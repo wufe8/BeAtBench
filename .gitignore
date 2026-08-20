@@ -1,0 +1,23 @@
+local/
+
+# 构建产物
+/build/
+/cmake-build-*/
+/out/
+*.user
+
+# vcpkg
+/vcpkg_installed/
+
+# CMake 生成
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# 编辑器运行时缓存（波形金字塔等，见 doc/02 §8）
+**/.beatbench-cache/
