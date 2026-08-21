@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeAtBench · 布局探索（M2 设计参考）</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 18px 90px;
+    background: #0b0d10; color: #e6e9ee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1440px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .sub { color: #9aa3b2; font-size: 13px; line-height: 1.6; margin-bottom: 26px; max-width: 960px; }
+  .sub b { color: #e6e9ee; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 22px; }
+
+  .card { border: 1px solid #262b33; border-radius: 16px; background: #12151a; padding: 16px; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .card-title { font-weight: 700; font-size: 15px; }
+  .card-ref { color: #6b7484; font-size: 11px; }
+  .card-note { margin-top: 12px; font-size: 12px; color: #9aa3b2; line-height: 1.55; }
+  .card-note b { color: #e6e9ee; }
+  .card-note .pro { color: #34d399; }
+  .card-note .con { color: #f87171; }
+
+  /* ============ 窗口骨架（统一深色，只关注布局） ============ */
+  .win { border: 1px solid #262b33; border-radius: 12px; background: #0d1014; overflow: hidden; display: flex; flex-direction: column; height: 300px; }
+  .bar { background: #161a21; border-bottom: 1px solid #20252e; padding: 6px 10px; display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: #8b95a7; flex-wrap: wrap; }
+  .bar .ttl { color: #c8cdd6; font-weight: 650; }
+  .grow { flex: 1; }
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  .side { background: #12161c; width: 118px; flex: 0 0 118px; padding: 8px; font-size: 9.5px; color: #7c8494; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #20252e; }
+  .side.right { border-right: none; border-left: 1px solid #20252e; }
+  .side .h { font-size: 9px; color: #5b6472; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+
+  .act { width: 36px; flex: 0 0 36px; background: #14171d; border-right: 1px solid #20252e; display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 10px; font-size: 9px; color: #6b7484; }
+
+  .main { flex: 1; background: #0b0e13; position: relative; min-width: 0; }
+  .main .h { position: absolute; top: 6px; left: 9px; font-size: 9.5px; color: #5b6472; z-index: 2; }
+  .main .h .dim { color: #3d4550; }
+
+  .n { position: absolute; background: #8b95f0; border-radius: 2px; height: 7px; z-index: 1; }
+  .n.scr { background: #38c4d6; }
+  .n.mine { background: #f0655a; width: 9px; height: 9px; border-radius: 1px; transform: rotate(45deg); }
+  .ln { position: absolute; background: rgba(139,149,240,.20); border-left: 2px solid #8b95f0; border-right: 2px solid #8b95f0; z-index: 1; }
+
+  .status { background: #12161c; border-top: 1px solid #20252e; padding: 4px 10px; font-size: 9.5px; color: #6b7484; }
+
+  .pages { background: #14171d; border-top: 1px solid #20252e; padding: 5px 10px; display: flex; gap: 6px; font-size: 10px; color: #8b95a7; }
+  .pages .pg { padding: 3px 11px; border-radius: 5px; }
+  .pages .pg.on { background: #6e79d6; color: #fff; }
+
+  .floating { position: absolute; border: 1px solid #2a2f3a; border-radius: 8px; background: #161a21; box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 7px 9px; font-size: 9px; color: #8b95a7; z-index: 3; }
+  .floating .h { display: block; color: #5b6472; font-size: 8.5px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+
+  /* 对比表 + 建议 */
+  .cmp { margin-top: 34px; border: 1px solid #262b33; border-radius: 14px; background: #12151a; overflow: hidden; }
+  .cmp h2 { font-size: 14px; margin: 0; padding: 12px 16px; border-bottom: 1px solid #262b33; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid #1e232b; vertical-align: top; }
+  th { color: #6b7484; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+
+  .reco { margin-top: 22px; border: 1px solid #2a2f3a; border-left: 3px solid #6e79d6; border-radius: 10px; background: #14171d; padding: 14px 16px; font-size: 13px; line-height: 1.7; color: #c8cdd6; }
+  .reco b { color: #fff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>BeAtBench · 布局探索</h1>
+  <div class="sub">
+    六种<b>完全不同的空间分配</b>，参考 IDE / 设计软件 / DAW / 剪辑软件。重点看四件事：<b>时间轴朝哪（竖/横）、面板怎么收（固定/底部/悬浮/页面）、编辑区占比、任务怎么切</b>。
+    纯静态骨架图，不含实现。
+  </div>
+
+  <!-- ★ 推荐方案（已拍板）：页面式工作区 -->
+  <div style="border:1px solid #2a2f3a; border-left:3px solid #6e79d6; border-radius:12px; background:#14171d; padding:16px 18px; margin-bottom:26px;">
+    <div style="font-weight:700; font-size:15px; margin-bottom:4px;">★ 推荐方案（已拍板）：页面式工作区</div>
+    <div style="color:#9aa3b2; font-size:12px; line-height:1.6; margin-bottom:14px;">
+      参考 DaVinci Resolve：<b style="color:#c8cdd6">固定 chrome（菜单栏 + 底部页面条 + 状态栏）</b> 包裹 <b style="color:#c8cdd6">随页面变化的工具条 + 页面内容</b>。
+      3 页：<b style="color:#fff">编辑</b>（M2 核心）/ <b style="color:#fff">切音</b>（Phase C 占位）/ <b style="color:#fff">测试</b>（Phase B 起占位）。
+    </div>
+
+    <div class="win" style="height:auto; max-width:880px; margin:0 auto;">
+      <div class="bar"><span class="ttl">菜单栏（固定全局）</span> 文件 编辑 视图 工作区 帮助</div>
+      <div class="bar"><span class="ttl">页面工具条（随页面）</span> snap 量化 网格 缩放 · 试听 · SP7K</div>
+      <div class="bar"><span class="ttl">编辑工具条（编辑页）</span> 选择 放置 LN 地雷 平移 · 采样 · 快捷键</div>
+      <div class="body" style="height:210px;">
+        <div class="side"><span class="h">左 Dock（组件）</span><span>采样面板</span><span>lint 面板</span><span>BGA 面板</span><span>元信息面板</span></div>
+        <div class="main"><span class="h">编辑页 · 竖向时间轴（上=高小节）</span>
+          <span class="n" style="left:8%;top:20%;width:16%"></span>
+          <span class="n" style="left:28%;top:55%;width:16%"></span>
+          <span class="n scr" style="left:48%;top:34%;width:16%"></span>
+          <span class="ln" style="left:68%;top:58%;width:16%;height:20%"></span>
+          <span class="n mine" style="left:84%;top:74%"></span>
+        </div>
+        <div class="side right"><span class="h">右 Dock</span><span>属性面板</span><span>lane / 时间 / 采样</span></div>
+      </div>
+      <div class="pages" style="flex-wrap:wrap;">
+        <span class="pg on">编辑 · 调整谱面</span>
+        <span class="pg">切音 · 对音/MIDI/key音（占位）</span>
+        <span class="pg">测试 · 试玩/预览（占位）</span>
+      </div>
+      <div class="status">状态栏（固定全局） · 页面条 = 顶层工作区切换</div>
+    </div>
+
+    <div style="color:#6b7484; font-size:11.5px; margin-top:12px; line-height:1.7;">
+      空模板默认布局 = 编辑页的「左 Dock + 中央时间轴 + 右 Dock」三栏；切音页/测试页是占位页，后续各自填充（切音 = 横向时间轴 + 波形，测试 = 大预览 + 试玩）。
+      皮肤边界见 doc/05 §8：默认皮肤 = 完整参考 + 组件库，不提供「空模板」。
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- A 经典竖排 -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">A · 经典竖排三栏</span><span class="card-ref">参考：iBMSC / BMSE</span></div>
+      <div class="win">
+        <div class="bar"><span class="ttl">菜单</span> 文件 编辑 视图 工作区</div>
+        <div class="bar">主工具条：编辑|切音 · snap · 量化 · 网格</div>
+        <div class="bar">编辑工具条：选择 放置 LN 地雷 平移</div>
+        <div class="body">
+          <div class="side"><span class="h">左 Dock</span><span>采样 / lint / BGA / 元信息</span></div>
+          <div class="main"><span class="h">竖向时间轴 <span class="dim">上=高小节</span></span>
+            <span class="n" style="left:8%;top:18%;width:16%"></span>
+            <span class="n" style="left:28%;top:52%;width:16%"></span>
+            <span class="n scr" style="left:48%;top:32%;width:16%"></span>
+            <span class="ln" style="left:68%;top:56%;width:16%;height:22%"></span>
+            <span class="n mine" style="left:82%;top:74%"></span>
+          </div>
+          <div class="side right"><span class="h">右 Dock</span><span>属性：lane / 时间 / 采样</span></div>
+        </div>
+        <div class="status">状态栏：SP7K · 128 notes · 100%</div>
+      </div>
+      <div class="card-note"><b>思路</b>：时间轴居中、左右固定 Dock，两排工具条。<br><span class="pro">优</span> 谱师零门槛、编辑区大；<span class="con">缺</span> 面板全摊开，屏幕小会挤。</div>
+    </div>
+
+    <!-- B IDE 式 -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">B · IDE 式</span><span class="card-ref">参考：VS Code / JetBrains</span></div>
+      <div class="win">
+        <div class="bar"><span class="ttl">编辑</span> chart.bms <span style="opacity:.5">×</span> <span class="grow"></span>⌘K</div>
+        <div class="body">
+          <div class="act">▦<br>采样<br>lint<br>设置</div>
+          <div class="side"><span class="h">侧栏</span><span>采样树 / lint 树</span></div>
+          <div class="main"><span class="h">竖向时间轴 <span class="dim">标签页式</span></span>
+            <span class="n" style="left:10%;top:20%;width:16%"></span>
+            <span class="n" style="left:30%;top:55%;width:16%"></span>
+            <span class="ln" style="left:50%;top:40%;width:16%;height:26%"></span>
+            <span class="n scr" style="left:70%;top:28%;width:16%"></span>
+            <span class="n mine" style="left:86%;top:70%"></span>
+          </div>
+          <div class="side right"><span class="h">属性</span><span>lane / 时间 / 采样</span></div>
+        </div>
+        <div class="bar" style="border-top:1px solid #20252e;border-bottom:none"><span class="ttl">问题面板</span> [WARN] 缺失采样 #WAV03 · [ERROR] #BPM 非法 · [INFO] 128 notes</div>
+        <div class="status">状态栏</div>
+      </div>
+      <div class="card-note"><b>思路</b>：活动栏 + 侧栏 + 底部「问题面板」收纳 lint/输出，编辑器标签页化。<br><span class="pro">优</span> 诊断内聚、扩展点清晰；<span class="con">缺</span> 对谱师偏重，编辑区略窄。</div>
+    </div>
+
+    <!-- C 时间轴在下 -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">C · 时间轴在下</span><span class="card-ref">参考：Premiere / DaVinci / Ableton</span></div>
+      <div class="win">
+        <div class="bar"><span class="ttl">工具条</span> 试听 · 切音 · snap · 量化</div>
+        <div class="body">
+          <div class="side"><span class="h">媒体库</span><span>采样 / 波形素材</span></div>
+          <div class="main"><span class="h">预览 / 试玩视口</span>
+            <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:44%;height:56%;border:1px dashed #2a2f3a;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#3d4550;font-size:9px">谱面预览 / BGA / 试玩</div>
+          </div>
+          <div class="side right"><span class="h">检查器</span><span>属性 / 效果</span></div>
+        </div>
+        <div class="bar" style="border-top:1px solid #20252e;border-bottom:none;flex-direction:column;align-items:stretch">
+          <span class="ttl">横向时间轴 <span style="color:#5b6472;font-weight:400">（时间 → 右）</span></span>
+          <div style="position:relative;height:74px;margin-top:6px;background:#0b0e13;border-radius:6px">
+            <span class="n" style="left:8%;top:10%;width:16%"></span>
+            <span class="n" style="left:30%;top:42%;width:12%"></span>
+            <span class="n scr" style="left:46%;top:72%;width:10%"></span>
+            <span class="ln" style="left:60%;top:20%;width:26%;height:8px"></span>
+            <span class="n mine" style="left:82%;top:50%"></span>
+          </div>
+        </div>
+        <div class="status">状态栏</div>
+      </div>
+      <div class="card-note"><b>思路</b>：把时间轴改成<b>横向</b>放底部，上方留大块预览/试玩区，媒体库+检查器分列两侧（剪辑软件布局）。<br><span class="pro">优</span> 试听+波形直观、切音友好；<span class="con">缺</span> 与"下落式游玩"方向感不同。</div>
+    </div>
+
+    <!-- D 页面式 -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">D · 页面式工作区</span><span class="card-ref">参考：DaVinci Resolve</span></div>
+      <div class="win">
+        <div class="bar"><span class="ttl">工作区：编辑</span> 页内工具条</div>
+        <div class="body">
+          <div class="side"><span class="h">采样</span><span>#WAV01…#WAV04</span></div>
+          <div class="main"><span class="h">编辑页 · 竖向时间轴</span>
+            <span class="n" style="left:10%;top:22%;width:16%"></span>
+            <span class="n" style="left:30%;top:58%;width:16%"></span>
+            <span class="n scr" style="left:50%;top:34%;width:16%"></span>
+            <span class="ln" style="left:70%;top:60%;width:16%;height:20%"></span>
+          </div>
+          <div class="side right"><span class="h">属性</span><span>lane / 时间 / 采样</span></div>
+        </div>
+        <div class="pages">
+          <span class="pg on">编辑</span><span class="pg">切音</span><span class="pg">试听</span><span class="pg">输出</span>
+        </div>
+        <div class="status">底部页面条 = 顶层工作区切换</div>
+      </div>
+      <div class="card-note"><b>思路</b>：把「工作区切换」升级成<b>底部页面条</b>，每个页面是<b>完全不同的布局</b>（编辑/切音/试听/输出各自一套）。<br><span class="pro">优</span> 任务切分最清晰；<span class="con">缺</span> 各页布局都要单独设计。</div>
+    </div>
+
+    <!-- E 命令面板优先 -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">E · 命令面板优先</span><span class="card-ref">参考：Linear / Notion / Raycast</span></div>
+      <div class="win">
+        <div class="bar"><span class="ttl">BeAtBench</span> chart.bms <span class="grow"></span><span style="border:1px solid #2a2f3a;border-radius:5px;padding:2px 8px">⌘K</span></div>
+        <div class="body">
+          <div class="main"><span class="h">全幅竖向时间轴 <span class="dim">无固定面板</span></span>
+            <span class="n" style="left:12%;top:20%;width:14%"></span>
+            <span class="n" style="left:30%;top:48%;width:14%"></span>
+            <span class="n scr" style="left:48%;top:30%;width:14%"></span>
+            <span class="ln" style="left:66%;top:55%;width:14%;height:24%"></span>
+            <span class="n mine" style="left:84%;top:72%"></span>
+            <div class="floating" style="left:50%;top:26%;transform:translateX(-50%);width:58%">
+              <span class="h">⌘K 命令面板</span>
+              › 放置 note · 移动 · LN · 打开采样面板 · 跳转小节…
+            </div>
+          </div>
+        </div>
+        <div class="status">极简状态栏</div>
+      </div>
+      <div class="card-note"><b>思路</b>：编辑区最大化，面板全部按需召唤，⌘K 命令面板成为主要入口。<br><span class="pro">优</span> 极简聚焦；<span class="con">缺</span> 有学习门槛，谱师需要记命令。</div>
+    </div>
+
+    <!-- F 悬浮画布 -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">F · 悬浮画布</span><span class="card-ref">参考：Figma / Photoshop</span></div>
+      <div class="win">
+        <div class="bar"><span class="ttl">极简顶栏</span> <span class="grow"></span>缩放 · 网格</div>
+        <div class="body">
+          <div class="main"><span class="h">全幅画布 / 时间轴</span>
+            <span class="n" style="left:14%;top:24%;width:14%"></span>
+            <span class="n" style="left:32%;top:56%;width:14%"></span>
+            <span class="n scr" style="left:50%;top:36%;width:14%"></span>
+            <span class="ln" style="left:68%;top:62%;width:14%;height:20%"></span>
+            <span class="n mine" style="left:84%;top:50%"></span>
+            <div class="floating" style="left:10px;top:16%;width:112px"><span class="h">采样（浮动）</span>#WAV01…#WAV04</div>
+            <div class="floating" style="right:10px;top:16%;width:118px"><span class="h">属性（浮动）</span>lane / 时间 / 采样</div>
+            <div class="floating" style="left:50%;bottom:12px;transform:translateX(-50%)"><span class="h">悬浮工具</span> V · N · L · M · H · Z</div>
+          </div>
+        </div>
+        <div class="status">状态栏</div>
+      </div>
+      <div class="card-note"><b>思路</b>：无固定 Dock，工具/采样/属性都是<b>悬浮面板</b>，画布全幅可拖可藏。<br><span class="pro">优</span> 画布最大化、自定义强；<span class="con">缺</span> 面板管理成本高，遮挡内容。</div>
+    </div>
+
+  </div>
+
+  <!-- 对比表 -->
+  <div class="cmp">
+    <h2>六向对比速览</h2>
+    <table>
+      <thead><tr><th>布局</th><th>时间轴</th><th>面板组织</th><th>参考</th><th>一句话</th></tr></thead>
+      <tbody>
+        <tr><td>A 经典竖排</td><td>竖</td><td>左右固定 Dock</td><td>iBMSC</td><td>谱师零门槛</td></tr>
+        <tr><td>B IDE 式</td><td>竖</td><td>活动栏 + 侧栏 + 底部问题面板</td><td>VS Code</td><td>诊断内聚、可扩展</td></tr>
+        <tr><td>C 时间轴在下</td><td>横</td><td>预览在上 + 媒体库/检查器两侧</td><td>Premiere/Resolve</td><td>试听波形直观</td></tr>
+        <tr><td>D 页面式</td><td>各页不同</td><td>底部页面条切换整页布局</td><td>DaVinci Resolve</td><td>任务切分最清晰</td></tr>
+        <tr><td>E 命令面板优先</td><td>竖</td><td>无固定面板，⌘K 召唤</td><td>Linear/Notion</td><td>极简聚焦</td></tr>
+        <tr><td>F 悬浮画布</td><td>竖</td><td>悬浮工具 + 悬浮面板</td><td>Figma/PS</td><td>画布最大化</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="reco">
+    <b>我的建议（组合拳）：</b>把已有的「工作区切换」升级成 <b>D 的底部页面条</b>，然后——
+    <b>编辑页</b> 用 <b>A</b>（竖排三栏，谱师零门槛）；<b>切音页</b> 用 <b>C</b>（横向时间轴 + 波形，DAW/剪辑思路，切音天然是横向波形任务）；<b>试听页</b> 用 <b>C 的上半部分</b>（大预览 + 试玩）；<b>输出页</b> 后置。
+    B 的「底部问题面板」可以塞进编辑页底部，E/F 可作为后期「专注模式」或高级自定义。
+    这样 = 各任务用最合适的布局，而不是一个布局硬扛所有任务。
+  </div>
+
+  <div class="sub" style="margin-top:18px">
+    判断点就一句话：<b>编辑（谱面摆放）要竖排、切音（音频切片）要横排、试听要画面</b>——三者诉求不同，所以「页面式」最能装下它们。
+  </div>
+
+</div>
+</body>
+</html>

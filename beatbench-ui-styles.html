@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeAtBench · 外观探索（M2 设计参考）</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 18px 90px;
+    background: #0b0d10; color: #e6e9ee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1440px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .sub { color: #9aa3b2; font-size: 13px; line-height: 1.6; margin-bottom: 26px; max-width: 900px; }
+  .sub b { color: #e6e9ee; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 22px; }
+
+  .card { border: 1px solid #262b33; border-radius: 16px; background: #12151a; padding: 16px; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .card-title { font-weight: 700; font-size: 15px; }
+  .card-ref { color: #6b7484; font-size: 11px; }
+  .card-note { margin-top: 12px; font-size: 12px; color: #9aa3b2; line-height: 1.55; }
+  .card-note b { color: #e6e9ee; }
+
+  /* ================= 共享 mini 编辑器骨架（默认深色，各主题覆盖变量换肤） ================= */
+  .mini {
+    --bg:#0b0d10; --surface:#12151a; --surface2:#1a1e24; --border:#262b33;
+    --text:#e6e9ee; --muted:#9aa3b2; --accent:#6366f1; --accent2:#22d3ee;
+    --accent-soft:rgba(99,102,241,.16); --on-accent:#fff;
+    --n1:#8b9cf8; --n2:#8b9cf8; --n3:#8b9cf8; --n4:#8b9cf8;
+    --scratch:#22d3ee; --mine:#f87171; --ln:rgba(139,156,248,.26); --wave:rgba(139,156,248,.12);
+    --radius:8px; --radius-sm:5px; --note-radius:2px; --fs:12px;
+
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; font-size: var(--fs);
+  }
+  .mini-menubar { display: flex; gap: 12px; padding: 5px 10px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+  .mini-toolbar { display: flex; gap: 6px; align-items: center; padding: 7px 10px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .mini-toolbar2 { display: flex; gap: 6px; align-items: center; padding: 6px 10px; background: var(--surface2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .seg b { background: var(--accent); color: var(--on-accent); padding: 3px 9px; font-weight: 600; font-size: 11px; }
+  .seg i { padding: 3px 9px; font-style: normal; color: var(--muted); font-size: 11px; }
+  .chip { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 8px; color: var(--muted); background: var(--surface); font-size: 11px; }
+  .chip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .mode { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 8px; color: var(--accent2); background: var(--surface); font-family: ui-monospace, Consolas, monospace; font-size: 10px; }
+  .hint { color: var(--muted); font-size: 10px; }
+  .spacer { flex: 1; }
+
+  .mini-body { display: flex; height: 200px; }
+  .mini-left, .mini-right { width: 84px; flex: 0 0 84px; padding: 8px; background: var(--surface); font-size: 10px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; font-family: ui-monospace, Consolas, monospace; }
+  .mini-left { border-right: 1px solid var(--border); }
+  .mini-right { border-left: 1px solid var(--border); }
+  .pl.warn { color: #eab308; }
+  .mini-ruler, .mini-ruler2 { width: 32px; flex: 0 0 32px; text-align: center; font-size: 9px; color: var(--muted); background: var(--surface); padding: 8px 0; font-family: ui-monospace, Consolas, monospace; line-height: 2.2; }
+  .mini-ruler { border-right: 1px solid var(--border); }
+  .mini-ruler2 { border-left: 1px solid var(--border); }
+
+  .mini-lanes { flex: 1; display: flex; position: relative; background: var(--bg); min-width: 0; }
+  .lane { position: relative; flex: 1; border-right: 1px solid var(--border); min-width: 34px; }
+  .lane-h { position: absolute; top: 5px; left: 0; right: 0; text-align: center; font-size: 9px; color: var(--muted); z-index: 2; }
+  .note { position: absolute; left: 3px; right: 3px; height: 8px; background: var(--n1); border-radius: var(--note-radius); transform: translateY(-50%); z-index: 1; }
+  .note.k2 { background: var(--n2); }
+  .note.k3 { background: var(--n3); }
+  .note.k4 { background: var(--n4); }
+  .note.scratch { background: var(--scratch); height: 7px; }
+  .note.mine { background: var(--mine); height: 12px; width: 12px; left: 50%; right: auto; margin-left: -6px; transform: translateY(-50%) rotate(45deg); border-radius: 2px; }
+  .note.ln { background: var(--ln); border-left: 2px solid var(--n2); border-right: 2px solid var(--n2); }
+  .wave { position: absolute; inset: 0; background: var(--wave); }
+
+  .mini-status { padding: 4px 10px; background: var(--surface2); border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+
+  /* ================= 主题 1：经典 iBMSC（浅灰、方形、高密度） ================= */
+  .v-ibmsc .mini {
+    --bg:#c8c8c8; --surface:#d4d0c8; --surface2:#dedede; --border:#8a8a8a;
+    --text:#000; --muted:#3f3f3f; --accent:#000080; --accent2:#7a0000; --accent-soft:#c8c8ff; --on-accent:#fff;
+    --n1:#0000c0; --n2:#008000; --n3:#b89000; --n4:#c00000; --scratch:#c000c0; --mine:#606060; --ln:rgba(0,0,192,.22); --wave:rgba(0,0,0,.08);
+    --radius:0px; --radius-sm:0px; --note-radius:0px; --fs:11px;
+  }
+  .v-ibmsc .chip { border-style: outset; }
+  .v-ibmsc .lane-h { font-weight: 700; }
+
+  /* ================= 主题 2：osu!lazer（明亮、圆润、多彩） ================= */
+  .v-osu .mini {
+    --bg:#f4f4f8; --surface:#ffffff; --surface2:#efeff4; --border:#dcdce6;
+    --text:#1a1a28; --muted:#6f6f84; --accent:#ff66aa; --accent2:#66aaff; --accent-soft:rgba(255,102,170,.14); --on-accent:#fff;
+    --n1:#66aaff; --n2:#ff66aa; --n3:#ffcc33; --n4:#66d9a0; --scratch:#ff88aa; --mine:#ff5555; --ln:rgba(102,170,255,.25); --wave:rgba(102,170,255,.10);
+    --radius:12px; --radius-sm:7px; --note-radius:4px; --fs:12.5px;
+  }
+  .v-osu .mini { box-shadow: 0 6px 20px rgba(60,60,100,.10); }
+
+  /* ================= 主题 3：Ableton（暗色极简、扁平、橙 accent） ================= */
+  .v-ableton .mini {
+    --bg:#1c1c1c; --surface:#262626; --surface2:#202020; --border:#333;
+    --text:#d9d9d9; --muted:#858585; --accent:#ff8f2b; --accent2:#c9ff66; --accent-soft:rgba(255,143,43,.16); --on-accent:#1c1c1c;
+    --n1:#b8b8b8; --n2:#b8b8b8; --n3:#b8b8b8; --n4:#b8b8b8; --scratch:#ff8f2b; --mine:#ff5a4d; --ln:rgba(184,184,184,.25); --wave:rgba(255,255,255,.05);
+    --radius:3px; --radius-sm:3px; --note-radius:1px; --fs:12px;
+  }
+  .v-ableton .note { border: 1px solid rgba(255,255,255,.07); }
+
+  /* ================= 主题 4：FL Studio（深灰、多彩轨道头、密集） ================= */
+  .v-fl .mini {
+    --bg:#1a1a1a; --surface:#232323; --surface2:#2c2c2c; --border:#3a3a3a;
+    --text:#e8e8e8; --muted:#9a9a9a; --accent:#ff8a00; --accent2:#00d46a; --accent-soft:rgba(255,138,0,.16); --on-accent:#1a1a1a;
+    --n1:#00d46a; --n2:#38b6ff; --n3:#ffde3d; --n4:#ff6ec7; --scratch:#ff8a00; --mine:#ff3b3b; --ln:rgba(0,212,106,.25); --wave:rgba(255,255,255,.05);
+    --radius:6px; --radius-sm:4px; --note-radius:2px; --fs:12px;
+  }
+  .v-fl .lane:nth-child(1) .lane-h { color:#ff8a00; }
+  .v-fl .lane:nth-child(2) .lane-h { color:#00d46a; }
+  .v-fl .lane:nth-child(3) .lane-h { color:#38b6ff; }
+  .v-fl .lane:nth-child(4) .lane-h { color:#ffde3d; }
+  .v-fl .lane:nth-child(5) .lane-h { color:#ff6ec7; }
+  .v-fl .lane:nth-child(6) .lane-h { color:#ff8a00; }
+
+  /* ================= 主题 5：专业 DAW · Reaper（中性灰、高密度、电平条） ================= */
+  .v-reaper .mini {
+    --bg:#2c2c2c; --surface:#383838; --surface2:#242424; --border:#4a4a4a;
+    --text:#e6e6e6; --muted:#9c9c9c; --accent:#b0b0b0; --accent2:#4a90d9; --accent-soft:rgba(255,255,255,.08); --on-accent:#111;
+    --n1:#8ab4d8; --n2:#8ab4d8; --n3:#8ab4d8; --n4:#8ab4d8; --scratch:#d8c48a; --mine:#d88a8a; --ln:rgba(138,180,216,.25); --wave:rgba(74,144,217,.14);
+    --radius:2px; --radius-sm:2px; --note-radius:1px; --fs:11px;
+  }
+  .v-reaper .lane::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:linear-gradient(to bottom, #4a90d9, #2c5a8a); opacity:.45; }
+
+  /* ================= 主题 6：现代极简 · Linear（深色高对比、精致） ================= */
+  .v-linear .mini {
+    --bg:#0a0b0e; --surface:#141519; --surface2:#1b1d23; --border:#262a31;
+    --text:#f5f6f8; --muted:#7c8494; --accent:#6e79d6; --accent2:#8b95f0; --accent-soft:rgba(110,121,214,.16); --on-accent:#fff;
+    --n1:#8b95f0; --n2:#8b95f0; --n3:#8b95f0; --n4:#8b95f0; --scratch:#38c4d6; --mine:#f0655a; --ln:rgba(139,149,240,.25); --wave:rgba(139,149,240,.10);
+    --radius:10px; --radius-sm:6px; --note-radius:3px; --fs:12.5px;
+  }
+
+  /* 对比表 */
+  .cmp { margin-top: 34px; border: 1px solid #262b33; border-radius: 14px; background: #12151a; overflow: hidden; }
+  .cmp h2 { font-size: 14px; margin: 0; padding: 12px 16px; border-bottom: 1px solid #262b33; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid #1e232b; vertical-align: top; }
+  th { color: #6b7484; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .cmp .note { font-size: 11px; color: #9aa3b2; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>BeAtBench · 外观探索</h1>
+  <div class="sub">
+    M2 起填充 GUI，先定「气质」。下面是<b>六个方向</b>，各参考一类设计软件 / DAW；同一套编辑器骨架，只换皮肤（配色 / 密度 / 圆角 / note 样式 / 控件质感）。
+    纯静态预览，不含实现代码。看完圈一个方向（或说「A 的底 + B 的 note」这种组合），我再收敛。
+  </div>
+
+  <div class="grid">
+
+    <!-- 1 iBMSC -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">① 经典 iBMSC</span><span class="card-ref">参考：iBMSC / BMSE</span></div>
+      <div class="mini v-ibmsc">
+        <div class="mini-menubar"><span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span></div>
+        <div class="mini-toolbar">
+          <span class="seg"><b>编辑</b><i>切音</i></span>
+          <span class="chip">1/16</span><span class="chip">量化</span><span class="chip">网格</span>
+          <span class="spacer"></span><span class="chip">▶ 试听</span><span class="mode">SP7K</span>
+        </div>
+        <div class="mini-toolbar2">
+          <span class="chip">选择</span><span class="chip on">放置</span><span class="chip">LN</span><span class="chip">地雷</span><span class="chip">平移</span>
+          <span class="spacer"></span><span class="hint">1-7 皿 F1-F7</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-left">
+            <span>#WAV01 kick</span><span>#WAV02 snare</span><span class="pl warn">#WAV03 hihat</span><span>#WAV04 bass</span>
+          </div>
+          <div class="mini-ruler">008<br>006<br>004<br>002</div>
+          <div class="mini-lanes">
+            <div class="lane"><span class="lane-h">皿</span><span class="note scratch" style="top:30%"></span></div>
+            <div class="lane"><span class="lane-h">1</span><span class="note k1" style="top:18%"></span><span class="note k1" style="top:62%"></span></div>
+            <div class="lane"><span class="lane-h">2</span><span class="note k2 ln" style="top:42%;height:22%"></span></div>
+            <div class="lane"><span class="lane-h">3</span><span class="note k3" style="top:52%"></span></div>
+            <div class="lane"><span class="lane-h">4</span><span class="note mine" style="top:70%"></span></div>
+            <div class="lane"><span class="lane-h">BGM</span><div class="wave"></div></div>
+          </div>
+          <div class="mini-ruler2">0:17<br>0:09<br>0:05<br>0:00</div>
+          <div class="mini-right"><span>1P · Key 3</span><span>002 : 0.25</span><span>#WAV01</span><span>Normal</span></div>
+        </div>
+        <div class="mini-status">SP7K · 128 notes · 100% · 命令即接口</div>
+      </div>
+      <div class="card-note"><b>气质：怀旧效率工具。</b>方形控件、老 Windows 灰、高密度小字号，note 按通道着色。适合「老谱师直接上手、零学习成本」。</div>
+    </div>
+
+    <!-- 2 osu -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">② osu!lazer 明亮</span><span class="card-ref">参考：osu!lazer</span></div>
+      <div class="mini v-osu">
+        <div class="mini-menubar"><span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span></div>
+        <div class="mini-toolbar">
+          <span class="seg"><b>编辑</b><i>切音</i></span>
+          <span class="chip">1/16</span><span class="chip">量化</span><span class="chip">网格</span>
+          <span class="spacer"></span><span class="chip">▶ 试听</span><span class="mode">SP7K</span>
+        </div>
+        <div class="mini-toolbar2">
+          <span class="chip">选择</span><span class="chip on">放置</span><span class="chip">LN</span><span class="chip">地雷</span><span class="chip">平移</span>
+          <span class="spacer"></span><span class="hint">1-7 皿 F1-F7</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-left">
+            <span>#WAV01 kick</span><span>#WAV02 snare</span><span class="pl warn">#WAV03 hihat</span><span>#WAV04 bass</span>
+          </div>
+          <div class="mini-ruler">008<br>006<br>004<br>002</div>
+          <div class="mini-lanes">
+            <div class="lane"><span class="lane-h">皿</span><span class="note scratch" style="top:30%"></span></div>
+            <div class="lane"><span class="lane-h">1</span><span class="note k1" style="top:18%"></span><span class="note k1" style="top:62%"></span></div>
+            <div class="lane"><span class="lane-h">2</span><span class="note k2 ln" style="top:42%;height:22%"></span></div>
+            <div class="lane"><span class="lane-h">3</span><span class="note k3" style="top:52%"></span></div>
+            <div class="lane"><span class="lane-h">4</span><span class="note mine" style="top:70%"></span></div>
+            <div class="lane"><span class="lane-h">BGM</span><div class="wave"></div></div>
+          </div>
+          <div class="mini-ruler2">0:17<br>0:09<br>0:05<br>0:00</div>
+          <div class="mini-right"><span>1P · Key 3</span><span>002 : 0.25</span><span>#WAV01</span><span>Normal</span></div>
+        </div>
+        <div class="mini-status">SP7K · 128 notes · 100% · 命令即接口</div>
+      </div>
+      <div class="card-note"><b>气质：现代友好。</b>浅色、大圆角、柔和阴影、note 多彩圆润。适合做「默认浅色 / 新用户第一印象」。</div>
+    </div>
+
+    <!-- 3 Ableton -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">③ Ableton 暗色极简</span><span class="card-ref">参考：Ableton Live</span></div>
+      <div class="mini v-ableton">
+        <div class="mini-menubar"><span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span></div>
+        <div class="mini-toolbar">
+          <span class="seg"><b>编辑</b><i>切音</i></span>
+          <span class="chip">1/16</span><span class="chip">量化</span><span class="chip">网格</span>
+          <span class="spacer"></span><span class="chip">▶ 试听</span><span class="mode">SP7K</span>
+        </div>
+        <div class="mini-toolbar2">
+          <span class="chip">选择</span><span class="chip on">放置</span><span class="chip">LN</span><span class="chip">地雷</span><span class="chip">平移</span>
+          <span class="spacer"></span><span class="hint">1-7 皿 F1-F7</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-left">
+            <span>#WAV01 kick</span><span>#WAV02 snare</span><span class="pl warn">#WAV03 hihat</span><span>#WAV04 bass</span>
+          </div>
+          <div class="mini-ruler">008<br>006<br>004<br>002</div>
+          <div class="mini-lanes">
+            <div class="lane"><span class="lane-h">皿</span><span class="note scratch" style="top:30%"></span></div>
+            <div class="lane"><span class="lane-h">1</span><span class="note k1" style="top:18%"></span><span class="note k1" style="top:62%"></span></div>
+            <div class="lane"><span class="lane-h">2</span><span class="note k2 ln" style="top:42%;height:22%"></span></div>
+            <div class="lane"><span class="lane-h">3</span><span class="note k3" style="top:52%"></span></div>
+            <div class="lane"><span class="lane-h">4</span><span class="note mine" style="top:70%"></span></div>
+            <div class="lane"><span class="lane-h">BGM</span><div class="wave"></div></div>
+          </div>
+          <div class="mini-ruler2">0:17<br>0:09<br>0:05<br>0:00</div>
+          <div class="mini-right"><span>1P · Key 3</span><span>002 : 0.25</span><span>#WAV01</span><span>Normal</span></div>
+        </div>
+        <div class="mini-status">SP7K · 128 notes · 100% · 命令即接口</div>
+      </div>
+      <div class="card-note"><b>气质：克制扁平。</b>暖灰底、橙色 accent、clip 式色块、几乎无阴影无圆角。适合「长期专注、低视觉噪音」。</div>
+    </div>
+
+    <!-- 4 FL -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">④ FL Studio 多彩</span><span class="card-ref">参考：FL Studio</span></div>
+      <div class="mini v-fl">
+        <div class="mini-menubar"><span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span></div>
+        <div class="mini-toolbar">
+          <span class="seg"><b>编辑</b><i>切音</i></span>
+          <span class="chip">1/16</span><span class="chip">量化</span><span class="chip">网格</span>
+          <span class="spacer"></span><span class="chip">▶ 试听</span><span class="mode">SP7K</span>
+        </div>
+        <div class="mini-toolbar2">
+          <span class="chip">选择</span><span class="chip on">放置</span><span class="chip">LN</span><span class="chip">地雷</span><span class="chip">平移</span>
+          <span class="spacer"></span><span class="hint">1-7 皿 F1-F7</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-left">
+            <span>#WAV01 kick</span><span>#WAV02 snare</span><span class="pl warn">#WAV03 hihat</span><span>#WAV04 bass</span>
+          </div>
+          <div class="mini-ruler">008<br>006<br>004<br>002</div>
+          <div class="mini-lanes">
+            <div class="lane"><span class="lane-h">皿</span><span class="note scratch" style="top:30%"></span></div>
+            <div class="lane"><span class="lane-h">1</span><span class="note k1" style="top:18%"></span><span class="note k1" style="top:62%"></span></div>
+            <div class="lane"><span class="lane-h">2</span><span class="note k2 ln" style="top:42%;height:22%"></span></div>
+            <div class="lane"><span class="lane-h">3</span><span class="note k3" style="top:52%"></span></div>
+            <div class="lane"><span class="lane-h">4</span><span class="note mine" style="top:70%"></span></div>
+            <div class="lane"><span class="lane-h">BGM</span><div class="wave"></div></div>
+          </div>
+          <div class="mini-ruler2">0:17<br>0:09<br>0:05<br>0:00</div>
+          <div class="mini-right"><span>1P · Key 3</span><span>002 : 0.25</span><span>#WAV01</span><span>Normal</span></div>
+        </div>
+        <div class="mini-status">SP7K · 128 notes · 100% · 命令即接口</div>
+      </div>
+      <div class="card-note"><b>气质：活泼密集。</b>深底、彩色轨道头、分区色块感强、密度高。适合「一眼分清轨道 / 视觉分区需求强」。</div>
+    </div>
+
+    <!-- 5 Reaper -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">⑤ 专业 DAW · Reaper</span><span class="card-ref">参考：Reaper / Cubase</span></div>
+      <div class="mini v-reaper">
+        <div class="mini-menubar"><span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span></div>
+        <div class="mini-toolbar">
+          <span class="seg"><b>编辑</b><i>切音</i></span>
+          <span class="chip">1/16</span><span class="chip">量化</span><span class="chip">网格</span>
+          <span class="spacer"></span><span class="chip">▶ 试听</span><span class="mode">SP7K</span>
+        </div>
+        <div class="mini-toolbar2">
+          <span class="chip">选择</span><span class="chip on">放置</span><span class="chip">LN</span><span class="chip">地雷</span><span class="chip">平移</span>
+          <span class="spacer"></span><span class="hint">1-7 皿 F1-F7</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-left">
+            <span>#WAV01 kick</span><span>#WAV02 snare</span><span class="pl warn">#WAV03 hihat</span><span>#WAV04 bass</span>
+          </div>
+          <div class="mini-ruler">008<br>006<br>004<br>002</div>
+          <div class="mini-lanes">
+            <div class="lane"><span class="lane-h">皿</span><span class="note scratch" style="top:30%"></span></div>
+            <div class="lane"><span class="lane-h">1</span><span class="note k1" style="top:18%"></span><span class="note k1" style="top:62%"></span></div>
+            <div class="lane"><span class="lane-h">2</span><span class="note k2 ln" style="top:42%;height:22%"></span></div>
+            <div class="lane"><span class="lane-h">3</span><span class="note k3" style="top:52%"></span></div>
+            <div class="lane"><span class="lane-h">4</span><span class="note mine" style="top:70%"></span></div>
+            <div class="lane"><span class="lane-h">BGM</span><div class="wave"></div></div>
+          </div>
+          <div class="mini-ruler2">0:17<br>0:09<br>0:05<br>0:00</div>
+          <div class="mini-right"><span>1P · Key 3</span><span>002 : 0.25</span><span>#WAV01</span><span>Normal</span></div>
+        </div>
+        <div class="mini-status">SP7K · 128 notes · 100% · 命令即接口</div>
+      </div>
+      <div class="card-note"><b>气质：精准工具。</b>中性灰、细刻度、轨道电平条、波形优先、克制配色、密度最高。适合「切音工作台 / 音频向工作流」。</div>
+    </div>
+
+    <!-- 6 Linear -->
+    <div class="card">
+      <div class="card-head"><span class="card-title">⑥ 现代极简 · Linear</span><span class="card-ref">参考：Linear / Raycast</span></div>
+      <div class="mini v-linear">
+        <div class="mini-menubar"><span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span></div>
+        <div class="mini-toolbar">
+          <span class="seg"><b>编辑</b><i>切音</i></span>
+          <span class="chip">1/16</span><span class="chip">量化</span><span class="chip">网格</span>
+          <span class="spacer"></span><span class="chip">▶ 试听</span><span class="mode">SP7K</span>
+        </div>
+        <div class="mini-toolbar2">
+          <span class="chip">选择</span><span class="chip on">放置</span><span class="chip">LN</span><span class="chip">地雷</span><span class="chip">平移</span>
+          <span class="spacer"></span><span class="hint">1-7 皿 F1-F7</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-left">
+            <span>#WAV01 kick</span><span>#WAV02 snare</span><span class="pl warn">#WAV03 hihat</span><span>#WAV04 bass</span>
+          </div>
+          <div class="mini-ruler">008<br>006<br>004<br>002</div>
+          <div class="mini-lanes">
+            <div class="lane"><span class="lane-h">皿</span><span class="note scratch" style="top:30%"></span></div>
+            <div class="lane"><span class="lane-h">1</span><span class="note k1" style="top:18%"></span><span class="note k1" style="top:62%"></span></div>
+            <div class="lane"><span class="lane-h">2</span><span class="note k2 ln" style="top:42%;height:22%"></span></div>
+            <div class="lane"><span class="lane-h">3</span><span class="note k3" style="top:52%"></span></div>
+            <div class="lane"><span class="lane-h">4</span><span class="note mine" style="top:70%"></span></div>
+            <div class="lane"><span class="lane-h">BGM</span><div class="wave"></div></div>
+          </div>
+          <div class="mini-ruler2">0:17<br>0:09<br>0:05<br>0:00</div>
+          <div class="mini-right"><span>1P · Key 3</span><span>002 : 0.25</span><span>#WAV01</span><span>Normal</span></div>
+        </div>
+        <div class="mini-status">SP7K · 128 notes · 100% · 命令即接口</div>
+      </div>
+      <div class="card-note"><b>气质：精致克制。</b>深色高对比、单紫 accent、留白、讲究的圆角与字体。适合「品牌化 / 现代默认深色」。</div>
+    </div>
+
+  </div>
+
+  <!-- 对比表 -->
+  <div class="cmp">
+    <h2>六向对比速览</h2>
+    <table>
+      <thead><tr><th>方向</th><th>明暗</th><th>密度</th><th>圆角</th><th>note 着色</th><th>一句话气质</th></tr></thead>
+      <tbody>
+        <tr><td>① iBMSC</td><td>浅灰</td><td>高</td><td>无（方形）</td><td>按通道多色</td><td>怀旧效率工具</td></tr>
+        <tr><td>② osu!lazer</td><td>浅</td><td>中高</td><td>大</td><td>多彩圆润</td><td>现代友好</td></tr>
+        <tr><td>③ Ableton</td><td>暗暖灰</td><td>中</td><td>极小</td><td>中性灰 + 橙皿</td><td>克制扁平</td></tr>
+        <tr><td>④ FL Studio</td><td>暗</td><td>高</td><td>小</td><td>多彩 + 彩色轨道头</td><td>活泼密集</td></tr>
+        <tr><td>⑤ Reaper</td><td>暗中性灰</td><td>最高</td><td>极小</td><td>低饱和 + 电平条</td><td>精准工具</td></tr>
+        <tr><td>⑥ Linear</td><td>暗</td><td>中</td><td>中</td><td>单色 + 强调</td><td>精致克制</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub" style="margin-top:22px">
+    常见取舍：<b>默认深色</b>建议从 ③/⑥ 里挑（低视觉噪音）；<b>要老谱师零门槛</b>就 ①；<b>要年轻化/多彩</b>就 ②/④；<b>切音工作台</b>天然偏 ⑤ 的专业 DAW 味。
+    也可以混搭，例如「⑥ 的底 + ④ 的彩色轨道头」。
+  </div>
+
+</div>
+</body>
+</html>

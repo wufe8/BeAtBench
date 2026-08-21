@@ -2,6 +2,7 @@ local/
 
 # 构建产物
 /build/
+/build-gui/
 /cmake-build-*/
 /out/
 *.user
