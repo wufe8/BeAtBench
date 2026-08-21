@@ -3,7 +3,11 @@
 # URI = BeatBench；将来 L3 皮肤包可注册同名/扩展 URI（doc/08 §3）。
 qt_standard_project_setup()   # AUTOMOC/AUTORCC/AUTOUIC 统一策略（Qt 6.3+）
 
-add_executable(beatbench main.cpp bridge/CommandDispatcher.cpp)
+add_executable(beatbench
+    main.cpp
+    bridge/CommandDispatcher.cpp
+    bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
+)
 target_link_libraries(beatbench PRIVATE beatbench_core Qt6::Quick Qt6::QuickControls2)
 beatbench_set_warnings(beatbench)
 
@@ -17,6 +21,8 @@ qt_add_qml_module(beatbench
         qml/pages/TestPage.qml
         qml/components/PageSwitcher.qml
         qml/components/MetaPanel.qml
+        qml/components/BbToolButton.qml
+        qml/components/BbTabButton.qml
 )
 
 set_target_properties(beatbench PROPERTIES

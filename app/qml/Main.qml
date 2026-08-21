@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// BeatBench 主窗口（M2 页面式工作区外壳，doc/05 v0.2 + beatbench-ui-layouts.html 推荐图）。
-// 结构：固定 chrome（菜单栏 + 底部页面条 + 状态栏）包裹 页面工具条 + 三栏页面内容。
-// 第一条真链路：文件 → 打开谱面 → dispatch(info) → 元信息面板（左 Dock）。
+// BeatBench 主窗口（M2 页面式工作区外壳，doc/05 v0.2）。
+// 结构：固定 chrome（菜单栏 + 页面工具条 + 页面条 + 状态栏）包裹页面内容区；
+// 页面内容 = EditPage / SlicePage / TestPage（切换只换视图，不换命令引擎）。
+// 颜色/字体一律走 Theme token（doc/07 §4，禁硬编码）；皮肤系统 = 内置默认皮肤骨架（doc/08 §3.4）。
+// 第一条真链路：文件 → 打开谱面 → dispatch(info) → 元信息面板（EditPage 左 Dock）。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -15,6 +17,8 @@ ApplicationWindow {
     height: 800
     title: qsTr("BeAtBench")
     visible: true
+    font.family: Theme.fontSans
+    font.pixelSize: Theme.fsBase
 
     // ---------- 会话状态（不入 undo，doc/05 §1.2） ----------
     property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试
@@ -73,114 +77,63 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        // 页面工具条（随页面变化）
+        // 页面工具条（随页面变化；工具条 = 皮肤 L2 可声明区，doc/08 §3.1）
         ToolBar {
             Layout.fillWidth: true
+            background: Rectangle {
+                color: Theme.surface
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right
+                             anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+            }
             RowLayout {
                 anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
                 spacing: 6
-                Label { text: qsTr("页面工具条"); color: "#6b7484"; padding: 4 }
-                ToolButton { text: "snap 1/16"; enabled: chartMeta !== null }
-                ToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
-                ToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
-                ToolButton { text: qsTr("缩放"); enabled: chartMeta !== null }
+                BbToolButton { text: "snap 1/16"; enabled: chartMeta !== null }
+                BbToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
+                BbToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
+                BbToolButton { text: qsTr("缩放"); enabled: chartMeta !== null }
                 Item { Layout.fillWidth: true }
-                ToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
-                Label { text: "SP7K"; color: "#8b95a7"; padding: 4 }
+                BbToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
+                Label { text: "SP7K"; color: Theme.accent; font.family: Theme.fontMono
+                        font.pixelSize: Theme.fsSmall; padding: 4 }
             }
         }
 
-        // 编辑工具条（编辑页专属）
+        // 编辑工具条（编辑页专属，flat 工具选择样式）
         ToolBar {
             visible: currentPage === 0
             Layout.fillWidth: true
+            background: Rectangle {
+                color: Theme.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right
+                             anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+            }
             RowLayout {
                 anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
                 spacing: 6
-                Label { text: qsTr("编辑工具"); color: "#6b7484"; padding: 4 }
-                ToolButton { text: "V 选择"; checkable: true; checked: true }
-                ToolButton { text: "N 放置"; checkable: true }
-                ToolButton { text: "L LN"; checkable: true }
-                ToolButton { text: "M 地雷"; checkable: true }
-                ToolButton { text: "H 平移"; checkable: true }
+                BbToolButton { text: "V 选择"; checkable: true; checked: true; flatStyle: true }
+                BbToolButton { text: "N 放置"; checkable: true; flatStyle: true }
+                BbToolButton { text: "L LN"; checkable: true; flatStyle: true }
+                BbToolButton { text: "M 地雷"; checkable: true; flatStyle: true }
+                BbToolButton { text: "H 平移"; checkable: true; flatStyle: true }
                 Item { Layout.fillWidth: true }
-                Label { text: chartPath ? chartPath : qsTr("未打开谱面"); color: "#8b95a7"; elide: Text.ElideMiddle }
+                Label { text: chartPath ? chartPath : qsTr("未打开谱面"); color: Theme.textFaint
+                        elide: Text.ElideMiddle; font.pixelSize: Theme.fsSmall }
             }
         }
 
-        // 页面内容区
-        Item {
+        // 页面内容区（切页 = 切视图，doc/05 §2）
+        StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-
-            // 三栏：左 Dock + 中央视口（占位）+ 右 Dock
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-
-                // 左 Dock（面板容器）
-                Rectangle {
-                    Layout.preferredWidth: 230
-                    Layout.fillHeight: true
-                    color: "#12161c"
-                    border.color: "#20252e"
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 8
-                        TabBar {
-                            id: leftTabs
-                            Layout.fillWidth: true
-                            TabButton { text: qsTr("元信息") }
-                            TabButton { text: qsTr("采样") }
-                            TabButton { text: qsTr("lint") }
-                            TabButton { text: qsTr("BGA") }
-                        }
-                        StackLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            currentIndex: leftTabs.currentIndex
-                            MetaPanel { meta: window.chartMeta; chartPath: window.chartPath }
-                            Label { text: qsTr("采样管理（M2 第 4 步）"); color: "#6b7484" }
-                            Label { text: qsTr("lint 报告（M2 第 4 步）"); color: "#6b7484" }
-                            Label { text: qsTr("BGA 预览（后置）"); color: "#6b7484" }
-                        }
-                    }
-                }
-
-                // 中央视口（时间轴占位，M2 第 5 步用 QQuickPaintedItem 实现）
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: "#0b0e13"
-                    border.color: "#20252e"
-                    Label {
-                        anchors.centerIn: parent
-                        text: chartMeta
-                              ? qsTr("竖向时间轴（上=高小节）\nBPM %1 · 已加载").arg(chartMeta.BPM !== undefined ? chartMeta.BPM : "—")
-                              : qsTr("打开谱面开始编辑（Ctrl+O）")
-                        horizontalAlignment: Text.AlignHCenter
-                        color: "#5b6472"
-                    }
-                }
-
-                // 右 Dock（属性面板占位）
-                Rectangle {
-                    Layout.preferredWidth: 220
-                    Layout.fillHeight: true
-                    color: "#12161c"
-                    border.color: "#20252e"
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 6
-                        Label { text: qsTr("属性"); font.bold: true; color: "#c8cdd6" }
-                        Label { text: chartMeta ? (chartMeta.TITLE !== undefined ? chartMeta.TITLE : "") : qsTr("未选中"); color: "#8b95a7" }
-                        Label { text: qsTr("lane / 时间 / 采样（M3）"); color: "#6b7484" }
-                    }
-                }
-            }
+            currentIndex: window.currentPage
+            EditPage { chartMeta: window.chartMeta; chartPath: window.chartPath }
+            SlicePage {}
+            TestPage {}
         }
 
         // 底部页面条（固定，Resolve 式页面切换）
@@ -193,15 +146,20 @@ ApplicationWindow {
         // 状态栏（固定全局）
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 26
-            color: "#12161c"
-            border.color: "#20252e"
+            Layout.preferredHeight: 28
+            color: Theme.surface2
+            border.color: Theme.border
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                Label { text: window.statusText; color: "#8b95a7"; elide: Text.ElideMiddle; Layout.fillWidth: true }
-                Label { text: chartMeta ? "SP7K · " + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""; color: "#6b7484" }
+                Label { text: window.statusText; color: Theme.textMuted
+                        elide: Text.ElideMiddle; Layout.fillWidth: true
+                        font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall }
+                Label {
+                    text: chartMeta ? "SP7K · " + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
+                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
+                }
             }
         }
     }
@@ -250,7 +208,7 @@ ApplicationWindow {
             spacing: 6
             Label { text: "BeAtBench " + qsTr("0.1.0（M2）"); font.bold: true }
             Label { text: qsTr("BMS 谱面编辑器 · Qt Quick/QML · GPL-3.0") }
-            Label { text: qsTr("协议：命令即接口（doc/06 §3）"); color: "#8b95a7" }
+            Label { text: qsTr("协议：命令即接口（doc/06 §3）"); color: Theme.textMuted }
         }
     }
 }

@@ -6,12 +6,13 @@ import QtQuick.Controls
 Item {
     Rectangle {
         anchors.fill: parent
-        color: "#0b0e13"
+        color: Theme.bg
         Label {
             anchors.centerIn: parent
             text: qsTr("切音页（占位）\nPhase C / M6：横向时间轴 + 波形 + 采样管理强化")
             horizontalAlignment: Text.AlignHCenter
-            color: "#5b6472"
+            color: Theme.textFaint
+            font.pixelSize: Theme.fsBase
         }
     }
 }

@@ -110,6 +110,8 @@ skins/MySkin/
   - `CommandDispatcher`（QObject 包装 `global_registry().dispatch()`，命令即接口不变）；
   - `ChartModel`（QAbstractListModel：notes / bpm / stop / measures，供 ListView / 自绘消费）；
   - `TimingEngine` 包装（QObject：time_us / position_at，供标尺/播放头）；
+  - `ThemeManager`（L1 token 只读属性，**2026-08 已落地**：默认值内置（= preview.html :root），
+    theme.json 加载待 schema 定稿，见 §6）；
 - **第一条真链路（M2）**：打开谱面（文件对话框 → `dispatch(info)`）→ QML 元信息表单绑定——验证全栈。
 
 ## 5. 对既有文档的影响

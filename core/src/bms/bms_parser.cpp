@@ -334,7 +334,6 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 const auto measure = static_cast<std::uint32_t>(
                     (token[0] - '0') * 100 + (token[1] - '0') * 10 + (token[2] - '0'));
                 const auto channel = token.substr(3);
-                const auto data = line.substr(token_end + 1);
                 const auto rule = bms_channel_rule(channel);
                 if (rule && rule->semantics != ChannelSemantics::KeepRaw) {
                     const auto data = line.substr(token_end + 1);

@@ -15,7 +15,8 @@ ColumnLayout {
     Label {
         text: qsTr("元信息")
         font.bold: true
-        color: "#c8cdd6"
+        color: Theme.text
+        font.pixelSize: Theme.fsBase
     }
 
     // 常用头部字段（显示顺序）
@@ -36,17 +37,17 @@ ColumnLayout {
                     spacing: 6
                     Label {
                         text: modelData + ":"
-                        color: "#6b7484"
-                        Layout.preferredWidth: 86
-                        font.family: "Consolas, monospace"
-                        font.pixelSize: 11
+                        color: Theme.textFaint
+                        Layout.preferredWidth: 90
+                        font.family: Theme.fontMono
+                        font.pixelSize: Theme.fsSmall
                     }
                     Label {
                         text: root.meta ? (root.meta[modelData] !== undefined ? String(root.meta[modelData]) : "—") : "—"
-                        color: root.meta && root.meta[modelData] !== undefined ? "#c8cdd6" : "#5b6472"
+                        color: root.meta && root.meta[modelData] !== undefined ? Theme.text : Theme.textFaint
                         elide: Text.ElideRight
                         Layout.fillWidth: true
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fsSmall
                     }
                 }
             }
@@ -55,8 +56,8 @@ ColumnLayout {
             Label {
                 visible: root.meta !== null
                 text: qsTr("路径：%1").arg(root.chartPath)
-                color: "#5b6472"
-                font.pixelSize: 10
+                color: Theme.textFaint
+                font.pixelSize: Theme.fsTiny
                 elide: Text.ElideMiddle
                 Layout.fillWidth: true
             }
