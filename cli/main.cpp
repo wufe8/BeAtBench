@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // beatbench-cli：无 Qt 依赖的批处理入口（对齐稿 02 §6.1，P1 模式）。
-// 与 GUI 共用 core 命令对象；子命令随里程碑加入（convert/slice/package 见 doc/02 §7）。
+// 两种形态：
+// - 人类可读子命令：info / check / convert / version；
+// - --json <请求> 或 --json（读 stdin）：命令协议入口（doc/06 §3），
+//   输出 JSON 信封到 stdout；exit 0 = 信封已产出（语义看 ok 字段），
+//   2 = 无法产出信封（请求 JSON 本身非法 / 无输入），1 = 内部异常。
+// GUI 与外部插件走同一协议（进程内 dispatch 或进程外 --json）。
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <map>
+#include <iostream>
+#include <iterator>
 #include <string>
 #include <string_view>
-#include <vector>
 
+#include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
-#include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/bms/ChartCheck.hpp"
+#include "beatbench/core/command/Builtins.hpp"
+#include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/json/Json.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -20,26 +29,26 @@
 
 namespace {
 
-constexpr std::string_view kVersion = "0.1.0";
+// 输出编码：Windows 控制台默认 GBK，切到 UTF-8（仅影响本进程控制台）
+void setup_console() {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+}
 
 void print_usage() {
     std::printf(
         "BeAtBench CLI %.*s\n"
         "用法: beatbench-cli <子命令> [参数]\n"
+        "      beatbench-cli --json '<请求>'   命令协议（JSON 信封，见 doc/06）\n"
+        "      beatbench-cli --json < req.json 同上，从 stdin 读取\n"
         "\n"
         "子命令:\n"
         "  info <file.bms>     解析并输出谱面信息（元信息/定义表/事件统计）\n"
         "  check <file.bms>    谱面检查（解析诊断 + lint：缺失采样/#RANK/#TOTAL）\n"
         "  convert <in> <out>  编码/往返写出转换 [--encoding utf8|sjis]\n"
         "  version             打印版本与许可信息\n",
-        static_cast<int>(kVersion.size()), kVersion.data());
-}
-
-// 输出编码：Windows 控制台默认 GBK，切到 UTF-8（仅影响本进程控制台）
-void setup_console() {
-#ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);
-#endif
+        static_cast<int>(beatbench::kVersion.size()), beatbench::kVersion.data());
 }
 
 std::string severity_name(beatbench::bms::Severity s) {
@@ -59,54 +68,6 @@ void print_diagnostics(const std::vector<beatbench::bms::Diagnostic>& diags) {
             std::printf("[%s] %s\n", severity_name(d.severity).c_str(), d.message.c_str());
         }
     }
-}
-
-// 事件统计（info 展示）：note 数 / LN 对数 / BPM/STOP/节拍/BGA 事件数 / 通道分布。
-// 通道分布按「反向映射」归回 BMS 通道字符串，与旧解析器对照口径一致。
-struct EventStats {
-    std::size_t notes = 0;
-    std::size_t ln_pairs = 0;
-    std::size_t bpm = 0;
-    std::size_t stop = 0;
-    std::size_t measure = 0;
-    std::size_t bga = 0;
-    std::size_t raw_lines = 0;
-    std::map<std::string, std::size_t> channels;  // 通道名 → note 数
-};
-
-EventStats collect_event_stats(const beatbench::Chart& chart) {
-    EventStats stats;
-    stats.notes = chart.notes.size();
-    stats.bpm = chart.bpm_events.size();
-    stats.stop = chart.stop_events.size();
-    stats.measure = chart.measure_events.size();
-    stats.bga = chart.bga_events.size();
-    stats.raw_lines = chart.raw_lines.size();
-    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
-        const auto& ev = chart.notes[i];
-        const auto& n = ev.value;
-        // LN 对：互为配对的取头（配对下标大于自身则为尾，跳过计数）
-        if (n.ln_pair && *n.ln_pair > i) {
-            ++stats.ln_pairs;
-        }
-        // 通道：互为配对 → 按时间序分头尾；否则普通通道
-        bool is_head = false;
-        bool is_tail = false;
-        if (n.ln_pair && *n.ln_pair < chart.notes.size()) {
-            const auto j = *n.ln_pair;
-            const auto& p = chart.notes[j].value;
-            if (p.ln_pair && *p.ln_pair == i) {  // 互指 = 配对
-                if (ev < chart.notes[j]) {
-                    is_head = true;
-                } else {
-                    is_tail = true;
-                }
-            }
-        }
-        const auto ch = beatbench::bms::bms_channel_for(n.lane, is_head, is_tail, n.kind);
-        if (!ch.empty()) ++stats.channels[ch];
-    }
-    return stats;
 }
 
 int cmd_info(const std::string& path) {
@@ -149,7 +110,7 @@ int cmd_info(const std::string& path) {
         }
     }
 
-    const auto stats = collect_event_stats(chart);
+    const auto stats = beatbench::bms::collect_event_stats(chart);
     std::printf("\n--- 事件 ---\n");
     std::printf("note: %zu  LN 对: %zu  BPM: %zu  STOP: %zu  节拍: %zu  BGA: %zu  raw 保留行: %zu\n",
                 stats.notes, stats.ln_pairs, stats.bpm, stats.stop, stats.measure, stats.bga,
@@ -179,36 +140,14 @@ int cmd_check(const std::string& path) {
     std::printf("检查: %s\n", path.c_str());
     print_diagnostics(result.diagnostics);
 
-    // 最小 lint
-    std::size_t lint_warnings = 0;
-    // 1) 缺失 WAV 引用文件（相对谱面目录）
-    const std::filesystem::path base = std::filesystem::path(path).parent_path();
+    const auto lint =
+        beatbench::bms::lint_chart(chart, std::filesystem::path(path).parent_path());
     std::size_t missing = 0;
-    for (const auto& [key, def] : chart.samples) {
-        if (key.first != beatbench::SampleKind::Wav || def.file.empty()) continue;
-        const auto full = base / def.file;
-        if (!std::filesystem::exists(full)) {
-            std::printf("[WARN ] 缺失采样文件 #WAV%s %s\n",
-                        beatbench::bms::u32_to_c36(key.second, 2).c_str(), def.file.c_str());
-            ++missing;
-            ++lint_warnings;
-        }
+    for (const auto& issue : lint) {
+        std::printf("[WARN ] %s\n", issue.message.c_str());
+        if (issue.code == "missing_wav") ++missing;
     }
-    // 2) 缺失 #RANK / #TOTAL（播放器判定/回血依赖）
-    if (!chart.meta.count("RANK")) {
-        std::printf("[WARN ] 缺失 #RANK（判定难度，播放器将用默认值）\n");
-        ++lint_warnings;
-    }
-    if (!chart.meta.count("TOTAL")) {
-        std::printf("[WARN ] 缺失 #TOTAL（回血总量，播放器将用默认值）\n");
-        ++lint_warnings;
-    }
-    // 3) 空谱面（无 note 无 BGA 无节奏事件）
-    if (chart.notes.empty() && chart.bpm_events.empty() && chart.stop_events.empty() &&
-        chart.measure_events.empty() && chart.bga_events.empty() && chart.raw_lines.empty()) {
-        std::printf("[WARN ] 空谱面（未解析到任何内容）\n");
-        ++lint_warnings;
-    }
+
     std::printf("结果: %zu 错误, %zu 警告, 缺失采样 %zu 个, lint %zu 个\n",
                 static_cast<std::size_t>(std::count_if(
                     result.diagnostics.begin(), result.diagnostics.end(),
@@ -218,9 +157,9 @@ int cmd_check(const std::string& path) {
                     [](const auto& d) {
                         return d.severity == beatbench::bms::Severity::Warning;
                     })),
-                missing, lint_warnings);
+                missing, lint.size());
 
-    bool failed = missing > 0;
+    bool failed = !lint.empty();
     for (const auto& d : result.diagnostics) {
         if (d.severity == beatbench::bms::Severity::Error) failed = true;
     }
@@ -255,6 +194,35 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
     return 0;
 }
 
+// --json 模式：解析请求 → 进程内 dispatch → 输出信封。
+// 退出码：0 = 已产出信封（命令语义看信封 ok 字段）；2 = 请求 JSON 非法/无输入；
+// 1 = 内部异常（不应发生）。
+int run_json(const std::string& request_text) {
+    try {
+        const auto request = beatbench::json::Json::parse(request_text);
+        std::printf("%s\n", beatbench::cmd::global_registry().dispatch(request).dump().c_str());
+        return 0;
+    } catch (const beatbench::json::JsonError& e) {
+        auto err = beatbench::json::Json::object();
+        err.set("ok", false);
+        auto error = beatbench::json::Json::object();
+        error.set("code", "bad_request");
+        error.set("message", std::string("请求 JSON 非法: ") + e.what());
+        err.set("error", std::move(error));
+        std::printf("%s\n", err.dump().c_str());
+        return 2;
+    } catch (const std::exception& e) {
+        auto err = beatbench::json::Json::object();
+        err.set("ok", false);
+        auto error = beatbench::json::Json::object();
+        error.set("code", "internal");
+        error.set("message", std::string("内部错误: ") + e.what());
+        err.set("error", std::move(error));
+        std::printf("%s\n", err.dump().c_str());
+        return 1;
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -264,9 +232,23 @@ int main(int argc, char** argv) {
         return 1;
     }
     const std::string_view cmd = argv[1];
+    if (cmd == "--json") {
+        std::string request_text;
+        if (argc >= 3) {
+            request_text = argv[2];
+        } else {
+            request_text.assign(std::istreambuf_iterator<char>(std::cin),
+                                std::istreambuf_iterator<char>());
+        }
+        if (request_text.empty()) {
+            std::printf("{\"ok\":false,\"error\":{\"code\":\"bad_request\",\"message\":\"空请求\"}}\n");
+            return 2;
+        }
+        return run_json(request_text);
+    }
     if (cmd == "version") {
-        std::printf("beatbench-cli %.*s (GPL-3.0)\n", static_cast<int>(kVersion.size()),
-                    kVersion.data());
+        std::printf("beatbench-cli %.*s (GPL-3.0)\n", static_cast<int>(beatbench::kVersion.size()),
+                    beatbench::kVersion.data());
         return 0;
     }
     if (cmd == "info" || cmd == "check") {

@@ -7,7 +7,11 @@ add_library(beatbench_core STATIC
     src/bms/bms_parser.cpp
     src/bms/bms_writer.cpp
     src/bms/bms_flatten.cpp
+    src/bms/chart_check.cpp
     src/timing/timing_engine.cpp
+    src/json/json.cpp
+    src/command/registry.cpp
+    src/command/builtins.cpp
 )
 target_include_directories(beatbench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(beatbench_core PUBLIC cxx_std_20)

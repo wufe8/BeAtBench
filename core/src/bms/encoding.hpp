@@ -7,9 +7,6 @@
 
 namespace beatbench::bms {
 
-/// 编码检测结果（read_bms_file 使用；read_bms 约定输入已是 UTF-8）。
-enum class DetectedEncoding { Utf8, ShiftJis };
-
 /// 检测字节流编码：BOM → #ENCODING 声明 → 严格 UTF-8 校验启发式。
 DetectedEncoding detect_encoding(std::string_view bytes);
 

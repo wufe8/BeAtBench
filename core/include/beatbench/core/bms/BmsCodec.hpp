@@ -11,6 +11,9 @@ namespace beatbench::bms {
 /// BMS 文本编码。传统 Shift-JIS；现代工具渐用 UTF-8（#ENCODING 注释）。读取建议 Auto。
 enum class BmsEncoding { Auto, ShiftJis, Utf8 };
 
+/// 编码检测结果（read_bms_file 填写；read_bms 输入约定已是 UTF-8）。
+enum class DetectedEncoding { Utf8, ShiftJis };
+
 struct BmsReadOptions {
     BmsEncoding encoding = BmsEncoding::Auto;
     bool preserve_comments = true;  ///< 保留注释块以便写回
@@ -33,6 +36,7 @@ struct Diagnostic {
 struct BmsReadResult {
     Chart chart;
     std::vector<Diagnostic> diagnostics;
+    DetectedEncoding detected = DetectedEncoding::Utf8;  ///< read_bms_file 的检测结果
 };
 
 /// 解析 BMS 文本。

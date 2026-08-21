@@ -529,6 +529,8 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         enc = detect_encoding(bytes) == DetectedEncoding::Utf8 ? BmsEncoding::Utf8
                                                                : BmsEncoding::ShiftJis;
     }
+    result.detected = enc == BmsEncoding::Utf8 ? DetectedEncoding::Utf8
+                                               : DetectedEncoding::ShiftJis;
 
     std::string_view view(bytes);
     if (enc == BmsEncoding::Utf8) {
