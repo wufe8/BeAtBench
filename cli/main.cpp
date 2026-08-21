@@ -28,9 +28,9 @@ void print_usage() {
         "用法: beatbench-cli <子命令> [参数]\n"
         "\n"
         "子命令:\n"
-        "  info <file.bms>     解析并输出谱面信息（元信息/定义表/数据行统计）\n"
-        "  check <file.bms>    谱面检查（解析诊断 + 缺失 WAV 引用）\n"
-        "  convert <in> <out>  编码/往返写出转换   [TODO M1]\n"
+        "  info <file.bms>     解析并输出谱面信息（元信息/定义表/事件统计）\n"
+        "  check <file.bms>    谱面检查（解析诊断 + lint：缺失采样/#RANK/#TOTAL）\n"
+        "  convert <in> <out>  编码/往返写出转换 [--encoding utf8|sjis]\n"
         "  version             打印版本与许可信息\n",
         static_cast<int>(kVersion.size()), kVersion.data());
 }
@@ -179,7 +179,9 @@ int cmd_check(const std::string& path) {
     std::printf("检查: %s\n", path.c_str());
     print_diagnostics(result.diagnostics);
 
-    // 最小 lint：缺失 WAV 引用文件（相对谱面目录）
+    // 最小 lint
+    std::size_t lint_warnings = 0;
+    // 1) 缺失 WAV 引用文件（相对谱面目录）
     const std::filesystem::path base = std::filesystem::path(path).parent_path();
     std::size_t missing = 0;
     for (const auto& [key, def] : chart.samples) {
@@ -189,9 +191,25 @@ int cmd_check(const std::string& path) {
             std::printf("[WARN ] 缺失采样文件 #WAV%s %s\n",
                         beatbench::bms::u32_to_c36(key.second, 2).c_str(), def.file.c_str());
             ++missing;
+            ++lint_warnings;
         }
     }
-    std::printf("结果: %zu 错误, %zu 警告, 缺失采样 %zu 个\n",
+    // 2) 缺失 #RANK / #TOTAL（播放器判定/回血依赖）
+    if (!chart.meta.count("RANK")) {
+        std::printf("[WARN ] 缺失 #RANK（判定难度，播放器将用默认值）\n");
+        ++lint_warnings;
+    }
+    if (!chart.meta.count("TOTAL")) {
+        std::printf("[WARN ] 缺失 #TOTAL（回血总量，播放器将用默认值）\n");
+        ++lint_warnings;
+    }
+    // 3) 空谱面（无 note 无 BGA 无节奏事件）
+    if (chart.notes.empty() && chart.bpm_events.empty() && chart.stop_events.empty() &&
+        chart.measure_events.empty() && chart.bga_events.empty() && chart.raw_lines.empty()) {
+        std::printf("[WARN ] 空谱面（未解析到任何内容）\n");
+        ++lint_warnings;
+    }
+    std::printf("结果: %zu 错误, %zu 警告, 缺失采样 %zu 个, lint %zu 个\n",
                 static_cast<std::size_t>(std::count_if(
                     result.diagnostics.begin(), result.diagnostics.end(),
                     [](const auto& d) { return d.severity == beatbench::bms::Severity::Error; })),
@@ -200,13 +218,41 @@ int cmd_check(const std::string& path) {
                     [](const auto& d) {
                         return d.severity == beatbench::bms::Severity::Warning;
                     })),
-                missing);
+                missing, lint_warnings);
 
     bool failed = missing > 0;
     for (const auto& d : result.diagnostics) {
         if (d.severity == beatbench::bms::Severity::Error) failed = true;
     }
     return failed ? 1 : 0;
+}
+
+int cmd_convert(const std::string& in_path, const std::string& out_path,
+                const std::string& encoding) {
+    const auto result = beatbench::bms::read_bms_file(in_path);
+    const auto& chart = result.chart;
+    print_diagnostics(result.diagnostics);
+
+    beatbench::bms::BmsWriteOptions opts;
+    if (encoding == "sjis" || encoding == "shift_jis" || encoding == "shift-jis") {
+        opts.encoding = beatbench::bms::BmsEncoding::ShiftJis;
+    } else if (encoding == "utf8" || encoding == "utf-8") {
+        opts.encoding = beatbench::bms::BmsEncoding::Utf8;
+    } else {
+        std::printf("[ERROR] 未知编码 '%s'（支持 utf8 / sjis）\n", encoding.c_str());
+        return 2;
+    }
+    const auto text = beatbench::bms::write_bms(chart, opts);
+    std::ofstream out(out_path, std::ios::binary);
+    if (!out.is_open()) {
+        std::printf("[ERROR] 无法写入: %s\n", out_path.c_str());
+        return 1;
+    }
+    out << text;
+    out.close();
+    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(),
+                text.size(), encoding.c_str());
+    return 0;
 }
 
 }  // namespace
@@ -232,8 +278,17 @@ int main(int argc, char** argv) {
         return cmd == "info" ? cmd_info(argv[2]) : cmd_check(argv[2]);
     }
     if (cmd == "convert") {
-        std::printf("[TODO] 子命令 'convert' 于 M1 实现（依赖 core/bms 写出与编码层）。\n");
-        return 0;
+        if (argc < 4) {
+            std::printf("用法: beatbench-cli convert <in.bms> <out.bms> [--encoding utf8|sjis]\n");
+            return 2;
+        }
+        std::string encoding = "utf8";
+        if (argc >= 6 && std::string_view(argv[4]) == "--encoding") {
+            encoding = argv[5];
+        } else if (argc >= 5 && std::string_view(argv[4]) != "--encoding") {
+            encoding = argv[4];  // 兼容裸参数
+        }
+        return cmd_convert(argv[2], argv[3], encoding);
     }
     std::printf("未知子命令: %.*s\n\n", static_cast<int>(cmd.size()), cmd.data());
     print_usage();

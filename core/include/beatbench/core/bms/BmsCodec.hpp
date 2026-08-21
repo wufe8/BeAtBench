@@ -46,4 +46,17 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts 
 /// 写出 BMS 文本（M1 实现；归一化策略见对齐稿 02 §4.3）。
 std::string write_bms(const Chart& chart, const BmsWriteOptions& opts = {});
 
+/// #RANDOM/#IF/#SWITCH/#SETRANDOM 选择块展开（文本层预处理，不解析块内容）。
+/// 语义：单次播放内固定——把选中的分支内容替换进文本流，未选分支丢弃；
+/// 块内数据行保持原样（调用方随后再 read_bms 事件化）。
+/// 选择策略（BMS/LR2 惯例）：
+/// - #RANDOM n：随机值 r ∈ [1, n]，选择第 r 段（段以 #ENDIF 分隔）；
+/// - #IF expr：expr 求值为非 0 时选（支持直接数值与变量 RANDOM）；
+/// - #SWITCH v + #CASE x/#DEFAULT：v == x 的分支；
+/// - #SETRANDOM v：设置变量 RANDOM = v（影响后续 RANDOM/IF）。
+/// random_value 提供确定的选择（播放器用随机种子；编辑器预览/时序用固定值）。
+/// 默认 random_value = 1（选第一个分支）。
+std::string expand_variants(std::string_view text, std::uint32_t random_value = 1,
+                            std::vector<Diagnostic>* diagnostics = nullptr);
+
 }  // namespace beatbench::bms

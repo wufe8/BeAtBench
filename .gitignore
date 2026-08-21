@@ -21,3 +21,6 @@ compile_commands.json
 
 # 编辑器运行时缓存（波形金字塔等，见 doc/02 §8）
 **/.beatbench-cache/
+
+# 视觉工具运行时缓存
+.dsh-vision-toolkit/

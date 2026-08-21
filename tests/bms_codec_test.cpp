@@ -396,7 +396,8 @@ TEST(BmsRead, EventizesMeasureLen) {
 }
 
 TEST(BmsRead, EventizesBpmInlineAndRef) {
-    // ch03：整段纯数字 = 直接数值（可变长）；含字母 = 2 字符槽位引用；ch08 = 引用
+    // ch03：整段纯数字 = 直接数值（可变长）；含字母 = 2 字符槽位引用；
+    // 引用未定义时按 LR2 兼容十六进制解析；ch08 = 引用
     const auto res = read_bms("#BPM01 200\n#BPM8C 153\n#00103:0065536\n#00208:01\n#00303:64\n#00403:8C\n");
     ASSERT_EQ(res.chart.bpm_events.size(), 4u);
     EXPECT_EQ(res.chart.bpm_events[0].measure, 1u);
@@ -404,9 +405,17 @@ TEST(BmsRead, EventizesBpmInlineAndRef) {
     EXPECT_EQ(res.chart.bpm_events[1].measure, 2u);
     EXPECT_EQ(res.chart.bpm_events[1].value.value, 200.0);    // ch08 引用 #BPM01
     EXPECT_EQ(res.chart.bpm_events[2].measure, 3u);
-    EXPECT_EQ(res.chart.bpm_events[2].value.value, 64.0);     // 纯数字整体
+    EXPECT_EQ(res.chart.bpm_events[2].value.value, 100.0);    // 无定义 → 十六进制 0x64
     EXPECT_EQ(res.chart.bpm_events[3].measure, 4u);
-    EXPECT_EQ(res.chart.bpm_events[3].value.value, 153.0);    // 含字母 → 引用 #BPM8C
+    EXPECT_EQ(res.chart.bpm_events[3].value.value, 153.0);    // 引用 #BPM8C
+}
+
+TEST(BmsRead, EventizesBpmHexFallback) {
+    // LR2 兼容：ch03 引用无定义时按十六进制（yukkuri 式减速谱）
+    const auto res = read_bms("#BPM 200\n#00003:C8\n#00103:C7\n");
+    ASSERT_EQ(res.chart.bpm_events.size(), 2u);
+    EXPECT_EQ(res.chart.bpm_events[0].value.value, 200.0);
+    EXPECT_EQ(res.chart.bpm_events[1].value.value, 199.0);
 }
 
 TEST(BmsRead, EventizesBpmMultiSlot) {

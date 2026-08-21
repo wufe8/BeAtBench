@@ -86,7 +86,9 @@ inline bool parse_double(std::string_view s, double& out) {
     return false;
 }
 
-// 槽位值 → BPM 落值：2 位 → 查 #BPMxx 引用；否则直接数值；失败 → 告警 + 130
+// 槽位值 → BPM 落值：2 位 → 查 #BPMxx 引用；引用未定义时按 LR2 兼容的十六进制
+// 解析（如 C8 = 200；yukkuri 等谱面直接用 16 进制 BPM 值）；否则直接数值。
+// 失败 → 告警 + 130
 double resolve_bpm(const Chart& chart, std::string_view slot, int number,
                    std::vector<Diagnostic>& diags) {
     if (slot.size() == 2) {
@@ -95,6 +97,13 @@ double resolve_bpm(const Chart& chart, std::string_view slot, int number,
             it != chart.samples.end()) {
             double d = 0;
             if (parse_double(it->second.value, d)) return d;
+        }
+        // LR2 兼容：2 字符按十六进制（C8 → 200）
+        char* end = nullptr;
+        std::string tmp(slot);
+        const long v = std::strtol(tmp.c_str(), &end, 16);
+        if (end != tmp.c_str() && *end == '\0' && v > 0) {
+            return static_cast<double>(v);
         }
     }
     double d = 0;
@@ -197,7 +206,48 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     std::vector<NoteInfo> note_infos;
     bool in_block_comment = false;
 
-    for (const auto& [line, number] : lines) {
+    // ---- 预扫描 1：#LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
+    {
+        // （已在上方完成，此处占位保持结构清晰）
+    }
+
+    // ---- 预扫描 2：定义行（#WAVxx/#BMPxx/#BPMxx/#STOPxx）。
+    // 先于数据行解析，保证数据行内的 #BPMxx/#STOPxx 引用与定义顺序无关
+    // （真实谱面惯例定义在前，但规范不保证）。 ----
+    std::vector<char> consumed(lines.size(), 0);
+    for (std::size_t li = 0; li < lines.size(); ++li) {
+        const auto& line = lines[li].text;
+        if (line.empty() || line[0] != '#') continue;
+        const auto token = field_token(line);
+        const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
+                                      token.size();
+        const auto up = upper_ascii(token);
+        SampleKind kind{};
+        std::size_t prefix_len = 0;
+        bool is_def = false;
+        if (up.size() >= 5 && up.starts_with("WAV")) { kind = SampleKind::Wav; prefix_len = 3; is_def = true; }
+        else if (up.size() >= 5 && up.starts_with("BMP")) { kind = SampleKind::Bmp; prefix_len = 3; is_def = true; }
+        else if (up.size() >= 5 && up.starts_with("BPM")) { kind = SampleKind::Bpm; prefix_len = 3; is_def = true; }
+        else if (up.size() >= 6 && up.starts_with("STOP")) { kind = SampleKind::Stop; prefix_len = 4; is_def = true; }
+        if (!is_def) continue;
+        const auto id_part = std::string_view(up).substr(prefix_len);
+        if (id_part.size() != 2 || !is_c36_digit(id_part[0]) || !is_c36_digit(id_part[1])) {
+            continue;  // 3 位 id 变体等：留待主循环（raw 保留）
+        }
+        const auto value = field_value(line, token_end);
+        SampleDef def;
+        if (kind == SampleKind::Wav || kind == SampleKind::Bmp) {
+            def.file = std::string(value);
+        } else {
+            def.value = std::string(value);
+        }
+        chart.samples[{kind, c36_to_u32(id_part, 2)}] = def;
+        consumed[li] = 1;
+    }
+
+    for (std::size_t li = 0; li < lines.size(); ++li) {
+        const auto& [line, number] = lines[li];
+        if (consumed[li]) continue;  // 预扫描已消费的定义行
         if (in_block_comment) {
             if (opts.preserve_comments) raw.emplace_back(line);
             if (line.find("*/") != std::string_view::npos) in_block_comment = false;

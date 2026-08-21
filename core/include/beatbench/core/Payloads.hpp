@@ -45,9 +45,10 @@ struct Stop {
     }
 };
 
-/// 节拍事件（BMS ch02：当前小节拍数，默认 1.0 = 4/4，即每小节 4 个 4 分拍）。
+/// 节拍事件（BMS ch02：每小节拍数，4/4 = 4；0.5 = 半拍小节）。
+/// 小节时长 = beats × 60 / BPM（由 timing 引擎按 BPM 分段积分）。
 struct MeasureLen {
-    double beats = 1.0;
+    double beats = 4.0;
 
     friend bool operator==(const MeasureLen&, const MeasureLen&) = default;
     friend bool operator<(const MeasureLen& a, const MeasureLen& b) {
