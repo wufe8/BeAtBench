@@ -84,7 +84,8 @@ void LintListModel::loadFromCheck(const QString& checkJson) {
             add_flag("missing_rank", "缺失 #RANK（判定难度，播放器将用默认值）");
             add_flag("missing_total", "缺失 #TOTAL（回血总量，播放器将用默认值）");
             add_flag("empty", "空谱面（未解析到任何内容）");
-            // 4) wav_ext_mismatch（引用 .wav 存在 .ogg 等）：聚合为一条（上千条同因警告不刷屏）
+            // 4) wav_ext_mismatch（引用 .wav 存在 .ogg 等）：信息级（文件实际可用），
+            // 聚合为一条（上千条同因信息不刷屏）
             if (const Json* arr3 = lint->find("wav_ext_mismatch"); arr3 && arr3->is_array()) {
                 const auto& darr = arr3->as_array();
                 if (!darr.empty()) {
@@ -101,7 +102,7 @@ void LintListModel::loadFromCheck(const QString& checkJson) {
                         }
                     }
                     Entry agg;
-                    agg.severity = QStringLiteral("warning");
+                    agg.severity = QStringLiteral("info");
                     agg.id = firstId;
                     agg.message = QObject::tr("%1 个采样文件扩展名与引用不符（示例: %2 → %3）")
                                       .arg(darr.size())

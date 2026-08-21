@@ -141,7 +141,8 @@ ColumnLayout {
                         Layout.fillWidth: true
                         font.pixelSize: Theme.fsTiny
                     }
-                    // 状态点（缺失=黄；扩展名不符=青）——精简徽标，详情悬停提示
+                    // 状态点（缺失=黄；扩展名不符=青）——精简徽标；仅「缺失」提供悬停提示
+                    // （扩展名不符为信息级，lint 面板聚合说明，此处不提示）
                     Rectangle {
                         width: 6
                         height: 6
@@ -164,9 +165,8 @@ ColumnLayout {
                         sampleModel.selectId(row.id)
                         root.samplePicked(row.id, row.file)
                     }
-                    ToolTip.visible: mouse.containsMouse && (row.missing || row.extMismatch)
-                    ToolTip.text: row.missing ? qsTr("文件缺失")
-                                              : (row.extMismatch ? qsTr("扩展名与引用不符（播放器按 wav→ogg 回退查找）") : "")
+                    ToolTip.visible: mouse.containsMouse && row.missing
+                    ToolTip.text: qsTr("文件缺失")
                     ToolTip.delay: 400
                 }
             }

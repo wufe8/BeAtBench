@@ -259,7 +259,9 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         lnobj_text = "ZZ";  // 默认；若头部无 #LNOBJ 行则需补（见下方头部输出修正）
     }
 
-    // 3b. note：LN 头尾通道由配对关系决定（互为配对时按时间序分头尾）
+    // 3b. note：LN 通道由配对关系决定（互为配对时按时间序分头尾）
+    //   LNTYPE 1（默认）：头尾同在 RDM LN 通道（1P→5x / 2P→6x，槽位文本 = WAV id）；
+    //   LNTYPE 2（#LNOBJ）：头尾同在普通通道（1x/2x），尾槽位文本 = #LNOBJ id。
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         const auto& ev = chart.notes[i];
         const auto& n = ev.value;
@@ -273,9 +275,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 is_tail = true;
             }
         }
-        const auto channel = bms_channel_for(n.lane, is_head, is_tail, n.kind);
+        const auto channel = bms_channel_for(n.lane, !lntype2 && (is_head || is_tail), n.kind);
         if (channel.empty()) continue;  // 无法表示的 Lane（罕见）→ 丢弃并依赖诊断
-        // 槽位文本：普通/头 = WAV id；LNTYPE 2 尾 = LNOBJ id；LNTYPE 1 尾 = WAV id
         std::string slot_text;
         if (is_tail && lntype2) {
             slot_text = lnobj_text;
@@ -304,12 +305,19 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             last_beats[ev.measure] = ev.value.beats;
         }
         for (const auto& [measure, beats] : last_beats) {
-            add_cell(measure, "02", Rational(0, 1), format_num(beats));
+            // 模型四分拍 → ch02 整小节记号倍数（÷4，与 parser 的 ×4 对称）
+            add_cell(measure, "02", Rational(0, 1), format_num(beats / 4.0));
         }
     }
-    // 3f. BGA（ch04 base / ch06 poor）
+    // 3f. BGA（ch04 base / ch06 poor / ch07 layer / ch0A layer2；层号 ↔ 通道反向映射）
     for (const auto& ev : chart.bga_events) {
-        const auto channel = ev.value.layer == 1 ? "06" : "04";
+        std::string_view channel = "04";
+        switch (ev.value.layer) {
+            case 1: channel = "06"; break;
+            case 2: channel = "07"; break;
+            case 3: channel = "0A"; break;
+            default: break;  // layer 0 = base（未知层号兜底 ch04）
+        }
         add_cell(ev.measure, channel, ev.pos, fmt_id(chart, ev.value.image.id));
     }
 

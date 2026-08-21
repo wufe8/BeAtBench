@@ -82,13 +82,13 @@ TEST(Timing, ConstantBpm) {
 }
 
 TEST(Timing, ChangedMeasureLen) {
-    // ch02 = 2 → 每小节 2 拍：一小节 = 2×60/150 = 0.8s
+    // ch02 = 2 → 8/4 拍（每小节 8 四分拍）：一小节 = 8×60/150 = 3.2s
     auto chart = chart_from_text("#BPM 150\n#00002:2\n#00111:01\n");
     TimingEngine te;
     te.rebuild(chart);
     EXPECT_EQ(te.time_us({0, Rational(0, 1)}), 0);
-    EXPECT_EQ(te.time_us({0, Rational(1, 2)}), 400000);
-    EXPECT_EQ(te.time_us({1, Rational(0, 1)}), 800000);
+    EXPECT_EQ(te.time_us({0, Rational(1, 2)}), 1600000);
+    EXPECT_EQ(te.time_us({1, Rational(0, 1)}), 3200000);
 }
 
 TEST(Timing, BpmChangeInsideMeasure) {

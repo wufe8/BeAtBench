@@ -15,6 +15,11 @@ EventStats collect_event_stats(const Chart& chart) {
     stats.measure = chart.measure_events.size();
     stats.bga = chart.bga_events.size();
     stats.raw_lines = chart.raw_lines.size();
+    // LNTYPE 2：LN 头尾在普通通道（无独立 5x/6x 通道），通道统计按普通通道计
+    bool lntype2 = false;
+    if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end() && it->second == "2") {
+        lntype2 = true;
+    }
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         const auto& ev = chart.notes[i];
         const auto& n = ev.value;
@@ -36,7 +41,7 @@ EventStats collect_event_stats(const Chart& chart) {
                 }
             }
         }
-        const auto ch = bms_channel_for(n.lane, is_head, is_tail, n.kind);
+        const auto ch = bms_channel_for(n.lane, !lntype2 && (is_head || is_tail), n.kind);
         if (!ch.empty()) ++stats.channels[ch];
     }
     return stats;

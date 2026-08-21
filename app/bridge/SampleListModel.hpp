@@ -101,7 +101,7 @@ private:
         int pedal2 = 0;
         int bgm = 0;             // 背景音轨（ch01）引用数
         bool missing = false;
-        bool extMismatch = false;  // 扩展名不符（wav_ext_mismatch，lint 警告级）
+        bool extMismatch = false;  // 扩展名不符（wav_ext_mismatch，lint 信息级）
     };
 
     void rebuild();

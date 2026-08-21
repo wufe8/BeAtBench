@@ -492,47 +492,71 @@ TEST(BmsChannelMap, Semantics) {
     EXPECT_EQ(bms_channel_rule("02")->semantics, ChannelSemantics::MeasureLen);
     EXPECT_EQ(bms_channel_rule("03")->semantics, ChannelSemantics::BpmInline);
     EXPECT_EQ(bms_channel_rule("04")->semantics, ChannelSemantics::Bga);
+    EXPECT_EQ(bms_channel_rule("04")->bga_layer, 0);  // base
     EXPECT_EQ(bms_channel_rule("06")->semantics, ChannelSemantics::BgaPoor);
+    EXPECT_EQ(bms_channel_rule("06")->bga_layer, 1);  // poor
+    EXPECT_EQ(bms_channel_rule("07")->semantics, ChannelSemantics::Bga);  // BGA Layer（BMS 笔记）
+    EXPECT_EQ(bms_channel_rule("07")->bga_layer, 2);
+    EXPECT_EQ(bms_channel_rule("0A")->semantics, ChannelSemantics::Bga);  // BGA Layer2
+    EXPECT_EQ(bms_channel_rule("0A")->bga_layer, 3);
+    EXPECT_EQ(bms_channel_rule("0B")->semantics, ChannelSemantics::KeepRaw);  // 不透明度控制通道
     EXPECT_EQ(bms_channel_rule("08")->semantics, ChannelSemantics::BpmRef);
     EXPECT_EQ(bms_channel_rule("09")->semantics, ChannelSemantics::StopRef);
     EXPECT_EQ(bms_channel_rule("01")->semantics, ChannelSemantics::Note);  // BGM 背景轨（2026-08 结构化）
     EXPECT_EQ(bms_channel_rule("01")->lane, (Lane{0, LaneKind::Bgm, 0}));
-    EXPECT_EQ(bms_channel_rule("07")->semantics, ChannelSemantics::KeepRaw);
     EXPECT_FALSE(bms_channel_rule("99").has_value());
     EXPECT_FALSE(bms_channel_rule("").has_value());
     EXPECT_FALSE(bms_channel_rule("0").has_value());
 }
 
 TEST(BmsChannelMap, NoteLanes) {
+    // BMS 笔记「5/7key SP/DP 模式游玩轨」：11-15=键1-5 16=皿 17=踏板/保留 18=键6 19=键7
     const auto r11 = bms_channel_rule("11");
     ASSERT_TRUE(r11.has_value());
     EXPECT_EQ(r11->semantics, ChannelSemantics::Note);
     EXPECT_EQ(r11->lane, (Lane{0, LaneKind::Key, 1}));
-    EXPECT_EQ(r11->ln_head, false);
+    EXPECT_EQ(r11->ln_channel, false);
     EXPECT_EQ(bms_channel_rule("16")->lane, (Lane{0, LaneKind::Scratch, 0}));
-    EXPECT_EQ(bms_channel_rule("17")->lane, (Lane{0, LaneKind::Key, 7}));
-    EXPECT_EQ(bms_channel_rule("18")->lane, (Lane{0, LaneKind::Key, 8}));
-    EXPECT_EQ(bms_channel_rule("19")->lane, (Lane{0, LaneKind::Pedal, 0}));
+    EXPECT_EQ(bms_channel_rule("17")->lane, (Lane{0, LaneKind::Pedal, 0}));
+    EXPECT_EQ(bms_channel_rule("18")->lane, (Lane{0, LaneKind::Key, 6}));
+    EXPECT_EQ(bms_channel_rule("19")->lane, (Lane{0, LaneKind::Key, 7}));
     EXPECT_EQ(bms_channel_rule("21")->lane, (Lane{1, LaneKind::Key, 1}));
     EXPECT_EQ(bms_channel_rule("26")->lane, (Lane{1, LaneKind::Scratch, 0}));
-    // LN 头尾 / 地雷（大小写不敏感）
-    EXPECT_EQ(bms_channel_rule("51")->ln_head, true);
-    EXPECT_EQ(bms_channel_rule("61")->ln_tail, true);
+    EXPECT_EQ(bms_channel_rule("27")->lane, (Lane{1, LaneKind::Pedal, 0}));
+    EXPECT_EQ(bms_channel_rule("28")->lane, (Lane{1, LaneKind::Key, 6}));
+    EXPECT_EQ(bms_channel_rule("29")->lane, (Lane{1, LaneKind::Key, 7}));
+    // LN 通道：51-59=1P、61-69=2P（RDM 记法，LNTYPE 1 同通道交替头尾；大小写不敏感）
+    EXPECT_EQ(bms_channel_rule("51")->lane, (Lane{0, LaneKind::Key, 1}));
+    EXPECT_EQ(bms_channel_rule("51")->ln_channel, true);
+    EXPECT_EQ(bms_channel_rule("56")->lane, (Lane{0, LaneKind::Scratch, 0}));
+    EXPECT_EQ(bms_channel_rule("56")->ln_channel, true);
+    EXPECT_EQ(bms_channel_rule("59")->lane, (Lane{0, LaneKind::Key, 7}));
+    EXPECT_EQ(bms_channel_rule("61")->lane, (Lane{1, LaneKind::Key, 1}));
+    EXPECT_EQ(bms_channel_rule("61")->ln_channel, true);
+    EXPECT_EQ(bms_channel_rule("68")->lane, (Lane{1, LaneKind::Key, 6}));
+    // 地雷（槽位与游玩轨同构）
     EXPECT_EQ(bms_channel_rule("d3")->note_kind, NoteKind::Landmine);
     EXPECT_EQ(bms_channel_rule("D3")->lane, (Lane{0, LaneKind::Key, 3}));
+    EXPECT_EQ(bms_channel_rule("D7")->lane, (Lane{0, LaneKind::Pedal, 0}));
     EXPECT_EQ(bms_channel_rule("E3")->lane, (Lane{1, LaneKind::Key, 3}));
 }
 
 TEST(BmsChannelMap, Reverse) {
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 1}, false, false, NoteKind::Normal), "11");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Scratch, 0}, false, false, NoteKind::Normal), "16");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Pedal, 0}, false, false, NoteKind::Normal), "19");
-    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 5}, false, false, NoteKind::Normal), "25");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 2}, true, false, NoteKind::Normal), "52");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 2}, false, true, NoteKind::Normal), "62");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 4}, false, false, NoteKind::Landmine), "D4");
-    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 4}, false, false, NoteKind::Landmine), "E4");
-    EXPECT_TRUE(bms_channel_for({0, LaneKind::Key, 9}, false, false, NoteKind::Normal).empty());
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 1}, false, NoteKind::Normal), "11");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Scratch, 0}, false, NoteKind::Normal), "16");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Pedal, 0}, false, NoteKind::Normal), "17");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 6}, false, NoteKind::Normal), "18");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 7}, false, NoteKind::Normal), "19");
+    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 5}, false, NoteKind::Normal), "25");
+    EXPECT_EQ(bms_channel_for({1, LaneKind::Pedal, 0}, false, NoteKind::Normal), "27");
+    // LN（RDM 记法）：1P→5x / 2P→6x（头尾同通道，不再区分头尾通道）
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 2}, true, NoteKind::Normal), "52");
+    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 2}, true, NoteKind::Normal), "62");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Scratch, 0}, true, NoteKind::Normal), "56");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 4}, false, NoteKind::Landmine), "D4");
+    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 4}, false, NoteKind::Landmine), "E4");
+    EXPECT_EQ(bms_channel_for({0, LaneKind::Pedal, 0}, false, NoteKind::Landmine), "D7");
+    EXPECT_TRUE(bms_channel_for({0, LaneKind::Key, 9}, false, NoteKind::Normal).empty());
 }
 
 // ---------- 数据行事件化 ----------
@@ -552,7 +576,7 @@ TEST(BmsRead, EventizesMeasureLen) {
     const auto res = read_bms("#00302:2\n");
     ASSERT_EQ(res.chart.measure_events.size(), 1u);
     EXPECT_EQ(res.chart.measure_events[0].measure, 3u);
-    EXPECT_EQ(res.chart.measure_events[0].value.beats, 2.0);
+    EXPECT_EQ(res.chart.measure_events[0].value.beats, 8.0);  // ch02=2 → 8/4 拍 → 8 四分拍
 }
 
 TEST(BmsRead, EventizesBpmInlineAndRef) {
@@ -594,25 +618,39 @@ TEST(BmsRead, EventizesStop) {
 }
 
 TEST(BmsRead, EventizesBga) {
-    const auto res = read_bms("#BMP01 bg.png\n#00104:01\n#00206:01\n");
-    ASSERT_EQ(res.chart.bga_events.size(), 2u);
+    const auto res = read_bms("#BMP01 bg.png\n#00104:01\n#00206:01\n#00307:01\n#0040A:01\n");
+    ASSERT_EQ(res.chart.bga_events.size(), 4u);
     EXPECT_EQ(res.chart.bga_events[0].value.image.id, 1u);
     EXPECT_EQ(res.chart.bga_events[0].value.layer, 0);  // ch04 base
     EXPECT_EQ(res.chart.bga_events[1].value.layer, 1);  // ch06 poor
+    EXPECT_EQ(res.chart.bga_events[1].value.image.id, 1u);
+    EXPECT_EQ(res.chart.bga_events[2].value.layer, 2);  // ch07 layer（BMS 笔记）
+    EXPECT_EQ(res.chart.bga_events[3].value.layer, 3);  // ch0A layer2
 }
 
 // ---------- LN 配对 ----------
 
 TEST(BmsRead, LnPairType1) {
-    const auto res = read_bms("#LNTYPE 1\n#00151:01\n#00261:01\n");
+    // LNTYPE 1（RDM 记法）：51-59=1P LN 通道，同通道内按出现次序交替头尾
+    const auto res = read_bms("#LNTYPE 1\n#00151:01\n#00251:01\n");
     ASSERT_EQ(res.chart.notes.size(), 2u);
     EXPECT_EQ(res.chart.notes[0].value.ln_pair, 1u);  // 头 → 尾
     EXPECT_EQ(res.chart.notes[1].value.ln_pair, 0u);  // 尾 → 头
+    EXPECT_EQ(res.chart.notes[0].value.lane, (Lane{0, LaneKind::Key, 1}));
+}
+
+TEST(BmsRead, LnPairType1TwoP) {
+    // 61-69 = 2P LN 通道（与 51-59 是不同玩家侧，互不配对）
+    const auto res = read_bms("#LNTYPE 1\n#00161:01\n#00261:01\n");
+    ASSERT_EQ(res.chart.notes.size(), 2u);
+    EXPECT_EQ(res.chart.notes[0].value.ln_pair, 1u);
+    EXPECT_EQ(res.chart.notes[0].value.lane, (Lane{1, LaneKind::Key, 1}));
 }
 
 TEST(BmsRead, LnPairType2) {
-    // LNTYPE 2：61-69 值 == LNOBJ 才是尾；非 LNOBJ 值 → 普通 note
-    const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00151:01\n#00261:ZZ\n#00361:02\n");
+    // LNTYPE 2（#LNOBJ）：头尾同在普通通道；值==#LNOBJ 的物件为尾；
+    // 非 LNOBJ 值 → 普通 note（kSample 例 2：#02412:3C…ZZ 即通道 12 内头尾）
+    const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n#00311:02\n");
     ASSERT_EQ(res.chart.notes.size(), 3u);
     EXPECT_EQ(res.chart.notes[0].value.ln_pair, 1u);  // 头配对
     EXPECT_EQ(res.chart.notes[1].value.ln_pair, 0u);
@@ -633,7 +671,8 @@ TEST(BmsRead, LnUnclosedWarns) {
 }
 
 TEST(BmsRead, LnOrphanTailWarns) {
-    const auto res = read_bms("#00161:01\n");
+    // LNTYPE 2 尾没有可配对的头
+    const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00111:ZZ\n");
     bool warned = false;
     for (const auto& d : res.diagnostics) {
         if (d.severity == Severity::Warning && d.message.find("LN") != std::string::npos) {
@@ -703,13 +742,13 @@ TEST(BmsRoundTrip, SamePosConflictSplitsRows) {
 }
 
 TEST(BmsRoundTrip, LnType2RoundTrip) {
-    const auto src = "#LNTYPE 2\n#LNOBJ ZZ\n#00151:01\n#00261:ZZ\n";
+    // LNTYPE 2：头尾同在普通通道；尾槽位写回 #LNOBJ 文本
+    const auto src = "#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n";
     const auto r1 = read_bms(src);
     ASSERT_EQ(r1.chart.notes.size(), 2u);
     EXPECT_EQ(r1.chart.notes[0].value.ln_pair, 1u);
     const auto out = write_bms(r1.chart);
-    // 尾槽位应写回 LNOBJ 文本（而非 WAV id 01）
-    EXPECT_NE(out.find("#00261:ZZ"), std::string::npos);
+    EXPECT_NE(out.find("#00211:ZZ"), std::string::npos);
     const auto r2 = read_bms(out);
     EXPECT_EQ(normalize_notes(r2.chart.notes), normalize_notes(r1.chart.notes));
     EXPECT_EQ(r2.chart.meta, r1.chart.meta);

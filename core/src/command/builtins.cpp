@@ -242,7 +242,7 @@ public:
                 e.set("message", issue.message);
                 missing_wav.push_back(std::move(e));
             } else if (issue.code == "wav_ext_mismatch") {
-                // 扩展名不符（引用 .wav 存在 .ogg 等）：警告级，文件实际可用（播放器按扩展名回退）
+                // 扩展名不符（引用 .wav 存在 .ogg 等）：信息级，文件实际可用（播放器按扩展名回退）
                 Json e = Json::object();
                 e.set("id", issue.id);
                 e.set("file", issue.file);

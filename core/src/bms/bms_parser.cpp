@@ -158,8 +158,8 @@ std::int64_t resolve_stop_us(const Chart& chart, std::string_view slot, int numb
 struct NoteInfo {
     std::uint32_t idx = 0;
     Lane lane;
-    bool head = false;
-    bool tail = false;
+    bool ln_channel = false;  // 51-69 RDM LN 通道（LNTYPE 1：同通道内按时间序交替头尾）
+    bool lnobj_tail = false;  // LNTYPE 2：普通通道内值 == #LNOBJ 的对象 = LN 尾
     int number = 0;
 };
 
@@ -382,8 +382,9 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                  "无法解析节拍值（按 1 处理）: " + std::string(data), number});
                             beats = 1.0;
                         }
+                        // ch02 文件值 = 「整小节记号倍数」（1 = 4/4）；模型存四分拍 → 存 ×4
                         chart.measure_events.push_back(
-                            {measure, Rational(0, 1), MeasureLen{beats}});
+                            {measure, Rational(0, 1), MeasureLen{beats * 4.0}});
                         continue;
                     }
                     if (rule->semantics == ChannelSemantics::BpmInline) {
@@ -419,12 +420,11 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 note.lane = rule->lane;
                                 note.sample.id = id;
                                 note.kind = rule->note_kind;
-                                const bool is_tail =
-                                    rule->ln_tail && (!lntype2 || id == lnobj_id);
                                 chart.notes.push_back({measure, pos, note});
                                 note_infos.push_back(
                                     {static_cast<std::uint32_t>(chart.notes.size() - 1),
-                                     rule->lane, rule->ln_head, is_tail, number});
+                                     rule->lane, rule->ln_channel,
+                                     lntype2 && !rule->ln_channel && id == lnobj_id, number});
                                 break;
                             }
                             case ChannelSemantics::BpmInline:
@@ -446,7 +446,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                             case ChannelSemantics::BgaPoor: {
                                 Bga bga;
                                 bga.image.id = decode_id(chart, slot);
-                                bga.layer = rule->semantics == ChannelSemantics::BgaPoor ? 1 : 0;
+                                bga.layer = rule->bga_layer;  // 0=base 1=poor 2=layer 3=layer2
                                 chart.bga_events.push_back({measure, pos, bga});
                                 break;
                             }
@@ -501,36 +501,57 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             {Severity::Warning, std::string("无法识别的行：") + std::string(line), number});
     }
 
-    // ---- LN 配对：同 lane 内「最近未配对头」匹配尾；LNTYPE 1 全尾 / LNTYPE 2 仅 LNOBJ 值 ----
+    // ---- LN 配对 ----
+    // 定义（hitkey「#xxx51-69」「#LNTYPE 1 :: RDM-notation」+ BMS 笔记「长音」）：
+    //   LNTYPE 1（RDM 记法，BMS 惯例默认）：51-59 = 1P LN 通道、61-69 = 2P LN 通道；
+    //     通道内物件按出现次序严格交替 = 头、尾、头、尾…（同 lane 配对）。
+    //   LNTYPE 2（#LNOBJ）：不用 51-69；头尾同在普通通道（11-29），
+    //     值 == #LNOBJ 的物件为尾，头 = 同 lane 最近未配对的先前物件。
+    //     （BMS 笔记例 2：#02412:3C0000000000ZZ → channel 12 内 3C 头 + ZZ 尾。）
     {
-        std::map<Lane, std::vector<std::uint32_t>> head_stacks;  // lane → 未配对头下标栈
+        std::map<Lane, std::optional<std::uint32_t>> pending_head;  // LNTYPE 1：交替状态
+        std::map<Lane, std::vector<std::uint32_t>> head_stack;      // LNTYPE 2：候选头栈
         for (const auto& info : note_infos) {
-            if (info.tail) {
-                auto& stack = head_stacks[info.lane];
-                if (stack.empty()) {
-                    result.diagnostics.push_back(
-                        {Severity::Warning,
-                         "未配对 LN 尾（缺少头）: 行 " + std::to_string(info.number), 0});
-                    continue;
+            if (lntype2) {
+                if (info.ln_channel) continue;  // 51-69 在 LNTYPE 2 下按普通物件保留
+                if (info.lnobj_tail) {
+                    auto& stk = head_stack[info.lane];
+                    if (stk.empty()) {
+                        result.diagnostics.push_back(
+                            {Severity::Warning,
+                             "未配对 LN 尾（缺少头）: 行 " + std::to_string(info.number), 0});
+                        continue;
+                    }
+                    const auto h = stk.back();
+                    stk.pop_back();
+                    chart.notes[h].value.ln_pair = info.idx;
+                    chart.notes[info.idx].value.ln_pair = h;
+                } else {
+                    head_stack[info.lane].push_back(info.idx);
                 }
-                const auto h = stack.back();
-                stack.pop_back();
+                continue;
+            }
+            // LNTYPE 1（含未声明，默认 1）
+            if (!info.ln_channel) continue;
+            auto& pending = pending_head[info.lane];
+            if (pending) {
+                const auto h = *pending;
+                pending.reset();
                 chart.notes[h].value.ln_pair = info.idx;
                 chart.notes[info.idx].value.ln_pair = h;
-            }
-            if (info.head) {
-                head_stacks[info.lane].push_back(info.idx);
+            } else {
+                pending = info.idx;
             }
         }
-        for (const auto& [lane, stack] : head_stacks) {
+        // 未闭合 LN 头（LNTYPE 1 残留 / LNTYPE 2 无关；仅 LNTYPE 1 路径有 pending）
+        for (const auto& [lane, pending] : pending_head) {
             (void)lane;
-            for (const auto idx : stack) {
-                result.diagnostics.push_back(
-                    {Severity::Warning,
-                     "未闭合 LN 头（缺少尾）: 行 " +
-                         std::to_string(note_infos[idx].number),
-                     0});
-            }
+            if (!pending) continue;
+            result.diagnostics.push_back(
+                {Severity::Warning,
+                 "未闭合 LN 头（缺少尾）: 行 " +
+                     std::to_string(note_infos[*pending].number),
+                 0});
         }
     }
 

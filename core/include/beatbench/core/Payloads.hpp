@@ -35,7 +35,9 @@ struct Bpm {
     friend bool operator<(const Bpm& a, const Bpm& b) { return a.value < b.value; }
 };
 
-/// STOP 事件。模型存微秒；BMS 的 #STOPxx n → n/192 秒由 codec 换算。
+/// STOP 事件。模型存微秒；BMS 的 #STOPxx n → n/192 秒由 codec 换算（固定秒，不随 BPM 变化）。
+/// 注：hitkey 通道表把 STOP 记为「音符单位、随当下 BPM 变化」（1/192 拍）；本实现按
+/// LR2/常见固定秒口径。两者在时间轴 STOP 栏的视觉长度可能不同，如后续谱面不符再校准。
 struct Stop {
     std::int64_t duration_us = 0;
 
