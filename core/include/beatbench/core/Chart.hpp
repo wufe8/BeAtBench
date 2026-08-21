@@ -4,6 +4,7 @@
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "beatbench/core/Event.hpp"
@@ -12,17 +13,36 @@
 
 namespace beatbench {
 
-/// 采样/图片/值定义（#WAVxx/#BMPxx/#BPMxx/#STOPxx 的模型形态）。
-/// 键 = SampleRef.id；BMS 的 36 进制编号由 bms codec 映射。
+/// 定义表条目类型（BMS #WAVxx/#BMPxx/#BPMxx/#STOPxx 的模型形态，格式无关）。
+/// 键 = (kind, id)：**BMS 中四类定义表是独立命名空间**（#BPM01 与 #BMP01 可共存），
+/// 其他格式（bmson sound_channels 等）映射到同构概念。
+/// SampleRef.id 单独出现时由使用方语境决定 kind（note 引用 WAV、BGA 引用 BMP）。
+enum class SampleKind : std::uint8_t {
+    Wav,  ///< 音频采样（#WAVxx → file）
+    Bmp,  ///< 图像/BGA（#BMPxx → file）
+    Bpm,  ///< BPM 定义（#BPMxx → value 原文本，保留精度）
+    Stop, ///< STOP 定义（#STOPxx → value 原文本）
+};
+
 struct SampleDef {
-    std::string file;  ///< 相对谱面目录的路径
+    std::string file;   ///< Wav/Bmp：相对谱面目录的路径
+    std::string value;  ///< Bpm/Stop：数值原文本（往返保留精度，codec 展开事件时再解析）
+
+    friend bool operator==(const SampleDef&, const SampleDef&) = default;
 };
 
 /// 权威谱面模型（格式无关）。任何 codec 都能填充；
 /// 未知头部字段与格式扩展 → extensions 透传，保证往返保真（对齐稿 02 §4）。
 struct Chart {
     std::unordered_map<std::string, std::string> meta;  ///< 头部字段，键名大写、值原样
-    std::unordered_map<std::uint32_t, SampleDef> samples;
+    /// 定义表：键 = (kind, id)。BMS 的 36 进制编号由 bms codec 映射；
+    /// id 上限（1296）是 bms codec 层的约束与校验，模型不设限。
+    std::map<std::pair<SampleKind, std::uint32_t>, SampleDef> samples;
+
+    /// 未结构化消费的原始行（保序）：注释块、控制指令（#RANDOM/#IF…）、
+    /// 数据行（#mmmcc:…，note 解析前的承载）、未知行。写回时原样输出。
+    /// 这是格式无关的通用保留机制：任何 codec 都能把暂不理解的文本行存到这里。
+    std::vector<std::string> raw_lines;
 
     std::vector<Event<Note>> notes;
     std::vector<Event<Bpm>> bpm_events;

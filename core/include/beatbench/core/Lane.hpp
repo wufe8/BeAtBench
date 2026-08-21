@@ -19,6 +19,12 @@ struct Lane {
     std::uint8_t index = 1;   // kind==Key 时有效（1..9），其余为 0
 
     friend bool operator==(const Lane&, const Lane&) = default;
+    // 排序（map 键 / 分组用）：player → kind → index
+    friend bool operator<(const Lane& a, const Lane& b) {
+        if (a.player != b.player) return a.player < b.player;
+        if (a.kind != b.kind) return a.kind < b.kind;
+        return a.index < b.index;
+    }
 };
 
 }  // namespace beatbench

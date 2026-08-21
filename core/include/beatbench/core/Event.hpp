@@ -19,6 +19,9 @@ struct Event {
         if (a.measure != b.measure) return a.measure < b.measure;
         return a.pos < b.pos;
     }
+    friend bool operator==(const Event& a, const Event& b) {
+        return a.measure == b.measure && a.pos == b.pos && a.value == b.value;
+    }
 };
 
 }  // namespace beatbench
