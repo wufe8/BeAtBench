@@ -23,5 +23,8 @@ compile_commands.json
 # 编辑器运行时缓存（波形金字塔等，见 doc/02 §8）
 **/.beatbench-cache/
 
+# QML 运行期错误日志（调试钩子，main.cpp 写）
+beatbench-qml-errors.log
+
 # 视觉工具运行时缓存
 .dsh-vision-toolkit/

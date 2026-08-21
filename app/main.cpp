@@ -1,22 +1,39 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// beatbench：Qt Widgets 图形界面（需要 Qt 6.8 LTS；找不到 Qt 时 CMake 自动跳过本目标）。
-// 阶段说明：M0 空壳；M2 起填充工作区外壳（编辑/切音）与时间轴视口。
-#include <QApplication>
-#include <QLabel>
-#include <QMainWindow>
-#include <Qt>
+// beatbench：Qt Quick/QML GUI 入口（M2，页面式工作区，doc/05 v0.2）。
+// 桥接对象 CommandDispatcher 以 context property `beatbench` 暴露给 QML；
+// QML 只与 JSON 信封字符串交换（doc/06 §3 协议不变）。
+#include <QFile>
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QTextStream>
+
+#include "bridge/CommandDispatcher.hpp"
+
+// QML 加载/运行期错误落盘（GUI 应用无控制台；调试期保留，发布前可去）
+static void dumpQmlWarnings(const QList<QQmlError>& warnings) {
+    QFile out(QStringLiteral("beatbench-qml-errors.log"));
+    if (out.open(QIODevice::Append | QIODevice::Text)) {
+        QTextStream ts(&out);
+        for (const auto& e : warnings)
+            ts << e.toString() << Qt::endl;
+    }
+}
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
-    QMainWindow window;
-    window.setWindowTitle(QStringLiteral("BeAtBench"));
-    auto* label = new QLabel(QStringLiteral(
-        "M0 骨架已就绪。\n"
-        "下一步：M1 格式层（core/bms codec + timing）\n"
-        "        M2 面板（元信息/文件绑定/时间轴 + 工作区外壳）"));
-    label->setAlignment(Qt::AlignCenter);
-    window.setCentralWidget(label);
-    window.resize(960, 540);
-    window.show();
+    QGuiApplication app(argc, argv);
+    app.setOrganizationName(QStringLiteral("BeAtBench"));
+    app.setApplicationName(QStringLiteral("BeAtBench"));
+    app.setApplicationVersion(QStringLiteral("0.1.0"));
+
+    beatbench::app::CommandDispatcher dispatcher;
+
+    QQmlApplicationEngine engine;
+    QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
+    engine.rootContext()->setContextProperty(QStringLiteral("beatbench"), &dispatcher);
+    engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
+
+    if (engine.rootObjects().isEmpty())
+        return -1;
     return app.exec();
 }
