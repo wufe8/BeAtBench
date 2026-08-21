@@ -31,13 +31,23 @@ struct SampleDef {
     friend bool operator==(const SampleDef&, const SampleDef&) = default;
 };
 
+/// 定义表 id 进制（BMS 文本层特性，模型层记录以便 codec 解释/输出 id 文本）。
+/// 默认 36（0-9A-Z，大小写折叠）；`#BASE 62` 扩展 → 大小写敏感 base62（62×62=3844，
+/// LR2 扩展 DLL / beatoraja 支持，见 BMS文件分析笔记）。其他格式可用自己的约定。
+enum class IdBase : std::uint8_t {
+    Base36 = 36,
+    Base62 = 62,
+};
+
 /// 权威谱面模型（格式无关）。任何 codec 都能填充；
 /// 未知头部字段与格式扩展 → extensions 透传，保证往返保真（对齐稿 02 §4）。
 struct Chart {
     std::unordered_map<std::string, std::string> meta;  ///< 头部字段，键名大写、值原样
     /// 定义表：键 = (kind, id)。BMS 的 36 进制编号由 bms codec 映射；
-    /// id 上限（1296）是 bms codec 层的约束与校验，模型不设限。
+    /// id 上限（1296 / base62 3844）是 bms codec 层的约束与校验，模型不设限。
     std::map<std::pair<SampleKind, std::uint32_t>, SampleDef> samples;
+
+    IdBase id_base = IdBase::Base36;  ///< 定义表 id 进制（见上）；#BASE 指令由 parser 设置
 
     /// 未结构化消费的原始行（保序）：注释块、控制指令（#RANDOM/#IF…）、
     /// 数据行（#mmmcc:…，note 解析前的承载）、未知行。写回时原样输出。

@@ -73,6 +73,20 @@ inline std::string upper_ascii(std::string_view s) {
 
 inline bool is_ascii_digit(char c) { return c >= '0' && c <= '9'; }
 
+// id 解码：按 chart.id_base 分派（36 = 大小写折叠；62 = 大小写敏感 base62）
+inline std::uint32_t decode_id(const Chart& chart, std::string_view id_part) {
+    return chart.id_base == IdBase::Base62 ? c62_to_u32(id_part, 2) : c36_to_u32(id_part, 2);
+}
+
+inline bool is_id_digit(const Chart& chart, char c) {
+    return chart.id_base == IdBase::Base62 ? is_base62_digit(c) : is_c36_digit(c);
+}
+
+// id 文本规范化：36 模式折叠为大写（#wav1a ≡ #WAV1A）；62 模式保留原始大小写
+inline std::string norm_id_text(const Chart& chart, std::string_view id_part) {
+    return chart.id_base == IdBase::Base62 ? std::string(id_part) : upper_ascii(id_part);
+}
+
 // 严格数值解析：全串可解析返回 true
 inline bool parse_double(std::string_view s, double& out) {
     if (s.empty()) return false;
@@ -92,7 +106,7 @@ inline bool parse_double(std::string_view s, double& out) {
 double resolve_bpm(const Chart& chart, std::string_view slot, int number,
                    std::vector<Diagnostic>& diags) {
     if (slot.size() == 2) {
-        const auto id = c36_to_u32(slot, 2);
+        const auto id = decode_id(chart, slot);
         if (const auto it = chart.samples.find({SampleKind::Bpm, id});
             it != chart.samples.end()) {
             double d = 0;
@@ -126,7 +140,7 @@ inline std::string_view trim_view(std::string_view s) {
 std::int64_t resolve_stop_us(const Chart& chart, std::string_view slot, int number,
                              std::vector<Diagnostic>& diags) {
     if (slot.size() == 2) {
-        const auto id = c36_to_u32(slot, 2);
+        const auto id = decode_id(chart, slot);
         if (const auto it = chart.samples.find({SampleKind::Stop, id});
             it != chart.samples.end()) {
             double d = 0;
@@ -183,6 +197,24 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         }
     }
 
+    // ---- 预扫描 0：#BASE（id 进制扩展）。#BASE 62 → 大小写敏感 base62（62×62=3844，
+    // LR2 扩展 DLL / beatoraja 支持）；其余值按 36 处理并告警。须先于一切 id 解析。 ----
+    for (const auto& [line, number] : lines) {
+        if (line.empty() || line[0] != '#') continue;
+        const auto token = field_token(line);
+        const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
+                                      token.size();
+        if (upper_ascii(token) != "BASE") continue;
+        const auto v = trim_view(field_value(line, token_end));
+        if (v == "62") {
+            chart.id_base = IdBase::Base62;
+        } else if (!v.empty()) {
+            result.diagnostics.push_back({Severity::Warning,
+                                          "不支持的 #BASE 值（按 36 进制处理）: " + std::string(v),
+                                          number});
+        }
+    }
+
     // ---- 预扫描 #LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
     bool lntype2 = false;
     std::uint32_t lnobj_id = 1295;  // 默认 ZZ
@@ -198,7 +230,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             lntype2 = v == "2";
         } else if (up == "LNOBJ") {
             const auto v = field_value(line, token_end);
-            if (!v.empty()) lnobj_id = c36_to_u32(v, 2);
+            if (!v.empty()) lnobj_id = decode_id(chart, v);
         }
     }
 
@@ -230,8 +262,9 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         else if (up.size() >= 5 && up.starts_with("BPM")) { kind = SampleKind::Bpm; prefix_len = 3; is_def = true; }
         else if (up.size() >= 6 && up.starts_with("STOP")) { kind = SampleKind::Stop; prefix_len = 4; is_def = true; }
         if (!is_def) continue;
-        const auto id_part = std::string_view(up).substr(prefix_len);
-        if (id_part.size() != 2 || !is_c36_digit(id_part[0]) || !is_c36_digit(id_part[1])) {
+        // id 取原始大小写；36 模式折叠为大写、62 模式原样（见 norm_id_text）
+        const auto id_part = norm_id_text(chart, token.substr(prefix_len));
+        if (id_part.size() != 2 || !is_id_digit(chart, id_part[0]) || !is_id_digit(chart, id_part[1])) {
             continue;  // 3 位 id 变体等：留待主循环（raw 保留）
         }
         const auto value = field_value(line, token_end);
@@ -241,7 +274,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         } else {
             def.value = std::string(value);
         }
-        chart.samples[{kind, c36_to_u32(id_part, 2)}] = def;
+        chart.samples[{kind, decode_id(chart, id_part)}] = def;
         consumed[li] = 1;
     }
 
@@ -291,9 +324,10 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         else if (up.size() >= 5 && up.starts_with("BPM")) { kind = SampleKind::Bpm; prefix_len = 3; is_def = true; }
         else if (up.size() >= 6 && up.starts_with("STOP")) { kind = SampleKind::Stop; prefix_len = 4; is_def = true; }
         if (is_def) {
-            const auto id_part = std::string_view(up).substr(prefix_len);
-            if (id_part.size() == 2 && is_c36_digit(id_part[0]) && is_c36_digit(id_part[1])) {
-                const auto id = c36_to_u32(id_part, 2);
+            // id 取原始大小写；36 模式折叠为大写、62 模式原样（见 norm_id_text）
+            const auto id_part = norm_id_text(chart, token.substr(prefix_len));
+            if (id_part.size() == 2 && is_id_digit(chart, id_part[0]) && is_id_digit(chart, id_part[1])) {
+                const auto id = decode_id(chart, id_part);
                 const auto value = field_value(line, token_end);
                 SampleDef def;
                 if (kind == SampleKind::Wav || kind == SampleKind::Bmp) {
@@ -307,7 +341,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             // 3 位及以上 id 的变体定义（生态存在，暂不结构化）：原样保留，不污染头部
             bool all_c36 = !id_part.empty();
             for (const char c : id_part) {
-                if (!is_c36_digit(c)) {
+                if (!is_id_digit(chart, c)) {
                     all_c36 = false;
                     break;
                 }
@@ -380,7 +414,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                            static_cast<std::int64_t>(n_slots));
                         switch (rule->semantics) {
                             case ChannelSemantics::Note: {
-                                const auto id = c36_to_u32(slot, 2);
+                                const auto id = decode_id(chart, slot);
                                 Note note;
                                 note.lane = rule->lane;
                                 note.sample.id = id;
@@ -411,7 +445,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                             case ChannelSemantics::Bga:
                             case ChannelSemantics::BgaPoor: {
                                 Bga bga;
-                                bga.image.id = c36_to_u32(slot, 2);
+                                bga.image.id = decode_id(chart, slot);
                                 bga.layer = rule->semantics == ChannelSemantics::BgaPoor ? 1 : 0;
                                 chart.bga_events.push_back({measure, pos, bga});
                                 break;
@@ -455,6 +489,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 }
             }
             if (alpha_num) {
+                if (up == "BASE") continue;  // id 进制指令：预扫描已结构化（chart.id_base），不入 meta
                 chart.meta[up] = std::string(field_value(line, token_end));
                 continue;
             }

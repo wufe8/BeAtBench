@@ -14,6 +14,9 @@ Item {
     property var chartMeta: null
     property string chartPath: ""
 
+    /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
+    signal samplePicked(string id, string file)
+
     SplitView {
         anchors.fill: parent
         orientation: Qt.Horizontal
@@ -40,24 +43,28 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 8
-                TabBar {
+                // 栏目条（可横向滚动；BGA 等更多栏目加入时不截断）
+                BbTabStrip {
                     id: leftTabs
+                    objectName: "leftTabs"  // 调试 --tab N 用（main.cpp findChild）
                     Layout.fillWidth: true
-                    // 标签样式 = 默认皮肤组件库 BbTabButton（.dock-tab 样式）
-                    BbTabButton { text: qsTr("元信息") }
-                    BbTabButton { text: qsTr("采样") }
-                    BbTabButton { text: qsTr("lint") }
-                    BbTabButton { text: qsTr("BGA") }
+                    Layout.preferredHeight: 30
+                    model: [qsTr("元信息"), qsTr("采样"), qsTr("lint"), qsTr("BGA")]
+                    onIndexRequested: (index) => leftTabs.currentIndex = index
                 }
                 StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     currentIndex: leftTabs.currentIndex
                     MetaPanel { meta: root.chartMeta; chartPath: root.chartPath }
-                    Label { text: qsTr("采样管理（M2 第 4 步）"); color: Theme.textFaint;
-                            font.pixelSize: Theme.fsSmall }
-                    Label { text: qsTr("lint 报告（M2 第 4 步）"); color: Theme.textFaint;
-                            font.pixelSize: Theme.fsSmall }
+                    SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file) }
+                    LintPanel {
+                        onIssuePicked: (id) => {
+                            // lint → 采样 双向往返：切到采样标签并定位该行
+                            leftTabs.currentIndex = 1
+                            samplePanel.requireId(id)
+                        }
+                    }
                     Label { text: qsTr("BGA 预览（后置）"); color: Theme.textFaint;
                             font.pixelSize: Theme.fsSmall }
                 }

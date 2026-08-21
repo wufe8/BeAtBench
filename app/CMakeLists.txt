@@ -6,7 +6,11 @@ qt_standard_project_setup()   # AUTOMOC/AUTORCC/AUTOUIC 统一策略（Qt 6.3+�
 add_executable(beatbench
     main.cpp
     bridge/CommandDispatcher.cpp
+    bridge/SampleListModel.cpp
+    bridge/LintListModel.cpp
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
+    bridge/SampleListModel.hpp
+    bridge/LintListModel.hpp
 )
 target_link_libraries(beatbench PRIVATE beatbench_core Qt6::Quick Qt6::QuickControls2)
 beatbench_set_warnings(beatbench)
@@ -23,6 +27,9 @@ qt_add_qml_module(beatbench
         qml/components/MetaPanel.qml
         qml/components/BbToolButton.qml
         qml/components/BbTabButton.qml
+        qml/components/BbTabStrip.qml
+        qml/components/SamplePanel.qml
+        qml/components/LintPanel.qml
 )
 
 set_target_properties(beatbench PROPERTIES

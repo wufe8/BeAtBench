@@ -42,20 +42,81 @@ EventStats collect_event_stats(const Chart& chart) {
     return stats;
 }
 
+std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> collect_sample_usage(
+    const Chart& chart) {
+    std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> out;
+    auto touch = [&](SampleKind kind, std::uint32_t id, std::uint32_t measure,
+                     Lane lane_kind) -> SampleUsage& {
+        auto& u = out[{kind, id}];
+        ++u.refs;
+        if (u.first_measure == 0 || measure < u.first_measure) u.first_measure = measure;
+        const bool p2 = lane_kind.player == 1;
+        switch (lane_kind.kind) {
+            case LaneKind::Key: (p2 ? ++u.key2 : ++u.key1); break;
+            case LaneKind::Scratch: (p2 ? ++u.scratch2 : ++u.scratch1); break;
+            case LaneKind::Pedal: (p2 ? ++u.pedal2 : ++u.pedal1); break;
+            case LaneKind::Bgm: ++u.bgm; break;
+        }
+        return u;
+    };
+    for (const auto& ev : chart.notes) {
+        touch(SampleKind::Wav, ev.value.sample.id, ev.measure, ev.value.lane);
+    }
+    for (const auto& ev : chart.bga_events) {
+        touch(SampleKind::Bmp, ev.value.image.id, ev.measure, Lane{});  // BGA 无轨道语义
+    }
+    return out;
+}
+
+// 采样文件扩展名回退枚举（beatoraja/LR2 的 wav→ogg 探索惯例）：
+// 精确不存在时按本表替换扩展名查找（大小写不敏感目录由 filesystem 保证）。
+inline std::string_view audio_ext_fallback(std::string_view ext) {
+    if (ext == "wav" || ext == "wave") return "ogg";
+    if (ext == "ogg") return "mp3";
+    if (ext == "mp3") return "flac";
+    if (ext == "flac") return "wma";
+    return {};
+}
+
 std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::path& base_dir) {
     std::vector<LintIssue> issues;
-    // 1) 缺失 WAV 引用文件（相对谱面目录）
+    // 1) WAV 引用文件检查（相对谱面目录；扩展名回退见 audio_ext_fallback）
     for (const auto& [key, def] : chart.samples) {
         if (key.first != SampleKind::Wav || def.file.empty()) continue;
         const auto full = base_dir / def.file;
-        if (!std::filesystem::exists(full)) {
-            LintIssue issue;
-            issue.code = "missing_wav";
-            issue.message = "缺失采样文件 #WAV" + u32_to_c36(key.second, 2) + " " + def.file;
-            issue.id = u32_to_c36(key.second, 2);
-            issue.file = def.file;
-            issues.push_back(std::move(issue));
+        if (std::filesystem::exists(full)) continue;
+        // 精确不存在 → 试探同名异扩展（wav→ogg→mp3→flac→wma）
+        const auto path = std::filesystem::path(def.file);
+        const std::string ext = path.extension().string();
+        std::string resolved_noext = path.string();
+        resolved_noext.erase(resolved_noext.size() - ext.size());
+        LintIssue mismatch;
+        mismatch.code = "wav_ext_mismatch";
+        mismatch.id = id_text(chart, key.second);
+        mismatch.file = def.file;
+        bool found_fallback = false;
+        std::string_view next = audio_ext_fallback(
+            ext.size() > 1 && ext.front() == '.' ? std::string_view(ext).substr(1) : std::string_view());
+        while (!next.empty()) {
+            if (std::filesystem::exists(base_dir / (resolved_noext + "." + std::string(next)))) {
+                mismatch.resolved = resolved_noext + "." + std::string(next);
+                found_fallback = true;
+                break;
+            }
+            next = audio_ext_fallback(next);
         }
+        if (found_fallback) {
+            mismatch.message = "采样文件扩展名与引用不符（引用 " + def.file + "，存在 " +
+                               mismatch.resolved + "）";
+            issues.push_back(std::move(mismatch));
+            continue;
+        }
+        LintIssue issue;
+        issue.code = "missing_wav";
+        issue.message = "缺失采样文件 #WAV" + id_text(chart, key.second) + " " + def.file;
+        issue.id = id_text(chart, key.second);
+        issue.file = def.file;
+        issues.push_back(std::move(issue));
     }
     // 2) 缺失 #RANK / #TOTAL（播放器判定/回血依赖）
     if (!chart.meta.count("RANK")) {

@@ -89,10 +89,31 @@ Json diags_json(const std::vector<Diagnostic>& diags) {
 
 Json samples_json(const Chart& chart) {
     Json wav = Json::array(), bmp = Json::array(), bpm = Json::array(), stop = Json::array();
+    const auto usage = collect_sample_usage(chart);
     // samples 按键 (kind, id) 有序：kind 序 + id 升序
     for (const auto& [key, def] : chart.samples) {
         Json e = Json::object();
-        e.set("id", u32_to_c36(key.second, 2));
+        e.set("id", id_text(chart, key.second));
+        // 使用统计（采样面板检索/排序；bpm/stop 无统计，默认 0）
+        {
+            const auto it = usage.find(key);
+            e.set("refs", static_cast<std::int64_t>(it != usage.end() ? it->second.refs : 0));
+            e.set("first_measure",
+                  static_cast<std::int64_t>(it != usage.end() ? it->second.first_measure : 0));
+            Json u = Json::array();
+            if (it != usage.end()) {
+                // token：keys/scratch/pedal = 1P，*2 = 2P，bgm = 背景音轨
+                // （面板按 player 动态分组，未用组不出现）
+                if (it->second.key1) u.push_back("keys");
+                if (it->second.scratch1) u.push_back("scratch");
+                if (it->second.pedal1) u.push_back("pedal");
+                if (it->second.key2) u.push_back("keys2");
+                if (it->second.scratch2) u.push_back("scratch2");
+                if (it->second.pedal2) u.push_back("pedal2");
+                if (it->second.bgm) u.push_back("bgm");
+            }
+            e.set("usage", std::move(u));
+        }
         switch (key.first) {
             case SampleKind::Wav:
                 e.set("file", def.file);
@@ -212,6 +233,7 @@ public:
 
         Json l = Json::object();
         Json missing_wav = Json::array();
+        Json ext_mismatch = Json::array();
         for (const auto& issue : lint) {
             if (issue.code == "missing_wav") {
                 Json e = Json::object();
@@ -219,9 +241,18 @@ public:
                 e.set("file", issue.file);
                 e.set("message", issue.message);
                 missing_wav.push_back(std::move(e));
+            } else if (issue.code == "wav_ext_mismatch") {
+                // 扩展名不符（引用 .wav 存在 .ogg 等）：警告级，文件实际可用（播放器按扩展名回退）
+                Json e = Json::object();
+                e.set("id", issue.id);
+                e.set("file", issue.file);
+                e.set("resolved", issue.resolved);
+                e.set("message", issue.message);
+                ext_mismatch.push_back(std::move(e));
             }
         }
         l.set("missing_wav", std::move(missing_wav));
+        l.set("wav_ext_mismatch", std::move(ext_mismatch));
         for (const auto& issue : lint) {
             if (issue.code == "missing_rank") l.set("missing_rank", true);
             if (issue.code == "missing_total") l.set("missing_total", true);

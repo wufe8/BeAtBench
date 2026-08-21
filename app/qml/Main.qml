@@ -25,6 +25,10 @@ ApplicationWindow {
     property var chartMeta: null         // dispatch(info) 的 result.meta
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     property string statusText: qsTr("就绪")
+    property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
+    // 当前编辑工具（互斥单选，会话状态；M3 接输入/放置，note 类型（普通/LN/地雷）届时
+    // 作为正交维度另设「放置类型」组，不并入本组——doc/05 §5 交互）
+    property string editorTool: "select"
 
     // ---------- 全局快捷键（QML MenuItem 无 shortcut 属性，用 Shortcut 类型） ----------
     Shortcut { sequence: "Ctrl+O"; onActivated: fileDialog.open() }
@@ -115,12 +119,30 @@ ApplicationWindow {
                 anchors.leftMargin: 8
                 anchors.rightMargin: 8
                 spacing: 6
-                BbToolButton { text: "V 选择"; checkable: true; checked: true; flatStyle: true }
-                BbToolButton { text: "N 放置"; checkable: true; flatStyle: true }
-                BbToolButton { text: "L LN"; checkable: true; flatStyle: true }
-                BbToolButton { text: "M 地雷"; checkable: true; flatStyle: true }
-                BbToolButton { text: "H 平移"; checkable: true; flatStyle: true }
+                Label { text: qsTr("工具"); color: Theme.textFaint
+                        font.pixelSize: Theme.fsTiny; padding: 4 }
+                // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题
+                BbToolButton { text: "V 选择"; active: window.editorTool === "select"; flatStyle: true
+                               onClicked: window.editorTool = "select" }
+                BbToolButton { text: "N 放置"; active: window.editorTool === "note"; flatStyle: true
+                               onClicked: window.editorTool = "note" }
+                BbToolButton { text: "L LN"; active: window.editorTool === "ln"; flatStyle: true
+                               onClicked: window.editorTool = "ln" }
+                BbToolButton { text: "M 地雷"; active: window.editorTool === "mine"; flatStyle: true
+                               onClicked: window.editorTool = "mine" }
+                BbToolButton { text: "H 平移"; active: window.editorTool === "pan"; flatStyle: true
+                               onClicked: window.editorTool = "pan" }
                 Item { Layout.fillWidth: true }
+                // 当前采样（M3 放置落点；检索/选择在左 Dock 采样面板）
+                Label {
+                    text: sampleModel.currentSampleText
+                    color: Theme.accent
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    elide: Text.ElideMiddle
+                    visible: sampleModel.currentSampleText !== ""
+                    Layout.maximumWidth: 220
+                }
                 Label { text: chartPath ? chartPath : qsTr("未打开谱面"); color: Theme.textFaint
                         elide: Text.ElideMiddle; font.pixelSize: Theme.fsSmall }
             }
@@ -131,7 +153,15 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: window.currentPage
-            EditPage { chartMeta: window.chartMeta; chartPath: window.chartPath }
+            EditPage {
+                chartMeta: window.chartMeta
+                chartPath: window.chartPath
+                onSamplePicked: (id, file) => {
+                    // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
+                    window.currentSampleId = id
+                    window.statusText = qsTr("当前采样：#WAV%1 %2").arg(id, file)
+                }
+            }
             SlicePage {}
             TestPage {}
         }
@@ -169,21 +199,35 @@ ApplicationWindow {
         id: fileDialog
         title: qsTr("打开 BMS 谱面")
         nameFilters: [qsTr("BMS 谱面 (*.bms)"), qsTr("所有文件 (*)")]
-        onAccepted: {
-            var path = urlToPath(selectedFile)
-            var req = JSON.stringify({ command: "info", args: { path: path } })
-            var resp = beatbench.dispatch(req)
-            var r = JSON.parse(resp)
-            if (r.ok) {
-                window.chartMeta = r.result.meta
-                window.chartPath = r.result.path
-                window.statusText = qsTr("已打开：%1（%2 个采样）").arg(r.result.path, String(Object.keys(r.result.samples ?? {}).length))
-            } else {
-                window.chartMeta = null
-                window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code, r.error.message)
-            }
-        }
+        onAccepted: openChart(urlToPath(selectedFile))
         onRejected: { /* 用户取消 */ }
+    }
+
+    // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
+    property string debugOpenPath: ""
+    onDebugOpenPathChanged: if (debugOpenPath !== "") openChart(debugOpenPath)
+
+    function openChart(path) {
+        var req = JSON.stringify({ command: "info", args: { path: path } })
+        var resp = beatbench.dispatch(req)
+        var r = JSON.parse(resp)
+        if (r.ok) {
+            window.chartMeta = r.result.meta
+            window.chartPath = r.result.path
+            // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
+            // 预计算 + 链式单参 .arg（经典稳妥形式）
+            var wavCount = r.result.samples && r.result.samples.wav
+                           ? r.result.samples.wav.length : 0
+            window.statusText = qsTr("已打开：%1（%2 个采样）").arg(r.result.path).arg(wavCount)
+            // 采样面板 + lint 面板：info 的 wav 定义表 + check 的缺失/诊断（M2 第 4 步）
+            sampleModel.loadFromInfo(resp)
+            var checkResp = beatbench.dispatch(JSON.stringify({ command: "check", args: { path: path } }))
+            sampleModel.loadFromCheck(checkResp)
+            lintModel.loadFromCheck(checkResp)
+        } else {
+            window.chartMeta = null
+            window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code, r.error.message)
+        }
     }
 
     // file:///C:/x → C:/x（Windows 本地路径）

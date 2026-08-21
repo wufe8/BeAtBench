@@ -232,6 +232,11 @@ TEST(Timing, RandomBranchTiming) {
 
 TEST(TimingRealCharts, SelfConsistentRoundTrip) {
     namespace fs = std::filesystem;
+    // 快速回归：BB_SKIP_REAL=1 跳过（本测试对 358 谱面逐事件时序正逆算，约 1 分钟；
+    // 提交前完整回归跑，见 doc/04 §6）
+    if (std::getenv("BB_SKIP_REAL")) {
+        GTEST_SKIP() << "BB_SKIP_REAL 已设置：跳过真实谱面时序自洽（快速回归）";
+    }
     const fs::path root = BEATBENCH_SOURCE_DIR "/local/chart";
     if (!fs::exists(root)) {
         GTEST_SKIP() << "local/chart 不存在（样本未提交，属正常）";

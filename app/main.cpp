@@ -22,7 +22,10 @@
 #include <QVariant>
 
 #include "bridge/CommandDispatcher.hpp"
+#include "bridge/LintListModel.hpp"
+#include "bridge/SampleListModel.hpp"
 #include "bridge/ThemeManager.hpp"
+#include "beatbench/core/json/Json.hpp"
 
 // QML 加载/运行期错误落盘（GUI 应用无控制台；调试期保留，发布前可去）
 static void dumpQmlWarnings(const QList<QQmlError>& warnings) {
@@ -32,6 +35,16 @@ static void dumpQmlWarnings(const QList<QQmlError>& warnings) {
         for (const auto& e : warnings)
             ts << e.toString() << Qt::endl;
     }
+}
+
+// 全部 Qt 消息 → 落盘（调试期；GUI 应用 stderr 不可见）
+static void messageToLog(QtMsgType type, const QMessageLogContext&, const QString& msg) {
+    QFile out(QStringLiteral("beatbench-qml-errors.log"));
+    if (out.open(QIODevice::Append | QIODevice::Text)) {
+        QTextStream ts(&out);
+        ts << msg << Qt::endl;
+    }
+    Q_UNUSED(type);
 }
 
 // 系统控件本地化（FileDialog 等 Qt 内置文本 → 中文）：加载 Qt 自带 qtbase_zh_CN.qm。
@@ -68,11 +81,15 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
     });
 }
 
+// 调试/迭代用：--open <bms 路径>——启动即「打开谱面」，走 QML openChart()（与 Ctrl+O 同路径，
+// 见 Main.qml；由 debugOpenPath 属性触发）。配合 --screenshot/--tab 做真数据界面验收。
+
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("BeAtBench"));
     app.setApplicationName(QStringLiteral("BeAtBench"));
     app.setApplicationVersion(QStringLiteral("0.1.0"));
+    qInstallMessageHandler(messageToLog);  // 调试期：Qt 消息落盘（GUI 无控制台）
 
     // 全局深色基线（doc/08 §2）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；
     // 值全部来自 ThemeManager token（单一数据源）。
@@ -100,15 +117,27 @@ int main(int argc, char** argv) {
     loadNativeTranslations(app);
 
     beatbench::app::CommandDispatcher dispatcher;
+    beatbench::app::SampleListModel sampleModel;
+    beatbench::app::LintListModel lintModel;
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
     engine.rootContext()->setContextProperty(QStringLiteral("beatbench"), &dispatcher);
     engine.rootContext()->setContextProperty(QStringLiteral("Theme"), &theme);
+    engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
 
-    // --screenshot <png>：截图后退出（见 scheduleScreenshot）
     const QStringList args = app.arguments();
+
+    // --open <bms>：启动即打开谱面（QML openChart 同路径；配 --screenshot 做真数据验收）
+    const int openIdx = args.indexOf(QStringLiteral("--open"));
+    if (openIdx >= 0 && openIdx + 1 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugOpenPath", args.at(openIdx + 1));
+    }
+
+    // --screenshot <png>：截图后退出（见 scheduleScreenshot）
     const int shotIdx = args.indexOf(QStringLiteral("--screenshot"));
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
         scheduleScreenshot(engine, args.at(shotIdx + 1));
@@ -121,6 +150,19 @@ int main(int argc, char** argv) {
         if (ok) {
             if (QObject* root = engine.rootObjects().value(0))
                 root->setProperty("currentPage", p);
+        }
+    }
+
+    // --tab N：左 Dock 标签（0 元信息 1 采样 2 lint 3 BGA；配合 --screenshot 验收面板）
+    const int tabIdx = args.indexOf(QStringLiteral("--tab"));
+    if (tabIdx >= 0 && tabIdx + 1 < args.size()) {
+        bool ok = false;
+        const int t = args.at(tabIdx + 1).toInt(&ok);
+        if (ok) {
+            if (QObject* root = engine.rootObjects().value(0)) {
+                if (QObject* tabBar = root->findChild<QObject*>(QStringLiteral("leftTabs")))
+                    tabBar->setProperty("currentIndex", t);
+            }
         }
     }
 

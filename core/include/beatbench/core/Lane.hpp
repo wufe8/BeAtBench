@@ -9,6 +9,7 @@ enum class LaneKind : std::uint8_t {
     Key,      ///< 普通按键轨，index = 键号（1..9）
     Scratch,  ///< 转盘/皿轨（BMS 16/26）
     Pedal,    ///< 踏板/保留轨（BMS 17/27）
+    Bgm,      ///< 背景音轨（BMS ch01）：到达即自动播放，游戏界面不可见、不参与判定
 };
 
 /// 抽象轨道：{玩家侧, 类别, 键号}。

@@ -83,6 +83,11 @@ inline bool ln_paired(const Chart& chart, std::size_t i, std::size_t j) {
     return a.ln_pair && *a.ln_pair == j && b.ln_pair && *b.ln_pair == i;
 }
 
+// id 文本：按 chart.id_base 输出（36 = 大写；62 = 大小写敏感 base62）
+inline std::string fmt_id(const Chart& chart, std::uint32_t id) {
+    return chart.id_base == IdBase::Base62 ? u32_to_c62(id, 2) : u32_to_c36(id, 2);
+}
+
 }  // namespace
 
 std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
@@ -91,11 +96,16 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
 
     // ---- 1. 头部字段 ----
     {
+        // #BASE（id 进制扩展，如 #BASE 62）：须在头部最前（LR2/beatoraja 惯例）
+        if (chart.id_base == IdBase::Base62) {
+            out += "#BASE 62\n";
+        }
         std::vector<std::string> known;    // 按 kMetaOrder
         std::vector<std::string> unknown;  // 字母序
         for (const auto& [key, value] : chart.meta) {
             (void)value;
             const auto up = upper_ascii(key);
+            if (up == "BASE") continue;  // id 进制已由 id_base 结构化输出，meta 不重复
             const bool is_known = std::find(std::begin(kMetaOrder), std::end(kMetaOrder), up) !=
                                   std::end(kMetaOrder);
             (is_known ? known : unknown).push_back(up);
@@ -144,7 +154,10 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         for (const auto& ev : chart.stop_events) {
             const auto us = ev.value.duration_us;
             if (stop_id_by_us.count(us)) continue;
-            while (stop_defs.count(next_id)) ++next_id;
+            // id 空间上限（36 = 1295；62 = 3843）；全满时复用最后一个（退化，理论不可达）
+            const std::uint32_t max_id =
+                chart.id_base == IdBase::Base62 ? 3843 : 1295;
+            while (stop_defs.count(next_id) && next_id < max_id) ++next_id;
             const auto text = format_num(us / 1000000.0 * 192.0);
             stop_id_by_us[us] = next_id;
             stop_defs[next_id] = text;
@@ -170,7 +183,9 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         for (const auto& ev : chart.bpm_events) {
             const auto v = ev.value.value;
             if (bpm_id_by_value.count(v)) continue;
-            while (bpm_defs.count(next_id)) ++next_id;
+            const std::uint32_t max_id =
+                chart.id_base == IdBase::Base62 ? 3843 : 1295;
+            while (bpm_defs.count(next_id) && next_id < max_id) ++next_id;
             const auto text = format_num(v);
             bpm_id_by_value[v] = next_id;
             bpm_defs[next_id] = text;
@@ -210,7 +225,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             } else {
                 value = chart.samples.at({kind, id}).file;
             }
-            const auto id36 = u32_to_c36(id, 2);
+            const auto id36 = fmt_id(chart, id);
             append_line(out, std::string(tag) + id36, value);
         }
     };
@@ -265,7 +280,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         if (is_tail && lntype2) {
             slot_text = lnobj_text;
         } else {
-            slot_text = u32_to_c36(n.sample.id, 2);
+            slot_text = fmt_id(chart, n.sample.id);
         }
         add_cell(ev.measure, channel, ev.pos, std::move(slot_text));
     }
@@ -274,13 +289,13 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     for (const auto& ev : chart.bpm_events) {
         const auto it = bpm_id_by_value.find(ev.value.value);
         if (it == bpm_id_by_value.end()) continue;  // 理论上不会发生（上面已派生）
-        add_cell(ev.measure, "03", ev.pos, u32_to_c36(it->second, 2));
+        add_cell(ev.measure, "03", ev.pos, fmt_id(chart, it->second));
     }
     // 3d. STOP（ch09 引用恢复：us → id）
     for (const auto& ev : chart.stop_events) {
         const auto it = stop_id_by_us.find(ev.value.duration_us);
         if (it == stop_id_by_us.end()) continue;  // 理论上不会发生（上面已派生）
-        add_cell(ev.measure, "09", ev.pos, u32_to_c36(it->second, 2));
+        add_cell(ev.measure, "09", ev.pos, fmt_id(chart, it->second));
     }
     // 3e. 节拍（ch02，pos 0；同 measure 多事件取最后）
     {
@@ -295,7 +310,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     // 3f. BGA（ch04 base / ch06 poor）
     for (const auto& ev : chart.bga_events) {
         const auto channel = ev.value.layer == 1 ? "06" : "04";
-        add_cell(ev.measure, channel, ev.pos, u32_to_c36(ev.value.image.id, 2));
+        add_cell(ev.measure, channel, ev.pos, fmt_id(chart, ev.value.image.id));
     }
 
     // 3g. 逐行输出：槽位最小化（N = 各事件分母 LCM），空槽 "00"。

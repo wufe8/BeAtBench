@@ -40,7 +40,8 @@ struct Table {
 
     constexpr Table() {
         constexpr Rule specials[kSpecialCount] = {
-            {{'0', '1'}, ChannelSemantics::KeepRaw},
+            // ch01 = 背景音/BGM：到达即自动播放，游戏不可见（BMS 笔记「通道」节）
+            {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm},
             {{'0', '2'}, ChannelSemantics::MeasureLen},
             {{'0', '3'}, ChannelSemantics::BpmInline},
             {{'0', '4'}, ChannelSemantics::Bga},
@@ -117,6 +118,11 @@ std::optional<BmsChannelRule> bms_channel_rule(std::string_view channel) {
 }
 
 std::string bms_channel_for(const Lane& lane, bool ln_head, bool ln_tail, NoteKind kind) {
+    // 背景音轨（ch01）：不参与 LN/地雷位序，恒为 "01"
+    if (lane.kind == LaneKind::Bgm) {
+        if (ln_head || ln_tail) return {};
+        return "01";
+    }
     const int slot = lane_slot(lane.kind, lane.index);
     if (slot < 0) return {};
     if (kind == NoteKind::Landmine) {

@@ -17,6 +17,7 @@
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/bms/ChartCheck.hpp"
 
 using namespace beatbench;
 using namespace beatbench::bms;
@@ -195,6 +196,164 @@ TEST(BmsUtil, OverflowTruncatesToTail) {
     EXPECT_EQ(c36_to_u32("ZZZ", 2), 1295u);  // 超长取尾部两位
 }
 
+// ---------- base62（#BASE 62 扩展，大小写敏感 id） ----------
+
+TEST(BmsUtil, C62ToU32) {
+    EXPECT_EQ(c62_to_u32("00"), 0u);
+    EXPECT_EQ(c62_to_u32("0a"), 36u);   // 小写 a = 36
+    EXPECT_EQ(c62_to_u32("10"), 62u);   // 权重 62：10 进制值 62
+    EXPECT_EQ(c62_to_u32("zZ"), 61u * 62u + 35u);  // 61*62+35 = 3817
+    EXPECT_EQ(c62_to_u32("zz"), 3843u); // 61*62+61 = 3843（2 位最大）
+}
+
+TEST(BmsUtil, U32ToC62) {
+    EXPECT_EQ(u32_to_c62(0, 2), "00");
+    EXPECT_EQ(u32_to_c62(36, 2), "0a");
+    EXPECT_EQ(u32_to_c62(62, 2), "10");
+    EXPECT_EQ(u32_to_c62(3817, 2), "zZ");
+    EXPECT_EQ(u32_to_c62(3843, 2), "zz");
+}
+
+TEST(BmsUtil, C62RoundTrip) {
+    for (std::uint32_t v = 0; v <= 3843; ++v) {
+        EXPECT_EQ(c62_to_u32(u32_to_c62(v, 2), 2), v);
+    }
+}
+
+TEST(BmsUtil, C62CaseSensitive) {
+    // 大小写不同 → 数值不同（与 c36 折叠语义的本质区别）
+    EXPECT_NE(c62_to_u32("1a"), c62_to_u32("1A"));
+}
+
+TEST(BmsRead, Base62ParsesCaseSensitiveIds) {
+    const std::string text = "*----- HEADER\n"
+                             "#BASE 62\n"
+                             "#PLAYER 1\n"
+                             "#BPM 130\n"
+                             "#WAV1a kick_a.wav\n"   // 小写 id
+                             "#WAV1A kick_A.wav\n"   // 大写 id（与上不同）
+                             "#WAVzZ tail.wav\n"
+                             "#BPM0a 200\n"          // BPM 定义同样 base62
+                             "#00111:1a1A\n"         // 槽位引用大小写区分
+                             "#00111:zZ00\n"         // 同通道第二行（同 pos 冲突分裂）
+                             "#00308:0a\n";          // ch08 引用 #BPM0a
+    const auto res = read_bms(text);
+    ASSERT_FALSE(has_error(res)) << ascii_safe(res.diagnostics.front().message);
+    EXPECT_EQ(res.chart.id_base, IdBase::Base62);
+    // 四个 WAV 定义：1a / 1A / zZ 各自独立
+    EXPECT_EQ(res.chart.samples.size(), 4u);  // WAV×3 + BPM×1
+    EXPECT_EQ(res.chart.samples.at({SampleKind::Wav, c62_to_u32("1a")}).file, "kick_a.wav");
+    EXPECT_EQ(res.chart.samples.at({SampleKind::Wav, c62_to_u32("1A")}).file, "kick_A.wav");
+    EXPECT_EQ(res.chart.samples.at({SampleKind::Wav, c62_to_u32("zZ")}).file, "tail.wav");
+    // note 引用按大小写分派（00111 两行各 2+1 槽，00 空槽跳过）
+    ASSERT_EQ(res.chart.notes.size(), 3u);
+    EXPECT_EQ(res.chart.notes[0].value.sample.id, c62_to_u32("1a"));
+    EXPECT_EQ(res.chart.notes[1].value.sample.id, c62_to_u32("1A"));
+    EXPECT_EQ(res.chart.notes[2].value.sample.id, c62_to_u32("zZ"));
+    // 头部 #BPM 130 是元信息不产生事件；仅 ch08 引用 #BPM0a → 200 一个事件
+    ASSERT_EQ(res.chart.bpm_events.size(), 1u);
+    EXPECT_EQ(res.chart.bpm_events.front().value.value, 200.0);
+}
+
+TEST(BmsRoundTrip, Base62Stable) {
+    const std::string text = "*----- HEADER\n"
+                             "#BASE 62\n"
+                             "#PLAYER 1\n"
+                             "#TITLE T\n"
+                             "#BPM 130\n"
+                             "#WAV1a kick.wav\n"
+                             "#WAVzZ end.wav\n"
+                             "#BPM0a 200\n"
+                             "#00111:1a0a\n"
+                             "#00008:0a\n";
+    // 注意 #00111:1a0a 的第二个槽 0a 引用未定义 → 解析宽容（0），仅验证往返结构
+    const auto res = read_bms(text);
+    ASSERT_FALSE(has_error(res));
+    const auto out = write_bms(res.chart);
+    EXPECT_NE(out.find("#BASE 62"), std::string::npos);
+    const auto res2 = read_bms(out);
+    ASSERT_FALSE(has_error(res2));
+    EXPECT_EQ(res2.chart.id_base, IdBase::Base62);
+    EXPECT_EQ(res2.chart.samples.size(), res.chart.samples.size());
+    EXPECT_EQ(res2.chart.samples.at({SampleKind::Wav, c62_to_u32("1a")}).file, "kick.wav");
+    // 第二次往返稳定（幂等）
+    EXPECT_EQ(write_bms(res2.chart), out);
+}
+
+// ---------- 定义表使用统计（采样面板） ----------
+
+TEST(ChartCheck, SampleUsageCounts) {
+    const std::string text = "*----- HEADER\n"
+                             "#PLAYER 1\n"
+                             "#BPM 130\n"
+                             "#WAV01 kick.wav\n"
+                             "#WAV02 snare.wav\n"
+                             "#WAV03 bgm.wav\n"
+                             "#BMP01 bg.png\n"
+                             "#00211:0102\n"  // 小节 2：键1 kick、键2 snare
+                             "#00211:0100\n"  // 同通道第二行：键1 kick（同 pos 冲突分裂）
+                             "#00416:02\n"    // 小节 4：皿 snare
+                             "#00504:01\n"    // 小节 5：BGA bg
+                             "#00501:03\n";   // 小节 5：BGM 轨（ch01，游戏不可见自动播放）
+    const auto res = read_bms(text);
+    ASSERT_FALSE(has_error(res));
+    const auto usage = collect_sample_usage(res.chart);
+    {
+        const auto& u = usage.at({SampleKind::Wav, 2});
+        EXPECT_EQ(u.refs, 2u);          // snare 键 1 次 + 皿 1 次
+        EXPECT_EQ(u.first_measure, 2u);
+        EXPECT_EQ(u.key1, 1u);
+        EXPECT_EQ(u.scratch1, 1u);
+    }
+    {
+        const auto& u = usage.at({SampleKind::Wav, 3});
+        EXPECT_EQ(u.bgm, 1u);           // BGM 轨引用
+        EXPECT_EQ(u.refs, 1u);
+    }
+    {
+        const auto& u = usage.at({SampleKind::Bmp, 1});
+        EXPECT_EQ(u.refs, 1u);
+        EXPECT_EQ(u.first_measure, 5u);
+    }
+    EXPECT_EQ(usage.count({SampleKind::Wav, 4}), 0u);
+}
+
+TEST(ChartCheck, WavExtFallback) {
+    // 谱面引用 .wav、磁盘放同名 .ogg（Doppelganger 类生态现象，beatoraja/LR2 按扩展名回退）：
+    // → 报 wav_ext_mismatch（警告级，带 resolved），不再误报 missing_wav；完全缺失仍报。
+    auto dir = std::filesystem::temp_directory_path() / "bb_lint_ext_fallback";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "kick.ogg", std::ios::binary);
+        f << "OggS placeholder";
+    }
+    const std::string text =
+        "*----- HEADER\n"
+        "#PLAYER 1\n"
+        "#TITLE ExtFallback\n"
+        "#BPM 130\n"
+        "#WAV01 kick.wav\n"
+        "#WAV02 absent.wav\n"
+        "#00111:0102\n";
+    const auto res = read_bms(text);
+    ASSERT_FALSE(has_error(res));
+    const auto issues = lint_chart(res.chart, dir);
+    int mismatch = 0, missing = 0;
+    for (const auto& i : issues) {
+        if (i.code == "wav_ext_mismatch") {
+            ++mismatch;
+            EXPECT_EQ(i.id, "01");
+            EXPECT_EQ(i.resolved, "kick.ogg");
+        } else if (i.code == "missing_wav") {
+            ++missing;
+            EXPECT_EQ(i.id, "02");
+        }
+    }
+    EXPECT_EQ(mismatch, 1);
+    EXPECT_EQ(missing, 1);
+    std::filesystem::remove_all(dir);
+}
+
 // ---------- 合成文本解析 ----------
 
 TEST(BmsRead, ParsesMeta) {
@@ -336,7 +495,8 @@ TEST(BmsChannelMap, Semantics) {
     EXPECT_EQ(bms_channel_rule("06")->semantics, ChannelSemantics::BgaPoor);
     EXPECT_EQ(bms_channel_rule("08")->semantics, ChannelSemantics::BpmRef);
     EXPECT_EQ(bms_channel_rule("09")->semantics, ChannelSemantics::StopRef);
-    EXPECT_EQ(bms_channel_rule("01")->semantics, ChannelSemantics::KeepRaw);
+    EXPECT_EQ(bms_channel_rule("01")->semantics, ChannelSemantics::Note);  // BGM 背景轨（2026-08 结构化）
+    EXPECT_EQ(bms_channel_rule("01")->lane, (Lane{0, LaneKind::Bgm, 0}));
     EXPECT_EQ(bms_channel_rule("07")->semantics, ChannelSemantics::KeepRaw);
     EXPECT_FALSE(bms_channel_rule("99").has_value());
     EXPECT_FALSE(bms_channel_rule("").has_value());
@@ -587,6 +747,12 @@ TEST(BmsRoundTrip, DerivedStopDef) {
 
 TEST(BmsRealCharts, RoundTripAllLocalCharts) {
     namespace fs = std::filesystem;
+    // 快速回归：BB_SKIP_REAL=1 跳过真实谱面往返（只跑合成用例，几十秒内完成）。
+    // 359 谱面往返 = 大量文本 IO（本地磁盘/杀软扫描会显著影响耗时），完整回归在提交前跑，
+    // 见 doc/04 §6 测试说明。BB_ONLY=<子串> 可只跑匹配文件名的样本。
+    if (std::getenv("BB_SKIP_REAL")) {
+        GTEST_SKIP() << "BB_SKIP_REAL 已设置：跳过 local/chart 真实谱面往返（快速回归）";
+    }
     const fs::path root = BEATBENCH_SOURCE_DIR "/local/chart";
     if (!fs::exists(root)) {
         GTEST_SKIP() << "local/chart 不存在（样本未提交，属正常）";
