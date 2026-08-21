@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeAtBench · 编辑器界面预览</title>
+<style>
+  /* 设计令牌：换肤唯一入口 */
+  :root {
+    --bg: #0b0d10;
+    --surface: #12151a;
+    --surface-2: #1a1e24;
+    --surface-3: #21262e;
+    --border: #262b33;
+    --border-strong: #333a44;
+    --text: #e6e9ee;
+    --text-muted: #9aa3b2;
+    --text-faint: #6b7484;
+
+    --primary: #6366f1;
+    --accent: #22d3ee;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+
+    --key-note: #8b9cf8;
+    --ln-tail: rgba(139,156,248,.26);
+
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  }
+  [data-theme="light"] {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --surface-3: #e7eaf0;
+    --border: #e0e3e8;
+    --border-strong: #cfd5dd;
+    --text: #1a1d21;
+    --text-muted: #5b6472;
+    --text-faint: #8a93a1;
+    --ln-tail: rgba(99,102,241,.18);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-sans); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: 18px 16px 60px;
+    transition: background .2s ease, color .2s ease;
+  }
+
+  .page-head { max-width: 1220px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .page-head h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+  .page-head .sub { color: var(--text-muted); font-size: 12px; }
+  .theme-btn {
+    appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    padding: 6px 14px; border-radius: 999px; cursor: pointer; font-family: inherit; font-size: 12px;
+  }
+  .theme-btn:hover { border-color: var(--border-strong); }
+
+  .editor {
+    max-width: 1220px; margin: 0 auto;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+    background: var(--surface); box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  [data-theme="light"] .editor { box-shadow: 0 12px 40px rgba(15,23,42,.12); }
+
+  /* 菜单栏 */
+  .menubar {
+    display: flex; gap: 16px; padding: 6px 12px;
+    background: var(--surface-2); border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--text-muted); user-select: none;
+  }
+  .menubar span { cursor: default; }
+  .menubar span:hover { color: var(--text); }
+
+  /* 工具条 */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+  .seg button {
+    appearance: none; border: none; background: var(--surface-2); color: var(--text-muted);
+    font-family: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.active { background: var(--primary); color: #fff; }
+  .tb {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text);
+    border-radius: var(--radius-sm); padding: 5px 10px; font-family: inherit; font-size: 12px; cursor: pointer;
+  }
+  .tb:hover { background: var(--surface-3); }
+  .tb.disabled { opacity: .45; cursor: not-allowed; }
+  .tb .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--success); margin-right: 5px; }
+  .grow { flex: 1; }
+  .mode-chip {
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 4px 10px;
+    background: var(--surface-2);
+  }
+  /* 编辑工具条（第二排） */
+  .toolbar2 { background: var(--surface-2); }
+  .tool-group { display: inline-flex; gap: 4px; }
+  .tool-btn {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--text-muted); border-radius: var(--radius-sm); padding: 4px 9px;
+    font-family: inherit; font-size: 12px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .tool-btn:hover { color: var(--text); background: var(--surface-3); }
+  .tool-btn.active { color: var(--primary); border-color: var(--primary); background: rgba(99,102,241,.15); }
+  .kbd {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+    border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px;
+    background: var(--surface-2);
+  }
+  .tb-sep { width: 1px; height: 18px; background: var(--border-strong); }
+  .tb-label { font-size: 11px; color: var(--text-faint); }
+  .hint { font-size: 11px; color: var(--text-faint); }
+
+  /* 主体三栏 */
+  .editor-body { display: grid; grid-template-columns: 208px minmax(0,1fr) 200px; min-height: 560px; }
+
+  /* 左 Dock */
+  .left-dock { border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; }
+  .dock-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .dock-tab {
+    flex: 1; appearance: none; border: none; background: none; cursor: pointer;
+    font-family: inherit; font-size: 11px; color: var(--text-muted); padding: 8px 2px;
+    border-bottom: 2px solid transparent;
+  }
+  .dock-tab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 600; }
+  .dock-panel { display: none; padding: 10px; overflow: auto; }
+  .dock-panel.active { display: block; }
+  .dock-panel h4 { margin: 0 0 8px; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+
+  .list { display: flex; flex-direction: column; gap: 2px; }
+  .list-item {
+    display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); cursor: default;
+  }
+  .list-item:hover { background: var(--surface-2); color: var(--text); }
+  .list-item .tag { color: var(--text-faint); }
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+    font-family: var(--font-sans);
+  }
+  .badge-warn { background: rgba(251,191,36,.15); color: var(--warning); }
+  .badge-err  { background: rgba(248,113,113,.15); color: var(--danger); }
+
+  .field { margin-bottom: 9px; }
+  .field label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+  .field input, .field select {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+    border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono); font-size: 12px; outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--primary); }
+
+  .bga-box {
+    height: 150px; border: 1px dashed var(--border-strong); border-radius: var(--radius);
+    background: radial-gradient(120% 120% at 30% 20%, rgba(99,102,241,.35), rgba(34,211,238,.15) 55%, transparent),
+                var(--surface-2);
+    display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px;
+  }
+
+  /* 中央视口 */
+  .center { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+  .viewport-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-muted);
+    font-family: var(--font-mono); background: var(--surface);
+  }
+  .viewport-head b { color: var(--accent); font-weight: 600; }
+
+  .timeline { display: flex; flex: 1; min-height: 0; }
+
+  .measure-ruler, .time-ruler {
+    width: 48px; flex: 0 0 48px; position: relative; background: var(--surface);
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); user-select: none;
+  }
+  .measure-ruler { border-right: 1px solid var(--border); }
+  .time-ruler { border-left: 1px solid var(--border); }
+  .measure-ruler span, .time-ruler span { position: absolute; left: 4px; transform: translateY(-50%); }
+  .time-ruler span { right: 4px; left: auto; }
+
+  .lane-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; }
+  .lane-row { display: flex; height: 100%; position: relative; min-width: 0; }
+
+  .lane {
+    width: 46px; flex: 0 0 46px; position: relative; border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .lane.scratch { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+  .lane.bgm { width: 96px; flex: 0 0 96px; }
+  .lane.p2 { background: color-mix(in srgb, var(--primary) 5%, var(--surface)); }
+  .lane-label {
+    position: absolute; top: 4px; left: 0; right: 0; text-align: center;
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); pointer-events: none;
+  }
+
+  /* 小节网格线（水平，时间向下） */
+  .gridlines {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image: repeating-linear-gradient(to bottom, var(--border) 0 1px, transparent 1px 12.5%);
+  }
+  .gridlines.off { background-image: none; }
+
+  /* note */
+  .note {
+    position: absolute; left: 3px; right: 3px; height: 9px; border-radius: 3px;
+    background: var(--key-note); cursor: pointer; transform: translateY(-50%);
+    box-shadow: 0 1px 2px rgba(0,0,0,.4); z-index: 2;
+  }
+  .note:hover { filter: brightness(1.15); }
+  .note.selected { outline: 2px solid #fff; outline-offset: 1px; }
+  .note.scratch { background: var(--accent); height: 7px; border-radius: 2px; }
+  .note.mine {
+    background: var(--danger); height: 13px; width: 13px; left: 50%; right: auto; margin-left: -6.5px;
+    transform: translateY(-50%) rotate(45deg); border-radius: 2px;
+  }
+  .note.ln-head { border-radius: 3px 0 0 3px; }
+  .ln-tail {
+    position: absolute; left: 9px; right: 9px; background: var(--ln-tail);
+    border-left: 2px solid var(--key-note); border-right: 2px solid var(--key-note);
+    pointer-events: none; z-index: 1;
+  }
+
+  /* BGM 波形 */
+  .wave { position: absolute; inset: 0; pointer-events: none; }
+  .wave.flip { transform: scaleY(-1); }
+  .bgm-marker {
+    position: absolute; left: 2px; right: 2px; height: 10px; border-radius: 2px;
+    background: rgba(34,211,238,.28); border: 1px solid var(--accent);
+    font-family: var(--font-mono); font-size: 8px; color: var(--accent);
+    display: flex; align-items: center; justify-content: center; transform: translateY(-50%);
+    pointer-events: none; z-index: 2;
+  }
+
+  /* 2P 折叠 */
+  .p2-toggle {
+    width: 32px; flex: 0 0 32px; position: relative; border-right: 1px solid var(--border);
+    background: var(--surface-2); cursor: pointer; user-select: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .p2-toggle .txt {
+    writing-mode: vertical-rl; font-size: 10px; color: var(--text-muted); letter-spacing: .1em;
+  }
+  .p2-toggle:hover .txt { color: var(--accent); }
+  #p2Group { display: none; }
+  #p2Group.open { display: flex; }
+
+  /* 右 Dock */
+  .right-dock { border-left: 1px solid var(--border); background: var(--surface); padding: 12px; }
+  .right-dock h4 { margin: 0 0 10px; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .prop-row { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
+  .prop-row .k { color: var(--text-muted); }
+  .prop-row .v { font-family: var(--font-mono); color: var(--text); text-align: right; }
+  .prop-actions { display: flex; gap: 6px; margin-top: 12px; }
+  .btn {
+    flex: 1; appearance: none; border: 1px solid var(--border-strong); background: var(--surface-2);
+    color: var(--text); border-radius: var(--radius-sm); padding: 6px 8px; font-family: inherit;
+    font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { background: var(--surface-3); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+  /* 状态栏 */
+  .statusbar {
+    display: flex; gap: 16px; padding: 5px 12px; border-top: 1px solid var(--border);
+    background: var(--surface-2); font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    user-select: none;
+  }
+  .statusbar .ok { color: var(--success); }
+
+  /* 切音工作区（占位） */
+  .slice-view { display: none; flex: 1; min-height: 0; }
+  .slice-view.active { display: flex; }
+  .slice-panel {
+    flex: 1; margin: 16px; border: 1px dashed var(--border-strong); border-radius: var(--radius);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    color: var(--text-faint);
+  }
+  .slice-wave { width: 90%; height: 90px; position: relative; border-bottom: 1px solid var(--border-strong); }
+  .slice-cut {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent);
+  }
+  .slice-cut::after { content: attr(data-t); position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+
+  .caption { max-width: 1220px; margin: 14px auto 0; color: var(--text-faint); font-size: 12px; }
+  .caption b { color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <h1>BeAtBench · 编辑器界面预览</h1>
+    <div class="sub">呈现效果构思 · 零依赖 · 非实现代码（M2 起填充 GUI 时再据此细化）</div>
+  </div>
+  <button class="theme-btn" id="themeBtn">切换浅色</button>
+</div>
+
+<div class="editor">
+
+  <!-- 菜单栏 -->
+  <div class="menubar">
+    <span>文件</span><span>编辑</span><span>视图</span><span>工作区</span><span>帮助</span>
+  </div>
+
+  <!-- 工具条 -->
+  <div class="toolbar">
+    <div class="seg" id="wsSeg">
+      <button class="active" data-ws="edit">编辑</button>
+      <button data-ws="slice">切音</button>
+    </div>
+    <select class="tb" title="snap 细分">
+      <option>1/16</option><option>1/8</option><option>1/4</option>
+      <option>1/32</option><option>1/64</option><option>free</option>
+    </select>
+    <button class="tb">量化</button>
+    <button class="tb" id="gridBtn">网格</button>
+    <button class="tb">缩放</button>
+    <span class="grow"></span>
+    <button class="tb disabled"><span class="dot"></span>试听</button>
+    <button class="tb disabled">停止</button>
+    <div class="seg" id="dirSeg" title="滚动方向">
+      <button class="active" data-dir="hi-top">顶部=高小节</button>
+      <button data-dir="lo-top">顶部=低小节</button>
+    </div>
+    <span class="mode-chip">SP7K</span>
+  </div>
+
+  <!-- 编辑工具条（第二排） -->
+  <div class="toolbar toolbar2">
+    <div class="tool-group">
+      <button class="tool-btn active">选择 <span class="kbd">V</span></button>
+      <button class="tool-btn">放置 note <span class="kbd">N</span></button>
+      <button class="tool-btn">LN <span class="kbd">L</span></button>
+      <button class="tool-btn">地雷 <span class="kbd">M</span></button>
+      <button class="tool-btn">平移 <span class="kbd">H</span></button>
+      <button class="tool-btn">缩放 <span class="kbd">Z</span></button>
+    </div>
+    <span class="tb-sep"></span>
+    <span class="tb-label">采样</span>
+    <select class="tb">
+      <option>#WAV01 · kick.wav</option>
+      <option>#WAV02 · snare.wav</option>
+      <option>#WAV04 · bass.wav</option>
+    </select>
+    <span class="grow"></span>
+    <span class="hint">快捷键：<span class="kbd">1-7</span> 放键 · <span class="kbd">皿</span> · <span class="kbd">F1-F7</span> 备用 · <span class="kbd">Del</span> 删除 · <span class="kbd">Esc</span> 取消</span>
+  </div>
+
+  <!-- 三栏主体 -->
+  <div class="editor-body">
+
+    <!-- 左 Dock -->
+    <aside class="left-dock">
+      <div class="dock-tabs">
+        <button class="dock-tab active" data-tab="samples">采样</button>
+        <button class="dock-tab" data-tab="lint">lint</button>
+        <button class="dock-tab" data-tab="bga">BGA</button>
+        <button class="dock-tab" data-tab="meta">元信息</button>
+      </div>
+
+      <div class="dock-panel active" id="samples">
+        <h4>定义表（WAV）</h4>
+        <div class="list">
+          <div class="list-item"><span class="tag">#WAV01</span> kick.wav</div>
+          <div class="list-item"><span class="tag">#WAV02</span> snare.wav</div>
+          <div class="list-item"><span class="tag">#WAV03</span> hihat.wav <span class="badge badge-warn" style="margin-left:auto">缺失</span></div>
+          <div class="list-item"><span class="tag">#WAV04</span> bass.wav</div>
+          <div class="list-item"><span class="tag">#WAV05</span> synth.wav</div>
+          <div class="list-item"><span class="tag">#WAV06</span> piano.wav</div>
+        </div>
+        <h4 style="margin-top:14px">定义表（BPM/STOP）</h4>
+        <div class="list">
+          <div class="list-item"><span class="tag">#BPM01</span> 174</div>
+          <div class="list-item"><span class="tag">#BPM02</span> 87</div>
+          <div class="list-item"><span class="tag">#STOP01</span> 96</div>
+        </div>
+      </div>
+
+      <div class="dock-panel" id="lint">
+        <h4>lint 报告</h4>
+        <div class="list">
+          <div class="list-item">[<span style="color:var(--warning)">WARN</span>] (行 12) 通道 3 小节 5 越界</div>
+          <div class="list-item">[<span style="color:var(--warning)">WARN</span>] 缺失采样 #WAV03</div>
+          <div class="list-item">[<span style="color:var(--danger)">ERROR</span>] (行 88) #BPM 非法值</div>
+          <div class="list-item">[<span style="color:var(--success)">INFO</span>] 128 notes · 6 LN 对</div>
+        </div>
+      </div>
+
+      <div class="dock-panel" id="bga">
+        <h4>BGA 预览</h4>
+        <div class="bga-box">#BGA 预览（图像解码后置）</div>
+        <div class="field" style="margin-top:10px">
+          <label>图层 layer</label>
+          <select><option>0 · base</option><option>1 · poor</option><option>2 · layer</option><option>3 · layer2</option></select>
+        </div>
+        <div class="field">
+          <label>不透明度</label>
+          <input value="255" />
+        </div>
+      </div>
+
+      <div class="dock-panel" id="meta">
+        <h4>元信息（Chart.meta）</h4>
+        <div class="field"><label>#TITLE</label><input value="Example Song" /></div>
+        <div class="field"><label>#ARTIST</label><input value="artist" /></div>
+        <div class="field"><label>#BPM</label><input value="174" /></div>
+        <div class="field"><label>#PLAYER</label><select><option>3</option><option>1</option><option>2</option></select></div>
+        <div class="field"><label>#PLAYLEVEL</label><input value="7" /></div>
+      </div>
+    </aside>
+
+    <!-- 中央视口 -->
+    <main class="center">
+      <div class="viewport-head">
+        <span>编辑工作区 · <b>SP 7 Keys</b> · 1/16 snap</span>
+        <span>播放头 <b>0:05.23</b> · 小节 003.50</span>
+      </div>
+
+      <!-- 编辑视图 -->
+      <div class="timeline" id="editView">
+        <div class="measure-ruler">
+          <span style="top:0%">001</span>
+          <span style="top:12.5%">002</span>
+          <span style="top:25%">003</span>
+          <span style="top:37.5%">004</span>
+          <span style="top:50%">005</span>
+          <span style="top:62.5%">006</span>
+          <span style="top:75%">007</span>
+          <span style="top:87.5%">008</span>
+        </div>
+
+        <div class="lane-scroll">
+          <div class="lane-row" id="laneRow" style="height:100%">
+
+            <div class="lane scratch" style="min-height:100%">
+              <div class="gridlines"></div>
+              <div class="lane-label">皿</div>
+              <div class="note scratch" style="top:12.5%" data-lane="1P · Scratch" data-time="001 : 0.00" data-sample="#WAV01" data-kind="Normal 皿"></div>
+              <div class="note scratch" style="top:43.8%" data-lane="1P · Scratch" data-time="003 : 0.50" data-sample="#WAV02" data-kind="Normal 皿"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">1</div>
+              <div class="note" style="top:3.1%" data-lane="1P · Key 1" data-time="000 : 0.25" data-sample="#WAV01" data-kind="Normal"></div>
+              <div class="note" style="top:51.6%" data-lane="1P · Key 1" data-time="004 : 0.125" data-sample="#WAV03" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">2</div>
+              <div class="note ln-head" style="top:28.1%" data-lane="1P · Key 2" data-time="002 : 0.25" data-sample="#WAV04" data-kind="LN 头"></div>
+              <div class="ln-tail" style="top:28.1%;height:12.5%"></div>
+              <div class="note" style="top:53.1%" data-lane="1P · Key 2" data-time="004 : 0.25" data-sample="#WAV04" data-kind="Normal"></div>
+              <div class="note" style="top:81.3%" data-lane="1P · Key 2" data-time="006 : 0.50" data-sample="#WAV05" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">3</div>
+              <div class="note" style="top:9.4%" data-lane="1P · Key 3" data-time="000 : 0.75" data-sample="#WAV02" data-kind="Normal"></div>
+              <div class="note" style="top:54.7%" data-lane="1P · Key 3" data-time="004 : 0.375" data-sample="#WAV05" data-kind="Normal"></div>
+              <div class="note" style="top:65.6%" data-lane="1P · Key 3" data-time="005 : 0.25" data-sample="#WAV01" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">4</div>
+              <div class="note mine" style="top:37.5%" data-lane="1P · Key 4" data-time="003 : 0.00" data-sample="—" data-kind="地雷"></div>
+              <div class="note" style="top:56.3%" data-lane="1P · Key 4" data-time="004 : 0.50" data-sample="#WAV06" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">5</div>
+              <div class="note" style="top:18.8%" data-lane="1P · Key 5" data-time="001 : 0.50" data-sample="#WAV05" data-kind="Normal"></div>
+              <div class="note" style="top:57.8%" data-lane="1P · Key 5" data-time="004 : 0.625" data-sample="#WAV02" data-kind="Normal"></div>
+              <div class="note" style="top:90.6%" data-lane="1P · Key 5" data-time="007 : 0.25" data-sample="#WAV04" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">6</div>
+              <div class="note ln-head" style="top:71.9%" data-lane="1P · Key 6" data-time="005 : 0.75" data-sample="#WAV03" data-kind="LN 头"></div>
+              <div class="ln-tail" style="top:71.9%;height:12.5%"></div>
+              <div class="note" style="top:59.4%" data-lane="1P · Key 6" data-time="004 : 0.75" data-sample="#WAV01" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane">
+              <div class="gridlines"></div>
+              <div class="lane-label">7</div>
+              <div class="note" style="top:31.3%" data-lane="1P · Key 7" data-time="002 : 0.50" data-sample="#WAV06" data-kind="Normal"></div>
+              <div class="note" style="top:60.9%" data-lane="1P · Key 7" data-time="004 : 0.875" data-sample="#WAV05" data-kind="Normal"></div>
+            </div>
+
+            <div class="lane bgm">
+              <div class="gridlines"></div>
+              <div class="lane-label">BGM · 波形铺底</div>
+              <svg class="wave" viewBox="0 0 96 560" preserveAspectRatio="none">
+                <path d="M48 0 L28 38 L62 76 L22 114 L52 152 L30 190 L64 228 L24 266 L50 304 L32 342 L58 380 L26 418 L46 456 L34 500 L48 560"
+                      fill="none" stroke="rgba(139,156,248,.55)" stroke-width="1.6"/>
+                <path d="M48 0 L68 38 L34 76 L74 114 L44 152 L66 190 L32 228 L72 266 L46 304 L64 342 L38 380 L70 418 L50 456 L62 500 L48 560"
+                      fill="none" stroke="rgba(139,156,248,.28)" stroke-width="1.2"/>
+              </svg>
+              <div class="bgm-marker" style="top:15%">#WAV01</div>
+              <div class="bgm-marker" style="top:62%">#WAV04</div>
+            </div>
+
+            <div class="p2-toggle" id="p2Toggle" title="折叠/展开 2P">
+              <span class="txt">2P ▸</span>
+            </div>
+
+            <div id="p2Group">
+              <div class="lane p2">
+                <div class="gridlines"></div><div class="lane-label">2P·皿</div>
+                <div class="note scratch" style="top:20%" data-lane="2P · Scratch" data-time="001 : 0.60" data-sample="#WAV02" data-kind="Normal 皿"></div>
+              </div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·1</div><div class="note" style="top:30%" data-lane="2P · Key 1" data-time="002 : 0.40" data-sample="#WAV04" data-kind="Normal"></div></div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·2</div></div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·3</div><div class="note" style="top:55%" data-lane="2P · Key 3" data-time="004 : 0.40" data-sample="#WAV06" data-kind="Normal"></div></div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·4</div></div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·5</div></div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·6</div></div>
+              <div class="lane p2"><div class="gridlines"></div><div class="lane-label">2P·7</div></div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="time-ruler">
+          <span style="top:0%">0:00.0</span>
+          <span style="top:12.5%">0:02.3</span>
+          <span style="top:25%">0:04.8</span>
+          <span style="top:37.5%">0:07.2</span>
+          <span style="top:50%">0:09.9</span>
+          <span style="top:62.5%">0:12.4</span>
+          <span style="top:75%">0:15.2</span>
+          <span style="top:87.5%">0:17.9</span>
+        </div>
+      </div>
+
+      <!-- 切音视图（占位） -->
+      <div class="slice-view" id="sliceView">
+        <div class="slice-panel">
+          <div style="font-size:14px;color:var(--text-muted)">切音工作台 · Slice Workspace</div>
+          <div class="slice-wave">
+            <svg viewBox="0 0 900 90" preserveAspectRatio="none" style="width:100%;height:100%">
+              <path d="M0 45 L40 30 L80 55 L120 20 L160 60 L200 35 L240 70 L280 25 L320 50 L360 30 L400 65 L440 20 L480 55 L520 40 L560 70 L600 25 L640 50 L680 30 L720 60 L760 35 L800 65 L840 25 L880 45 L900 40"
+                    fill="none" stroke="rgba(34,211,238,.7)" stroke-width="2"/>
+            </svg>
+            <div class="slice-cut" style="left:25%" data-t="cut 01"></div>
+            <div class="slice-cut" style="left:50%" data-t="cut 02"></div>
+            <div class="slice-cut" style="left:75%" data-t="cut 03"></div>
+          </div>
+          <div style="font-size:12px">Phase C / M6 填充：波形切片 → 采样切分 → 写回定义表</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右 Dock -->
+    <aside class="right-dock">
+      <h4>选中对象 · 属性</h4>
+      <div class="prop-row"><span class="k">轨道 lane</span><span class="v" id="propLane">—</span></div>
+      <div class="prop-row"><span class="k">时间</span><span class="v" id="propTime">—</span></div>
+      <div class="prop-row"><span class="k">采样</span><span class="v" id="propSample">—</span></div>
+      <div class="prop-row"><span class="k">类型</span><span class="v" id="propKind">—</span></div>
+      <div class="prop-actions">
+        <button class="btn primary">移动</button>
+        <button class="btn">删除</button>
+      </div>
+      <div style="margin-top:14px;font-size:11px;color:var(--text-faint)">
+        动作按钮 = core 命令（如 <span style="font-family:var(--font-mono)">note.move</span> / <span style="font-family:var(--font-mono)">note.delete</span>）。
+      </div>
+    </aside>
+  </div>
+
+  <!-- 状态栏 -->
+  <div class="statusbar">
+    <span>模式 SP7K</span>
+    <span>小节 000–999</span>
+    <span>128 notes · 6 LN</span>
+    <span>缩放 100%</span>
+    <span class="ok">● 命令即接口（GUI 演示）</span>
+  </div>
+</div>
+
+<div class="caption">
+  <b>可交互：</b>明暗主题 · 工作区切换（编辑/切音）· 左侧面板标签 · 网格开关 · 滚动方向切换 · 2P 折叠 · 点选音符（右栏属性联动）。
+  <b>占位：</b>波形为示意 SVG，秒标尺为示意刻度（最终由 TimingEngine 精确计算）；本预览不含任何 Qt 实现代码。
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+
+    // 主题
+    document.getElementById('themeBtn').addEventListener('click', function () {
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      this.textContent = next === 'dark' ? '切换浅色' : '切换深色';
+    });
+
+    // 左 Dock 标签
+    var tabs = document.querySelectorAll('.dock-tab');
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () {
+        tabs.forEach(function (x) { x.classList.remove('active'); });
+        document.querySelectorAll('.dock-panel').forEach(function (p) { p.classList.remove('active'); });
+        t.classList.add('active');
+        document.getElementById(t.getAttribute('data-tab')).classList.add('active');
+      });
+    });
+
+    // 工作区切换
+    var seg = document.getElementById('wsSeg');
+    seg.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        seg.querySelectorAll('button').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        var ws = b.getAttribute('data-ws');
+        document.getElementById('editView').style.display = ws === 'edit' ? 'flex' : 'none';
+        document.getElementById('sliceView').classList.toggle('active', ws === 'slice');
+      });
+    });
+
+    // 网格开关
+    var gridBtn = document.getElementById('gridBtn');
+    var gridOn = true;
+    gridBtn.addEventListener('click', function () {
+      gridOn = !gridOn;
+      document.querySelectorAll('.gridlines').forEach(function (g) { g.classList.toggle('off', !gridOn); });
+    });
+
+    // 2P 折叠
+    var p2 = document.getElementById('p2Toggle');
+    p2.addEventListener('click', function () {
+      var g = document.getElementById('p2Group');
+      g.classList.toggle('open');
+      this.querySelector('.txt').textContent = g.classList.contains('open') ? '2P ▾' : '2P ▸';
+    });
+
+    // 点选 note → 右栏属性
+    var prop = {
+      lane: document.getElementById('propLane'),
+      time: document.getElementById('propTime'),
+      sample: document.getElementById('propSample'),
+      kind: document.getElementById('propKind')
+    };
+    function clearSelect() {
+      document.querySelectorAll('.note.selected').forEach(function (n) { n.classList.remove('selected'); });
+      prop.lane.textContent = prop.time.textContent = prop.sample.textContent = prop.kind.textContent = '—';
+    }
+    document.querySelectorAll('.note').forEach(function (n) {
+      n.addEventListener('click', function (e) {
+        e.stopPropagation();
+        document.querySelectorAll('.note.selected').forEach(function (x) { x.classList.remove('selected'); });
+        n.classList.add('selected');
+        prop.lane.textContent = n.getAttribute('data-lane');
+        prop.time.textContent = n.getAttribute('data-time');
+        prop.sample.textContent = n.getAttribute('data-sample');
+        prop.kind.textContent = n.getAttribute('data-kind');
+      });
+    });
+    document.getElementById('laneRow').addEventListener('click', clearSelect);
+
+    // ---- 滚动方向：默认「顶部=高小节」（note 自上而下落 → 底部=低小节）----
+    var dirSeg = document.getElementById('dirSeg');
+    function applyDirection(dir) {
+      var flip = dir === 'hi-top';
+      document.querySelectorAll('.note, .bgm-marker').forEach(function (el) {
+        var f = parseFloat(el.dataset.f);
+        el.style.top = ((flip ? (1 - f) : f) * 100) + '%';
+      });
+      document.querySelectorAll('.measure-ruler span, .time-ruler span').forEach(function (el) {
+        var f = parseFloat(el.dataset.f);
+        el.style.top = ((flip ? (1 - f - 0.125) : f) * 100) + '%';
+      });
+      document.querySelectorAll('.ln-tail').forEach(function (el) {
+        var f1 = parseFloat(el.dataset.f1);
+        var f2 = parseFloat(el.dataset.f2);
+        el.style.top = ((flip ? (1 - f2) : f1) * 100) + '%';
+        el.style.height = ((f2 - f1) * 100) + '%';
+      });
+      document.querySelectorAll('.wave').forEach(function (w) { w.classList.toggle('flip', flip); });
+    }
+    // 记录初始定位（此刻仍是「顶部=低小节」的原始百分比）
+    document.querySelectorAll('.note, .bgm-marker, .measure-ruler span, .time-ruler span').forEach(function (el) {
+      el.dataset.f = (parseFloat(el.style.top) / 100).toFixed(6);
+    });
+    document.querySelectorAll('.ln-tail').forEach(function (el) {
+      var t = parseFloat(el.style.top);
+      var h = parseFloat(el.style.height);
+      el.dataset.f1 = (t / 100).toFixed(6);
+      el.dataset.f2 = ((t + h) / 100).toFixed(6);
+    });
+    applyDirection('hi-top');
+    dirSeg.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        dirSeg.querySelectorAll('button').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        applyDirection(b.getAttribute('data-dir'));
+      });
+    });
+  })();
+</script>
+</body>
+</html>
