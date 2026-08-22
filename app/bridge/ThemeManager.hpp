@@ -39,11 +39,22 @@ public:
     BB_THEME_COLOR_PROP(danger)
     BB_THEME_COLOR_PROP(keyNote)        // 按键 note
     BB_THEME_COLOR_PROP(lnTail)         // LN 尾（rgba(139,156,248,.26)）
+    // 时间轴 note 着色（doc/05 §7；= beatbench-ui-styles.html 默认主题，仅本地/视觉语义）
+    BB_THEME_COLOR_PROP(n1)             // 键音 1（键 1/5/… → n1..n4 循环）
+    BB_THEME_COLOR_PROP(n2)             // 键音 2
+    BB_THEME_COLOR_PROP(n3)             // 键音 3
+    BB_THEME_COLOR_PROP(n4)             // 键音 4
+    BB_THEME_COLOR_PROP(scratch)        // 皿
+    BB_THEME_COLOR_PROP(mine)           // 地雷
+    BB_THEME_COLOR_PROP(ln)             // LN 体（rgba(139,156,248,.26)）
+    BB_THEME_COLOR_PROP(wave)           // BGM 波形底（rgba(139,156,248,.12)）
+    BB_THEME_COLOR_PROP(accent2)        // 强调别名（styles.html accent2 = 青）
 #undef BB_THEME_COLOR_PROP
 
     // ---- 非颜色 token ----
     Q_PROPERTY(qreal radiusSm READ radiusSm CONSTANT)   // 控件圆角（6）
     Q_PROPERTY(qreal radius READ radius CONSTANT)       // 面板圆角（10）
+    Q_PROPERTY(qreal noteRadius READ noteRadius CONSTANT) // note 圆角（2，= styles.html）
     Q_PROPERTY(qreal fsBase READ fsBase CONSTANT)       // 正文/按钮（13，= preview.html 基准）
     Q_PROPERTY(qreal fsSmall READ fsSmall CONSTANT)     // 次级/标签（12）
     Q_PROPERTY(qreal fsTiny READ fsTiny CONSTANT)       // 提示/占位（11）
@@ -52,6 +63,7 @@ public:
 
     qreal radiusSm() const { return 6.0; }
     qreal radius() const { return 10.0; }
+    qreal noteRadius() const { return 2.0; }
     qreal fsBase() const { return 13.0; }
     qreal fsSmall() const { return 12.0; }
     qreal fsTiny() const { return 11.0; }
@@ -84,6 +96,15 @@ private:
     BB_THEME_COLOR_MEMBER(danger, "#f87171")
     BB_THEME_COLOR_MEMBER(keyNote, "#8b9cf8")
     BB_THEME_COLOR_MEMBER(lnTail, "#428b9cf8")       // AARRGGBB：rgba(139,156,248,.26)
+    BB_THEME_COLOR_MEMBER(n1, "#8b9cf8")
+    BB_THEME_COLOR_MEMBER(n2, "#8b9cf8")
+    BB_THEME_COLOR_MEMBER(n3, "#8b9cf8")
+    BB_THEME_COLOR_MEMBER(n4, "#8b9cf8")
+    BB_THEME_COLOR_MEMBER(scratch, "#22d3ee")
+    BB_THEME_COLOR_MEMBER(mine, "#f87171")
+    BB_THEME_COLOR_MEMBER(ln, "#428b9cf8")           // AARRGGBB：rgba(139,156,248,.26)
+    BB_THEME_COLOR_MEMBER(wave, "#1f8b9cf8")         // AARRGGBB：rgba(139,156,248,.12)
+    BB_THEME_COLOR_MEMBER(accent2, "#22d3ee")
 #undef BB_THEME_COLOR_MEMBER
 };
 

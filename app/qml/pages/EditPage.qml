@@ -13,6 +13,19 @@ Item {
     id: root
     property var chartMeta: null
     property string chartPath: ""
+    /// 轨道列头显示实际 BMS 通道 id（Main 工具条勾选；Alt 临时在 ChartView 内处理）
+    property bool showChannelIds: false
+    /// BGM 轨展开（列头点击；--bgm-expand 调试参数）
+    property bool bgmExpanded: false
+    /// 拍子线 [num]/[den]（默认 [1]/[4] = 每 4 分音符）
+    property int beatNum: 1
+    property int beatDen: 4
+    /// note 采样标签：0 隐藏 / 1 id / 2 文件名
+    property int noteSampleMode: 0
+    /// 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
+    property bool showExtras: false
+    /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
+    readonly property string hoverText: chartView ? chartView.hoverText : ""
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)
@@ -118,19 +131,17 @@ Item {
                     }
                 }
 
-                // 视口主体（占位）
-                Item {
+                // 视口主体（M2 第 5 步：竖向时间轴，真数据 ChartSession）
+                ChartView {
+                    id: chartView
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Label {
-                        anchors.centerIn: parent
-                        text: root.chartMeta
-                              ? qsTr("竖向时间轴（上=高小节）")
-                              : qsTr("打开谱面开始编辑（Ctrl+O）")
-                        horizontalAlignment: Text.AlignHCenter
-                        color: Theme.textFaint
-                        font.pixelSize: Theme.fsBase
-                    }
+                    showChannelIds: root.showChannelIds
+                    bgmExpanded: root.bgmExpanded
+                    beatNum: root.beatNum
+                    beatDen: root.beatDen
+                    noteSampleMode: root.noteSampleMode
+                    showExtras: root.showExtras
                 }
             }
         }

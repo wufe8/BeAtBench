@@ -21,7 +21,9 @@
 #include <QTranslator>
 #include <QVariant>
 
+#include "bridge/ChartSession.hpp"
 #include "bridge/CommandDispatcher.hpp"
+#include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -119,6 +121,12 @@ int main(int argc, char** argv) {
     beatbench::app::CommandDispatcher dispatcher;
     beatbench::app::SampleListModel sampleModel;
     beatbench::app::LintListModel lintModel;
+    // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
+    // 与 info/check 命令共用同一 core 解析入口（doc/06 §3.6）
+    beatbench::app::ChartSession chartSession;
+    // 全局修饰键监控（Ctrl 按住态；QML Keys 收不到独立修饰键，Alt 又被菜单栏拦截）
+    beatbench::app::KeyMonitor keyMonitor;
+    app.installEventFilter(&keyMonitor);
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
@@ -126,6 +134,8 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("Theme"), &theme);
     engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
+    engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
 
     const QStringList args = app.arguments();
@@ -164,6 +174,29 @@ int main(int argc, char** argv) {
                     tabBar->setProperty("currentIndex", t);
             }
         }
+    }
+
+    // --bgm-expand / --channel-ids / --note-labels N：视觉验收调试参数（配 --screenshot）
+    if (args.contains(QStringLiteral("--bgm-expand"))) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugBgmExpand", true);
+    }
+    if (args.contains(QStringLiteral("--channel-ids"))) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugShowChannelIds", true);
+    }
+    const int nlIdx = args.indexOf(QStringLiteral("--note-labels"));
+    if (nlIdx >= 0 && nlIdx + 1 < args.size()) {
+        bool ok = false;
+        const int m = args.at(nlIdx + 1).toInt(&ok);
+        if (ok && m > 0) {
+            if (QObject* root = engine.rootObjects().value(0))
+                root->setProperty("debugNoteSampleMode", m);
+        }
+    }
+    if (args.contains(QStringLiteral("--show-extras"))) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugShowExtras", true);
     }
 
     if (engine.rootObjects().isEmpty())

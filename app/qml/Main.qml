@@ -26,6 +26,24 @@ ApplicationWindow {
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     property string statusText: qsTr("就绪")
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
+    // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换在 ChartView 内处理）
+    property bool showChannelIds: false
+    // 拍子线 [num]/[den]（默认 [1]/[4] = 每 4 分音符；M3 note 吸附也会依赖）
+    property int beatNum: 1
+    property int beatDen: 4
+    // note 上显示所用采样：0 隐藏 / 1 id / 2 文件名
+    property int noteSampleMode: 0
+    // 更多轨道（BGA 图层通道列，iBMSC 式；游玩轨与背景轨之间）
+    property bool showExtras: false
+    // 调试参数注入（--bgm-expand / --channel-ids / --note-labels / --show-extras，配 --screenshot 验收）
+    property bool debugBgmExpand: false
+    property bool debugShowChannelIds: false
+    property int debugNoteSampleMode: 0
+    property bool debugShowExtras: false
+    onDebugBgmExpandChanged: if (debugBgmExpand && editPage) editPage.bgmExpanded = true
+    onDebugShowChannelIdsChanged: if (debugShowChannelIds) window.showChannelIds = true
+    onDebugNoteSampleModeChanged: if (debugNoteSampleMode > 0) window.noteSampleMode = debugNoteSampleMode
+    onDebugShowExtrasChanged: if (debugShowExtras) window.showExtras = true
     // 当前编辑工具（互斥单选，会话状态；M3 接输入/放置，note 类型（普通/LN/地雷）届时
     // 作为正交维度另设「放置类型」组，不并入本组——doc/05 §5 交互）
     property string editorTool: "select"
@@ -97,6 +115,35 @@ ApplicationWindow {
                 BbToolButton { text: "snap 1/16"; enabled: chartMeta !== null }
                 BbToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
                 BbToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
+                // 拍子线显示调整（每 num/den 音符一条；M3 note 吸附复用此单位）
+                Label { text: qsTr("拍子线"); color: Theme.textFaint
+                        font.pixelSize: Theme.fsTiny; padding: 4 }
+                SpinBox {
+                    from: 1; to: 16
+                    value: window.beatNum
+                    editable: true
+                    onValueModified: window.beatNum = value
+                    font.pixelSize: Theme.fsSmall
+                    implicitWidth: 54
+                }
+                Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                SpinBox {
+                    from: 1; to: 16
+                    value: window.beatDen
+                    editable: true
+                    onValueModified: window.beatDen = value
+                    font.pixelSize: Theme.fsSmall
+                    implicitWidth: 54
+                }
+                // 更多轨道：BGA 图层通道列（04/06/07/0A，游玩轨与背景轨之间，iBMSC 式）
+                CheckBox {
+                    id: extrasCheck
+                    text: qsTr("更多轨道")
+                    checked: window.showExtras
+                    onToggled: window.showExtras = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("在游玩轨与背景轨之间显示 BGA 图层通道（BGA/LAYER/POOR/LAYER2 = 04/06/07/0A）")
+                }
                 BbToolButton { text: qsTr("缩放"); enabled: chartMeta !== null }
                 Item { Layout.fillWidth: true }
                 BbToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
@@ -133,6 +180,25 @@ ApplicationWindow {
                 BbToolButton { text: "H 平移"; active: window.editorTool === "pan"; flatStyle: true
                                onClicked: window.editorTool = "pan" }
                 Item { Layout.fillWidth: true }
+                // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
+                CheckBox {
+                    id: channelIdCheck
+                    text: qsTr("通道 ID")
+                    checked: window.showChannelIds
+                    onToggled: window.showChannelIds = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("轨道列头显示 BMS 通道号（Ctrl 按住临时显示；Alt 会被菜单栏拦截）")
+                }
+                // note 上显示所用采样（隐藏 / 显示 id / 显示文件名）
+                Label { text: qsTr("采样"); color: Theme.textFaint
+                        font.pixelSize: Theme.fsTiny; padding: 4 }
+                ComboBox {
+                    model: [qsTr("隐藏"), qsTr("显示 ID"), qsTr("显示文件名")]
+                    currentIndex: window.noteSampleMode
+                    onActivated: (idx) => window.noteSampleMode = idx
+                    font.pixelSize: Theme.fsSmall
+                    Layout.preferredWidth: 130
+                }
                 // 当前采样（M3 放置落点；检索/选择在左 Dock 采样面板）
                 Label {
                     text: sampleModel.currentSampleText
@@ -154,12 +220,18 @@ ApplicationWindow {
             Layout.fillHeight: true
             currentIndex: window.currentPage
             EditPage {
+                id: editPage
                 chartMeta: window.chartMeta
                 chartPath: window.chartPath
+                showChannelIds: window.showChannelIds
+                beatNum: window.beatNum
+                beatDen: window.beatDen
+                noteSampleMode: window.noteSampleMode
+                showExtras: window.showExtras
                 onSamplePicked: (id, file) => {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
                     window.currentSampleId = id
-                    window.statusText = qsTr("当前采样：#WAV%1 %2").arg(id, file)
+                    setStatus(qsTr("当前采样：#WAV%1 %2").arg(id, file))
                 }
             }
             SlicePage {}
@@ -183,15 +255,32 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                Label { text: window.statusText; color: Theme.textMuted
-                        elide: Text.ElideMiddle; Layout.fillWidth: true
-                        font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall }
+                // 单条消息：悬停信息（临时，优先）> 状态消息（瞬态：更新后 ~8s 自动回「就绪」）
+                Label {
+                    text: editPage.hoverText !== "" ? editPage.hoverText : window.statusText
+                    color: editPage.hoverText !== "" ? Theme.accent : Theme.textMuted
+                    elide: Text.ElideMiddle
+                    Layout.fillWidth: true
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                }
                 Label {
                     text: chartMeta ? "SP7K · " + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
                 }
             }
         }
+    }
+
+    // ---------- 状态消息（瞬态：setStatus 后 ~8s 自动回「就绪」，避免常驻噪声） ----------
+    Timer {
+        id: statusClearTimer
+        interval: 8000
+        onTriggered: window.statusText = qsTr("就绪")
+    }
+    function setStatus(msg) {
+        window.statusText = msg
+        statusClearTimer.restart()
     }
 
     // ---------- 第一条真链路：打开谱面 → dispatch(info) → 元信息 ----------
@@ -214,11 +303,14 @@ ApplicationWindow {
         if (r.ok) {
             window.chartMeta = r.result.meta
             window.chartPath = r.result.path
+            // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
+            chartSession.openChart(path)
             // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
             // 预计算 + 链式单参 .arg（经典稳妥形式）
             var wavCount = r.result.samples && r.result.samples.wav
                            ? r.result.samples.wav.length : 0
             window.statusText = qsTr("已打开：%1（%2 个采样）").arg(r.result.path).arg(wavCount)
+            statusClearTimer.restart()
             // 采样面板 + lint 面板：info 的 wav 定义表 + check 的缺失/诊断（M2 第 4 步）
             sampleModel.loadFromInfo(resp)
             var checkResp = beatbench.dispatch(JSON.stringify({ command: "check", args: { path: path } }))
@@ -227,6 +319,7 @@ ApplicationWindow {
         } else {
             window.chartMeta = null
             window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code, r.error.message)
+            statusClearTimer.restart()
         }
     }
 

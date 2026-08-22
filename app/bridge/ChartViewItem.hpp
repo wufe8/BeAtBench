@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// 竖向时间轴自绘视口（M2 第 5 步，doc/07 §3 步 5）：QQuickPaintedItem + QPainter。
+// 绘制（v1）：小节标尺（小节号 + BPM 变化标记 + STOP 段）、槽位网格、轨道列
+// （皿/1-7/BGM/2P，按谱面实际出现的 Lane 数据驱动）、note / LN 头尾 / 地雷
+// 按 (measure,pos) 落位；方向默认「顶部=高小节」（preview.html，note 自上而下落）。
+// 秒标尺与 BGM 波形铺底后置 Phase B（doc/07 §4）。
+// 数据源 = ChartSession（core Chart + TimingEngine 真数据）；只读展示，无编辑（M3）。
+// 滚动/缩放由 QML 侧 ChartView.qml 驱动（Flickable 无 onWheel，doc/04 §5）。
+// 类型经 QML_ELEMENT 注册为 BeatBench 模块组件（皮肤 L3 按组件覆写的落点，doc/05 §8）。
+#pragma once
+
+#include <QColor>
+#include <QFont>
+#include <QQuickPaintedItem>
+#include <QtQml/qqmlregistration.h>
+
+#include <vector>
+
+#include "beatbench/core/Chart.hpp"
+#include "beatbench/core/Lane.hpp"
+
+class QPainter;
+
+namespace beatbench::app {
+
+class ChartSession;
+class ThemeManager;
+
+class ChartViewItem : public QQuickPaintedItem {
+    Q_OBJECT
+    QML_ELEMENT
+
+    Q_PROPERTY(QObject* session READ session WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(QObject* theme READ theme WRITE setTheme NOTIFY themeChanged)
+    Q_PROPERTY(qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
+    Q_PROPERTY(qreal rulerWidth READ rulerWidth WRITE setRulerWidth NOTIFY rulerWidthChanged)
+    Q_PROPERTY(qreal laneWidth READ laneWidth WRITE setLaneWidth NOTIFY laneWidthChanged)
+    Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollYChanged)
+    Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentHeightChanged)
+    Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
+    Q_PROPERTY(int gridDiv READ gridDiv WRITE setGridDiv NOTIFY gridDivChanged)
+    Q_PROPERTY(int columnCount READ columnCount NOTIFY columnCountChanged)
+    /// BGM 列点击展开 → 按 #WAV id 从小到大分列（iBMSC 式「背景轨分开显示」，BMS 笔记 ch01 注）
+    Q_PROPERTY(bool bgmExpanded READ bgmExpanded WRITE setBgmExpanded NOTIFY bgmExpandedChanged)
+    /// 轨道列头显示实际 BMS 通道 id（皿=16、键1=11…；工具条勾选 / Ctrl 临时，doc debug 用）
+    Q_PROPERTY(bool showChannelIds READ showChannelIds WRITE setShowChannelIds NOTIFY showChannelIdsChanged)
+    /// 拍子线（强于槽位弱线、弱于小节线）：每 num/den 音符一条（默认 [1]/[4] = 每 4 分音符）
+    Q_PROPERTY(int beatNum READ beatNum WRITE setBeatNum NOTIFY beatNumChanged)
+    Q_PROPERTY(int beatDen READ beatDen WRITE setBeatDen NOTIFY beatDenChanged)
+    /// note 上显示所用采样：0=隐藏 1=显示 id（01） 2=显示文件名（#WAVxx 文件）
+    Q_PROPERTY(int noteSampleMode READ noteSampleMode WRITE setNoteSampleMode NOTIFY noteSampleModeChanged)
+    /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式，doc 参考 local/doc 截图）
+    Q_PROPERTY(bool showExtras READ showExtras WRITE setShowExtras NOTIFY showExtrasChanged)
+    /// 水平滚动（列区；轨道列超宽时用——底部滚动条 / Shift+滚轮 / Shift+拖拽）
+    Q_PROPERTY(qreal scrollX READ scrollX WRITE setScrollX NOTIFY scrollXChanged)
+    Q_PROPERTY(qreal contentWidth READ contentWidth NOTIFY contentWidthChanged)
+    /// 鼠标位置 + note 信息（状态栏展示；空 = 未悬停）
+    Q_PROPERTY(QString hoverText READ hoverText NOTIFY hoverChanged)
+
+public:
+    explicit ChartViewItem(QQuickItem* parent = nullptr);
+
+    void paint(QPainter* painter) override;
+
+    QObject* session() const { return m_session; }
+    void setSession(QObject* session);
+    QObject* theme() const { return m_theme; }
+    void setTheme(QObject* theme);
+
+    qreal measureHeight() const { return m_measureHeight; }
+    void setMeasureHeight(qreal v);
+    qreal rulerWidth() const { return m_rulerWidth; }
+    void setRulerWidth(qreal v);
+    qreal laneWidth() const { return m_laneWidth; }
+    void setLaneWidth(qreal v);
+    qreal scrollY() const { return m_scrollY; }
+    void setScrollY(qreal v);
+    qreal contentHeight() const;
+    bool topHigh() const { return m_topHigh; }
+    void setTopHigh(bool v);
+    int gridDiv() const { return m_gridDiv; }
+    void setGridDiv(int v);
+    int columnCount() const { return static_cast<int>(m_columns.size()); }
+    bool bgmExpanded() const { return m_bgmExpanded; }
+    void setBgmExpanded(bool v);
+    bool showChannelIds() const { return m_showChannelIds; }
+    void setShowChannelIds(bool v);
+    int beatNum() const { return m_beatNum; }
+    void setBeatNum(int v);
+    int beatDen() const { return m_beatDen; }
+    void setBeatDen(int v);
+    int noteSampleMode() const { return m_noteSampleMode; }
+    void setNoteSampleMode(int v);
+    bool showExtras() const { return m_showExtras; }
+    void setShowExtras(bool v);
+    qreal scrollX() const { return m_scrollX; }
+    void setScrollX(qreal v);
+    qreal contentWidth() const;
+    QString hoverText() const { return m_hoverText; }
+
+    /// 命中 BGM 列头（视口顶部横条内）→ 列下标（-1 未命中）；QML 点击用于展开/折叠。
+    Q_INVOKABLE int bgmHeaderIndexAt(qreal x) const;
+
+signals:
+    void sessionChanged();
+    void themeChanged();
+    void measureHeightChanged();
+    void rulerWidthChanged();
+    void laneWidthChanged();
+    void scrollYChanged();
+    void contentHeightChanged();
+    void topHighChanged();
+    void gridDivChanged();
+    void columnCountChanged();
+    void bgmExpandedChanged();
+    void showChannelIdsChanged();
+    void beatNumChanged();
+    void beatDenChanged();
+    void noteSampleModeChanged();
+    void showExtrasChanged();
+    void scrollXChanged();
+    void contentWidthChanged();
+    void hoverChanged();
+    /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
+    void chartChanged();
+
+protected:
+    void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
+    void hoverMoveEvent(QHoverEvent* event) override;
+    void hoverLeaveEvent(QHoverEvent* event) override;
+
+private:
+    struct Column {
+        beatbench::Lane lane;
+        QString label;
+        bool bgm = false;            // 背景音轨列（ch01；bgmId==0 为聚合列）
+        bool p2 = false;             // 2P 列（浅主色底）
+        std::uint32_t bgmId = 0;     // 展开后：本列对应的 #WAV id（0 = 聚合）
+        int bgaLayer = -1;           // BGA 图层列（0=base 1=poor 2=layer 3=layer2；-1 = 非 BGA）
+        bool bpm = false;            // BPM 元事件轨（窄列，iBMSC 式；不随 scrollX 滚动）
+        bool stop = false;           // STOP 元事件轨（同上）
+    };
+
+    void onSessionChartChanged();
+    void updateHover(const QPointF& pos);
+    ChartSession* sessionObj() const;
+    ThemeManager* themeObj() const;
+
+    /// 轨道列重算（谱面切换/尺寸/展开状态变化时；按谱面实际出现的 Lane 数据驱动）。
+    void rebuildColumns();
+    int columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId = 0) const;
+    /// BGA 事件 → 图层列（-1 = 无该层列，如 showExtras 关闭）。
+    int columnForBga(int layer) const;
+    void clampScrollX();
+    /// 列头文本：showChannelIds 时 = BMS 实际通道号（bms_channel_for 反向映射）。
+    QString columnLabel(const beatbench::Lane& lane, const QString& displayName) const;
+    /// 列宽：BPM/STOP 元事件轨 = m_metaTrackWidth（窄于普通轨道），其余 = m_laneWidth。
+    qreal columnWidth(std::size_t i) const;
+    /// 固定元事件轨（BPM/STOP）总宽（不加 scrollX / 不参与居中）。
+    qreal metaTrackWidth() const;
+
+    /// 拍位（measureFloat = measure + pos，0 起）→ 屏幕 y（含方向翻转与滚动）。
+    qreal yOf(qreal measureFloat) const;
+    /// 屏幕 y → 拍位（yOf 的逆；状态栏鼠标位置用）。
+    qreal measureAt(qreal screenY) const;
+    qreal posDouble(const beatbench::Rational& r) const;
+    void clampScroll();
+
+    QColor noteColor(const beatbench::Lane& lane) const;
+    double bpmAt(const beatbench::Chart& chart, int measure) const;
+    double beatsOf(const beatbench::Chart& chart, int measure) const;
+
+    void drawHint(QPainter* p, const QString& text);
+
+    QObject* m_session = nullptr;
+    QObject* m_theme = nullptr;
+    qreal m_measureHeight = 96.0;
+    qreal m_rulerWidth = 56.0;
+    qreal m_laneWidth = 38.0;
+    qreal m_metaTrackWidth = 36.0;  // BPM/STOP 元事件轨宽（窄于普通轨道，iBMSC 式）
+    qreal m_scrollY = 0.0;
+    bool m_topHigh = true;
+    int m_gridDiv = 16;
+    bool m_bgmExpanded = false;
+    bool m_showChannelIds = false;
+    int m_beatNum = 1;    // 拍子线：每 num/den 音符一条（默认 [1]/[4]）
+    int m_beatDen = 4;
+    int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
+    bool m_showExtras = false;  // BGA 图层通道列（d场景更多轨道）
+    qreal m_scrollX = 0.0;
+    std::vector<Column> m_columns;
+    std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
+    QFont m_rulerFont;
+    QFont m_noteLabelFont;  // note 内采样标签（9px）
+    QString m_hoverText;   // 鼠标位置 + note 信息（状态栏）
+    int m_hoverMeasure = -1;
+    qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
+};
+
+}  // namespace beatbench::app
