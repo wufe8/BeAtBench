@@ -13,9 +13,31 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace beatbench::edit {
+
+// ---------- TimingKind ----------
+
+std::string_view timing_kind_name(TimingKind kind) {
+    switch (kind) {
+        case TimingKind::Bpm: return "bpm";
+        case TimingKind::Stop: return "stop";
+        case TimingKind::Measure: return "measure";
+    }
+    return "";
+}
+
+std::optional<TimingKind> timing_kind_from_name(std::string_view name) {
+    if (name == "bpm") return TimingKind::Bpm;
+    if (name == "stop") return TimingKind::Stop;
+    if (name == "measure") return TimingKind::Measure;
+    return std::nullopt;
+}
 
 // ---------- 工具 ----------
 
@@ -82,6 +104,52 @@ void shift_pairs_after(std::vector<Event<Note>>& notes, std::size_t at, int delt
         if (!p) continue;
         if (delta > 0 && *p >= at) ++*p;
         if (delta < 0 && *p > at) --*p;
+    }
+}
+
+// —— timing 事件通用工具（BPM/STOP/节拍；按 (measure,pos) 升序，同 pos 保留次序） ——
+
+// 值读取（按种类取 value/duration_us/beats）
+double timing_value(const Event<Bpm>& e) { return e.value.value; }
+double timing_value(const Event<Stop>& e) {
+    return static_cast<double>(e.value.duration_us);
+}
+double timing_value(const Event<MeasureLen>& e) { return e.value.beats; }
+
+// 在按 (measure,pos) 升序的容器中找首个 >= (measure,pos) 的位置（插入点）
+template <typename T>
+std::size_t lower_bound_event(const std::vector<Event<T>>& evs, std::uint32_t measure,
+                              const Rational& pos) {
+    const Event<T> probe{measure, pos, {}};
+    return static_cast<std::size_t>(
+        std::lower_bound(evs.begin(), evs.end(), probe,
+                         [](const Event<T>& a, const Event<T>& b) {
+                             if (a.measure != b.measure) return a.measure < b.measure;
+                             return a.pos < b.pos;
+                         }) -
+        evs.begin());
+}
+
+// 找 (measure, pos) 处事件区间 [begin, end)（容器有序）
+template <typename T>
+std::pair<std::size_t, std::size_t> find_event_range(const std::vector<Event<T>>& evs,
+                                                     std::uint32_t measure,
+                                                     const Rational& pos) {
+    const std::size_t lo = lower_bound_event(evs, measure, pos);
+    std::size_t hi = lo;
+    while (hi < evs.size() && evs[hi].measure == measure && evs[hi].pos == pos) ++hi;
+    return {lo, hi};
+}
+
+// 快照值写入事件（按种类；Measure 的 pos 恒归 0）
+template <typename T>
+void set_timing_value(Event<T>& ev, double v) {
+    if constexpr (std::is_same_v<T, Bpm>) {
+        ev.value.value = v;
+    } else if constexpr (std::is_same_v<T, Stop>) {
+        ev.value.duration_us = static_cast<std::int64_t>(v);
+    } else {
+        ev.value.beats = v;
     }
 }
 
@@ -463,6 +531,120 @@ void Selection::add_rect(std::uint32_t measure_lo, std::uint32_t measure_hi,
         }
         m_refs.insert(ref);
     }
+}
+
+// ---------- PutTimingCommand ----------
+
+PutTimingCommand::PutTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos,
+                                   double value)
+    : m_kind(kind), m_measure(measure), m_pos(pos), m_value(value) {
+    if (m_kind == TimingKind::Measure) m_pos = Rational(0, 1);  // 节拍恒 pos 0
+}
+
+void PutTimingCommand::apply(Chart& chart) {
+    m_existed = false;
+    m_applied_index.reset();
+    const auto do_apply = [&](auto& evs) {
+        using Ev = typename std::remove_reference_t<decltype(evs)>::value_type;
+        const auto [lo, hi] = find_event_range(evs, m_measure, m_pos);
+        if (lo != hi) {  // 同位替换（同 pos 多值：改最后一个 = 引擎「后者覆盖」语义）
+            m_existed = true;
+            m_old_value = timing_value(evs[hi - 1]);
+            set_timing_value(evs[hi - 1], m_value);
+            return;
+        }
+        Ev ev;
+        ev.measure = m_measure;
+        ev.pos = m_pos;
+        set_timing_value(ev, m_value);
+        evs.insert(evs.begin() + static_cast<std::ptrdiff_t>(lo), std::move(ev));
+        m_applied_index = lo;
+    };
+    switch (m_kind) {
+        case TimingKind::Bpm: do_apply(chart.bpm_events); break;
+        case TimingKind::Stop: do_apply(chart.stop_events); break;
+        case TimingKind::Measure: do_apply(chart.measure_events); break;
+    }
+}
+
+void PutTimingCommand::invert(Chart& chart) {
+    const auto do_invert = [&](auto& evs) {
+        if (m_existed) {
+            const auto [lo, hi] = find_event_range(evs, m_measure, m_pos);
+            if (lo != hi) {
+                set_timing_value(evs[hi - 1], m_old_value);  // 恢复旧值
+            }
+            return;
+        }
+        if (m_applied_index && *m_applied_index < evs.size()) {
+            evs.erase(evs.begin() + static_cast<std::ptrdiff_t>(*m_applied_index));
+        }
+        m_applied_index.reset();
+    };
+    switch (m_kind) {
+        case TimingKind::Bpm: do_invert(chart.bpm_events); break;
+        case TimingKind::Stop: do_invert(chart.stop_events); break;
+        case TimingKind::Measure: do_invert(chart.measure_events); break;
+    }
+}
+
+std::string PutTimingCommand::describe() const {
+    std::string name(timing_kind_name(m_kind));
+    return "设置 " + name + " (m" + std::to_string(m_measure) + " @" +
+           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+}
+
+// ---------- DeleteTimingCommand ----------
+
+DeleteTimingCommand::DeleteTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos)
+    : m_kind(kind), m_measure(measure), m_pos(pos) {
+    if (m_kind == TimingKind::Measure) m_pos = Rational(0, 1);  // 节拍恒 pos 0
+}
+
+void DeleteTimingCommand::apply(Chart& chart) {
+    m_bpm.clear();
+    m_stop.clear();
+    m_measure_evs.clear();
+    m_index = 0;
+    const auto do_apply = [&](auto& evs, auto& snap) {
+        const auto [lo, hi] = find_event_range(evs, m_measure, m_pos);
+        for (std::size_t i = lo; i < hi; ++i) snap.push_back(evs[i]);
+        if (lo == hi) return;
+        m_index = lo;
+        evs.erase(evs.begin() + static_cast<std::ptrdiff_t>(lo),
+                  evs.begin() + static_cast<std::ptrdiff_t>(hi));
+    };
+    switch (m_kind) {
+        case TimingKind::Bpm: do_apply(chart.bpm_events, m_bpm); break;
+        case TimingKind::Stop: do_apply(chart.stop_events, m_stop); break;
+        case TimingKind::Measure: do_apply(chart.measure_events, m_measure_evs); break;
+    }
+}
+
+void DeleteTimingCommand::invert(Chart& chart) {
+    const auto do_invert = [&](auto& evs, const auto& snap) {
+        if (snap.empty()) return;
+        std::size_t at = m_index;
+        if (at > evs.size()) at = evs.size();
+        for (std::size_t i = 0; i < snap.size(); ++i) {
+            evs.insert(evs.begin() + static_cast<std::ptrdiff_t>(at + i), snap[i]);
+        }
+    };
+    switch (m_kind) {
+        case TimingKind::Bpm: do_invert(chart.bpm_events, m_bpm); break;
+        case TimingKind::Stop: do_invert(chart.stop_events, m_stop); break;
+        case TimingKind::Measure: do_invert(chart.measure_events, m_measure_evs); break;
+    }
+    m_bpm.clear();
+    m_stop.clear();
+    m_measure_evs.clear();
+    m_index = 0;
+}
+
+std::string DeleteTimingCommand::describe() const {
+    std::string name(timing_kind_name(m_kind));
+    return "删除 " + name + " (m" + std::to_string(m_measure) + " @" +
+           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
 }
 
 }  // namespace beatbench::edit

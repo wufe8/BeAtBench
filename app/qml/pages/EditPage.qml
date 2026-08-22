@@ -24,11 +24,42 @@ Item {
     property int noteSampleMode: 0
     /// 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     property bool showExtras: false
+    /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
+    property string editorTool: "select"
+    /// 放置用采样数值 id（chartSession.sampleValueOf；-1 = 未选）
+    property int sampleId: -1
+    /// 当前采样展示文本（提示用）
+    property string sampleText: ""
+    /// 选中 note 集合（NoteRef；框选后回填 → 高亮）
+    property var selection: []
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
     readonly property string hoverText: chartView ? chartView.hoverText : ""
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)
+    /// note 工具点击（hitTest 结果）→ Main 走 note.put
+    signal hitPlaceRequested(var hit)
+    /// 框选完成 → Main 存 selection + 复制到剪贴板
+    signal selectionFinished(var refs)
+    /// ln/mine 工具点击（命令未接）
+    signal toolNotReady(string tool)
+
+    /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
+    function centerMeasure() {
+        return chartView ? chartView.centerMeasure() : 0
+    }
+
+    /// 调试入口（--click）：视口局部坐标 → ChartView 同一手势分发路径（与 DPR/布局无关）。
+    function clickLocal(x, y) {
+        if (chartView) chartView.clickAt(x, y)
+    }
+
+    /// 调试入口（--click，旧）：本页局部坐标 → ChartView 局部坐标 → 同一手势分发路径。
+    function clickAt(x, y) {
+        if (!chartView) return
+        const p = chartView.mapFromItem(root, x, y)
+        chartView.clickAt(p.x, p.y)
+    }
 
     SplitView {
         anchors.fill: parent
@@ -142,6 +173,13 @@ Item {
                     beatDen: root.beatDen
                     noteSampleMode: root.noteSampleMode
                     showExtras: root.showExtras
+                    editorTool: root.editorTool
+                    sampleId: root.sampleId
+                    sampleText: root.sampleText
+                    selection: root.selection
+                    onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
+                    onSelectionFinished: (refs) => root.selectionFinished(refs)
+                    onToolNotReady: (tool) => root.toolNotReady(tool)
                 }
             }
         }

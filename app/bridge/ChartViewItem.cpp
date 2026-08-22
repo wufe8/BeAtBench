@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cmath>
+#include <unordered_set>
 
 #include "bridge/ChartSession.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -41,6 +42,9 @@ void ChartViewItem::setSession(QObject* session) {
     m_session = session;
     if (auto* cs = sessionObj()) {
         connect(cs, &ChartSession::chartChanged, this, &ChartViewItem::onSessionChartChanged);
+        // 内容变化（编辑放置/删除/撤销）：列结构可能变（新 lane），但**不重置滚动**
+        connect(cs, &ChartSession::contentChanged, this,
+                &ChartViewItem::onSessionContentChanged);
     }
     rebuildColumns();
     emit sessionChanged();
@@ -60,6 +64,21 @@ void ChartViewItem::onSessionChartChanged() {
     rebuildColumns();
     emit contentHeightChanged();
     emit chartChanged();
+    update();
+}
+
+void ChartViewItem::onSessionContentChanged() {
+    // 同文档内容变化（note.put/delete/undo…）：列结构可能变（新 lane），但视图滚动保持——
+    // 不发 chartChanged（那是 QML 重置滚动的信号）。
+    rebuildColumns();
+    emit contentHeightChanged();
+    update();
+}
+
+void ChartViewItem::setSelection(const QVariantList& v) {
+    if (m_selection == v) return;
+    m_selection = v;
+    emit selectionChanged();
     update();
 }
 
@@ -144,6 +163,118 @@ int ChartViewItem::bgmHeaderIndexAt(qreal x) const {
             return static_cast<int>(i);
     }
     return -1;
+}
+
+QString ChartViewItem::noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
+                                  const beatbench::Lane& lane, std::uint32_t sample) {
+    return QString::asprintf("%u|%lld|%lld|%d|%d|%d|%u", measure,
+                             static_cast<long long>(pos.num), static_cast<long long>(pos.den),
+                             static_cast<int>(lane.player), static_cast<int>(lane.kind),
+                             static_cast<int>(lane.index), sample);
+}
+
+QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
+    QVariantMap res;
+    res.insert(QStringLiteral("valid"), false);
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->chart() || m_measureHeight <= 0.0 || y < 18.0) return res;
+    int col = -1;
+    for (std::size_t i = 0; i < m_colRects.size(); ++i) {
+        if (m_colRects[i].contains(QPointF(x, y))) {
+            col = static_cast<int>(i);
+            break;
+        }
+    }
+    if (col < 0 || static_cast<std::size_t>(col) >= m_columns.size()) return res;
+    const Column& c = m_columns[static_cast<std::size_t>(col)];
+    // 元事件轨（BPM/STOP）/ BGA 图层列 / BGM 列：不可放置
+    if (c.bpm || c.stop || c.bgaLayer >= 0 || c.bgm) return res;
+    const qreal mf = measureAt(y);
+    if (mf < 0.0 || mf >= cs->measureCount()) return res;
+    const int measure = static_cast<int>(std::floor(mf));
+    qreal frac = mf - measure;
+    const int den = std::max(1, m_gridDiv);  // 吸附：gridDiv 槽/小节（默认 1/16 snap）
+    int num = static_cast<int>(std::llround(frac * den));
+    if (num >= den) num = den - 1;
+    if (num < 0) num = 0;
+    res.insert(QStringLiteral("valid"), true);
+    res.insert(QStringLiteral("measure"), measure);
+    res.insert(QStringLiteral("num"), num);
+    res.insert(QStringLiteral("den"), den);
+    res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
+    res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+    QString kind = QStringLiteral("key");
+    if (c.lane.kind == beatbench::LaneKind::Scratch) kind = QStringLiteral("scratch");
+    else if (c.lane.kind == beatbench::LaneKind::Pedal) kind = QStringLiteral("pedal");
+    else if (c.lane.kind == beatbench::LaneKind::Bgm) kind = QStringLiteral("bgm");
+    res.insert(QStringLiteral("laneKind"), kind);
+    res.insert(QStringLiteral("label"), c.label);
+    return res;
+}
+
+QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) const {
+    QVariantList out;
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->chart()) return out;
+    const QRectF sel(QPointF(std::min(x0, x1), std::min(y0, y1)),
+                     QPointF(std::max(x0, x1), std::max(y0, y1)));
+    const qreal mfLo = std::min(measureAt(sel.top()), measureAt(sel.bottom()));
+    const qreal mfHi = std::max(measureAt(sel.top()), measureAt(sel.bottom()));
+    const int m0 = std::max(0, static_cast<int>(std::floor(mfLo)) - 1);
+    const int m1 = std::min(cs->measureCount() - 1,
+                            static_cast<int>(std::ceil(mfHi)) + 1);
+    const beatbench::Chart& chart = *cs->chart();
+    const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
+    std::vector<QVariantMap> hits;
+    for (const auto& ev : chart.notes) {
+        if (static_cast<int>(ev.measure) < m0 || static_cast<int>(ev.measure) > m1) continue;
+        const int col = columnFor(ev.value.lane, ev.value.sample.id);
+        if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
+        const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
+        const qreal y = yOf(ev.measure + posDouble(ev.pos));
+        const QRectF nr(r.x() + 2, y - noteH, r.width() - 4, noteH);
+        if (!nr.intersects(sel)) continue;
+        QVariantMap ref;
+        ref.insert(QStringLiteral("measure"), static_cast<int>(ev.measure));
+        QVariantMap pos;
+        pos.insert(QStringLiteral("num"), static_cast<qlonglong>(ev.pos.num));
+        pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
+        ref.insert(QStringLiteral("pos"), pos);
+        QVariantMap lane;
+        lane.insert(QStringLiteral("player"), QVariant::fromValue(ev.value.lane.player));
+        lane.insert(QStringLiteral("kind"),
+                    ev.value.lane.kind == beatbench::LaneKind::Scratch
+                        ? QStringLiteral("scratch")
+                        : ev.value.lane.kind == beatbench::LaneKind::Pedal
+                              ? QStringLiteral("pedal")
+                              : ev.value.lane.kind == beatbench::LaneKind::Bgm
+                                    ? QStringLiteral("bgm")
+                                    : QStringLiteral("key"));
+        lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
+        ref.insert(QStringLiteral("lane"), lane);
+        ref.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
+        hits.push_back(std::move(ref));
+    }
+    // 稳定升序（(measure,pos) → lane → sample），满足「顺序无关」的前提下给可预期结果
+    std::stable_sort(hits.begin(), hits.end(), [](const QVariantMap& a, const QVariantMap& b) {
+        const qlonglong am = a[QStringLiteral("measure")].toLongLong();
+        const qlonglong bm = b[QStringLiteral("measure")].toLongLong();
+        if (am != bm) return am < bm;
+        const auto an = a[QStringLiteral("pos")].toMap()[QStringLiteral("num")].toLongLong();
+        const auto bn = b[QStringLiteral("pos")].toMap()[QStringLiteral("num")].toLongLong();
+        if (an != bn) return an < bn;
+        const auto ad = a[QStringLiteral("pos")].toMap()[QStringLiteral("den")].toLongLong();
+        const auto bd = b[QStringLiteral("pos")].toMap()[QStringLiteral("den")].toLongLong();
+        return ad != bd ? an * bd < bn * ad
+                        : a[QStringLiteral("lane")]
+                                  .toMap()[QStringLiteral("index")]
+                                  .toLongLong() <
+                              b[QStringLiteral("lane")]
+                                  .toMap()[QStringLiteral("index")]
+                                  .toLongLong();
+    });
+    for (auto& m : hits) out.push_back(std::move(m));
+    return out;
 }
 
 void ChartViewItem::setBeatNum(int v) {
@@ -700,6 +831,38 @@ void ChartViewItem::paint(QPainter* p) {
 
     // ---- note / LN / 地雷（note 底边 = 实际时间点） ----
     const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
+    // 选中高亮：NoteRef 键集（框选/粘贴后 QML 回填 selection）
+    std::unordered_set<std::string> selKeys;
+    if (!m_selection.isEmpty()) {
+        for (const auto& item : m_selection) {
+            const QVariantMap m = item.toMap();
+            const QVariantMap p = m.value(QStringLiteral("pos")).toMap();
+            const QVariantMap l = m.value(QStringLiteral("lane")).toMap();
+            const beatbench::Rational pos(p.value(QStringLiteral("num")).toLongLong(),
+                                          p.value(QStringLiteral("den")).toLongLong());
+            const QString kind = l.value(QStringLiteral("kind")).toString();
+            beatbench::Lane lane;
+            lane.player = static_cast<std::uint8_t>(
+                l.value(QStringLiteral("player")).toLongLong());
+            lane.index = static_cast<std::uint8_t>(
+                l.value(QStringLiteral("index")).toLongLong());
+            if (kind == QStringLiteral("scratch")) lane.kind = beatbench::LaneKind::Scratch;
+            else if (kind == QStringLiteral("pedal")) lane.kind = beatbench::LaneKind::Pedal;
+            else if (kind == QStringLiteral("bgm")) lane.kind = beatbench::LaneKind::Bgm;
+            selKeys.insert(noteRefKey(static_cast<std::uint32_t>(
+                                          m.value(QStringLiteral("measure")).toLongLong()),
+                                      pos, lane,
+                                      static_cast<std::uint32_t>(
+                                          m.value(QStringLiteral("sample")).toLongLong()))
+                               .toStdString());
+        }
+    }
+    const auto isSelected = [&](const beatbench::Event<beatbench::Note>& ev) {
+        return !selKeys.empty() &&
+               selKeys.count(noteRefKey(ev.measure, ev.pos, ev.value.lane,
+                                        ev.value.sample.id)
+                                 .toStdString()) > 0;
+    };
     // 描边标签（文件名模式/控制轨）：文字居中于格子、允许越出 note，浅色描边保证
     // 超出部分落在深底上也清晰可读（用户反馈 2026-09：纯深色文字在深底对比度不足）。
     const auto drawHaloLabel = [&](const QRectF& cell, const qreal y, const QString& label,
@@ -767,6 +930,11 @@ void ChartViewItem::paint(QPainter* p) {
             path.lineTo(r.center().x() - s, y - s);
             path.closeSubpath();
             p->fillPath(path, th->mine());
+            if (isSelected(ev)) {
+                p->setPen(QPen(th->onAccent(), 1.2));
+                p->setBrush(Qt::NoBrush);
+                p->drawPath(path);
+            }
             continue;
         }
 
@@ -788,12 +956,24 @@ void ChartViewItem::paint(QPainter* p) {
                 p->fillRect(QRectF(r.x() + 2, y2 - noteH, r.width() - 4, noteH),
                             noteColor(partner.value.lane));
                 drawSampleLabel(r, y, note);
+                if (isSelected(ev)) {
+                    p->setPen(QPen(th->onAccent(), 1.2));
+                    p->setBrush(Qt::NoBrush);
+                    p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
+                                       noteH + 2.0));
+                }
             } else if (static_cast<int>(partner.measure) < first ||
                        static_cast<int>(partner.measure) > last) {
                 // 头在可视范围外：只画尾帽
                 p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
                             noteColor(note.lane));
                 drawSampleLabel(r, y, note);
+                if (isSelected(ev)) {
+                    p->setPen(QPen(th->onAccent(), 1.2));
+                    p->setBrush(Qt::NoBrush);
+                    p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
+                                       noteH + 2.0));
+                }
             }
             continue;
         }
@@ -801,6 +981,11 @@ void ChartViewItem::paint(QPainter* p) {
         p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
                     noteColor(note.lane));
         drawSampleLabel(r, y, note);
+        if (isSelected(ev)) {
+            p->setPen(QPen(th->onAccent(), 1.2));
+            p->setBrush(Qt::NoBrush);
+            p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0, noteH + 2.0));
+        }
     }
 
     // ---- BGA 图层事件（更多轨道；固定四列：BGA/LAYER/POOR/LAYER2 = 04/06/07/0A） ----

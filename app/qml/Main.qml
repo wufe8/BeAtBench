@@ -47,9 +47,19 @@ ApplicationWindow {
     // 当前编辑工具（互斥单选，会话状态；M3 接输入/放置，note 类型（普通/LN/地雷）届时
     // 作为正交维度另设「放置类型」组，不并入本组——doc/05 §5 交互）
     property string editorTool: "select"
+    // 剪贴板（BMS 原始行；clipboard.copy 输出 → paste 输入；会话状态）
+    property var clipboardLines: []
+    // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
+    property var selectionRefs: []
 
     // ---------- 全局快捷键（QML MenuItem 无 shortcut 属性，用 Shortcut 类型） ----------
     Shortcut { sequence: "Ctrl+O"; onActivated: fileDialog.open() }
+    Shortcut { sequence: "Ctrl+S"; onActivated: saveChart() }
+    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: saveAsDialog.open() }
+    Shortcut { sequence: "Ctrl+Z"; onActivated: undoEdit() }
+    Shortcut { sequence: "Ctrl+Y"; onActivated: redoEdit() }
+    Shortcut { sequence: "Ctrl+C"; onActivated: copySelection() }
+    Shortcut { sequence: "Ctrl+V"; onActivated: pasteClipboard() }
     Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
 
     // ---------- 菜单栏（固定全局） ----------
@@ -60,6 +70,16 @@ ApplicationWindow {
                 text: qsTr("打开谱面…")
                 onTriggered: fileDialog.open()
             }
+            MenuItem {
+                text: qsTr("保存")
+                enabled: chartMeta !== null
+                onTriggered: saveChart()
+            }
+            MenuItem {
+                text: qsTr("另存为…")
+                enabled: chartMeta !== null
+                onTriggered: saveAsDialog.open()
+            }
             MenuSeparator {}
             MenuItem {
                 text: qsTr("退出")
@@ -69,8 +89,13 @@ ApplicationWindow {
         Menu {
             title: qsTr("编辑")
             enabled: chartMeta !== null
+            MenuItem { text: qsTr("撤销"); onTriggered: undoEdit() }
+            MenuItem { text: qsTr("重做"); onTriggered: redoEdit() }
+            MenuSeparator {}
+            MenuItem { text: qsTr("复制"); onTriggered: copySelection() }
+            MenuItem { text: qsTr("粘贴"); onTriggered: pasteClipboard() }
+            MenuSeparator {}
             MenuItem { text: qsTr("元信息编辑（M3）"); enabled: false }
-            MenuItem { text: qsTr("撤销（M3）"); enabled: false }
         }
         Menu {
             title: qsTr("视图")
@@ -228,10 +253,21 @@ ApplicationWindow {
                 beatDen: window.beatDen
                 noteSampleMode: window.noteSampleMode
                 showExtras: window.showExtras
+                editorTool: window.editorTool
+                sampleId: chartSession.sampleValueOf(window.currentSampleId)
+                sampleText: sampleModel.currentSampleText
+                selection: window.selectionRefs
                 onSamplePicked: (id, file) => {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
                     window.currentSampleId = id
                     setStatus(qsTr("当前采样：#WAV%1 %2").arg(id, file))
+                }
+                onHitPlaceRequested: (hit) => placeNote(hit)
+                onSelectionFinished: (refs) => onSelectionMade(refs)
+                onToolNotReady: (tool) => {
+                    setStatus(tool === "ln"
+                              ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
+                              : qsTr("地雷放置：M3 编辑命令尚未接 kind（当前仅普通 note）"))
                 }
             }
             SlicePage {}
@@ -295,6 +331,32 @@ ApplicationWindow {
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
     property string debugOpenPath: ""
     onDebugOpenPathChanged: if (debugOpenPath !== "") openChart(debugOpenPath)
+    // --tool / --click 调试参数（配 --screenshot 验收点击链）：工具 + 一次模拟点击
+    property string debugTool: ""
+    property double debugClickX: -1
+    property double debugClickY: -1
+    onDebugToolChanged: if (debugTool !== "") window.editorTool = debugTool
+    onDebugClickXChanged: debugMaybeClick()
+    onDebugClickYChanged: debugMaybeClick()
+    function debugMaybeClick() {
+        if (debugClickX < 0 || debugClickY < 0) return
+        // 等 openChart + 首帧渲染（hitTest 依赖 paint 后的 m_colRects）
+        debugClickTimer.restart()
+    }
+    Timer {
+        id: debugClickTimer
+        interval: 150
+        onTriggered: editPage.clickLocal(debugClickX, debugClickY)
+    }
+
+    // 另存为（文件 → 另存为… / Ctrl+Shift+S）
+    FileDialog {
+        id: saveAsDialog
+        title: qsTr("另存为 BMS 谱面")
+        fileMode: FileDialog.SaveFile
+        nameFilters: [qsTr("BMS 谱面 (*.bms)"), qsTr("所有文件 (*)")]
+        onAccepted: saveChartAs(urlToPath(selectedFile))
+    }
 
     function openChart(path) {
         var req = JSON.stringify({ command: "info", args: { path: path } })
@@ -330,6 +392,101 @@ ApplicationWindow {
         if (s.charAt(0) === "/" && /^\/[A-Za-z]:/.test(s))
             s = s.slice(1)
         return decodeURIComponent(s)
+    }
+
+    // ---------- 编辑命令封装（M3 协议：note.put/move/delete、session.*、clipboard.*） ----------
+    // 统一 dispatch + 成功即 chartSession.refresh()（指纹判定文档/内容变化，视图自动刷新）。
+    function sessionCmd(name, args) {
+        var req = JSON.stringify({ command: name, args: args || {} })
+        var resp = JSON.parse(beatbench.dispatch(req))
+        if (!resp.ok) {
+            setStatus(resp.error.code + ": " + resp.error.message)
+            return null
+        }
+        chartSession.refresh()
+        return resp.result
+    }
+    function placeNote(hit) {
+        if (window.currentSampleId === "") {
+            setStatus(qsTr("先选择采样：左 Dock「采样」面板点击 #WAVxx"))
+            return
+        }
+        var v = chartSession.sampleValueOf(window.currentSampleId)
+        if (v < 0) {
+            setStatus(qsTr("当前采样 #WAV%1 不在定义表中").arg(window.currentSampleId))
+            return
+        }
+        var r = sessionCmd("note.put", {
+            measure: hit.measure,
+            pos: { num: hit.num, den: hit.den },
+            lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
+            sample: v
+        })
+        if (r)
+            setStatus(qsTr("放置 #WAV%1 · 小节 %2 · %3/%4")
+                      .arg(window.currentSampleId).arg(hit.measure).arg(hit.num).arg(hit.den))
+    }
+    function onSelectionMade(refs) {
+        window.selectionRefs = refs
+        setStatus(qsTr("已选中 %1 个 note（Ctrl+C 复制）").arg(refs.length))
+    }
+    function copySelection() {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("没有选中（选择工具下 Shift+拖拽框选）"))
+            return
+        }
+        var r = sessionCmd("clipboard.copy", { selection: window.selectionRefs })
+        if (r) {
+            window.clipboardLines = r.lines
+            setStatus(qsTr("已复制 %1 个 note（%2 行）").arg(r.count).arg(r.lines.length))
+        }
+    }
+    function pasteClipboard() {
+        if (!window.clipboardLines || window.clipboardLines.length === 0) {
+            setStatus(qsTr("剪贴板为空（先框选 Ctrl+C）"))
+            return
+        }
+        var target = 0
+        if (typeof editPage !== "undefined" && editPage)
+            target = Math.floor(editPage.centerMeasure() || 0)
+        var r = sessionCmd("clipboard.paste", {
+            lines: window.clipboardLines,
+            target_measure: Math.max(0, target)
+        })
+        if (r)
+            setStatus(qsTr("已粘贴 %1 个 note 到小节 %2").arg(r.notes).arg(r.target_measure))
+    }
+    function undoEdit() {
+        var r = sessionCmd("session.undo")
+        if (r) {
+            if (r.ok)
+                setStatus(qsTr("已撤销（可重做 %1 步）").arg(r.redo_depth))
+            else
+                setStatus(qsTr("无可撤销"))
+        }
+    }
+    function redoEdit() {
+        var r = sessionCmd("session.redo")
+        if (r) {
+            if (r.ok)
+                setStatus(qsTr("已重做（可撤销 %1 步）").arg(r.undo_depth))
+            else
+                setStatus(qsTr("无可重做"))
+        }
+    }
+    function saveChart() {
+        var r = sessionCmd("session.save", { overwrite: true })
+        if (r) {
+            window.chartPath = r.output
+            setStatus(qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes))
+        }
+    }
+    function saveChartAs(path) {
+        var r = sessionCmd("session.save", { path: path, overwrite: true })
+        if (r) {
+            window.chartPath = r.output
+            setStatus(qsTr("已另存为：%1").arg(r.output))
+        }
     }
 
     // ---------- 关于对话框 ----------

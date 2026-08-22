@@ -283,18 +283,26 @@ int run_json(const std::string& request_text, bool multiline) {
                               ? std::string_view(request_text).substr(start)
                               : std::string_view(request_text).substr(start, e - start);
         if (!line.empty()) {
-            // 跳过纯空白行
+            // 跳过纯空白行（含 \r 结尾的空白）
             bool blank = true;
-            for (const char c : line) {
-                if (c != ' ' && c != '\t' && c != '\r') {
+            std::size_t first = 0;
+            std::size_t last = line.size();
+            for (std::size_t i = 0; i < line.size(); ++i) {
+                const char c = line[i];
+                if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
                     blank = false;
+                    first = i;
                     break;
                 }
             }
             if (!blank) {
+                // 去尾随 \r（Windows 换行 \r\n → 行尾残留）
+                while (last > first && (line[last - 1] == '\r' || line[last - 1] == '\n')) {
+                    --last;
+                }
                 any = true;
                 int c = 0;
-                dispatch_one(std::string(line), c);
+                dispatch_one(std::string(line.substr(first, last - first)), c);
                 if (c != 0 && code == 0) code = c;
             }
         }

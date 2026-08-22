@@ -199,6 +199,32 @@ int main(int argc, char** argv) {
             root->setProperty("debugShowExtras", true);
     }
 
+    // --tool <select|note|ln|mine|pan>：编辑工具（配 --click 验收手势分发）
+    const int toolIdx = args.indexOf(QStringLiteral("--tool"));
+    if (toolIdx >= 0 && toolIdx + 1 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugTool", args.at(toolIdx + 1));
+    }
+    // --sample <id 文本>：预选当前采样（放置链验收用）
+    const int sampleIdx = args.indexOf(QStringLiteral("--sample"));
+    if (sampleIdx >= 0 && sampleIdx + 1 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("currentSampleId", args.at(sampleIdx + 1));
+    }
+    // --click <x> <y>（窗口设备像素）：模拟一次点击（与真实事件同一手势路径；配 --screenshot）
+    const int clickIdx = args.indexOf(QStringLiteral("--click"));
+    if (clickIdx >= 0 && clickIdx + 2 < args.size()) {
+        bool okx = false, oky = false;
+        const double cx = args.at(clickIdx + 1).toDouble(&okx);
+        const double cy = args.at(clickIdx + 2).toDouble(&oky);
+        if (okx && oky) {
+            if (QObject* root = engine.rootObjects().value(0)) {
+                root->setProperty("debugClickX", cx);
+                root->setProperty("debugClickY", cy);
+            }
+        }
+    }
+
     if (engine.rootObjects().isEmpty())
         return -1;
     return app.exec();

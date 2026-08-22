@@ -2,6 +2,11 @@
 // 中央视口：竖向时间轴（M2 第 5 步，doc/07 §3 步 5）。
 // ChartViewItem 自绘（QPainter，真数据 = chartSession 上下文属性）；滚动/缩放/水平滚动
 // 由本组件驱动（⚠️ Flickable 无 onWheel → WheelHandler，doc/04 §5）。秒标尺/波形铺底后置 Phase B。
+// 编辑接线（M3 命令，handoff-m2-m3）：
+// - 工具分发：select 普通拖 = 滚动（保持原交互）、Shift+拖 = 框选（selectionFinished）；
+//   pan 拖 = 滚动；note 点击 = hitTest → hitPlaceRequested（Main 走 note.put）；
+//   地雷/LN 工具暂提示（M3 命令无 kind 语义）。
+// - 选中高亮：Main 把 selection 回填 → view.selection（ChartViewItem 绘制）。
 // BGM 列头点击 → 展开为按 #WAV id 分列（iBMSC 式后台轨分开显示，BMS 笔记 ch01 注）；
 // 列头显示实际 BMS 通道 id = 工具条勾选 / Ctrl 临时（C++ KeyMonitor 事件过滤器，Adobe 式）。
 // 皮肤边界（doc/08 §3.6 / doc/05 §8）：本组件 = 默认皮肤 surface「viewport」的组件库成员，
@@ -21,6 +26,15 @@ Item {
     property int beatDen: 4
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
+    // ---- 编辑接线（M3） ----
+    property string editorTool: "select" // select/note/ln/mine/pan（Main 会话状态）
+    property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
+    property string sampleText: ""       // 当前采样展示（无放置采样时提示）
+    property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
+
+    signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
+    signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
+    signal toolNotReady(string tool)        // ln/mine 工具点击（命令未接）
 
     onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
 
@@ -38,6 +52,7 @@ Item {
         beatDen: root.beatDen
         noteSampleMode: root.noteSampleMode
         showExtras: root.showExtras
+        selection: root.selection
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）
         showChannelIds: root.showChannelIds !== keyMonitor.ctrlHeld
         onChartChanged: {
@@ -74,30 +89,100 @@ Item {
         }
     }
 
-    // 点击（顶部 18px 列头内命中 BGM → 展开/折叠；否则起拖） + 拖拽滚动（含水平）
-    // （编辑/框选为 M3，届时与此手势互斥）
+    // 手势（M3 接线）：列头命中 → 展开；否则按工具分发：
+    //   拖动（select/pan/note 均可）滚动；select + Shift 拖动 = 框选；note 点击 = 放置。
+    // ⚠️ press 抓取保证 release 仍回到本 Area（落在滚动条上也不丢）。
+    // 状态抽为 root 级（handlePress/Release），MouseArea 与调试入口（--click）共用同一路径。
+    property real _lastY: -1
+    property real _lastX: 0
+    property int _pressX: 0
+    property int _pressY: 0
+    property bool _boxSelect: false
+    property bool _dragged: false
+
+    function handlePress(x, y, shift) {
+        if (y <= 18 && view.bgmHeaderIndexAt(x) >= 0) {
+            root.bgmExpanded = !root.bgmExpanded
+            return
+        }
+        _lastY = y
+        _lastX = x
+        _pressX = x
+        _pressY = y
+        _dragged = false
+        _boxSelect = root.editorTool === "select" && shift
+        if (_boxSelect) {
+            selRect.x = x
+            selRect.y = y
+            selRect.width = 0
+            selRect.height = 0
+            selRect.visible = true
+        }
+    }
+    function handleMove(x, y) {
+        if (_lastY < 0) return
+        const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
+        if (moved > 4) _dragged = true
+        if (_boxSelect) {
+            selRect.x = Math.min(_pressX, x)
+            selRect.y = Math.min(_pressY, y)
+            selRect.width = Math.abs(x - _pressX)
+            selRect.height = Math.abs(y - _pressY)
+            return
+        }
+        if (_dragged) {
+            view.scrollY -= (y - _lastY)
+            view.scrollX -= (x - _lastX)
+        }
+        _lastY = y
+        _lastX = x
+    }
+    function handleRelease(x, y) {
+        _lastY = -1
+        if (_boxSelect) {
+            selRect.visible = false
+            _boxSelect = false
+            if (_dragged && selRect.width > 3 && selRect.height > 3) {
+                root.selectionFinished(view.notesInRect(selRect.x, selRect.y,
+                                                        selRect.x + selRect.width,
+                                                        selRect.y + selRect.height))
+            }
+            return
+        }
+        const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
+        if (_dragged || moved > 4) return
+        // 点击：note 工具 → 放置；ln/mine → 提示未接线
+        if (root.editorTool === "note" && y > 18) {
+            const hit = view.hitTest(x, y)
+            if (hit.valid) root.hitPlaceRequested(hit)
+        } else if (root.editorTool === "ln" || root.editorTool === "mine") {
+            root.toolNotReady(root.editorTool)
+        }
+    }
+    /// 调试入口（--click，与真实事件同一分发路径）：点击后立即释放。
+    function clickAt(x, y) {
+        handlePress(x, y, false)
+        handleRelease(x, y)
+    }
+
     MouseArea {
         anchors.fill: parent
-        cursorShape: Qt.OpenHandCursor
-        property real lastY: -1
-        property real lastX: 0
-        onPressed: (mouse) => {
-            if (mouse.y <= 18 && view.bgmHeaderIndexAt(mouse.x) >= 0) {
-                root.bgmExpanded = !root.bgmExpanded
-                return
-            }
-            lastY = mouse.y
-            lastX = mouse.x
-        }
-        onPositionChanged: (mouse) => {
-            if (lastY >= 0) {
-                view.scrollY -= (mouse.y - lastY)
-                view.scrollX -= (mouse.x - lastX)
-                lastY = mouse.y
-                lastX = mouse.x
-            }
-        }
-        onReleased: lastY = -1
+        cursorShape: root.editorTool === "note" ? Qt.CrossCursor : Qt.OpenHandCursor
+
+        onPressed: (mouse) => root.handlePress(mouse.x, mouse.y,
+                                               (mouse.modifiers & Qt.ShiftModifier) !== 0)
+        onPositionChanged: (mouse) => root.handleMove(mouse.x, mouse.y)
+        onReleased: (mouse) => root.handleRelease(mouse.x, mouse.y)
+    }
+
+    // 框选矩形（select + Shift+拖；半透明主色 + 边框）
+    Rectangle {
+        id: selRect
+        visible: false
+        z: 3
+        color: Theme.primarySoft
+        border.color: Theme.accent
+        border.width: 1
     }
 
     // 右侧垂直滚动条（内容高于视口时出现；点击/拖拽滑块滑动）
@@ -170,6 +255,14 @@ Item {
                                    Math.max(1, hbar.width - thumb.width) * hbar.maxX
             }
         }
+    }
+
+    // ---- 编辑接线辅助 ----
+    /// 视口中心小节（粘贴 target_measure 用；topHigh 反向已处理）。
+    function centerMeasure() {
+        const h = view.height / 2
+        return view.topHigh ? (view.contentHeight - (view.scrollY + h)) / view.measureHeight
+                            : (view.scrollY + h) / view.measureHeight
     }
 
     // 状态栏用：鼠标位置 + note 信息（hoverText 由 ChartViewItem 计算）

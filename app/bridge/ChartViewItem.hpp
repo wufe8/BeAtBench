@@ -56,6 +56,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(qreal contentWidth READ contentWidth NOTIFY contentWidthChanged)
     /// 鼠标位置 + note 信息（状态栏展示；空 = 未悬停）
     Q_PROPERTY(QString hoverText READ hoverText NOTIFY hoverChanged)
+    /// 选中 note 集合（NoteRef 语义：measure/pos/lane/sample；框选/粘贴后回填，绘制高亮）
+    Q_PROPERTY(QVariantList selection READ selection WRITE setSelection NOTIFY selectionChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -73,6 +75,8 @@ public:
     void setRulerWidth(qreal v);
     qreal laneWidth() const { return m_laneWidth; }
     void setLaneWidth(qreal v);
+    QVariantList selection() const { return m_selection; }
+    void setSelection(const QVariantList& v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
     qreal contentHeight() const;
@@ -101,6 +105,14 @@ public:
     /// 命中 BGM 列头（视口顶部横条内）→ 列下标（-1 未命中）；QML 点击用于展开/折叠。
     Q_INVOKABLE int bgmHeaderIndexAt(qreal x) const;
 
+    /// 屏幕坐标 → 可放放置点（M3 note.put 入参）：{valid, measure, num, den,
+    /// lanePlayer, laneKind, laneIndex, label}。仅游玩轨（键/皿/踏板）；列头/元轨/BGM/BGA 无效。
+    Q_INVOKABLE QVariantMap hitTest(qreal x, qreal y) const;
+
+    /// 屏幕矩形内 note 枚举（clipboard.copy 的 selection 数组：{measure, pos:{num,den},
+    /// lane:{player,kind,index}, sample}；按 (measure,pos) 稳定升序）。
+    Q_INVOKABLE QVariantList notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) const;
+
 signals:
     void sessionChanged();
     void themeChanged();
@@ -121,6 +133,7 @@ signals:
     void scrollXChanged();
     void contentWidthChanged();
     void hoverChanged();
+    void selectionChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -142,9 +155,13 @@ private:
     };
 
     void onSessionChartChanged();
+    void onSessionContentChanged();
     void updateHover(const QPointF& pos);
     ChartSession* sessionObj() const;
     ThemeManager* themeObj() const;
+    /// NoteRef 语义键（measure|num|den|player|kind|index|sample）：选中判定用。
+    static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
+                              const beatbench::Lane& lane, std::uint32_t sample = 0);
 
     /// 轨道列重算（谱面切换/尺寸/展开状态变化时；按谱面实际出现的 Lane 数据驱动）。
     void rebuildColumns();
@@ -195,6 +212,7 @@ private:
     QString m_hoverText;   // 鼠标位置 + note 信息（状态栏）
     int m_hoverMeasure = -1;
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
+    QVariantList m_selection;  // 选中 note 集合（NoteRef 语义；绘制高亮用）
 };
 
 }  // namespace beatbench::app

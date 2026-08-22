@@ -467,7 +467,119 @@ std::uint32_t u32_arg(const Json& args, const char* key) {
     return static_cast<std::uint32_t>(v->as_i64());
 }
 
+// 时间轴事件种类参数（timing.* 的 kind：bpm / stop / measure）
+edit::TimingKind timing_kind_arg(const Json& args) {
+    const auto& s = arg_str(args, "kind");
+    const auto k = edit::timing_kind_from_name(s);
+    if (!k) {
+        throw CommandError("bad_args", "未知 kind '" + s + "'（支持 bpm / stop / measure）");
+    }
+    return *k;
+}
+
+// 数值参数（timing.put 的 value：BPM 值 / STOP 微秒 / 每小节拍数；允许小数）
+double number_arg(const Json& args, const char* key) {
+    const Json* v = args.find(key);
+    if (!v) throw CommandError("bad_args", std::string("缺少参数: ") + key);
+    if (!v->is_number()) {
+        throw CommandError("bad_args", std::string("参数类型错误: ") + key + " 应为数值");
+    }
+    return v->as_f64();
+}
+
+// 时间轴事件集合 → JSON 数组（timing.list 结果；按 (measure,pos) 升序）
+// kind 未知 → bad_args（协议层兜底，命令层不产生该情况）
+Json timing_events_json(const Chart& chart, std::string_view kind) {
+    Json arr = Json::array();
+    const auto push = [&](std::uint32_t measure, const Rational& pos, double value) {
+        Json e = Json::object();
+        e.set("measure", static_cast<std::int64_t>(measure));
+        Json p = Json::object();
+        p.set("num", pos.num);
+        p.set("den", pos.den);
+        e.set("pos", std::move(p));
+        e.set("value", value);
+        arr.push_back(std::move(e));
+    };
+    if (kind == "bpm") {
+        for (const auto& ev : chart.bpm_events) push(ev.measure, ev.pos, ev.value.value);
+    } else if (kind == "stop") {
+        for (const auto& ev : chart.stop_events) {
+            push(ev.measure, ev.pos, static_cast<double>(ev.value.duration_us));
+        }
+    } else if (kind == "measure") {
+        for (const auto& ev : chart.measure_events) push(ev.measure, ev.pos, ev.value.beats);
+    } else {
+        throw CommandError("bad_args", "未知 kind '" + std::string(kind) +
+                                           "'（支持 bpm / stop / measure）");
+    }
+    return arr;
+}
+
 }  // namespace
+
+// —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/05 §9 工具栏值放置 + 右 dock 列表） ——
+// kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 微秒 /
+// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义（bms_writer §2），
+// 因此「值」是唯一编辑维度——ch03 内联/引用的文本差异对编辑透明。
+// 两种 GUI 形态共用同一套接口：
+//   - 工具栏值放置（思路1）：timing.put（同位替换）+ timing.delete；
+//   - 右 dock 管理列表（思路2）：timing.list 数据源 + put/delete 增删改。
+// 「选中批量改值」= 客户端对每个选中事件发一个 timing.put（或 CompositeCommand 包装）。
+
+class TimingListCommand : public Command {
+public:
+    std::string_view name() const override { return "timing.list"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto& chart = session.chart();
+        const auto kind = timing_kind_arg(args);
+        Json out = Json::object();
+        out.set("kind", std::string(edit::timing_kind_name(kind)));
+        out.set("events", timing_events_json(chart, edit::timing_kind_name(kind)));
+        return out;
+    }
+};
+
+class TimingPutCommand : public Command {
+public:
+    std::string_view name() const override { return "timing.put"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto kind = timing_kind_arg(args);
+        const std::uint32_t measure = u32_arg(args, "measure");
+        const Rational pos = pos_from_json(args);
+        const double value = number_arg(args, "value");
+        const bool ok = session.exec(
+            std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("kind", std::string(edit::timing_kind_name(kind)));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+class TimingDeleteCommand : public Command {
+public:
+    std::string_view name() const override { return "timing.delete"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto kind = timing_kind_arg(args);
+        const std::uint32_t measure = u32_arg(args, "measure");
+        const Rational pos = pos_from_json(args);
+        const bool ok = session.exec(
+            std::make_unique<edit::DeleteTimingCommand>(kind, measure, pos));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("kind", std::string(edit::timing_kind_name(kind)));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
 
 // —— 剪贴板（BMS 原始行文本；2026-08 用户提议，外部工具兼容） ——
 // copy：选中 note 集合 → BMS 数据行文本（#mmmcc:槽位序列，同通道同 measure 合并 LCM）。
@@ -936,6 +1048,10 @@ void register_builtin_commands(Registry& registry) {
     // M3 剪贴板（BMS 原始行文本；外部工具兼容）
     registry.add(std::make_unique<ClipboardCopyCommand>());
     registry.add(std::make_unique<ClipboardPasteCommand>());
+    // M3 时间轴事件（BPM / STOP / 节拍：点放/列表/改值）
+    registry.add(std::make_unique<TimingListCommand>());
+    registry.add(std::make_unique<TimingPutCommand>());
+    registry.add(std::make_unique<TimingDeleteCommand>());
 }
 
 }  // namespace beatbench::cmd
