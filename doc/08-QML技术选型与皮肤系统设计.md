@@ -104,6 +104,30 @@ skins/MySkin/
 3. **命令协议**（doc/06 §3，不变——皮肤是界面，core 永远是引擎）；
 4. 引擎暴露给 QML 的注册类型（见 §4）。
 
+### 3.6 默认皮肤 surface 清单（L2 layout.json 的命名插槽，2026-08 布局探索补）
+
+L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前壳 Main.qml）已蕴含：
+
+| surface | 内容 | 说明 |
+|---|---|---|
+| `menuBar` | 菜单栏 | 固定全局 |
+| `pageToolbar` | 页面工具条（随页变） | snap/量化/网格/缩放 |
+| `editToolbar` | 编辑工具条（编辑页专属） | 工具选择 + 当前采样 |
+| `pageBody` | 页面内容区 | 内含 `leftDock` / `viewport` / `rightDock` |
+| `leftDock` | 左面板容器 | 元信息/采样/lint/BGA 标签页 |
+| `viewport` | 中央视口 | 竖向时间轴（QQuickPaintedItem） |
+| `rightDock` | 右属性面板 | 选中对象 / 事件时间线 |
+| `pageSwitcher` | 底部页面条 | 位置可配置（doc/05 待拍板 2） |
+| `statusBar` | 状态栏 | 固定全局 |
+
+**2026-08 布局探索（doc/05 §14）新增候选插槽**——理想皮肤若要免整壳支持，需纳入 schema：
+
+- `documentTabs`：顶部多文档标签条（① IDE 式）；
+- `activityRail`：左图标栏（① IDE 式 / ④ Material 式）；
+- `floatingTools`：视口内浮动工具弹层（① IDE 式 / ⑤ 经典弹窗式）。
+
+若 layout.json schema 定稿时不含以上三项，① 类布局只能走整壳替换（L3）。
+
 ## 4. core ↔ QML 桥接（app/bridge）
 
 - core 保持 Qt-free 静态库；app 层加 Qt 适配层把核心对象暴露给 QML：
@@ -128,7 +152,13 @@ skins/MySkin/
 ## 6. 待办 / 待拍板
 
 - [ ] `app/CMakeLists.txt`：`find_package(Qt6 COMPONENTS Quick QuickControls2)` + `QQmlApplicationEngine` 入口（M2 开工做）；
-- [ ] `theme.json` / `layout.json` schema 正式定稿（含 version 字段与缺省兜底规则）；
+- [ ] `theme.json` / `layout.json` schema 正式定稿（含 version 字段与缺省兜底规则；候选 surface 插槽清单见 §3.6）；
+- [ ] **UI 动作注册表（皮肤换壳前置，2026-08 布局探索提出）**：打开/保存/切页/选工具等 UI 动作目前硬编码
+     在 `Main.qml`，L3 整壳皮肤（重写 chrome）将无法复用 → 抽「动作 id → 处理器」注册表（与 core
+     「命令即接口」同思路，但这是 UI 侧动作，不是数据命令），皮肤壳按 id 触发（doc/05 §14.2）；
+- [ ] **theme.json token 与 ThemeManager 对齐（2026-08 布局探索发现）**：ThemeManager 现仅实现
+     `keyNote`/`lnTail` 两点；doc/05 §7 完整表（`n1..n4`/`scratch`/`mine`/`ln`/`wave`/`accent2`/
+     `note-radius` 等）未落地 → 换肤落地时按完整表补齐（doc/05 §14.3）；
 - [ ] L3 皮肤覆写的粒度约定（整壳替换 vs 按区域 `Replace:` 声明）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME）；
 - [ ] 时间轴视口技术路线确认：`QQuickPaintedItem`（QPainter 复用）起步，性能不够再迁 QSG；
@@ -139,4 +169,6 @@ skins/MySkin/
 
 - 本稿（08）；
 - `doc/beatbench-ui-styles.html`（设计参考 + token 数据来源，随 doc/ 提交）；
-- `skins/`（将来：内置默认皮肤 + 皮肤包目录，M2 起建）。
+- `skins/`（将来：内置默认皮肤 + 皮肤包目录，M2 起建）；
+- `local/ui-demos/`（5 套布局气质 demo，纯静态、gitignore——2026-08 布局探索产物，结论见 doc/05 §14，
+  仅本地参照，勿假设协作者可见）。
