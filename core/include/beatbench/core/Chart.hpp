@@ -49,6 +49,12 @@ struct Chart {
 
     IdBase id_base = IdBase::Base36;  ///< 定义表 id 进制（见上）；#BASE 指令由 parser 设置
 
+    /// 游玩模式 id（格式无关配置表，见 ChartMode.hpp）。
+    /// 读取时由 codec 推断并写入（bms：#PLAYER/扩展名 → sp7k/dp/battle/pms9k；
+    /// 5k 不区分，一律 sp7k 呈现）；写回时决定通道反向映射表。
+    /// 缺省 = 调用方按默认模式处理（bms 为 sp7k）。
+    std::optional<std::string> mode_id;
+
     /// 未结构化消费的原始行（保序）：注释块、控制指令（#RANDOM/#IF…）、
     /// 数据行（#mmmcc:…，note 解析前的承载）、未知行。写回时原样输出。
     /// 这是格式无关的通用保留机制：任何 codec 都能把暂不理解的文本行存到这里。

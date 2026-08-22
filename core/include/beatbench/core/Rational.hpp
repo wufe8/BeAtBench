@@ -19,6 +19,12 @@ struct Rational {
         return a.num == b.num && a.den == b.den;
     }
     friend bool operator<(const Rational& a, const Rational& b);
+    friend Rational operator+(const Rational& a, const Rational& b) {
+        return Rational(a.num * b.den + b.num * a.den, a.den * b.den);
+    }
+    friend Rational operator-(const Rational& a, const Rational& b) {
+        return Rational(a.num * b.den - b.num * a.den, a.den * b.den);
+    }
 };
 
 inline Rational::Rational(std::int64_t n, std::int64_t d) {

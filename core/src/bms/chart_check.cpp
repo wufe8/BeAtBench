@@ -4,6 +4,7 @@
 
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 namespace beatbench::bms {
 
@@ -41,7 +42,8 @@ EventStats collect_event_stats(const Chart& chart) {
                 }
             }
         }
-        const auto ch = bms_channel_for(n.lane, !lntype2 && (is_head || is_tail), n.kind);
+        const auto ch = bms_channel_for_mode(chart.mode_id.value_or("sp7k"), n.lane,
+                                             !lntype2 && (is_head || is_tail), n.kind);
         if (!ch.empty()) ++stats.channels[ch];
     }
     return stats;

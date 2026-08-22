@@ -12,6 +12,12 @@ add_library(beatbench_core STATIC
     src/json/json.cpp
     src/command/registry.cpp
     src/command/builtins.cpp
+    src/codec/codec_registry.cpp
+    src/codec/bms_adapter.cpp
+    src/codec/bms_channel_maps.cpp
+    src/codec/chart_modes.cpp
+    src/edit/edit_commands.cpp
+    src/edit/session_registry.cpp
 )
 target_include_directories(beatbench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(beatbench_core PUBLIC cxx_std_20)

@@ -4,8 +4,10 @@
 // 通道号 → Lane/语义的映射收敛在 ChannelMap（换格式 = 换映射规则）。
 #include "beatbench/core/bms/BmsCodec.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <string>
@@ -14,6 +16,7 @@
 
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 #include "encoding.hpp"
 
@@ -234,6 +237,34 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         }
     }
 
+    // ---- 预扫描 0b：#PLAYER → 游玩模式（chart.mode_id）。 ----
+    // 5/7key 不区分（现代播放器无视，无 18/19 通道也按 7key 呈现）；.pms 由 read_bms_file
+    // 按扩展名传入 opts.mode 覆盖（此处 text 层看不到扩展名）。#PLAYER 值：1/2=SP、
+    // 3=DP、4=Battle；其他/缺失 → sp7k（默认）。
+    if (opts.mode.empty() || opts.mode == "auto") {
+        int player = 0;
+        for (const auto& [line, number] : lines) {
+            (void)number;
+            if (line.empty() || line[0] != '#') continue;
+            const auto token = field_token(line);
+            const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
+                                          token.size();
+            if (upper_ascii(token) != "PLAYER") continue;
+            const auto v = field_value(line, token_end);
+            if (!v.empty()) player = std::atoi(std::string(v).c_str());
+            break;  // 首个 #PLAYER 即生效
+        }
+        if (player == 3) {
+            chart.mode_id = "dp";
+        } else if (player == 4) {
+            chart.mode_id = "battle";
+        } else {
+            chart.mode_id = "sp7k";  // 1/2/缺失/其他（5k 不区分）
+        }
+    } else {
+        chart.mode_id = opts.mode;
+    }
+
     auto& raw = chart.raw_lines;
     std::vector<NoteInfo> note_infos;
     bool in_block_comment = false;
@@ -368,7 +399,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 const auto measure = static_cast<std::uint32_t>(
                     (token[0] - '0') * 100 + (token[1] - '0') * 10 + (token[2] - '0'));
                 const auto channel = token.substr(3);
-                const auto rule = bms_channel_rule(channel);
+                const auto mode = chart.mode_id.value_or("sp7k");
+                const auto rule = bms_channel_rule_for(mode, channel);
                 if (rule && rule->semantics != ChannelSemantics::KeepRaw) {
                     const auto data = line.substr(token_end + 1);
 
@@ -475,8 +507,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
 
         // ---- 头部字段 / 控制指令 ----
         if (!token.empty() && !is_ascii_digit(token[0])) {
-            const auto up = upper_ascii(token);
-            if (is_control_tag(up)) {
+            const auto up_tag = upper_ascii(token);
+            if (is_control_tag(up_tag)) {
                 raw.emplace_back(line);  // #RANDOM/#IF/… 原样保留
                 continue;
             }
@@ -489,8 +521,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 }
             }
             if (alpha_num) {
-                if (up == "BASE") continue;  // id 进制指令：预扫描已结构化（chart.id_base），不入 meta
-                chart.meta[up] = std::string(field_value(line, token_end));
+                if (up_tag == "BASE") continue;  // id 进制指令：预扫描已结构化（chart.id_base），不入 meta
+                chart.meta[up_tag] = std::string(field_value(line, token_end));
                 continue;
             }
         }
@@ -569,6 +601,68 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     }
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
+    // 模式推断优先级（2026-08 修正，真实谱面验证）：
+    //   1. 显式 opts.mode（调用方指定，最高）；
+    //   2. #PLAYER 3 → dp、4 → battle（玩家数语义强于后缀——真实谱面存在
+    //      .pms 后缀但 #PLAYER 3 的 DP 谱，如 Doppelganger/_R9.pms）；
+    //   3. .pms 后缀 → pms9k（仅当 #PLAYER 非 3/4 时；PMS 9key 谱面惯例）；
+    //   4. 其余 → sp7k（read_bms 内按 #PLAYER 1/2/缺失推断）。
+    // #PLAYER 扫描需在编码解码前对原始字节做（ASCII 指令，编码无关）。
+    BmsReadOptions effective = opts;
+    if (effective.mode.empty() || effective.mode == "auto") {
+        int player = 0;
+        std::string_view bv(bytes);
+        std::size_t pos = 0;
+        while (pos <= bv.size()) {
+            const auto e = bv.find('\n', pos);
+            auto line = (e == std::string_view::npos) ? bv.substr(pos)
+                                                      : bv.substr(pos, e - pos);
+            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+            const auto line_view = line;  // 原始字节行（未解码）
+            // 找 #PLAYER（大小写不敏感；行首可有空白）
+            std::size_t p = 0;
+            while (p < line_view.size() &&
+                   (line_view[p] == ' ' || line_view[p] == '\t')) ++p;
+            if (p < line_view.size() && line_view[p] == '#') {
+                std::size_t i = p + 1;
+                std::string tag;
+                while (i < line_view.size() && line_view[i] != ' ' && line_view[i] != '\t' &&
+                       line_view[i] != ':') {
+                    tag.push_back(static_cast<char>(
+                        std::toupper(static_cast<unsigned char>(line_view[i]))));
+                    ++i;
+                }
+                if (tag == "PLAYER") {
+                    while (i < line_view.size() &&
+                           (line_view[i] == ' ' || line_view[i] == '\t' ||
+                            line_view[i] == ':')) {
+                        ++i;
+                    }
+                    std::string val;
+                    while (i < line_view.size() && line_view[i] >= '0' && line_view[i] <= '9') {
+                        val.push_back(line_view[i]);
+                        ++i;
+                    }
+                    if (!val.empty()) player = std::atoi(val.c_str());
+                    break;
+                }
+            }
+            if (e == std::string_view::npos) break;
+            pos = e + 1;
+        }
+        if (player == 3) {
+            effective.mode = "dp";
+        } else if (player == 4) {
+            effective.mode = "battle";
+        } else {
+            std::string ext = std::filesystem::path(path).extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (ext == ".pms") effective.mode = "pms9k";
+            // 否则留空 → read_bms 内按 #PLAYER 推断 sp7k
+        }
+    }
+
     // UTF-16 BOM：本阶段不支持（后续按需）
     if (bytes.size() >= 2 &&
         ((static_cast<unsigned char>(bytes[0]) == 0xFF &&
@@ -579,7 +673,7 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         return result;
     }
 
-    BmsEncoding enc = opts.encoding;
+    BmsEncoding enc = effective.encoding;
     if (enc == BmsEncoding::Auto) {
         enc = detect_encoding(bytes) == DetectedEncoding::Utf8 ? BmsEncoding::Utf8
                                                                : BmsEncoding::ShiftJis;
@@ -595,9 +689,9 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
             static_cast<unsigned char>(view[2]) == 0xBF) {
             view.remove_prefix(3);
         }
-        result = read_bms(view, opts);
+        result = read_bms(view, effective);
     } else {
-        result = read_bms(shiftjis_to_utf8(view), opts);
+        result = read_bms(shiftjis_to_utf8(view), effective);
     }
 
     result.diagnostics.push_back(

@@ -17,6 +17,7 @@
 
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 #include "encoding.hpp"
 
@@ -275,7 +276,9 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 is_tail = true;
             }
         }
-        const auto channel = bms_channel_for(n.lane, !lntype2 && (is_head || is_tail), n.kind);
+        const auto mode = chart.mode_id.value_or("sp7k");
+        const auto channel =
+            bms_channel_for_mode(mode, n.lane, !lntype2 && (is_head || is_tail), n.kind);
         if (channel.empty()) continue;  // 无法表示的 Lane（罕见）→ 丢弃并依赖诊断
         std::string slot_text;
         if (is_tail && lntype2) {

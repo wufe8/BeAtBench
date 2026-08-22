@@ -17,6 +17,10 @@ enum class DetectedEncoding { Utf8, ShiftJis };
 struct BmsReadOptions {
     BmsEncoding encoding = BmsEncoding::Auto;
     bool preserve_comments = true;  ///< 保留注释块以便写回
+    /// 显式游玩模式覆盖（"sp7k"/"dp"/"battle"/"pms9k"；空/"auto" = 推断）。
+    /// read_bms（文本层）按 #PLAYER 推断；read_bms_file 先按扩展名（.pms → pms9k）
+    /// 再按 #PLAYER。写回用 chart.mode_id 决定通道反向表。
+    std::string mode;
 };
 
 struct BmsWriteOptions {
