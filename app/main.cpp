@@ -198,6 +198,11 @@ int main(int argc, char** argv) {
         if (QObject* root = engine.rootObjects().value(0))
             root->setProperty("debugShowExtras", true);
     }
+    // --perf-log：时间轴 paint 帧耗时采样（QML 消息日志；配 --screenshot 验收性能）
+    if (args.contains(QStringLiteral("--perf-log"))) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugPerfLog", true);
+    }
 
     // --tool <select|note|ln|mine|pan>：编辑工具（配 --click 验收手势分发）
     const int toolIdx = args.indexOf(QStringLiteral("--tool"));
@@ -223,6 +228,11 @@ int main(int argc, char** argv) {
                 root->setProperty("debugClickY", cy);
             }
         }
+    }
+    // --delete-selection：点击后自动 Del（删除选中集；验收删除链）
+    if (args.contains(QStringLiteral("--delete-selection"))) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugDeleteSelection", true);
     }
 
     if (engine.rootObjects().isEmpty())

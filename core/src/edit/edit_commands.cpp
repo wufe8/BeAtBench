@@ -57,14 +57,21 @@ std::size_t lower_bound_pos(const std::vector<Event<Note>>& notes, std::uint32_t
 }
 
 // 找 (measure, pos, lane, sample) 匹配的 note 下标（首个命中）
+// ⚠️ 不做 (measure,pos) 二分：parser 按通道行序 push，notes 在同一 measure 内不保证
+// pos 升序（doc/04 §6 的「事件按 (measure,pos) 升序」约定未落实；2026-09 实测 Del 失效：
+// lower_bound 定位错位导致 1/4 之类 note 永远匹配不上）。改为 measure 段线性扫描
+// （行序 measure 单调递增 → 同 measure 连续段；命中率与代价可控）。
 std::optional<std::size_t> find_note(const std::vector<Event<Note>>& notes,
                                      std::uint32_t measure, const Rational& pos,
                                      const Lane& lane, std::uint32_t sample) {
-    std::size_t i = lower_bound_pos(notes, measure, pos);
-    while (i < notes.size() && notes[i].measure == measure && notes[i].pos == pos) {
-        const auto& n = notes[i].value;
-        if (n.lane == lane && n.sample.id == sample) return i;
-        ++i;
+    auto it = std::lower_bound(notes.begin(), notes.end(), measure,
+                               [](const Event<Note>& e, std::uint32_t m) {
+                                   return e.measure < m;
+                               });
+    for (; it != notes.end() && it->measure == measure; ++it) {
+        const auto& n = it->value;
+        if (it->pos == pos && n.lane == lane && n.sample.id == sample)
+            return static_cast<std::size_t>(it - notes.begin());
     }
     return std::nullopt;
 }

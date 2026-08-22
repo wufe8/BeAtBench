@@ -44,9 +44,6 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(bool bgmExpanded READ bgmExpanded WRITE setBgmExpanded NOTIFY bgmExpandedChanged)
     /// 轨道列头显示实际 BMS 通道 id（皿=16、键1=11…；工具条勾选 / Ctrl 临时，doc debug 用）
     Q_PROPERTY(bool showChannelIds READ showChannelIds WRITE setShowChannelIds NOTIFY showChannelIdsChanged)
-    /// 拍子线（强于槽位弱线、弱于小节线）：每 num/den 音符一条（默认 [1]/[4] = 每 4 分音符）
-    Q_PROPERTY(int beatNum READ beatNum WRITE setBeatNum NOTIFY beatNumChanged)
-    Q_PROPERTY(int beatDen READ beatDen WRITE setBeatDen NOTIFY beatDenChanged)
     /// note 上显示所用采样：0=隐藏 1=显示 id（01） 2=显示文件名（#WAVxx 文件）
     Q_PROPERTY(int noteSampleMode READ noteSampleMode WRITE setNoteSampleMode NOTIFY noteSampleModeChanged)
     /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式，doc 参考 local/doc 截图）
@@ -58,6 +55,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(QString hoverText READ hoverText NOTIFY hoverChanged)
     /// 选中 note 集合（NoteRef 语义：measure/pos/lane/sample；框选/粘贴后回填，绘制高亮）
     Q_PROPERTY(QVariantList selection READ selection WRITE setSelection NOTIFY selectionChanged)
+    /// 性能检测：paint 帧耗时采样落日志（--perf-log；每 20 帧一条）
+    Q_PROPERTY(bool perfLog READ perfLog WRITE setPerfLog NOTIFY perfLogChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -77,6 +76,8 @@ public:
     void setLaneWidth(qreal v);
     QVariantList selection() const { return m_selection; }
     void setSelection(const QVariantList& v);
+    bool perfLog() const { return m_perfLog; }
+    void setPerfLog(bool v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
     qreal contentHeight() const;
@@ -89,10 +90,6 @@ public:
     void setBgmExpanded(bool v);
     bool showChannelIds() const { return m_showChannelIds; }
     void setShowChannelIds(bool v);
-    int beatNum() const { return m_beatNum; }
-    void setBeatNum(int v);
-    int beatDen() const { return m_beatDen; }
-    void setBeatDen(int v);
     int noteSampleMode() const { return m_noteSampleMode; }
     void setNoteSampleMode(int v);
     bool showExtras() const { return m_showExtras; }
@@ -106,12 +103,20 @@ public:
     Q_INVOKABLE int bgmHeaderIndexAt(qreal x) const;
 
     /// 屏幕坐标 → 可放放置点（M3 note.put 入参）：{valid, measure, num, den,
-    /// lanePlayer, laneKind, laneIndex, label}。仅游玩轨（键/皿/踏板）；列头/元轨/BGM/BGA 无效。
+    /// lanePlayer, laneKind, laneIndex, label[, sampleHint]}。游玩轨（键/皿/踏板）与
+    /// BGM 轨可放置（展开列带 sampleHint = 固定 id）；列头/元轨/BGA 无效。
     Q_INVOKABLE QVariantMap hitTest(qreal x, qreal y) const;
 
     /// 屏幕矩形内 note 枚举（clipboard.copy 的 selection 数组：{measure, pos:{num,den},
     /// lane:{player,kind,index}, sample}；按 (measure,pos) 稳定升序）。
     Q_INVOKABLE QVariantList notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) const;
+
+    /// 屏幕坐标 → 命中的 note（NoteRef 形状：{measure, pos:{num,den}, lane:{...}, sample}；
+    /// valid=false = 空白）。选择/右键删除用；只查相邻小节（与 hover 同开销上限）。
+    Q_INVOKABLE QVariantMap noteAt(qreal x, qreal y) const;
+
+    /// 屏幕 y → 拍位（measure + pos 小数；时间轴工具（平移等）距离换算用）。
+    Q_INVOKABLE qreal measureAtY(qreal y) const;
 
 signals:
     void sessionChanged();
@@ -126,14 +131,13 @@ signals:
     void columnCountChanged();
     void bgmExpandedChanged();
     void showChannelIdsChanged();
-    void beatNumChanged();
-    void beatDenChanged();
     void noteSampleModeChanged();
     void showExtrasChanged();
     void scrollXChanged();
     void contentWidthChanged();
     void hoverChanged();
     void selectionChanged();
+    void perfLogChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -200,11 +204,10 @@ private:
     int m_gridDiv = 16;
     bool m_bgmExpanded = false;
     bool m_showChannelIds = false;
-    int m_beatNum = 1;    // 拍子线：每 num/den 音符一条（默认 [1]/[4]）
-    int m_beatDen = 4;
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
     bool m_showExtras = false;  // BGA 图层通道列（d场景更多轨道）
     qreal m_scrollX = 0.0;
+    bool m_perfLog = false;  // paint 帧耗时采样（--perf-log）
     std::vector<Column> m_columns;
     std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
     QFont m_rulerFont;
@@ -213,6 +216,7 @@ private:
     int m_hoverMeasure = -1;
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
     QVariantList m_selection;  // 选中 note 集合（NoteRef 语义；绘制高亮用）
+    int m_lastVisibleNotes = 0;  // 最近一次 paint 的可见 note 数（--perf-log）
 };
 
 }  // namespace beatbench::app

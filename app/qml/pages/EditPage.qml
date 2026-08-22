@@ -17,21 +17,24 @@ Item {
     property bool showChannelIds: false
     /// BGM 轨展开（列头点击；--bgm-expand 调试参数）
     property bool bgmExpanded: false
-    /// 拍子线 [num]/[den]（默认 [1]/[4] = 每 4 分音符）
-    property int beatNum: 1
-    property int beatDen: 4
     /// note 采样标签：0 隐藏 / 1 id / 2 文件名
     property int noteSampleMode: 0
     /// 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     property bool showExtras: false
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
     property string editorTool: "select"
+    /// 平移开关（拖拽选中 note = 时间轴移动；默认开）
+    property bool moveMode: true
     /// 放置用采样数值 id（chartSession.sampleValueOf；-1 = 未选）
     property int sampleId: -1
     /// 当前采样展示文本（提示用）
     property string sampleText: ""
     /// 选中 note 集合（NoteRef；框选后回填 → 高亮）
     property var selection: []
+    /// 吸附粒度（放置用：gridDiv 槽/小节；Main snap 切换）
+    property int snapDiv: 16
+    /// paint 帧耗时采样（--perf-log）
+    property bool perfLog: false
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
     readonly property string hoverText: chartView ? chartView.hoverText : ""
 
@@ -43,6 +46,14 @@ Item {
     signal selectionFinished(var refs)
     /// ln/mine 工具点击（命令未接）
     signal toolNotReady(string tool)
+    /// select 点击命中 note（选中；ctrl = 多选切换）
+    signal noteClicked(var ref, bool ctrl)
+    /// select 点击空白（清空选中）
+    signal canvasClicked()
+    /// 右键命中 note（删除）
+    signal noteRightDeleted(var ref)
+    /// 平移（时间轴位移，拍位小数）
+    signal moveSelectionRequested(real deltaF)
 
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
@@ -53,6 +64,14 @@ Item {
     function clickLocal(x, y) {
         if (chartView) chartView.clickAt(x, y)
     }
+
+    /// 缩放重置（工具条「缩放」按钮）。
+    function resetZoom() {
+        if (chartView) chartView.resetZoom()
+    }
+
+    /// 当前缩放百分比（工具条显示）。
+    readonly property int zoomPercent: chartView ? chartView.zoomPercent : 100
 
     /// 调试入口（--click，旧）：本页局部坐标 → ChartView 局部坐标 → 同一手势分发路径。
     function clickAt(x, y) {
@@ -169,17 +188,22 @@ Item {
                     Layout.fillHeight: true
                     showChannelIds: root.showChannelIds
                     bgmExpanded: root.bgmExpanded
-                    beatNum: root.beatNum
-                    beatDen: root.beatDen
                     noteSampleMode: root.noteSampleMode
                     showExtras: root.showExtras
                     editorTool: root.editorTool
+                    moveMode: root.moveMode
                     sampleId: root.sampleId
                     sampleText: root.sampleText
                     selection: root.selection
+                    gridDiv: root.snapDiv
+                    perfLog: root.perfLog
                     onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
                     onSelectionFinished: (refs) => root.selectionFinished(refs)
                     onToolNotReady: (tool) => root.toolNotReady(tool)
+                    onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
+                    onCanvasClicked: () => root.canvasClicked()
+                    onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
+                    onMoveSelectionRequested: (deltaF) => root.moveSelectionRequested(deltaF)
                 }
             }
         }

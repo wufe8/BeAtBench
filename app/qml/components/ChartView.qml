@@ -19,22 +19,29 @@ Item {
 
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
     property bool topHigh: true          // 默认「顶部=高小节」（preview.html，note 自上而下落）
-    property int gridDiv: 16             // 槽位网格（1/16 snap）
+    property int gridDiv: 16             // 槽位粒度（1/snap：显示弱线 + 放置吸附，同源）
     property bool showChannelIds: false  // 列头显示实际 BMS 通道 id（工具条勾选）
     property bool bgmExpanded: false     // BGM 轨展开（列头点击切换；--bgm-expand 调试）
-    property int beatNum: 1              // 拍子线：每 num/den 音符一条（默认 [1]/[4] = 每 4 分音符）
-    property int beatDen: 4
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
+    /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
+    readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
     // ---- 编辑接线（M3） ----
     property string editorTool: "select" // select/note/ln/mine/pan（Main 会话状态）
+    property bool moveMode: true           // 平移开关（默认开）：拖拽选中 note = 时间轴移动
     property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
     property string sampleText: ""       // 当前采样展示（无放置采样时提示）
     property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
+    property bool perfLog: false         // paint 帧耗时采样（--perf-log）
+    property bool _ctrlHeld: false       // 本次按下是否 Ctrl（多选切换）
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
     signal toolNotReady(string tool)        // ln/mine 工具点击（命令未接）
+    signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
+    signal canvasClicked()                  // select 点击空白（清空选中）
+    signal noteRightDeleted(var ref)        // 右键命中 note（删除）
+    signal moveSelectionRequested(real deltaF)  // 平移（时间轴位移，拍位小数）
 
     onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
 
@@ -48,11 +55,10 @@ Item {
         measureHeight: root.measureHeight
         topHigh: root.topHigh
         gridDiv: root.gridDiv
-        beatNum: root.beatNum
-        beatDen: root.beatDen
         noteSampleMode: root.noteSampleMode
         showExtras: root.showExtras
         selection: root.selection
+        perfLog: root.perfLog
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）
         showChannelIds: root.showChannelIds !== keyMonitor.ctrlHeld
         onChartChanged: {
@@ -99,8 +105,27 @@ Item {
     property int _pressY: 0
     property bool _boxSelect: false
     property bool _dragged: false
+    property bool _panning: false   // 中键拖动 = 滚动（任何工具下）
+    property bool _moving: false    // 平移模式：拖拽选中 note = 时间轴移动
+    property real _moveStartF: 0    // 按下时的拍位（measure + pos 小数）
+    property real _moveDeltaF: 0    // 当前拖动位移（拍位小数）
 
-    function handlePress(x, y, shift) {
+    /// 平移判定：按下点在选中集内的某个 note 上？
+    function isSelectedNote(hit) {
+        if (!hit || !hit.valid) return false
+        for (var i = 0; i < root.selection.length; i++) {
+            const s = root.selection[i]
+            if (s.measure === hit.measure && s.sample === hit.sample &&
+                    s.lane.kind === hit.lane.kind &&
+                    s.lane.index === hit.lane.index &&
+                    s.lane.player === hit.lane.player &&
+                    s.pos.num === hit.pos.num && s.pos.den === hit.pos.den)
+                return true
+        }
+        return false
+    }
+
+    function handlePress(x, y, shift, ctrl) {
         if (y <= 18 && view.bgmHeaderIndexAt(x) >= 0) {
             root.bgmExpanded = !root.bgmExpanded
             return
@@ -110,7 +135,20 @@ Item {
         _pressX = x
         _pressY = y
         _dragged = false
-        _boxSelect = root.editorTool === "select" && shift
+        _ctrlHeld = ctrl
+        // 平移模式（默认开）：命中的 note（自动选中）→ 拖动 = 时间轴移动
+        if (root.moveMode && root.editorTool === "select") {
+            const hit = view.noteAt(x, y)
+            if (hit.valid) {
+                if (!isSelectedNote(hit)) root.noteClicked(hit, false)
+                _moving = true
+                _moveDeltaF = 0
+                _moveStartF = view.measureAtY(y)
+                return
+            }
+        }
+        // select 工具 = 框选（拖动）；pan 工具 = 滚动（拖动）；note = 点击放置
+        _boxSelect = root.editorTool === "select"
         if (_boxSelect) {
             selRect.x = x
             selRect.y = y
@@ -120,7 +158,16 @@ Item {
         }
     }
     function handleMove(x, y) {
-        if (_lastY < 0) return
+        if (_lastY < 0 && !_moving) return
+        if (_moving) {
+            const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
+            if (moved > 4) _dragged = true
+            // 实时 delta 拍位（供状态栏/预览；release 一次性应用）
+            if (_dragged) _moveDeltaF = view.measureAtY(y) - _moveStartF
+            _lastY = y
+            _lastX = x
+            return
+        }
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (moved > 4) _dragged = true
         if (_boxSelect) {
@@ -139,13 +186,29 @@ Item {
     }
     function handleRelease(x, y) {
         _lastY = -1
+        if (_moving) {
+            _moving = false
+            const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
+            if (_dragged && moved > 4 && Math.abs(_moveDeltaF) > 0.001)
+                root.moveSelectionRequested(_moveDeltaF)
+            _dragged = false
+            return
+        }
         if (_boxSelect) {
             selRect.visible = false
+            const draggedSel = _dragged && selRect.width > 3 && selRect.height > 3
             _boxSelect = false
-            if (_dragged && selRect.width > 3 && selRect.height > 3) {
+            if (draggedSel) {
                 root.selectionFinished(view.notesInRect(selRect.x, selRect.y,
                                                         selRect.x + selRect.width,
                                                         selRect.y + selRect.height))
+                return
+            }
+            // 点击（未拖动）：点选 note（Ctrl = 多选切换）/ 空白清空
+            if (y > 18) {
+                const hit = view.noteAt(x, y)
+                if (hit.valid) root.noteClicked(hit, _ctrlHeld)
+                else root.canvasClicked()
             }
             return
         }
@@ -161,18 +224,68 @@ Item {
     }
     /// 调试入口（--click，与真实事件同一分发路径）：点击后立即释放。
     function clickAt(x, y) {
-        handlePress(x, y, false)
+        handlePress(x, y, false, false)
         handleRelease(x, y)
+    }
+
+    /// 缩放重置（工具条「缩放」按钮）：恢复默认小节高度。
+    function resetZoom() {
+        root.measureHeight = 96
     }
 
     MouseArea {
         anchors.fill: parent
-        cursorShape: root.editorTool === "note" ? Qt.CrossCursor : Qt.OpenHandCursor
+        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        // select = 箭头（框选/点选）；pan = 手（拖动滚动）；note = 十字（点击放置）
+        cursorShape: root.editorTool === "note" ? Qt.CrossCursor
+                     : root.editorTool === "pan" ? Qt.OpenHandCursor
+                     : Qt.ArrowCursor
 
-        onPressed: (mouse) => root.handlePress(mouse.x, mouse.y,
-                                               (mouse.modifiers & Qt.ShiftModifier) !== 0)
-        onPositionChanged: (mouse) => root.handleMove(mouse.x, mouse.y)
-        onReleased: (mouse) => root.handleRelease(mouse.x, mouse.y)
+        onPressed: (mouse) => {
+            if (mouse.button === Qt.RightButton) {
+                // 右键命中 note → 直接删除（BMS 编辑器惯例；select/pan/note 工具下可用）
+                if (root.editorTool === "select" || root.editorTool === "pan" ||
+                        root.editorTool === "note") {
+                    const hit = view.noteAt(mouse.x, mouse.y)
+                    if (hit.valid) root.noteRightDeleted(hit)
+                }
+                return  // 右键不进入拖拽/框选/放置
+            }
+            if (mouse.button === Qt.MiddleButton) {
+                // 中键拖动 = 滚动（任何工具下通用导航）
+                root._panning = true
+                root._lastY = mouse.y
+                root._lastX = mouse.x
+                root._dragged = false
+                return
+            }
+            root.handlePress(mouse.x, mouse.y,
+                             (mouse.modifiers & Qt.ShiftModifier) !== 0,
+                             (mouse.modifiers & Qt.ControlModifier) !== 0)
+        }
+        onPositionChanged: (mouse) => {
+            if (root._panning) {
+                const moved = Math.abs(mouse.y - root._pressY) + Math.abs(mouse.x - root._pressX)
+                if (moved > 4) root._dragged = true
+                if (root._dragged) {
+                    view.scrollY -= (mouse.y - root._lastY)
+                    view.scrollX -= (mouse.x - root._lastX)
+                }
+                root._lastY = mouse.y
+                root._lastX = mouse.x
+                return
+            }
+            root.handleMove(mouse.x, mouse.y)
+        }
+        onReleased: (mouse) => {
+            if (root._panning) {
+                root._panning = false
+                root._lastY = -1
+                return
+            }
+            if (mouse.button === Qt.RightButton) return
+            root.handleRelease(mouse.x, mouse.y)
+        }
     }
 
     // 框选矩形（select + Shift+拖；半透明主色 + 边框）

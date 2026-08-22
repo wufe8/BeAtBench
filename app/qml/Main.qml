@@ -28,9 +28,6 @@ ApplicationWindow {
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换在 ChartView 内处理）
     property bool showChannelIds: false
-    // 拍子线 [num]/[den]（默认 [1]/[4] = 每 4 分音符；M3 note 吸附也会依赖）
-    property int beatNum: 1
-    property int beatDen: 4
     // note 上显示所用采样：0 隐藏 / 1 id / 2 文件名
     property int noteSampleMode: 0
     // 更多轨道（BGA 图层通道列，iBMSC 式；游玩轨与背景轨之间）
@@ -40,6 +37,15 @@ ApplicationWindow {
     property bool debugShowChannelIds: false
     property int debugNoteSampleMode: 0
     property bool debugShowExtras: false
+    property bool debugPerfLog: false
+    // --delete-selection：点击后自动 Del（验收删除链）
+    property bool debugDeleteSelection: false
+    onDebugDeleteSelectionChanged: if (debugDeleteSelection) debugDeleteTimer.restart()
+    Timer {
+        id: debugDeleteTimer
+        interval: 400   // 点击（150ms）之后
+        onTriggered: deleteSelection()
+    }
     onDebugBgmExpandChanged: if (debugBgmExpand && editPage) editPage.bgmExpanded = true
     onDebugShowChannelIdsChanged: if (debugShowChannelIds) window.showChannelIds = true
     onDebugNoteSampleModeChanged: if (debugNoteSampleMode > 0) window.noteSampleMode = debugNoteSampleMode
@@ -51,6 +57,13 @@ ApplicationWindow {
     property var clipboardLines: []
     // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
     property var selectionRefs: []
+    // 吸附（放置用）：槽/小节；工具条数字框手动填写（1/16 每 16 槽）
+    property int snapDiv: 16
+    // 平移模式（checkbox 开关，默认开）：拖拽选中 note = 时间轴移动（不改轨道）
+    property bool moveMode: true
+    /// 文本输入焦点（工具快捷键让行，避免输入时误触）
+    readonly property bool textInputFocused:
+        window.activeFocusItem && typeof window.activeFocusItem.text === "string"
 
     // ---------- 全局快捷键（QML MenuItem 无 shortcut 属性，用 Shortcut 类型） ----------
     Shortcut { sequence: "Ctrl+O"; onActivated: fileDialog.open() }
@@ -60,6 +73,19 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Y"; onActivated: redoEdit() }
     Shortcut { sequence: "Ctrl+C"; onActivated: copySelection() }
     Shortcut { sequence: "Ctrl+V"; onActivated: pasteClipboard() }
+    Shortcut { sequence: "Del"; enabled: chartMeta !== null && currentPage === 0
+                onActivated: deleteSelection() }
+    // 编辑工具快捷键（文本输入焦点时让行）
+    Shortcut { sequence: "V"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "select" }
+    Shortcut { sequence: "N"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "note" }
+    Shortcut { sequence: "L"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "ln" }
+    Shortcut { sequence: "M"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "mine" }
+    Shortcut { sequence: "H"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "pan" }
     Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
 
     // ---------- 菜单栏（固定全局） ----------
@@ -137,31 +163,22 @@ ApplicationWindow {
                 anchors.leftMargin: 8
                 anchors.rightMargin: 8
                 spacing: 6
-                BbToolButton { text: "snap 1/16"; enabled: chartMeta !== null }
+                // snap 粒度（1/N 小节）：槽位弱线显示 + 放置吸附（同源；手动填写）
+                Label { text: qsTr("snap 1/"); color: Theme.textMuted
+                        font.pixelSize: Theme.fsSmall; padding: 2 }
+                BbSpinBox {
+                    from: 1; to: 192
+                    value: window.snapDiv
+                    editable: true
+                    implicitWidth: 64
+                    onValueModified: window.snapDiv = Math.max(1, value)
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("槽位粒度：放置吸附 + 槽位线显示（>64 不画弱线）")
+                }
                 BbToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
                 BbToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
-                // 拍子线显示调整（每 num/den 音符一条；M3 note 吸附复用此单位）
-                Label { text: qsTr("拍子线"); color: Theme.textFaint
-                        font.pixelSize: Theme.fsTiny; padding: 4 }
-                SpinBox {
-                    from: 1; to: 16
-                    value: window.beatNum
-                    editable: true
-                    onValueModified: window.beatNum = value
-                    font.pixelSize: Theme.fsSmall
-                    implicitWidth: 54
-                }
-                Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-                SpinBox {
-                    from: 1; to: 16
-                    value: window.beatDen
-                    editable: true
-                    onValueModified: window.beatDen = value
-                    font.pixelSize: Theme.fsSmall
-                    implicitWidth: 54
-                }
                 // 更多轨道：BGA 图层通道列（04/06/07/0A，游玩轨与背景轨之间，iBMSC 式）
-                CheckBox {
+                BbCheckBox {
                     id: extrasCheck
                     text: qsTr("更多轨道")
                     checked: window.showExtras
@@ -169,7 +186,11 @@ ApplicationWindow {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("在游玩轨与背景轨之间显示 BGA 图层通道（BGA/LAYER/POOR/LAYER2 = 04/06/07/0A）")
                 }
-                BbToolButton { text: qsTr("缩放"); enabled: chartMeta !== null }
+                BbToolButton { text: qsTr("缩放 %1%").arg(editPage.zoomPercent)
+                               enabled: chartMeta !== null
+                               onClicked: { editPage.resetZoom(); setStatus(qsTr("缩放已重置")) }
+                               ToolTip.visible: hovered
+                               ToolTip.text: qsTr("当前缩放（点击恢复 100% = 小节高度 96px）；Ctrl+滚轮缩放") }
                 Item { Layout.fillWidth: true }
                 BbToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
                 Label { text: "SP7K"; color: Theme.accent; font.family: Theme.fontMono
@@ -202,11 +223,21 @@ ApplicationWindow {
                                onClicked: window.editorTool = "ln" }
                 BbToolButton { text: "M 地雷"; active: window.editorTool === "mine"; flatStyle: true
                                onClicked: window.editorTool = "mine" }
-                BbToolButton { text: "H 平移"; active: window.editorTool === "pan"; flatStyle: true
+                BbToolButton { text: "H 拖拽"; active: window.editorTool === "pan"; flatStyle: true
                                onClicked: window.editorTool = "pan" }
+                // 平移 = 开关式模式（不占工具位）：勾选后（V 选择下）拖拽选中 note
+                // 仅沿时间轴移动（note.move；跨轨道移动不支持）
+                BbCheckBox {
+                    id: moveModeCheck
+                    text: qsTr("平移")
+                    checked: window.moveMode
+                    onToggled: window.moveMode = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("开启后拖拽选中 note = 沿时间轴移动（不换轨）")
+                }
                 Item { Layout.fillWidth: true }
                 // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
-                CheckBox {
+                BbCheckBox {
                     id: channelIdCheck
                     text: qsTr("通道 ID")
                     checked: window.showChannelIds
@@ -217,11 +248,10 @@ ApplicationWindow {
                 // note 上显示所用采样（隐藏 / 显示 id / 显示文件名）
                 Label { text: qsTr("采样"); color: Theme.textFaint
                         font.pixelSize: Theme.fsTiny; padding: 4 }
-                ComboBox {
+                BbComboBox {
                     model: [qsTr("隐藏"), qsTr("显示 ID"), qsTr("显示文件名")]
                     currentIndex: window.noteSampleMode
                     onActivated: (idx) => window.noteSampleMode = idx
-                    font.pixelSize: Theme.fsSmall
                     Layout.preferredWidth: 130
                 }
                 // 当前采样（M3 放置落点；检索/选择在左 Dock 采样面板）
@@ -249,14 +279,15 @@ ApplicationWindow {
                 chartMeta: window.chartMeta
                 chartPath: window.chartPath
                 showChannelIds: window.showChannelIds
-                beatNum: window.beatNum
-                beatDen: window.beatDen
                 noteSampleMode: window.noteSampleMode
                 showExtras: window.showExtras
                 editorTool: window.editorTool
+                moveMode: window.moveMode
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs
+                snapDiv: window.snapDiv
+                perfLog: window.debugPerfLog
                 onSamplePicked: (id, file) => {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
                     window.currentSampleId = id
@@ -264,6 +295,10 @@ ApplicationWindow {
                 }
                 onHitPlaceRequested: (hit) => placeNote(hit)
                 onSelectionFinished: (refs) => onSelectionMade(refs)
+                onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
+                onCanvasClicked: () => window.onCanvasClicked()
+                onNoteRightDeleted: (ref) => deleteNoteAt(ref)
+                onMoveSelectionRequested: (deltaF) => moveSelection(deltaF)
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
                               ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
@@ -406,7 +441,56 @@ ApplicationWindow {
         chartSession.refresh()
         return resp.result
     }
+    /// 只 dispatch 不 refresh（批删除循环里用；调用方完成后统一 refresh 一次）。
+    function dispatchCmd(name, args) {
+        var req = JSON.stringify({ command: name, args: args || {} })
+        var resp = JSON.parse(beatbench.dispatch(req))
+        if (!resp.ok) {
+            setStatus(resp.error.code + ": " + resp.error.message)
+            return null
+        }
+        return resp.result
+    }
+    function deleteNoteAt(ref) {
+        var r = sessionCmd("note.delete", {
+            measure: ref.measure, pos: ref.pos, lane: ref.lane, sample: ref.sample
+        })
+        if (r) setStatus(qsTr("已删除（可撤销）"))
+    }
+    function deleteSelection() {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("没有选中（点击 note 选中 / Shift+框选）"))
+            return
+        }
+        var refs = window.selectionRefs.slice()
+        var done = 0
+        for (var i = 0; i < refs.length; i++) {
+            var r = dispatchCmd("note.delete", {
+                measure: refs[i].measure, pos: refs[i].pos,
+                lane: refs[i].lane, sample: refs[i].sample
+            })
+            if (r) done++
+        }
+        if (done > 0) {
+            chartSession.refresh()
+            window.selectionRefs = []
+            setStatus(qsTr("已删除 %1 个 note（Undo 可恢复）").arg(done))
+        }
+    }
     function placeNote(hit) {
+        // BGM 展开列带 sampleHint（该列固定 #WAV id）→ 直接用；否则取当前采样
+        if (hit.sampleHint !== undefined && hit.sampleHint >= 0) {
+            var r0 = sessionCmd("note.put", {
+                measure: hit.measure,
+                pos: { num: hit.num, den: hit.den },
+                lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
+                sample: hit.sampleHint
+            })
+            if (r0)
+                setStatus(qsTr("放置 #WAV%1（BGM 列）· 小节 %2")
+                          .arg(hit.sampleHint).arg(hit.measure))
+            return
+        }
         if (window.currentSampleId === "") {
             setStatus(qsTr("先选择采样：左 Dock「采样」面板点击 #WAVxx"))
             return
@@ -429,6 +513,62 @@ ApplicationWindow {
     function onSelectionMade(refs) {
         window.selectionRefs = refs
         setStatus(qsTr("已选中 %1 个 note（Ctrl+C 复制）").arg(refs.length))
+    }
+    function refEquals(a, b) {
+        return a && b && a.measure === b.measure && a.sample === b.sample &&
+               a.lane.kind === b.lane.kind && a.lane.index === b.lane.index &&
+               a.lane.player === b.lane.player &&
+               a.pos.num === b.pos.num && a.pos.den === b.pos.den
+    }
+    function onNoteClicked(ref, ctrl) {
+        if (ctrl) {
+            // 多选切换（Ctrl+点击，文件管理器逻辑）：已选中 → 移除；否则追加
+            var arr = window.selectionRefs.slice()
+            var idx = -1
+            for (var i = 0; i < arr.length; i++)
+                if (refEquals(arr[i], ref)) { idx = i; break }
+            if (idx >= 0) arr.splice(idx, 1)
+            else arr.push(ref)
+            window.selectionRefs = arr
+            setStatus(qsTr("已选中 %1 个 note").arg(arr.length))
+            return
+        }
+        window.selectionRefs = [ref]
+        setStatus(qsTr("选中 #WAV%1（Del 删除 / 右键删除 / 拖拽平移）").arg(ref.sample))
+    }
+    function onCanvasClicked() {
+        if (window.selectionRefs.length > 0) window.selectionRefs = []
+    }
+    /// 平移选中 note（时间轴位移 deltaF 拍位小数；note.move，不换轨）。
+    /// ⚠️ NoteMoveCommand 的 from 读**顶层** player/kind/index（M3 只修了 put/delete 的
+    /// lane 子对象）→ 把 lane 字段平铺到 from 顶层（协议仍兼容）。
+    function moveSelection(deltaF) {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("先选中 note（V 选择点击/框选）再平移"))
+            return
+        }
+        var refs = window.selectionRefs.slice()
+        var done = 0
+        for (var i = 0; i < refs.length; i++) {
+            var r = refs[i]
+            var oldF = r.measure + r.pos.num / r.pos.den + deltaF
+            var m = Math.floor(oldF)
+            var frac = oldF - m
+            var den = Math.max(1, window.snapDiv)
+            var num = Math.round(frac * den)
+            if (num >= den) { num = 0; m += 1 }
+            if (m < 0) continue
+            var rr = dispatchCmd("note.move", {
+                from: { measure: r.measure, pos: r.pos, sample: r.sample,
+                        player: r.lane.player, kind: r.lane.kind, index: r.lane.index },
+                to: { measure: m, pos: { num: num, den: den } }
+            })
+            if (rr) done++
+        }
+        if (done > 0) {
+            chartSession.refresh()
+            setStatus(qsTr("已平移 %1 个 note（%2 小节）").arg(done).arg(deltaF.toFixed(3)))
+        }
     }
     function copySelection() {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
