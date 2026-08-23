@@ -428,7 +428,7 @@ ApplicationWindow {
         interval: 150
         onTriggered: {
             if (typeof editPage !== "undefined" && editPage && editPage.locateChartView) {
-                const r = editPage.locateChartView().probe(debugProbeX, debugProbeY)
+                const r = editPage.probeLocal(debugProbeX, debugProbeY)
                 console.log("PROBE " + JSON.stringify(r))
             }
         }
@@ -610,13 +610,18 @@ ApplicationWindow {
             setStatus(qsTr("当前采样 #WAV%1 不在定义表中").arg(window.currentSampleId))
             return
         }
-        var r = sessionCmd("note.put", {
+        // ⚠️ 问题1（2026-09）：BGM 展开列（bgmLine>=0，无固定 sampleHint）放置必须传
+        // bgm_line——否则 note.put 默认 bgm_line=0 落到 bgm1（虚拟子通道行号丢失）。
+        var putArgs2 = {
             measure: hit.measure,
             pos: { num: hit.num, den: hit.den },
             lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
             sample: v,
             kind: kind
-        })
+        }
+        if (hit.bgmLine !== undefined && hit.bgmLine >= 0)
+            putArgs2.bgm_line = hit.bgmLine
+        var r = sessionCmd("note.put", putArgs2)
         if (r) {
             var st = kind === "ln"
                      ? qsTr("放置 LN #WAV%1 · 小节 %2 · %3/%4")
@@ -751,9 +756,11 @@ ApplicationWindow {
         var r = sessionCmd("note.moveRegion", args)
         if (r) {
             window.selectionRefs = []
-            setStatus(targetLane && targetLane.valid
-                      ? qsTr("已移动 %1 个 note（改通道）").arg(r.notes)
-                      : qsTr("已移动 %1 个 note（+%2 拍）").arg(r.notes).arg(deltaF.toFixed(3)))
+            // 文案：有实际时间位移 → +拍；纯换轨（deltaF≈0 且有目标列）→ 改通道
+            if (targetLane && targetLane.valid && Math.abs(deltaF) < 0.0001)
+                setStatus(qsTr("已移动 %1 个 note（改通道）").arg(r.notes))
+            else
+                setStatus(qsTr("已移动 %1 个 note（+%2 拍）").arg(r.notes).arg(deltaF.toFixed(3)))
         }
     }
     function copySelection() {

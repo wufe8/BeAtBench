@@ -68,14 +68,21 @@ Item {
         return chartView
     }
 
-    /// 调试入口（--click）：视口局部坐标 → ChartView 同一手势分发路径（与 DPR/布局无关）。
+    /// 调试入口（--click）：ChartView 局部坐标 → 同一手势分发路径。
+    /// ⚠️ 坐标语义 = ChartView 局部（probe columns 的 x/w + contentsH 推算；非窗口像素）。
     function clickLocal(x, y) {
         if (chartView) chartView.clickAt(x, y)
     }
 
-    /// 调试入口（--drag）：模拟按下→移动→释放（ChartView 局部坐标，与 --click 同路径）。
+    /// 调试入口（--drag）：ChartView 局部坐标（按下→移动→释放）。
     function dragLocal(x1, y1, x2, y2) {
         if (chartView) chartView.dragAt(x1, y1, x2, y2)
+    }
+
+    /// 诊断探针（--probe）：ChartView 局部坐标 → probe。
+    function probeLocal(x, y) {
+        if (!chartView) return null
+        return chartView.probe(x, y)
     }
 
     /// 缩放重置（工具条「缩放」按钮）。
