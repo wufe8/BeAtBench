@@ -268,6 +268,14 @@ ApplicationWindow {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("勾选=点 LN 任一段自动选中配对两端（整体移动/删除）；未勾=LNs 当单 note")
                 }
+                // 单点 ↔ LN 转换（2026-09 用户）：选中游玩轨 note 一键转换
+                BbToolButton {
+                    text: qsTr("单点/LN")
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    onClicked: toggleLnSelection()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("选中游玩轨 note：LN→断开两端变单点；单点→向前配最近同轨同采样单点为 LN")
+                }
                 // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
                 BbCheckBox {
                     id: channelIdCheck
@@ -550,7 +558,7 @@ ApplicationWindow {
         var args = {
             measure: ref.measure, pos: ref.pos, lane: ref.lane, sample: ref.sample
         }
-        if (ref.bgmLine !== undefined) args.bgm_line = ref.bgmLine
+        if (ref.bgm_line !== undefined) args.bgm_line = ref.bgm_line
         var r = sessionCmd("note.delete", args)
         if (r) setStatus(qsTr("已删除（可撤销）"))
     }
@@ -566,7 +574,7 @@ ApplicationWindow {
                 measure: refs[i].measure, pos: refs[i].pos,
                 lane: refs[i].lane, sample: refs[i].sample
             }
-            if (refs[i].bgmLine !== undefined) args.bgm_line = refs[i].bgmLine
+            if (refs[i].bgm_line !== undefined) args.bgm_line = refs[i].bgm_line
             var r = dispatchCmd("note.delete", args)
             if (r) done++
         }
@@ -590,8 +598,8 @@ ApplicationWindow {
                 sample: hit.sampleHint,
                 kind: kind
             }
-            if (hit.bgmLine !== undefined && hit.bgmLine >= 0)
-                putArgs.bgm_line = hit.bgmLine
+            if (hit.bgm_line !== undefined && hit.bgm_line >= 0)
+                putArgs.bgm_line = hit.bgm_line
             var r0 = sessionCmd("note.put", putArgs)
             if (r0)
                 setStatus(kind === "ln"
@@ -619,8 +627,8 @@ ApplicationWindow {
             sample: v,
             kind: kind
         }
-        if (hit.bgmLine !== undefined && hit.bgmLine >= 0)
-            putArgs2.bgm_line = hit.bgmLine
+        if (hit.bgm_line !== undefined && hit.bgm_line >= 0)
+            putArgs2.bgm_line = hit.bgm_line
         var r = sessionCmd("note.put", putArgs2)
         if (r) {
             var st = kind === "ln"
@@ -640,7 +648,7 @@ ApplicationWindow {
                a.lane.kind === b.lane.kind && a.lane.index === b.lane.index &&
                a.lane.player === b.lane.player &&
                a.pos.num === b.pos.num && a.pos.den === b.pos.den &&
-               (a.bgmLine === undefined || b.bgmLine === undefined || a.bgmLine === b.bgmLine)
+               (a.bgm_line === undefined || b.bgm_line === undefined || a.bgm_line === b.bgm_line)
     }
     function onNoteClicked(ref, ctrl) {
         // LN 选取模式（默认关）：点 LN 任一段 → 自动纳入配对段。ref 由 noteAt 返回，
@@ -744,13 +752,13 @@ ApplicationWindow {
                     break
                 }
             }
-            if (sameLane && !(targetLane.bgmLine !== undefined && targetLane.bgmLine >= 0)) {
+            if (sameLane && !(targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)) {
                 // 同轨且非 BGM 子轨：纯时间移动——不传 to_lane/to_bgm_line
             } else {
                 args.to_lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
                                  index: targetLane.laneIndex }
-                if (targetLane.bgmLine !== undefined && targetLane.bgmLine >= 0)
-                    args.to_bgm_line = targetLane.bgmLine
+                if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
+                    args.to_bgm_line = targetLane.bgm_line
             }
         }
         var r = sessionCmd("note.moveRegion", args)
@@ -761,6 +769,19 @@ ApplicationWindow {
                 setStatus(qsTr("已移动 %1 个 note（改通道）").arg(r.notes))
             else
                 setStatus(qsTr("已移动 %1 个 note（+%2 拍）").arg(r.notes).arg(deltaF.toFixed(3)))
+        }
+    }
+    /// 单点 ↔ LN 转换（工具栏「单点/LN」按钮；selection 批量一个 undo 步）。
+    /// LN→断开两端变单点；单点→向前配最近同 lane 同 sample 未配对单点为 LN。
+    function toggleLnSelection() {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("先选中 note（点击/框选）再转换单点/LN"))
+            return
+        }
+        var r = sessionCmd("note.toggleLn", { selection: window.selectionRefs.slice() })
+        if (r) {
+            window.selectionRefs = []
+            setStatus(qsTr("已转换 %1 个 note（单点↔LN）").arg(r.notes))
         }
     }
     function copySelection() {

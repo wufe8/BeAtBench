@@ -236,7 +236,7 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     else if (c.lane.kind == beatbench::LaneKind::Bgm) kind = QStringLiteral("bgm");
     res.insert(QStringLiteral("laneKind"), kind);
     res.insert(QStringLiteral("label"), c.label);
-    res.insert(QStringLiteral("bgmLine"), c.bgmLine);
+    res.insert(QStringLiteral("bgm_line"), c.bgmLine);
     res.insert(QStringLiteral("bgaLayer"), c.bgaLayer);
     // BGM 展开列：该列即固定 #WAV id（放置用它，不取当前采样）
     if (c.bgm && c.bgmId != 0) res.insert(QStringLiteral("sampleHint"), static_cast<int>(c.bgmId));
@@ -271,7 +271,7 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
             res.insert(QStringLiteral("laneKind"), QStringLiteral("key"));
             res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
             res.insert(QStringLiteral("label"), c.label);
-            res.insert(QStringLiteral("bgmLine"), -1);
+            res.insert(QStringLiteral("bgm_line"), -1);
             res.insert(QStringLiteral("bgaLayer"), -1);
             return res;
         }
@@ -284,7 +284,7 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
         res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
         res.insert(QStringLiteral("laneKind"), kind);
         res.insert(QStringLiteral("label"), c.label);
-        res.insert(QStringLiteral("bgmLine"), c.bgmLine);
+        res.insert(QStringLiteral("bgm_line"), c.bgmLine);
         res.insert(QStringLiteral("bgaLayer"), c.bgaLayer);
         return res;
     }
@@ -352,7 +352,7 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         res.insert(QStringLiteral("lane"), lane);
         res.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
         // BGM 行序号（同值多行 Bgm note 消歧；前端选中/删除/移动必带）
-        res.insert(QStringLiteral("bgmLine"), static_cast<int>(ev.value.bgm_line));
+        res.insert(QStringLiteral("bgm_line"), static_cast<int>(ev.value.bgm_line));
         // LN 选取模式（默认关）：命中 LN 任一段 → 返回配对段（lnPartner），
         // 前端据此自动多选两端（用户问题5）。配对段 = ln_pair 下标指向的 note。
         if (m_lnSelectMode && ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size()) {
@@ -376,7 +376,7 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
             plane.insert(QStringLiteral("index"), QVariant::fromValue(p.value.lane.index));
             pr.insert(QStringLiteral("lane"), plane);
             pr.insert(QStringLiteral("sample"), static_cast<int>(p.value.sample.id));
-            pr.insert(QStringLiteral("bgmLine"), static_cast<int>(p.value.bgm_line));
+            pr.insert(QStringLiteral("bgm_line"), static_cast<int>(p.value.bgm_line));
             res.insert(QStringLiteral("lnPartner"), pr);
         }
         return res;
@@ -426,7 +426,7 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
         lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
         ref.insert(QStringLiteral("lane"), lane);
         ref.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
-        ref.insert(QStringLiteral("bgmLine"), static_cast<int>(ev.value.bgm_line));
+        ref.insert(QStringLiteral("bgm_line"), static_cast<int>(ev.value.bgm_line));
         hits.push_back(std::move(ref));
     }
     // 稳定升序（(measure,pos) → lane → sample），满足「顺序无关」的前提下给可预期结果
@@ -657,6 +657,13 @@ QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
     if (lane.kind == beatbench::LaneKind::Bgm)
         return QColor(QStringLiteral("#4ade80"));  // 背景轨 → 绿（与 BGA 层一致,自动播放）
     return th->textMuted();  // Pedal 等罕见轨：弱化色
+}
+
+QColor ChartViewItem::noteColor(const beatbench::Lane& lane, const beatbench::Note& note) const {
+    QColor c = noteColor(lane);
+    // LN note（ln_pair 存在）：加深 35%——与单点直接分辨（2026-09 用户）。
+    if (note.ln_pair) c = c.darker(135);
+    return c;
 }
 
 double ChartViewItem::bpmAt(const beatbench::Chart& chart, int measure) const {
@@ -1179,43 +1186,30 @@ void ChartViewItem::paint(QPainter* p) {
 
         if (note.ln_pair) {
             const auto& partner = chart.notes[*note.ln_pair];
-            const bool isHead =
+            // 2026-09（用户反馈）：LN 绘制不再依赖「谁是头尾」的固定角色——
+            // ① 每端在**自己列**画自己的帽（移动后尾帽在尾的新列/新 y）；
+            // ② 体（中段线）由**时间早的端**画：从早端 y 到晚端 y（画在早端列中心线，
+            //    hi-top 下晚端在上 → 体跨 min..max）；
+            // ③ 选中框每端都画（头尾均可见时有明确高亮）。
+            const bool isEarlier =
                 ev.measure < partner.measure ||
                 (ev.measure == partner.measure &&
                  posDouble(ev.pos) < posDouble(partner.pos));
-            if (isHead) {
+            // 自己帽（各列）；LN note 用加深色（2026-09）
+            p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
+                        noteColor(note.lane, note));
+            drawSampleLabel(r, y, note);
+            // 体：时间早端画（连接两端 y；画在早端列）
+            if (isEarlier) {
                 const qreal y2 = yOf(partner.measure + posDouble(partner.pos));
-                // hi-top：尾在小节上方（y2 < y）→ 体跨 min..max
+                // 早端列（本端列 r）；若 partner 在同列则中段线直接连，跨列时也画在本列
                 const qreal ya = std::min(y, y2), yb = std::max(y, y2);
                 p->fillRect(QRectF(r.center().x() - 3.0, ya, 6.0,
                                    std::max<qreal>(yb - ya, 4.0)),
                             th->ln());
-                p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
-                            noteColor(partner.value.lane));
-                p->fillRect(QRectF(r.x() + 2, y2 - noteH, r.width() - 4, noteH),
-                            noteColor(partner.value.lane));
-                drawSampleLabel(r, y, note);
-                if (isSelected(ev)) {
-                    p->setPen(QPen(th->onAccent(), 1.2));
-                    p->setBrush(Qt::NoBrush);
-                    p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
-                                       noteH + 2.0));
-                }
-            } else if (static_cast<int>(partner.measure) < first ||
-                       static_cast<int>(partner.measure) > last) {
-                // 头在可视范围外：只画尾帽
-                p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
-                            noteColor(note.lane));
-                drawSampleLabel(r, y, note);
-                if (isSelected(ev)) {
-                    p->setPen(QPen(th->onAccent(), 1.2));
-                    p->setBrush(Qt::NoBrush);
-                    p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
-                                       noteH + 2.0));
-                }
-            } else if (isSelected(ev)) {
-                // 头可见（上面 isHead 分支已画整条 LN 的选中框）——尾自身也被选中
-                // （LN 选取模式点任一段选中两端）也要有明确选中框（2026-09 用户问题5）。
+            }
+            // 选中框（每端）
+            if (isSelected(ev)) {
                 p->setPen(QPen(th->onAccent(), 1.2));
                 p->setBrush(Qt::NoBrush);
                 p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,

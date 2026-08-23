@@ -215,6 +215,9 @@ private:
     void clampScroll();
 
     QColor noteColor(const beatbench::Lane& lane) const;
+    /// LN note 专用色（2026-09 用户：位于 LN 轨的 note 加深，直接分辨单点/LN）。
+    /// LN（ln_pair 存在）→ 在普通色上加深；否则等同 noteColor(lane)。
+    QColor noteColor(const beatbench::Lane& lane, const beatbench::Note& note) const;
     double bpmAt(const beatbench::Chart& chart, int measure) const;
     double beatsOf(const beatbench::Chart& chart, int measure) const;
 

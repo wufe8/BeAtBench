@@ -134,7 +134,7 @@ Item {
                     s.lane.index === hit.lane.index &&
                     s.lane.player === hit.lane.player &&
                     s.pos.num === hit.pos.num && s.pos.den === hit.pos.den &&
-                    (s.bgmLine === undefined || s.bgmLine === hit.bgmLine))
+                    (s.bgm_line === undefined || s.bgm_line === hit.bgm_line))
                 return true
         }
         return false
