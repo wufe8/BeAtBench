@@ -25,8 +25,8 @@ Item {
     property bool showExtras: false
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
     property string editorTool: "select"
-    /// 平移开关（拖拽选中 note = 时间轴移动；默认开）
-    property bool moveMode: true
+    /// 平移开关（拖拽选中 note；默认关=自由 2D，勾选=轴锁定）
+    property bool moveMode: false
     /// 放置用采样数值 id（chartSession.sampleValueOf；-1 = 未选）
     property int sampleId: -1
     /// 当前采样展示文本（提示用）

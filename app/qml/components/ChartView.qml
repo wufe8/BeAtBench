@@ -30,7 +30,9 @@ Item {
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
     // ---- 编辑接线（M3） ----
     property string editorTool: "select" // select/note/ln/mine/pan（Main 会话状态）
-    property bool moveMode: true           // 平移开关（默认开）：拖拽选中 note = 时间轴移动
+    property bool moveMode: false          // 平移开关（默认关，2026-09 用户确认：
+                                           // 「默认关闭 note 平移限制」→ 自由 2D 拖动，
+                                           // 时间+通道可同时动；勾选后按轴锁定）
     property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
     property string sampleText: ""       // 当前采样展示（无放置采样时提示）
     property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
@@ -131,7 +133,8 @@ Item {
                     s.lane.kind === hit.lane.kind &&
                     s.lane.index === hit.lane.index &&
                     s.lane.player === hit.lane.player &&
-                    s.pos.num === hit.pos.num && s.pos.den === hit.pos.den)
+                    s.pos.num === hit.pos.num && s.pos.den === hit.pos.den &&
+                    (s.bgmLine === undefined || s.bgmLine === hit.bgmLine))
                 return true
         }
         return false

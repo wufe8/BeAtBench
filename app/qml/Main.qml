@@ -60,8 +60,9 @@ ApplicationWindow {
     // 吸附（放置用）：snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）
     property int snapNum: 1
     property int snapDen: 16
-    // 平移模式（checkbox 开关，默认开）：拖拽选中 note = 时间轴移动（不改轨道）
-    property bool moveMode: true
+    // 平移模式（checkbox 开关，默认关）：拖拽选中 note = 移动；勾选=按方向轴锁定
+    // （纵向→时间/通道不变；横向→通道/时间不变）。未勾=自由 2D（时间+通道都动）。
+    property bool moveMode: false
     // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
     property bool lnSelectMode: false
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）。
@@ -501,9 +502,11 @@ ApplicationWindow {
         return resp.result
     }
     function deleteNoteAt(ref) {
-        var r = sessionCmd("note.delete", {
+        var args = {
             measure: ref.measure, pos: ref.pos, lane: ref.lane, sample: ref.sample
-        })
+        }
+        if (ref.bgmLine !== undefined) args.bgm_line = ref.bgmLine
+        var r = sessionCmd("note.delete", args)
         if (r) setStatus(qsTr("已删除（可撤销）"))
     }
     function deleteSelection() {
@@ -514,10 +517,12 @@ ApplicationWindow {
         var refs = window.selectionRefs.slice()
         var done = 0
         for (var i = 0; i < refs.length; i++) {
-            var r = dispatchCmd("note.delete", {
+            var args = {
                 measure: refs[i].measure, pos: refs[i].pos,
                 lane: refs[i].lane, sample: refs[i].sample
-            })
+            }
+            if (refs[i].bgmLine !== undefined) args.bgm_line = refs[i].bgmLine
+            var r = dispatchCmd("note.delete", args)
             if (r) done++
         }
         if (done > 0) {
@@ -533,13 +538,16 @@ ApplicationWindow {
         else if (window.editorTool === "mine") kind = "mine"
         // BGM 展开列带 sampleHint（该列固定 #WAV id）→ 直接用；否则取当前采样
         if (hit.sampleHint !== undefined && hit.sampleHint >= 0) {
-            var r0 = sessionCmd("note.put", {
+            var putArgs = {
                 measure: hit.measure,
                 pos: { num: hit.num, den: hit.den },
                 lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
                 sample: hit.sampleHint,
                 kind: kind
-            })
+            }
+            if (hit.bgmLine !== undefined && hit.bgmLine >= 0)
+                putArgs.bgm_line = hit.bgmLine
+            var r0 = sessionCmd("note.put", putArgs)
             if (r0)
                 setStatus(kind === "ln"
                           ? qsTr("放置 LN #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure)
@@ -581,7 +589,8 @@ ApplicationWindow {
         return a && b && a.measure === b.measure && a.sample === b.sample &&
                a.lane.kind === b.lane.kind && a.lane.index === b.lane.index &&
                a.lane.player === b.lane.player &&
-               a.pos.num === b.pos.num && a.pos.den === b.pos.den
+               a.pos.num === b.pos.num && a.pos.den === b.pos.den &&
+               (a.bgmLine === undefined || b.bgmLine === undefined || a.bgmLine === b.bgmLine)
     }
     function onNoteClicked(ref, ctrl) {
         // LN 选取模式（默认关）：点 LN 任一段 → 自动纳入配对段。ref 由 noteAt 返回，
@@ -623,9 +632,9 @@ ApplicationWindow {
     }
     /// 平移选中 note（统一位移：拖拽/框选整段/多选）。
     /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）。
+    /// 2026-09 跨命名空间：targetLane 带 metaKind（bpm/stop）→ note.convert（id 不变）；
+    /// BGA 图层列（bgaLayer >= 0）→ note.convert（bga_*）；其余 = note.moveRegion。
     /// ⚠️ 用 note.moveRegion：selection + 统一 delta（{measure,pos}+可选 to_lane）→ 一个 undo 步。
-    ///   相对 M3 之前的「delete+put 兜底」（撤销 2 步、丢 LN），此为单命令、保 LN。
-    ///   note.move 的 moves 数组留给「逐项不同目标」场景（非均匀拖动），本函数不用。
     function moveSelection(deltaF, targetLane) {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（选择工具点击/框选）再移动"))
@@ -642,8 +651,40 @@ ApplicationWindow {
         var delta = { measure: m, pos: deltaPos }
         var args = { selection: window.selectionRefs.slice(), delta: delta }
         if (targetLane && targetLane.valid) {
+            // 跨命名空间：BPM/STOP 列（metaKind）→ note.convert；BGA 图层列 →
+            // note.convert（bga_*）；BGM 子轨（bgmLine >= 0）→ moveRegion 的 to_bgm_line。
+            if (targetLane.metaKind === "bpm" || targetLane.metaKind === "stop") {
+                var r0 = sessionCmd("note.convert", {
+                    selection: window.selectionRefs.slice(),
+                    target: targetLane.metaKind,
+                    delta: delta
+                })
+                if (r0) {
+                    window.selectionRefs = []
+                    setStatus(qsTr("已转换 %1 个 note → %2（id 不变）").arg(r0.notes).arg(targetLane.metaKind.toUpperCase()))
+                }
+                return
+            }
+            if (targetLane.bgaLayer !== undefined && targetLane.bgaLayer >= 0) {
+                var bgaTarget = "bga_base"
+                if (targetLane.bgaLayer === 1) bgaTarget = "bga_poor"
+                else if (targetLane.bgaLayer === 2) bgaTarget = "bga_layer"
+                else if (targetLane.bgaLayer === 3) bgaTarget = "bga_layer2"
+                var r1 = sessionCmd("note.convert", {
+                    selection: window.selectionRefs.slice(),
+                    target: bgaTarget,
+                    delta: delta
+                })
+                if (r1) {
+                    window.selectionRefs = []
+                    setStatus(qsTr("已转换 %1 个 note → BGA（id 不变）").arg(r1.notes))
+                }
+                return
+            }
             args.to_lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
                              index: targetLane.laneIndex }
+            if (targetLane.bgmLine !== undefined && targetLane.bgmLine >= 0)
+                args.to_bgm_line = targetLane.bgmLine
         }
         var r = sessionCmd("note.moveRegion", args)
         if (r) {
