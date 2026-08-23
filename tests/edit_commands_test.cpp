@@ -195,7 +195,8 @@ TEST(EditCommands, DeleteLnBreaksPair) {
 }
 
 TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
-    // 默认（move_ln_pair=false）：LN 当作单个 note，移动后配对解除
+    // 2026-09 用户最终确认：移动只移动选中 note，ln_pair 保持（不自动重连也不断开）。
+    // 默认（move_ln_pair=false）：只移主 note 到 m3，配对端留原位，互指按伙伴值保持。
     EditorSession s;
     Chart c = make_chart();
     c.notes[0].value.lane = {0, LaneKind::Key, 1};
@@ -213,11 +214,11 @@ TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
         if (e.measure == 3 && e.value.lane == (Lane{0, LaneKind::Key, 1})) ++in_m3;
     }
     EXPECT_EQ(in_m3, 1u);
-    // 配对已解除（被移动 note 与留原位的伙伴都无 ln_pair）
+    // 配对保持（被移动 note 与留原位的伙伴仍互指）
     for (const auto& e : s.chart().notes) {
-        EXPECT_FALSE(e.value.ln_pair.has_value());
+        EXPECT_TRUE(e.value.ln_pair.has_value());
     }
-    // undo 精确还原（配对也恢复）
+    // undo 精确还原（配对保持）
     ASSERT_TRUE(s.undo());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     EXPECT_TRUE(s.chart().notes[0].value.ln_pair.has_value());
@@ -225,7 +226,8 @@ TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
 }
 
 TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
-    // move_ln_pair=true：识别 LN 整体头尾移动（保持相对位置），配对保留
+    // 2026-09 用户最终确认：移动只移动选中 note，ln_pair 保持（不成对随动）。
+    // move_ln_pair=true 参数保留（旧 API），但只移主 note、配对互指按伙伴值保持。
     EditorSession s;
     Chart c = make_chart();
     c.notes[0].value.lane = {0, LaneKind::Key, 1};
@@ -237,13 +239,19 @@ TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
                                                          Lane{0, LaneKind::Key, 1}, 1, 3,
                                                          Rational(0, 1), true)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
-    // 两个配对 note 都在 m3
-    std::size_t in_m3 = 0;
+    // 头在 m3（pos0），尾留 m1（pos1/2）；两者仍互指
+    bool head_at_m3 = false, tail_at_m1 = false;
     for (const auto& e : s.chart().notes) {
-        if (e.measure == 3 && e.value.lane == (Lane{0, LaneKind::Key, 1})) ++in_m3;
+        if (e.measure == 3 && e.pos == Rational(0, 1) &&
+            e.value.lane == (Lane{0, LaneKind::Key, 1}))
+            head_at_m3 = true;
+        if (e.measure == 1 && e.pos == Rational(1, 2) &&
+            e.value.lane == (Lane{0, LaneKind::Key, 1}))
+            tail_at_m1 = true;
     }
-    EXPECT_EQ(in_m3, 2u);
-    // undo → 回到 m1/m2，配对保留
+    EXPECT_TRUE(head_at_m3);
+    EXPECT_TRUE(tail_at_m1);
+    // undo → 完全还原（含配对）
     ASSERT_TRUE(s.undo());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     bool at_m1 = false, at_m2 = false;
