@@ -81,7 +81,10 @@ ComboBox {
                     color: ListView.isCurrentItem ? Theme.surface3 : "transparent"
                 }
                 onClicked: {
+                    // ⚠️ 自管 popup 绕过了 ComboBox 内建激活链：手动派发「激活」信号，
+                    // 否则使用方绑定的 onActivated(idx) 永不触发（2026 反馈：采样框选择无反应）。
                     root.currentIndex = index
+                    root.activated(index)
                     root.popup.close()
                 }
             }

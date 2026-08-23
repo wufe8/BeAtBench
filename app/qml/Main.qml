@@ -57,8 +57,9 @@ ApplicationWindow {
     property var clipboardLines: []
     // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
     property var selectionRefs: []
-    // 吸附（放置用）：槽/小节；工具条数字框手动填写（1/16 每 16 槽）
-    property int snapDiv: 16
+    // 吸附（放置用）：snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）
+    property int snapNum: 1
+    property int snapDen: 16
     // 平移模式（checkbox 开关，默认开）：拖拽选中 note = 时间轴移动（不改轨道）
     property bool moveMode: true
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）
@@ -75,17 +76,17 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+V"; onActivated: pasteClipboard() }
     Shortcut { sequence: "Del"; enabled: chartMeta !== null && currentPage === 0
                 onActivated: deleteSelection() }
-    // 编辑工具快捷键（文本输入焦点时让行）
-    Shortcut { sequence: "V"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "select" }
-    Shortcut { sequence: "N"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "note" }
-    Shortcut { sequence: "L"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "ln" }
-    Shortcut { sequence: "M"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "mine" }
-    Shortcut { sequence: "H"; enabled: currentPage === 0 && !window.textInputFocused
+    // 编辑工具快捷键（数字 1-5：1=拖拽 2=选择 3=放置 4=LN 5=地雷；文本输入焦点时让行）
+    Shortcut { sequence: "1"; enabled: currentPage === 0 && !window.textInputFocused
                 onActivated: window.editorTool = "pan" }
+    Shortcut { sequence: "2"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "select" }
+    Shortcut { sequence: "3"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "note" }
+    Shortcut { sequence: "4"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "ln" }
+    Shortcut { sequence: "5"; enabled: currentPage === 0 && !window.textInputFocused
+                onActivated: window.editorTool = "mine" }
     Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
 
     // ---------- 菜单栏（固定全局） ----------
@@ -163,17 +164,27 @@ ApplicationWindow {
                 anchors.leftMargin: 8
                 anchors.rightMargin: 8
                 spacing: 6
-                // snap 粒度（1/N 小节）：槽位弱线显示 + 放置吸附（同源；手动填写）
-                Label { text: qsTr("snap 1/"); color: Theme.textMuted
+                // snap 粒度（snapNum/snapDen 小节）：槽位弱线显示 + 放置吸附（同源；分子分母手填）
+                Label { text: qsTr("snap"); color: Theme.textMuted
                         font.pixelSize: Theme.fsSmall; padding: 2 }
                 BbSpinBox {
-                    from: 1; to: 192
-                    value: window.snapDiv
+                    from: 1; to: 999
+                    value: window.snapNum
                     editable: true
-                    implicitWidth: 64
-                    onValueModified: window.snapDiv = Math.max(1, value)
+                    implicitWidth: 56
+                    onValueModified: window.snapNum = Math.max(1, value)
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("槽位粒度：放置吸附 + 槽位线显示（>64 不画弱线）")
+                    ToolTip.text: qsTr("snap 分子（槽数步长 = snapNum/snapDen 小节）")
+                }
+                Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                BbSpinBox {
+                    from: 1; to: 192
+                    value: window.snapDen
+                    editable: true
+                    implicitWidth: 56
+                    onValueModified: window.snapDen = Math.max(1, value)
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线）")
                 }
                 BbToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
                 BbToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
@@ -214,26 +225,29 @@ ApplicationWindow {
                 spacing: 6
                 Label { text: qsTr("工具"); color: Theme.textFaint
                         font.pixelSize: Theme.fsTiny; padding: 4 }
-                // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题
-                BbToolButton { text: "V 选择"; active: window.editorTool === "select"; flatStyle: true
-                               onClicked: window.editorTool = "select" }
-                BbToolButton { text: "N 放置"; active: window.editorTool === "note"; flatStyle: true
-                               onClicked: window.editorTool = "note" }
-                BbToolButton { text: "L LN"; active: window.editorTool === "ln"; flatStyle: true
-                               onClicked: window.editorTool = "ln" }
-                BbToolButton { text: "M 地雷"; active: window.editorTool === "mine"; flatStyle: true
-                               onClicked: window.editorTool = "mine" }
-                BbToolButton { text: "H 拖拽"; active: window.editorTool === "pan"; flatStyle: true
+                // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题。
+                // 顺序：1=拖拽（默认） 2=选择 3=放置 4=LN 5=地雷；快捷键同序。
+                BbToolButton { text: "1 拖拽"; active: window.editorTool === "pan"; flatStyle: true
                                onClicked: window.editorTool = "pan" }
-                // 平移 = 开关式模式（不占工具位）：勾选后（V 选择下）拖拽选中 note
-                // 仅沿时间轴移动（note.move；跨轨道移动不支持）
+                BbToolButton { text: "2 选择"; active: window.editorTool === "select"; flatStyle: true
+                               onClicked: window.editorTool = "select" }
+                BbToolButton { text: "3 放置"; active: window.editorTool === "note"; flatStyle: true
+                               onClicked: window.editorTool = "note" }
+                BbToolButton { text: "4 LN"; active: window.editorTool === "ln"; flatStyle: true
+                               onClicked: window.editorTool = "ln" }
+                BbToolButton { text: "5 地雷"; active: window.editorTool === "mine"; flatStyle: true
+                               onClicked: window.editorTool = "mine" }
+                // 平移 = 轴锁定开关（不占工具位、非门控）：勾选后拖拽选中 note 按方向主轴
+                // 移动——纵向=时间（note.move，通道不变）；横向=通道（delete+put，时间不变）。
+                // 未勾选 = 自由 2D（时间+通道都动）。无论勾选与否，拖拽选中 note 都可移动。
                 BbCheckBox {
                     id: moveModeCheck
                     text: qsTr("平移")
                     checked: window.moveMode
                     onToggled: window.moveMode = checked
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("开启后拖拽选中 note = 沿时间轴移动（不换轨）")
+                    ToolTip.text: qsTr("勾选=按方向轴锁定移动（纵向→时间/通道不变，横向→通道/时间不变）；"
+                                     + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
                 }
                 Item { Layout.fillWidth: true }
                 // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
@@ -286,7 +300,8 @@ ApplicationWindow {
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs
-                snapDiv: window.snapDiv
+                snapNum: window.snapNum
+                snapDen: window.snapDen
                 perfLog: window.debugPerfLog
                 onSamplePicked: (id, file) => {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
@@ -298,7 +313,7 @@ ApplicationWindow {
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
-                onMoveSelectionRequested: (deltaF) => moveSelection(deltaF)
+                onMoveSelectionRequested: (deltaF, targetLane) => moveSelection(deltaF, targetLane)
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
                               ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
@@ -478,17 +493,25 @@ ApplicationWindow {
         }
     }
     function placeNote(hit) {
+        // kind 语义（M3 note.put 已支持）：note→normal / ln→LN 自动配对 / mine→地雷。
+        var kind = "normal"
+        if (window.editorTool === "ln") kind = "ln"
+        else if (window.editorTool === "mine") kind = "mine"
         // BGM 展开列带 sampleHint（该列固定 #WAV id）→ 直接用；否则取当前采样
         if (hit.sampleHint !== undefined && hit.sampleHint >= 0) {
             var r0 = sessionCmd("note.put", {
                 measure: hit.measure,
                 pos: { num: hit.num, den: hit.den },
                 lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
-                sample: hit.sampleHint
+                sample: hit.sampleHint,
+                kind: kind
             })
             if (r0)
-                setStatus(qsTr("放置 #WAV%1（BGM 列）· 小节 %2")
-                          .arg(hit.sampleHint).arg(hit.measure))
+                setStatus(kind === "ln"
+                          ? qsTr("放置 LN #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure)
+                          : kind === "mine"
+                                ? qsTr("放置地雷 #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure)
+                                : qsTr("放置 #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure))
             return
         }
         if (window.currentSampleId === "") {
@@ -504,11 +527,17 @@ ApplicationWindow {
             measure: hit.measure,
             pos: { num: hit.num, den: hit.den },
             lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
-            sample: v
+            sample: v,
+            kind: kind
         })
-        if (r)
-            setStatus(qsTr("放置 #WAV%1 · 小节 %2 · %3/%4")
-                      .arg(window.currentSampleId).arg(hit.measure).arg(hit.num).arg(hit.den))
+        if (r) {
+            var st = kind === "ln"
+                     ? qsTr("放置 LN #WAV%1 · 小节 %2 · %3/%4")
+                     : kind === "mine"
+                           ? qsTr("放置地雷 #WAV%1 · 小节 %2 · %3/%4")
+                           : qsTr("放置 #WAV%1 · 小节 %2 · %3/%4")
+            setStatus(st.arg(window.currentSampleId).arg(hit.measure).arg(hit.num).arg(hit.den))
+        }
     }
     function onSelectionMade(refs) {
         window.selectionRefs = refs
@@ -539,35 +568,36 @@ ApplicationWindow {
     function onCanvasClicked() {
         if (window.selectionRefs.length > 0) window.selectionRefs = []
     }
-    /// 平移选中 note（时间轴位移 deltaF 拍位小数；note.move，不换轨）。
-    /// ⚠️ NoteMoveCommand 的 from 读**顶层** player/kind/index（M3 只修了 put/delete 的
-    /// lane 子对象）→ 把 lane 字段平铺到 from 顶层（协议仍兼容）。
-    function moveSelection(deltaF) {
+    /// 平移选中 note（统一位移：拖拽/框选整段/多选）。
+    /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）。
+    /// ⚠️ 用 note.moveRegion：selection + 统一 delta（{measure,pos}+可选 to_lane）→ 一个 undo 步。
+    ///   相对 M3 之前的「delete+put 兜底」（撤销 2 步、丢 LN），此为单命令、保 LN。
+    ///   note.move 的 moves 数组留给「逐项不同目标」场景（非均匀拖动），本函数不用。
+    function moveSelection(deltaF, targetLane) {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("先选中 note（V 选择点击/框选）再平移"))
+            setStatus(qsTr("先选中 note（选择工具点击/框选）再移动"))
             return
         }
-        var refs = window.selectionRefs.slice()
-        var done = 0
-        for (var i = 0; i < refs.length; i++) {
-            var r = refs[i]
-            var oldF = r.measure + r.pos.num / r.pos.den + deltaF
-            var m = Math.floor(oldF)
-            var frac = oldF - m
-            var den = Math.max(1, window.snapDiv)
-            var num = Math.round(frac * den)
-            if (num >= den) { num = 0; m += 1 }
-            if (m < 0) continue
-            var rr = dispatchCmd("note.move", {
-                from: { measure: r.measure, pos: r.pos, sample: r.sample,
-                        player: r.lane.player, kind: r.lane.kind, index: r.lane.index },
-                to: { measure: m, pos: { num: num, den: den } }
-            })
-            if (rr) done++
+        // delta snap：把连续拍位位移吸附到当前槽（snapNum/snapDen 小节），再拆成
+        // {measure(int 小节分量), pos(节内分数分量)}。BMS 槽位为离散步长，吸附后对齐网格。
+        var num = window.snapNum, den = window.snapDen
+        var slots = Math.max(1, Math.floor(den / num))
+        var snappedF = Math.round(deltaF * slots) / slots  // 吸附到整槽
+        var m = Math.floor(snappedF)
+        var frac = snappedF - m
+        var deltaPos = { num: Math.round(frac * den), den: den }
+        var delta = { measure: m, pos: deltaPos }
+        var args = { selection: window.selectionRefs.slice(), delta: delta }
+        if (targetLane && targetLane.valid) {
+            args.to_lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
+                             index: targetLane.laneIndex }
         }
-        if (done > 0) {
-            chartSession.refresh()
-            setStatus(qsTr("已平移 %1 个 note（%2 小节）").arg(done).arg(deltaF.toFixed(3)))
+        var r = sessionCmd("note.moveRegion", args)
+        if (r) {
+            window.selectionRefs = []
+            setStatus(targetLane && targetLane.valid
+                      ? qsTr("已移动 %1 个 note（改通道）").arg(r.notes)
+                      : qsTr("已移动 %1 个 note（+%2 拍）").arg(r.notes).arg(deltaF.toFixed(3)))
         }
     }
     function copySelection() {

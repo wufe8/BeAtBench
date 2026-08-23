@@ -2,11 +2,29 @@
 // 事件统计 + 最小 lint（info/check 命令与 CLI 展示共用，避免两处逻辑漂移）。
 #include "beatbench/core/bms/ChartCheck.hpp"
 
+#include <tuple>
+
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 namespace beatbench::bms {
+
+namespace {
+
+// 轨道文本（lint 消息用）：key1 / scratch / pedal / bgm / 2P 前缀
+std::string lane_text(const Lane& lane) {
+    std::string s = lane.player == 1 ? "2P " : "";
+    switch (lane.kind) {
+        case LaneKind::Key: s += "key" + std::to_string(lane.index); break;
+        case LaneKind::Scratch: s += "scratch"; break;
+        case LaneKind::Pedal: s += "pedal"; break;
+        case LaneKind::Bgm: s += "bgm"; break;
+    }
+    return s;
+}
+
+}  // namespace
 
 EventStats collect_event_stats(const Chart& chart) {
     EventStats stats;
@@ -136,6 +154,59 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
     if (chart.notes.empty() && chart.bpm_events.empty() && chart.stop_events.empty() &&
         chart.measure_events.empty() && chart.bga_events.empty() && chart.raw_lines.empty()) {
         issues.push_back({"empty_chart", "空谱面（未解析到任何内容）", 0});
+    }
+    // 4) 重叠 note（同 measure + pos + lane 多个；同 sample 也算——同值重叠也是问题）
+    //    播放器行为不定（可能只响一个/相位抵消），谱师通常无意为之。
+    {
+        std::map<std::tuple<std::uint32_t, Rational, Lane>, std::size_t> seen;
+        for (const auto& ev : chart.notes) {
+            const auto key = std::make_tuple(ev.measure, ev.pos, ev.value.lane);
+            auto& n = seen[key];
+            ++n;
+            if (n == 2) {  // 第二次出现才报（避免每组报 N-1 次）
+                LintIssue issue;
+                issue.code = "overlapping_notes";
+                issue.measure = ev.measure;
+                issue.pos_num = ev.pos.num;
+                issue.pos_den = ev.pos.den;
+                issue.lane_player = ev.value.lane.player;
+                issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
+                issue.lane_index = ev.value.lane.index;
+                issue.message = "重叠 note（同位置同轨道 " +
+                                std::to_string(ev.measure) + " 小节 " +
+                                std::to_string(ev.pos.num) + "/" +
+                                std::to_string(ev.pos.den) + " 轨道 " +
+                                lane_text(ev.value.lane) + "）";
+                issues.push_back(std::move(issue));
+            }
+        }
+    }
+    // 5) 悬挂 LN（ln_pair 指向不存在的下标 / 不互指 / 自我指向）
+    //    解析器已告警未闭合，但编辑命令（单 note 移动解除配对）可能产生悬挂，
+    //    lint 补一层兜底（对齐「连着错误的 note 则不管」语义——编辑器不修，只报）。
+    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
+        const auto& ev = chart.notes[i];
+        const auto p = ev.value.ln_pair;
+        if (!p) continue;
+        bool bad = *p >= chart.notes.size();  // 越界
+        if (!bad) {
+            const auto& q = chart.notes[*p].value.ln_pair;
+            bad = !q || *q != i;  // 不互指（含自我指向）
+        }
+        if (!bad) continue;
+        LintIssue issue;
+        issue.code = "dangling_ln";
+        issue.measure = ev.measure;
+        issue.pos_num = ev.pos.num;
+        issue.pos_den = ev.pos.den;
+        issue.lane_player = ev.value.lane.player;
+        issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
+        issue.lane_index = ev.value.lane.index;
+        issue.sample = ev.value.sample.id;
+        issue.message = "悬挂 LN（配对失效）: " + std::to_string(ev.measure) + " 小节 " +
+                        std::to_string(ev.pos.num) + "/" + std::to_string(ev.pos.den) +
+                        " 轨道 " + lane_text(ev.value.lane);
+        issues.push_back(std::move(issue));
     }
     return issues;
 }

@@ -45,7 +45,9 @@ std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> collect_sample_usage
 /// lint 单条结论：code = 稳定机器码（"missing_wav" 等，协议用），
 /// message = 中文展示文本。line 0 = 无行号。
 /// missing_wav 额外携带 id（槽位）/ file（相对路径），供机器消费；
-/// wav_ext_mismatch 额外携带 resolved（实际存在的同名异扩展文件）。
+/// wav_ext_mismatch 额外携带 resolved（实际存在的同名异扩展文件）；
+/// overlapping_notes 携带 measure（小节）/ pos（num/den）/ lane（轨道文本）供 GUI 定位；
+/// dangling_ln 携带 measure / pos / lane / sample（悬挂端 note 位置）。
 struct LintIssue {
     std::string code;
     std::string message;
@@ -53,9 +55,18 @@ struct LintIssue {
     std::string id;     ///< 采样槽位（missing_wav / wav_ext_mismatch）
     std::string file;   ///< 引用路径（missing_wav / wav_ext_mismatch）
     std::string resolved;  ///< 实际找到的同名文件（仅 wav_ext_mismatch）
+    // —— 位置信息（overlapping_notes / dangling_ln；0 = 无） ——
+    std::uint32_t measure = 0;
+    std::int64_t pos_num = 0;   ///< 节内位置（Rational num/den；den 0 = 无）
+    std::int64_t pos_den = 0;
+    std::uint8_t lane_player = 0;  ///< 轨道（Lane：player/kind/index；kind 255 = 无）
+    std::uint8_t lane_kind = 255;
+    std::uint8_t lane_index = 0;
+    std::uint32_t sample = 0;   ///< 采样 id（dangling_ln 用）
 };
 
-/// 最小 lint（M1 范围）：缺失 #WAV 引用文件 / 缺 #RANK / 缺 #TOTAL / 空谱面。
+/// 最小 lint（M1 范围）：缺失 #WAV 引用文件 / 缺 #RANK / 缺 #TOTAL / 空谱面 /
+/// 重叠 note / 悬挂 LN（M3 扩充）。
 /// base_dir = 谱面所在目录（#WAV 相对路径的解析基准）。
 std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::path& base_dir);
 

@@ -38,7 +38,9 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollYChanged)
     Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
-    Q_PROPERTY(int gridDiv READ gridDiv WRITE setGridDiv NOTIFY gridDivChanged)
+    /// 吸附粒度 = snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）。
+    Q_PROPERTY(int snapNum READ snapNum WRITE setSnapNum NOTIFY snapNumChanged)
+    Q_PROPERTY(int snapDen READ snapDen WRITE setSnapDen NOTIFY snapDenChanged)
     Q_PROPERTY(int columnCount READ columnCount NOTIFY columnCountChanged)
     /// BGM 列点击展开 → 按 #WAV id 从小到大分列（iBMSC 式「背景轨分开显示」，BMS 笔记 ch01 注）
     Q_PROPERTY(bool bgmExpanded READ bgmExpanded WRITE setBgmExpanded NOTIFY bgmExpandedChanged)
@@ -83,8 +85,12 @@ public:
     qreal contentHeight() const;
     bool topHigh() const { return m_topHigh; }
     void setTopHigh(bool v);
-    int gridDiv() const { return m_gridDiv; }
-    void setGridDiv(int v);
+    int gridDiv() const { return 0; }  // 已废弃（snapNum/snapDen 取代；保留避免旧绑定崩溃）
+    void setGridDiv(int);
+    int snapNum() const { return m_snapNum; }
+    void setSnapNum(int v);
+    int snapDen() const { return m_snapDen; }
+    void setSnapDen(int v);
     int columnCount() const { return static_cast<int>(m_columns.size()); }
     bool bgmExpanded() const { return m_bgmExpanded; }
     void setBgmExpanded(bool v);
@@ -118,6 +124,10 @@ public:
     /// 屏幕 y → 拍位（measure + pos 小数；时间轴工具（平移等）距离换算用）。
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
+    /// 屏幕 x → 命中的可放置列（{valid, lanePlayer, laneKind, laneIndex}；横向改轨移动用）。
+    /// BPM/STOP/BGA 列不可放置 → valid=false。
+    Q_INVOKABLE QVariantMap laneAtX(qreal x) const;
+
 signals:
     void sessionChanged();
     void themeChanged();
@@ -127,6 +137,8 @@ signals:
     void scrollYChanged();
     void contentHeightChanged();
     void topHighChanged();
+    void snapNumChanged();
+    void snapDenChanged();
     void gridDivChanged();
     void columnCountChanged();
     void bgmExpandedChanged();
@@ -201,7 +213,8 @@ private:
     qreal m_metaTrackWidth = 36.0;  // BPM/STOP 元事件轨宽（窄于普通轨道，iBMSC 式）
     qreal m_scrollY = 0.0;
     bool m_topHigh = true;
-    int m_gridDiv = 16;
+    int m_snapNum = 1;   // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）
+    int m_snapDen = 16;  // 吸附粒度分母
     bool m_bgmExpanded = false;
     bool m_showChannelIds = false;
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名

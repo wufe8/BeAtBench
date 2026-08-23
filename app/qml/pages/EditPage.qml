@@ -31,8 +31,9 @@ Item {
     property string sampleText: ""
     /// 选中 note 集合（NoteRef；框选后回填 → 高亮）
     property var selection: []
-    /// 吸附粒度（放置用：gridDiv 槽/小节；Main snap 切换）
-    property int snapDiv: 16
+    /// 吸附粒度（放置用：snapNum/snapDen 槽/小节；Main snap 分子分母）
+    property int snapNum: 1
+    property int snapDen: 16
     /// paint 帧耗时采样（--perf-log）
     property bool perfLog: false
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
@@ -52,8 +53,8 @@ Item {
     signal canvasClicked()
     /// 右键命中 note（删除）
     signal noteRightDeleted(var ref)
-    /// 平移（时间轴位移，拍位小数）
-    signal moveSelectionRequested(real deltaF)
+    /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）
+    signal moveSelectionRequested(real deltaF, var targetLane)
 
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
@@ -195,7 +196,8 @@ Item {
                     sampleId: root.sampleId
                     sampleText: root.sampleText
                     selection: root.selection
-                    gridDiv: root.snapDiv
+                    snapNum: root.snapNum
+                    snapDen: root.snapDen
                     perfLog: root.perfLog
                     onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
                     onSelectionFinished: (refs) => root.selectionFinished(refs)
@@ -203,7 +205,7 @@ Item {
                     onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
                     onCanvasClicked: () => root.canvasClicked()
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
-                    onMoveSelectionRequested: (deltaF) => root.moveSelectionRequested(deltaF)
+                    onMoveSelectionRequested: (deltaF, targetLane) => root.moveSelectionRequested(deltaF, targetLane)
                 }
             }
         }

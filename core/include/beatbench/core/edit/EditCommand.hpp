@@ -62,6 +62,9 @@ public:
     /// 追加子命令（所有权转移；追加后命令不可再被外部修改）。
     void add(std::unique_ptr<EditCommand> cmd);
 
+    /// 子命令数（调用方判断是否产生了任何有效子命令；如平移全落负小节则可能为 0）。
+    std::size_t size() const { return m_commands.size(); }
+
     std::string name() const override;
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;

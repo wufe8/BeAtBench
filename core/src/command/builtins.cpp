@@ -283,6 +283,8 @@ public:
         Json l = Json::object();
         Json missing_wav = Json::array();
         Json ext_mismatch = Json::array();
+        Json overlapping = Json::array();
+        Json dangling_ln = Json::array();
         for (const auto& issue : lint) {
             if (issue.code == "missing_wav") {
                 Json e = Json::object();
@@ -298,10 +300,41 @@ public:
                 e.set("resolved", issue.resolved);
                 e.set("message", issue.message);
                 ext_mismatch.push_back(std::move(e));
+            } else if (issue.code == "overlapping_notes" ||
+                       issue.code == "dangling_ln") {
+                // 位置信息（measure/pos/lane/sample）供 GUI 定位到具体 note
+                Json e = Json::object();
+                e.set("message", issue.message);
+                e.set("measure", static_cast<std::int64_t>(issue.measure));
+                if (issue.pos_den != 0) {
+                    Json pos = Json::object();
+                    pos.set("num", issue.pos_num);
+                    pos.set("den", issue.pos_den);
+                    e.set("pos", std::move(pos));
+                }
+                if (issue.lane_kind != 255) {
+                    Json lane = Json::object();
+                    lane.set("player", static_cast<std::int64_t>(issue.lane_player));
+                    // LaneKind 枚举：Key=0 Scratch=1 Pedal=2 Bgm=3
+                    std::string kind = "key";
+                    if (issue.lane_kind == 1) kind = "scratch";
+                    else if (issue.lane_kind == 2) kind = "pedal";
+                    else if (issue.lane_kind == 3) kind = "bgm";
+                    lane.set("kind", std::move(kind));
+                    lane.set("index", static_cast<std::int64_t>(issue.lane_index));
+                    e.set("lane", std::move(lane));
+                }
+                if (issue.code == "dangling_ln") {
+                    e.set("sample", static_cast<std::int64_t>(issue.sample));
+                }
+                (issue.code == "overlapping_notes" ? overlapping : dangling_ln)
+                    .push_back(std::move(e));
             }
         }
         l.set("missing_wav", std::move(missing_wav));
         l.set("wav_ext_mismatch", std::move(ext_mismatch));
+        l.set("overlapping_notes", std::move(overlapping));
+        l.set("dangling_ln", std::move(dangling_ln));
         for (const auto& issue : lint) {
             if (issue.code == "missing_rank") l.set("missing_rank", true);
             if (issue.code == "missing_total") l.set("missing_total", true);
@@ -467,6 +500,29 @@ std::uint32_t u32_arg(const Json& args, const char* key) {
     return static_cast<std::uint32_t>(v->as_i64());
 }
 
+// 解析 selection 数组（NoteRef 列表：{measure, pos, lane:{player,kind,index}, sample}）→
+// NoteRef 向量。空数组 / 非数组 → bad_args。lane 支持子对象优先 + 顶层平铺兼容。
+std::vector<edit::NoteRef> selection_from_json(const Json& args) {
+    const Json* sel = args.find("selection");
+    if (!sel) throw CommandError("bad_args", "缺少 selection 数组");
+    if (!sel->is_array()) throw CommandError("bad_args", "selection 应为数组");
+    std::vector<edit::NoteRef> refs;
+    for (const auto& item : sel->as_array()) {
+        if (!item.is_object()) throw CommandError("bad_args", "selection 元素应为对象");
+        edit::NoteRef ref;
+        ref.measure = u32_arg(item, "measure");
+        ref.pos = pos_from_json(item);
+        if (const Json* lj = item.find("lane")) {
+            ref.lane = lane_from_json(*lj);
+        } else {
+            ref.lane = lane_from_json(item);  // 顶层平铺兼容
+        }
+        ref.sample = u32_arg(item, "sample");
+        refs.push_back(std::move(ref));
+    }
+    return refs;
+}
+
 // 时间轴事件种类参数（timing.* 的 kind：bpm / stop / measure）
 edit::TimingKind timing_kind_arg(const Json& args) {
     const auto& s = arg_str(args, "kind");
@@ -514,6 +570,23 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
                                            "'（支持 bpm / stop / measure）");
     }
     return arr;
+}
+
+// 持久化钩子工厂：用 codec 把 chart 写到 path（崩溃备份/自动保存用）。
+// core/edit 不依赖 codec，由协议层注入——session.load 成功时绑定。
+edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
+    return [codec](const Chart& chart, const std::string& path) -> bool {
+        try {
+            const std::string text = codec->write(chart, beatbench::codec::WriteOptions{});
+            std::ofstream out(path, std::ios::binary);
+            if (!out.is_open()) return false;
+            out << text;
+            out.close();
+            return true;
+        } catch (...) {
+            return false;  // 备份/自动保存失败静默（下次编辑再试）
+        }
+    };
 }
 
 }  // namespace
@@ -778,7 +851,10 @@ public:
                 throw CommandError("read_failed", "读取失败: " + d.message);
             }
         }
-        session_from_args(args).load(std::move(result.chart), path);
+        auto& session = session_from_args(args);
+        session.load(std::move(result.chart), path);
+        // 注入持久化钩子（崩溃备份/自动保存用；按本文件 codec 写出）
+        session.set_persist_hook(make_persist_hook(codec));
         Json out = Json::object();
         out.set("loaded", true);
         out.set("path", path);
@@ -852,6 +928,31 @@ public:
     }
 };
 
+// 崩溃备份 / 自动保存开关（2026-09，用户决策：自动保存默认关，手动保存 + 崩溃备份为主）。
+// args: {autosave?:bool, backup?:bool} 任一提供则设置；返回当前状态。
+// 默认 backup=true（每次编辑后写 path+".bak"）、autosave=false。
+class SessionAutosaveCommand : public Command {
+public:
+    std::string_view name() const override { return "session.autosave"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (args.is_object()) {
+            if (const Json* v = args.find("autosave")) {
+                if (!v->is_bool()) throw CommandError("bad_args", "autosave 应为布尔");
+                session.set_autosave_enabled(v->as_bool());
+            }
+            if (const Json* v = args.find("backup")) {
+                if (!v->is_bool()) throw CommandError("bad_args", "backup 应为布尔");
+                session.set_backup_enabled(v->as_bool());
+            }
+        }
+        Json out = Json::object();
+        out.set("autosave", session.autosave_enabled());
+        out.set("backup", session.backup_enabled());
+        return out;
+    }
+};
+
 class NotePutCommand : public Command {
 public:
     std::string_view name() const override { return "note.put"; }
@@ -875,10 +976,28 @@ public:
             return lane_from_json(args);  // 顶层字段兼容（旧测试）
         }();
         const std::uint32_t sample = u32_arg(args, "sample");
-        const bool ok = session.exec(
-            std::make_unique<edit::PutNoteCommand>(measure, pos, lane, sample));
+        // kind 语义（2026-09，LN/地雷放置）：normal（默认）/ ln（LN 自动配对）/ mine（地雷）
+        // 地雷：kind=Landmine（写出走 D1-D9/E1-E9 通道）；LN：配对逻辑在命令层
+        bool ln_kind = false;
+        NoteKind kind = NoteKind::Normal;
+        if (args.is_object()) {
+            if (const Json* k = args.find("kind")) {
+                if (!k->is_string()) {
+                    throw CommandError("bad_args", "参数类型错误: kind 应为字符串");
+                }
+                const auto& s = k->as_str();
+                if (s == "ln") ln_kind = true;
+                else if (s == "mine") kind = NoteKind::Landmine;
+                else if (s != "normal") {
+                    throw CommandError("bad_args", "未知 kind '" + s + "'（支持 normal / ln / mine）");
+                }
+            }
+        }
+        const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
+            measure, pos, lane, sample, ln_kind, kind));
         Json out = Json::object();
         out.set("ok", ok);
+        out.set("kind", ln_kind ? "ln" : (kind == NoteKind::Landmine ? "mine" : "normal"));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }
@@ -887,25 +1006,70 @@ public:
 class NoteMoveCommand : public Command {
 public:
     std::string_view name() const override { return "note.move"; }
+
+    // 解析单个 move 项（from + to）：from = {measure, pos, lane?, sample}；
+    // to = {measure, pos, lane?}。返回 MoveNoteCommand（nullopt to_lane = 纯时间）。
+    // lane 支持子对象优先（{player,kind,index}）+ 顶层平铺兼容（旧 GUI workaround）。
+    static std::unique_ptr<edit::MoveNoteCommand> make_command(const Json& move) {
+        const Json* from = move.find("from");
+        if (!from || !from->is_object()) throw CommandError("bad_args", "缺少 from 对象");
+        const std::uint32_t from_m = u32_arg(*from, "measure");
+        const Rational from_pos = pos_from_json(*from);
+        const Lane lane = [&] {
+            if (const Json* lj = from->find("lane")) {
+                if (lj->is_object()) return lane_from_json(*lj);
+                if (lj->is_number()) {
+                    return Lane{0, LaneKind::Key, static_cast<std::uint8_t>(lj->as_i64())};
+                }
+                throw CommandError("bad_args", "from.lane 应为对象 {player,kind,index}");
+            }
+            return lane_from_json(*from);
+        }();
+        const std::uint32_t sample = u32_arg(*from, "sample");
+        const Json* to = move.find("to");
+        if (!to || !to->is_object()) throw CommandError("bad_args", "缺少 to 对象");
+        const std::uint32_t to_m = u32_arg(*to, "measure");
+        const Rational to_pos = pos_from_json(*to);
+        // 可选 to.lane：跨通道移动（2026-09，M2 自由 2D 拖动）；缺省 = 纯时间移动
+        std::optional<Lane> to_lane;
+        if (const Json* tl = to->find("lane")) {
+            if (!tl->is_object()) {
+                throw CommandError("bad_args", "to.lane 应为对象 {player,kind,index}");
+            }
+            to_lane = lane_from_json(*tl);
+        }
+        return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m,
+                                                       to_pos, false, to_lane);
+    }
+
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
             throw CommandError("no_chart", "未加载谱面（先 session.load）");
         }
-        const Json* from = args.find("from");
-        if (!from || !from->is_object()) throw CommandError("bad_args", "缺少 from 对象");
-        const std::uint32_t from_m = u32_arg(*from, "measure");
-        const Rational from_pos = pos_from_json(*from);
-        const Lane lane = lane_from_json(*from);
-        const std::uint32_t sample = u32_arg(*from, "sample");
-        const Json* to = args.find("to");
-        if (!to || !to->is_object()) throw CommandError("bad_args", "缺少 to 对象");
-        const std::uint32_t to_m = u32_arg(*to, "measure");
-        const Rational to_pos = pos_from_json(*to);
-        const bool ok = session.exec(std::make_unique<edit::MoveNoteCommand>(
-            from_m, from_pos, lane, sample, to_m, to_pos));
+        // Y1（2026）：`moves` 数组（1..N 项，每项 {from,to}）优先；
+        // 兼容旧顶层 `{from,to}`（无 moves 时回退，视为单元素数组）。
+        // 多 note 移动 = CompositeCommand 包 N 个 MoveNoteCommand（一个 undo 步）；
+        // 单 note = 同一路径（天然 1 undo 步），无单/多分支。
+        std::vector<std::unique_ptr<edit::MoveNoteCommand>> cmds;
+        if (const Json* mv = args.find("moves")) {
+            if (!mv->is_array()) throw CommandError("bad_args", "moves 应为数组");
+            const auto& arr = mv->as_array();
+            if (arr.empty()) throw CommandError("bad_args", "moves 数组为空（无 note 可移动）");
+            for (const auto& m : arr) {
+                if (!m.is_object()) throw CommandError("bad_args", "moves 元素应为对象");
+                cmds.push_back(make_command(m));
+            }
+        } else {
+            // 兼容旧单元素形式 {from, to}
+            cmds.push_back(make_command(args));
+        }
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (auto& c : cmds) comp->add(std::move(c));
+        const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
+        out.set("moved", static_cast<std::int64_t>(cmds.size()));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }
@@ -937,6 +1101,192 @@ public:
             std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample));
         Json out = Json::object();
         out.set("ok", ok);
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// —— 变换/量化（M3：doc/01 §D「量化/镜像/旋转」；批量 = CompositeCommand 一个 undo 步） ——
+// 输入 = selection 数组（前端物化，与 clipboard.copy 一致）；region 描述后置（handoff §区域）。
+
+class NoteQuantizeCommand : public Command {
+public:
+    std::string_view name() const override { return "note.quantize"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) {
+            throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        }
+        const auto refs = selection_from_json(args);
+        if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无可量化内容）");
+        // snap 参数：{num,den} 或 [num,den]；缺省 1/16
+        std::int64_t snap_num = 1, snap_den = 16;
+        if (const Json* s = args.find("snap")) {
+            if (s->is_object()) {
+                snap_num = s->at("num").as_i64();
+                snap_den = s->at("den").as_i64();
+            } else if (s->is_array() && s->size() == 2) {
+                snap_num = s->as_array()[0].as_i64();
+                snap_den = s->as_array()[1].as_i64();
+            } else {
+                throw CommandError("bad_args", "snap 应为 {num,den} 或 [num,den]");
+            }
+        }
+        if (snap_num <= 0 || snap_den <= 0) {
+            throw CommandError("bad_args", "snap 数值应 > 0");
+        }
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (const auto& r : refs) {
+            comp->add(std::make_unique<edit::QuantizeNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample, snap_num, snap_den));
+        }
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("notes", static_cast<std::int64_t>(refs.size()));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+class NoteTransformCommand : public Command {
+public:
+    std::string_view name() const override { return "note.transform"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) {
+            throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        }
+        const auto refs = selection_from_json(args);
+        if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无可变换内容）");
+        const bool mirror = arg_bool(args, "mirror", false);
+        const int rotate = [&] {
+            const Json* v = args.find("rotate");
+            if (!v || !v->is_int()) return 0;
+            return static_cast<int>(v->as_i64());
+        }();
+        if (!mirror && rotate == 0) {
+            throw CommandError("bad_args", "至少指定 mirror 或 rotate 之一");
+        }
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (const auto& r : refs) {
+            comp->add(std::make_unique<edit::TransformNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample, mirror, rotate));
+        }
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("notes", static_cast<std::int64_t>(refs.size()));
+        out.set("mirror", mirror);
+        out.set("rotate", static_cast<std::int64_t>(rotate));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// —— 区域平移（框选整段 / 多选统一位移 → note.moveRegion，2026-09） ——
+// 语义：对 selection 内所有 note 施加**统一**时间位移 delta（+ 可选统一换轨 to_lane），
+// 各 note 相对位置不变。用户「框选整个副歌段游玩轨整体拖」属此类——不是逐 note 精调
+// （那属于 note.move 的 moves），而是「按规则对区间内所有 note」。
+// 实现：逐 note 算 to = ref.pos + delta（归一 [0,1) 进位/借位到 measure），
+// 包进 CompositeCommand（一个 undo 步）；与 note.quantize/note.transform 同族。
+class NoteMoveRegionCommand : public Command {
+public:
+    std::string_view name() const override { return "note.moveRegion"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) {
+            throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        }
+        const auto refs = selection_from_json(args);
+        if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无可移动内容）");
+        // delta（统一时间位移，必填）：{measure:int, pos:{num,den}}；
+        // pos 为节内分数分量（[-1,1)），measure 为整数小节分量（正/负）。
+        std::int64_t d_measure = 0;
+        Rational d_pos(0, 1);
+        const Json* d = args.find("delta");
+        if (!d || !d->is_object()) throw CommandError("bad_args", "缺少 delta {measure,pos}");
+        if (const Json* dm = d->find("measure")) d_measure = dm->as_i64();
+        if (const Json* dp = d->find("pos")) d_pos = pos_from_json(*d);
+        // 可选 to_lane：整组统一换轨（拖拽横向移动）；缺省 = 纯时间
+        std::optional<Lane> to_lane;
+        if (const Json* tl = args.find("to_lane")) {
+            if (!tl->is_object()) throw CommandError("bad_args", "to_lane 应为对象 {player,kind,index}");
+            to_lane = lane_from_json(*tl);
+        }
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (const auto& r : refs) {
+            std::int64_t to_m = static_cast<std::int64_t>(r.measure) + d_measure;
+            Rational to_pos = r.pos + d_pos;  // 自动约分
+            // 归一 [0,1)（可能产生整数借位/进位）：
+            while (to_pos.num < 0) {
+                to_pos = to_pos + Rational(1, 1);
+                --to_m;
+            }
+            while (to_pos.num >= to_pos.den) {
+                to_pos = to_pos - Rational(1, 1);
+                ++to_m;
+            }
+            if (to_m < 0) continue;  // 移到负小节 → 跳过
+            comp->add(std::make_unique<edit::MoveNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample,
+                static_cast<std::uint32_t>(to_m), to_pos, false, to_lane));
+        }
+        if (comp->size() == 0) {
+            throw CommandError("bad_args", "平移后无有效 note（全部移到负小节）");
+        }
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("notes", static_cast<std::int64_t>(refs.size()));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// —— 元信息编辑（doc/05 §107「元信息表单」→ meta.edit；批量 Composite 一个 undo 步） ——
+
+class MetaListCommand : public Command {
+public:
+    std::string_view name() const override { return "meta.list"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        Json out = Json::object();
+        Json fields = Json::object();
+        for (const auto& [k, v] : session.chart().meta) fields.set(k, v);
+        out.set("meta", std::move(fields));
+        return out;
+    }
+};
+
+class MetaEditCommand : public Command {
+public:
+    std::string_view name() const override { return "meta.edit"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        // edits: [{key, value}]；value 空串 = 删除字段
+        const Json* edits = args.find("edits");
+        if (!edits || !edits->is_array()) {
+            throw CommandError("bad_args", "缺少 edits 数组");
+        }
+        if (edits->as_array().empty()) {
+            throw CommandError("bad_args", "edits 不能为空");
+        }
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (const auto& item : edits->as_array()) {
+            if (!item.is_object()) throw CommandError("bad_args", "edits 元素应为对象");
+            const Json* key = item.find("key");
+            if (!key || !key->is_string()) throw CommandError("bad_args", "edits 元素缺 key");
+            const Json* val = item.find("value");
+            if (!val || !val->is_string()) throw CommandError("bad_args", "edits 元素缺 value");
+            comp->add(std::make_unique<edit::MetaEditCommand>(key->as_str(), val->as_str()));
+        }
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("edits", static_cast<std::int64_t>(edits->as_array().size()));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }
@@ -1052,6 +1402,15 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<TimingListCommand>());
     registry.add(std::make_unique<TimingPutCommand>());
     registry.add(std::make_unique<TimingDeleteCommand>());
+    // M3 变换/量化（selection 批量，一个 undo 步）
+    registry.add(std::make_unique<NoteQuantizeCommand>());
+    registry.add(std::make_unique<NoteTransformCommand>());
+    registry.add(std::make_unique<NoteMoveRegionCommand>());
+    // M3 崩溃备份 / 自动保存开关（默认关自动保存）
+    registry.add(std::make_unique<SessionAutosaveCommand>());
+    // M3 元信息编辑（头部字段；批量一个 undo 步）
+    registry.add(std::make_unique<MetaListCommand>());
+    registry.add(std::make_unique<MetaEditCommand>());
 }
 
 }  // namespace beatbench::cmd

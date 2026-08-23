@@ -19,7 +19,8 @@ Item {
 
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
     property bool topHigh: true          // 默认「顶部=高小节」（preview.html，note 自上而下落）
-    property int gridDiv: 16             // 槽位粒度（1/snap：显示弱线 + 放置吸附，同源）
+    property int snapNum: 1              // 吸附粒度分子（放置吸附 + 槽位弱线）
+    property int snapDen: 16             // 吸附粒度分母
     property bool showChannelIds: false  // 列头显示实际 BMS 通道 id（工具条勾选）
     property bool bgmExpanded: false     // BGM 轨展开（列头点击切换；--bgm-expand 调试）
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
@@ -41,7 +42,9 @@ Item {
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
-    signal moveSelectionRequested(real deltaF)  // 平移（时间轴位移，拍位小数）
+    // 平移：deltaF = 时间轴位移（拍位小数，0=不动）；targetLane = 横向移动目标列
+    // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）
+    signal moveSelectionRequested(real deltaF, var targetLane)
 
     onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
 
@@ -54,7 +57,8 @@ Item {
         theme: Theme
         measureHeight: root.measureHeight
         topHigh: root.topHigh
-        gridDiv: root.gridDiv
+        snapNum: root.snapNum
+        snapDen: root.snapDen
         noteSampleMode: root.noteSampleMode
         showExtras: root.showExtras
         selection: root.selection
@@ -106,9 +110,10 @@ Item {
     property bool _boxSelect: false
     property bool _dragged: false
     property bool _panning: false   // 中键拖动 = 滚动（任何工具下）
-    property bool _moving: false    // 平移模式：拖拽选中 note = 时间轴移动
-    property real _moveStartF: 0    // 按下时的拍位（measure + pos 小数）
-    property real _moveDeltaF: 0    // 当前拖动位移（拍位小数）
+    property bool _moving: false    // 拖拽选中 note = 移动（选中 note 上按下即进入，无门控）
+    property real _moveStartF: 0    // 按下的拍位（measure + pos 小数）
+    property real _moveDeltaF: 0    // 当前时间位移（拍位小数）
+    property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
 
     /// 平移判定：按下点在选中集内的某个 note 上？
     function isSelectedNote(hit) {
@@ -136,13 +141,16 @@ Item {
         _pressY = y
         _dragged = false
         _ctrlHeld = ctrl
-        // 平移模式（默认开）：命中的 note（自动选中）→ 拖动 = 时间轴移动
-        if (root.moveMode && root.editorTool === "select") {
+        // 拖选中 note（仅 select 工具）→ 移动（无门控：拖拽永远可移动，issue 5）。
+        // 「平移」勾选与否只决定轴锁定（方向主轴），见 handleRelease。note/ln/mine 工具
+        // 不进入移动（note=点击放置；点已有 note 不做移动，防误触）。
+        if (root.editorTool === "select") {
             const hit = view.noteAt(x, y)
             if (hit.valid) {
                 if (!isSelectedNote(hit)) root.noteClicked(hit, false)
                 _moving = true
                 _moveDeltaF = 0
+                _moveTargetLane = null
                 _moveStartF = view.measureAtY(y)
                 return
             }
@@ -163,7 +171,12 @@ Item {
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             if (moved > 4) _dragged = true
             // 实时 delta 拍位（供状态栏/预览；release 一次性应用）
-            if (_dragged) _moveDeltaF = view.measureAtY(y) - _moveStartF
+            if (_dragged) {
+                _moveDeltaF = view.measureAtY(y) - _moveStartF
+                // 横向目标列（沿列头 y 带命中；无 2 轴联动时不该用到）
+                const laneHit = view.laneAtX(x)
+                _moveTargetLane = laneHit && laneHit.valid ? laneHit : null
+            }
             _lastY = y
             _lastX = x
             return
@@ -189,8 +202,35 @@ Item {
         if (_moving) {
             _moving = false
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
-            if (_dragged && moved > 4 && Math.abs(_moveDeltaF) > 0.001)
-                root.moveSelectionRequested(_moveDeltaF)
+            let deltaF = 0
+            let targetLane = null
+            if (_dragged && moved > 4) {
+                const dy = y - _pressY
+                const dx = x - _pressX
+                // 「平移」= 轴锁定（方向主轴）；未勾 = 自由 2D（时间+通道都动）
+                if (root.moveMode) {
+                    // 轴锁定：主导轴决定改什么
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        // 横向：改通道，时间不变
+                        const laneHit = view.laneAtX(x)
+                        targetLane = laneHit && laneHit.valid ? laneHit : null
+                        deltaF = 0
+                    } else {
+                        // 纵向：改时间，通道不变
+                        deltaF = _moveDeltaF
+                        targetLane = null
+                    }
+                } else {
+                    // 自由 2D：时间 + 通道都动
+                    deltaF = _moveDeltaF
+                    const laneHit = view.laneAtX(x)
+                    targetLane = laneHit && laneHit.valid ? laneHit : null
+                }
+            }
+            if (Math.abs(deltaF) > 0.001 || targetLane) {
+                // 应用前 snap 时间（拍位吸附到 snapNum/snapDen；在 Main 侧再做）
+                root.moveSelectionRequested(deltaF, targetLane)
+            }
             _dragged = false
             return
         }
@@ -214,12 +254,12 @@ Item {
         }
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (_dragged || moved > 4) return
-        // 点击：note 工具 → 放置；ln/mine → 提示未接线
-        if (root.editorTool === "note" && y > 18) {
+        // 点击：放置工具（note / ln / mine）→ hitTest → hitPlaceRequested（Main 按工具定 kind）。
+        // M3 note.put 已接 kind（normal/ln/mine）→ 三种工具都真实放置，不再提示 toolNotReady。
+        if ((root.editorTool === "note" || root.editorTool === "ln" ||
+                root.editorTool === "mine") && y > 18) {
             const hit = view.hitTest(x, y)
             if (hit.valid) root.hitPlaceRequested(hit)
-        } else if (root.editorTool === "ln" || root.editorTool === "mine") {
-            root.toolNotReady(root.editorTool)
         }
     }
     /// 调试入口（--click，与真实事件同一分发路径）：点击后立即释放。

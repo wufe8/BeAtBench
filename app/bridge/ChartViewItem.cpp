@@ -137,10 +137,23 @@ void ChartViewItem::setTopHigh(bool v) {
     update();
 }
 
-void ChartViewItem::setGridDiv(int v) {
-    if (m_gridDiv == v) return;
-    m_gridDiv = std::max(1, v);
-    emit gridDivChanged();
+void ChartViewItem::setGridDiv(int) {
+    // 已废弃：snapNum/snapDen 取代（保留空实现，避免旧 QML 绑定崩溃）。
+}
+
+void ChartViewItem::setSnapNum(int v) {
+    const int clamped = std::clamp(v, 1, 999);
+    if (m_snapNum == clamped) return;
+    m_snapNum = clamped;
+    emit snapNumChanged();
+    update();
+}
+
+void ChartViewItem::setSnapDen(int v) {
+    const int clamped = std::clamp(v, 1, 192);
+    if (m_snapDen == clamped) return;
+    m_snapDen = clamped;
+    emit snapDenChanged();
     update();
 }
 
@@ -197,14 +210,20 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     if (mf < 0.0 || mf >= cs->measureCount()) return res;
     const int measure = static_cast<int>(std::floor(mf));
     qreal frac = mf - measure;
-    const int den = std::max(1, m_gridDiv);  // 吸附：gridDiv 槽/小节（默认 1/16 snap）
-    int num = static_cast<int>(std::llround(frac * den));
-    if (num >= den) num = den - 1;
-    if (num < 0) num = 0;
+    // 吸附：粒度 = snapNum/snapDen 小节。槽位坐标 = frac × (snapDen/snapNum)，
+    // 四舍五入到整槽，再折算回 num/den（约分由 Rational ctor 完成）。
+    const int num = std::max(1, m_snapNum), den = std::max(1, m_snapDen);
+    const int slotCount = std::max(1, den / num);  // 每小节槽数 = snapDen/snapNum（整数步长）
+    int k = static_cast<int>(std::llround(frac * slotCount));
+    if (k >= slotCount) k = slotCount - 1;
+    if (k < 0) k = 0;
+    // k/slots 小节 = (k * snapDen/slots) / snapDen 拍？——不：grid 是「槽/小节」，
+    // 槽位步长 = snapNum/snapDen 小节，故 k 槽对应 frac = k * snapNum/snapDen。
+    // 还原：槽 k 的时间 = k*(snapNum/snapDen) 小节 → num=k*snapNum, den=snapDen。
+    res.insert(QStringLiteral("num"), static_cast<int>(k * num));
+    res.insert(QStringLiteral("den"), den);
     res.insert(QStringLiteral("valid"), true);
     res.insert(QStringLiteral("measure"), measure);
-    res.insert(QStringLiteral("num"), num);
-    res.insert(QStringLiteral("den"), den);
     res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
     res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
     QString kind = QStringLiteral("key");
@@ -223,6 +242,31 @@ qreal ChartViewItem::measureAtY(qreal y) const {
     if (!cs || !cs->chart() || m_measureHeight <= 0.0) return -1.0;
     const qreal mf = measureAt(y);
     return (mf < 0.0 || mf >= cs->measureCount()) ? -1.0 : mf;
+}
+
+QVariantMap ChartViewItem::laneAtX(qreal x) const {
+    QVariantMap res;
+    res.insert(QStringLiteral("valid"), false);
+    if (!sessionObj() || !sessionObj()->chart()) return res;
+    // 用给定 x 命中列（任意 y：列 rect 全高可命中，便于快速横向改轨）。取列的中点 y 带判定。
+    for (std::size_t i = 0; i < m_colRects.size(); ++i) {
+        const QRectF& r = m_colRects[static_cast<std::size_t>(i)];
+        if (x < r.left() || x > r.right()) continue;
+        const Column& c = m_columns[static_cast<std::size_t>(i)];
+        // 元事件轨（BPM/STOP）/ BGA 图层列：不可作为横向移动目标
+        if (c.bpm || c.stop || c.bgaLayer >= 0) return res;
+        QString kind = QStringLiteral("key");
+        if (c.lane.kind == beatbench::LaneKind::Scratch) kind = QStringLiteral("scratch");
+        else if (c.lane.kind == beatbench::LaneKind::Pedal) kind = QStringLiteral("pedal");
+        else if (c.lane.kind == beatbench::LaneKind::Bgm) kind = QStringLiteral("bgm");
+        res.insert(QStringLiteral("valid"), true);
+        res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
+        res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+        res.insert(QStringLiteral("laneKind"), kind);
+        res.insert(QStringLiteral("label"), c.label);
+        return res;
+    }
+    return res;
 }
 
 QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
@@ -768,13 +812,15 @@ void ChartViewItem::paint(QPainter* p) {
     QPen weak(weakC);
     weak.setWidthF(1.0);
     for (int m = first; m <= last; ++m) {
-        // 槽位弱线（= snap 粒度 1/gridDiv 小节；BMS 时间单位 = 切分槽位，显示与吸附同源。
-        // >64 粒度过密（如 1/192），只画小节线不画弱线）
-        if (m_gridDiv > 1 && m_gridDiv <= 64) {
-            for (int i = 1; i < m_gridDiv; ++i) {
+        // 槽位弱线（= snap 粒度 snapNum/snapDen 小节；BMS 时间单位 = 切分槽位，显示与吸附同源。
+        // snapDen/snapNum > 64 粒度过密（如 1/192），只画小节线不画弱线）
+        const int num = std::max(1, m_snapNum), den = std::max(1, m_snapDen);
+        const int slotCount = std::max(1, den / num);  // 每小节槽数（整数步长）
+        if (slotCount > 1 && slotCount <= 64) {
+            for (int i = 1; i < slotCount; ++i) {
                 p->setPen(weak);
-                p->drawLine(QPointF(metaRight, yOf(m + i / static_cast<qreal>(m_gridDiv))),
-                            QPointF(w, yOf(m + i / static_cast<qreal>(m_gridDiv))));
+                p->drawLine(QPointF(metaRight, yOf(m + i / static_cast<qreal>(slotCount))),
+                            QPointF(w, yOf(m + i / static_cast<qreal>(slotCount))));
             }
         }
         p->setPen(strong);
