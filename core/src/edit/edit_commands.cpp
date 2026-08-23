@@ -397,6 +397,31 @@ void MoveNoteCommand::apply(Chart& chart) {
     } else {
         main_ev.value.bgm_line = 0;
     }
+    // LN 通道标记（2026-09 用户验证）：
+    // - **换轨移动**（cross_lane）→ 目标 = 普通游玩通道：本 note ln_channel=false，
+    //   **同时原伙伴也 ln_channel=false**（数据层两组都退出 LN 通道——用户场景 2：
+    //   「移走头后头尾都回退普通通道，移回不再连成 LN」）；
+    // - **同通道时间移动**（不换轨）→ 保持 ln_channel（LN 不因时间平移丢失；
+    //   rebuild 按同组时间序重排，场景 1 的「仍 LN 通道 + lint 深色」由未配对覆盖）。
+    const bool cross_lane = m_to_lane && *m_to_lane != m_lane &&
+                            !(m_to_lane->kind == LaneKind::Bgm && m_lane.kind == LaneKind::Bgm &&
+                              m_to_lane->player == m_lane.player && m_to_lane->index == m_lane.index);
+    if (cross_lane) {
+        main_ev.value.ln_channel = false;
+        // 原伙伴（若存在 ln_pair）也退出 LN 通道（数据层；rebuild 会清其配对）
+        if (m_moved->value.ln_pair && *m_moved->value.ln_pair < chart.notes.size() &&
+            chart.notes.size() > *m_moved->value.ln_pair) {
+            // 注意：主 note 已删除、下标已调——伙伴下标在删除前记录，这里用 partner_val 找
+        }
+        if (partner_val) {
+            const auto& [pm, pp, pl, ps, pbl] = *partner_val;
+            const auto partner_idx =
+                find_note(chart.notes, pm, pp, pl, ps, pbl);
+            if (partner_idx && *partner_idx < chart.notes.size())
+                chart.notes[*partner_idx].value.ln_channel = false;
+        }
+    }
+    // 其余（同通道/BGM 同行）保持 main_ev 自带 ln_channel（moved 快照原值）
     main_ev.value.ln_pair.reset();  // 稍后按伙伴值重设
     const std::size_t main_at = lower_bound_pos(chart.notes, m_to_measure, m_to_pos);
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(main_at),
@@ -410,35 +435,9 @@ void MoveNoteCommand::apply(Chart& chart) {
         if (main_at <= i && *p >= main_at) ++*p;
     }
 
-    // 按伙伴值重定位互指（伙伴原地不动；找不到（被删/异常）→ 主 note 单点，伙伴 ln_pair 已清）。
-    // ⚠️ 2026-09 用户反馈：**跨通道移动 LN 端 → 断开**（变普通单点）——不同通道不构成
-    // 一条 LN（BMS LN 头尾恒同通道）；同通道（纯时间移动/lane 不变）保持互指。
-    const bool cross_lane = m_to_lane && *m_to_lane != m_lane &&
-                            // BGM 子轨（同 lane 不同 bgm_line）仍算「同通道」——行号变化
-                            // 不改变「同一 01 通道」的事实，保持 LN；仅真正跨 lane 才断开。
-                            !(m_to_lane->kind == LaneKind::Bgm && m_lane.kind == LaneKind::Bgm &&
-                              m_to_lane->player == m_lane.player && m_to_lane->index == m_lane.index);
-    if (partner_val && !cross_lane) {
-        const auto& [pm, pp, pl, ps, pbl] = *partner_val;
-        const auto partner_idx =
-            find_note(chart.notes, pm, pp, pl, ps, pbl);
-        if (partner_idx && *partner_idx != main_at && main_at < chart.notes.size()) {
-            chart.notes[main_at].value.ln_pair =
-                static_cast<std::uint32_t>(*partner_idx);
-            chart.notes[*partner_idx].value.ln_pair =
-                static_cast<std::uint32_t>(main_at);
-        }
-    } else {
-        // 跨通道断开：两端已清（删除时伙伴 ln_pair 已 reset；主 note 自身 ln_pair 已 reset），
-        // 无需额外动作——这里显式再保证一次（防御）。
-        if (partner_val) {
-            const auto& [pm, pp, pl, ps, pbl] = *partner_val;
-            const auto partner_idx =
-                find_note(chart.notes, pm, pp, pl, ps, pbl);
-            if (partner_idx && *partner_idx < chart.notes.size())
-                chart.notes[*partner_idx].value.ln_pair.reset();
-        }
-    }
+    // 配对：编辑命令不维护 ln_pair——EditorSession 的 rebuild_ln_pairs 统一推导
+    // （按 ln_channel 分组、时间序交替）。跨通道后本 note+伙伴 ln_channel 已在上面
+    // 置 false → rebuild 不会配；同通道时间移动保持 ln_channel → rebuild 仍配。
     m_last_delta = (m_to_pos - m_from_pos);
 }
 
@@ -490,12 +489,13 @@ void MoveNoteCommand::invert(Chart& chart) {
         if (*p == removed_at) p.reset();
     }
 
-    // 主 note 移回源位置 + 恢复源 lane + 源 BGM 行
+    // 主 note 移回源位置 + 恢复源 lane + 源 BGM 行 + **源 ln_channel**（apply 换轨时清了）
     main_ev.measure = m_from_measure;
     main_ev.pos = m_from_pos;
     if (m_to_lane) main_ev.value.lane = m_lane;
     main_ev.value.bgm_line =
         (main_ev.value.lane.kind == LaneKind::Bgm) ? m_from_bgm_line : 0;
+    main_ev.value.ln_channel = m_moved->value.ln_channel;  // undo 恢复原 LN 通道标记
     main_ev.value.ln_pair.reset();
     const std::size_t main_at = lower_bound_pos(chart.notes, m_from_measure, m_from_pos);
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(main_at),
@@ -509,7 +509,7 @@ void MoveNoteCommand::invert(Chart& chart) {
         if (main_at <= i && *p >= main_at) ++*p;
     }
 
-    // 按伙伴值重定位互指（伙伴原地未动）
+    // 按伙伴值重定位互指（伙伴原地未动）；**伙伴 ln_channel 也恢复**（apply 换轨时清了）
     if (partner_val) {
         const auto& [pm, pp, pl, ps, pbl] = *partner_val;
         const auto partner_idx = find_note(chart.notes, pm, pp, pl, ps, pbl);
@@ -518,6 +518,8 @@ void MoveNoteCommand::invert(Chart& chart) {
                 static_cast<std::uint32_t>(*partner_idx);
             chart.notes[*partner_idx].value.ln_pair =
                 static_cast<std::uint32_t>(main_at);
+            chart.notes[*partner_idx].value.ln_channel =
+                m_moved->value.ln_channel;  // 伙伴恢复 LN 通道（与主同源状态）
         }
     }
     m_moved.reset();
@@ -558,25 +560,23 @@ ToggleLnCommand::ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane,
 void ToggleLnCommand::apply(Chart& chart) {
     const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
     if (!idx) return;
-    // 2026-09 用户原则：ln_pair 是「文件数据 → 推导」的派生，命令只改**数据真相
-    // （ln_channel = 是否位于 LN 通道）**；配对交给 EditorSession 的统一 rebuild。
-    // - LN → 单点：本 note 的 ln_channel 置 false（rebuild 后会断开/重排）；
-    // - 单点 → LN：本 note 的 ln_channel 置 true，并**同时**把向前最近同 lane 同 sample
-    //   的 note 也置 true（rebuild 按 (lane,sample) 组内时间序交替配对成 LN）。
+    // 2026-09 用户最终确认：T-Ln 工具 = **按当前 LNTYPE 切换选中 note 的通道**——
+    //   LNTYPE 1：单点→LN = 通道 +40（11→51，模型 = ln_channel=true）；LN→单点 = -40。
+    //   LNTYPE 2（#LNOBJ）：单点→LN = id 变 LNOBJ；LN→单点 = id 变 Ln 头 id。
+    //   模型层用 ln_channel 表达（LNTYPE 1 语义）；**不向前查询、不标记伙伴**——
+    //   干净、便于 debug。配对交给 rebuild（仅 ln_channel note 参与）。
+    //   ⚠️ 旧逻辑（向前找最近同 lane 同 sample 并标记为 LN）已注释保留在下方，勿删。
+    //   // 单点 → LN：找候选伙伴（同 lane 同 sample；优先最近）
+    //   // for (std::size_t i = *idx; i-- > 0;) {
+    //   //     const auto& c = chart.notes[i].value;
+    //   //     if (c.lane != m_lane || c.sample.id != m_sample) continue;
+    //   //     if (!c.ln_channel) chart.notes[i].value.ln_channel = true;
+    //   //     m_applied_partner = static_cast<std::uint32_t>(i);
+    //   //     break;
+    //   // }
     Note& n = chart.notes[*idx].value;
     m_was_ln = n.ln_channel;
     n.ln_channel = !m_was_ln;
-    if (!m_was_ln) {
-        // 单点 → LN：找候选伙伴（同 lane 同 sample；优先最近）
-        for (std::size_t i = *idx; i-- > 0;) {
-            const auto& c = chart.notes[i].value;
-            if (c.lane != m_lane || c.sample.id != m_sample) continue;
-            // 同 lane 同 sample：若它已在 LN 通道 → 直接可用；否则标记它（组成一对）
-            if (!c.ln_channel) chart.notes[i].value.ln_channel = true;
-            m_applied_partner = static_cast<std::uint32_t>(i);
-            break;
-        }
-    }
     m_did_change = true;
 }
 
@@ -584,11 +584,8 @@ void ToggleLnCommand::invert(Chart& chart) {
     if (!m_did_change) return;
     const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
     if (!idx) return;
-    // 反向：恢复 ln_channel 原值（本 note + 可能标记的伙伴）
+    // 反向：只翻回本 note 的 ln_channel（原伙伴标记逻辑已去——与 apply 对称）
     chart.notes[*idx].value.ln_channel = m_was_ln;
-    if (m_applied_partner && *m_applied_partner < chart.notes.size()) {
-        chart.notes[*m_applied_partner].value.ln_channel = false;  // 清除标记（原为单点）
-    }
     m_did_change = false;
     m_was_ln = false;
     m_applied_partner.reset();

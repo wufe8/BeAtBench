@@ -961,6 +961,53 @@ public:
     }
 };
 
+// —— session.lint：对**内存活动会话**的 chart 跑 lint（编辑后刷新 lint 面板用） ——
+// 与 check（读文件）区别：check 走磁盘，编辑后未保存时看不到内存状态；
+// 本命令直接 lint session.chart()（含 LN 通道未配对等编辑产生的问题）。
+// 返回 issues 数组（{code,severity,measure,pos,lane,sample,message}）+ 各分类。
+class SessionLintCommand : public Command {
+public:
+    std::string_view name() const override { return "session.lint"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        std::filesystem::path base_dir(".");
+        if (!session.path().empty())
+            base_dir = std::filesystem::path(session.path()).parent_path();
+        const auto lint = beatbench::bms::lint_chart(session.chart(), base_dir);
+        Json arr = Json::array();
+        for (const auto& issue : lint) {
+            Json e = Json::object();
+            e.set("code", issue.code);
+            e.set("message", issue.message);
+            e.set("measure", static_cast<std::int64_t>(issue.measure));
+            if (issue.pos_den != 0) {
+                Json pos = Json::object();
+                pos.set("num", issue.pos_num);
+                pos.set("den", issue.pos_den);
+                e.set("pos", std::move(pos));
+            }
+            if (issue.lane_kind != 255) {
+                Json lane = Json::object();
+                lane.set("player", static_cast<std::int64_t>(issue.lane_player));
+                std::string kind = "key";
+                if (issue.lane_kind == 1) kind = "scratch";
+                else if (issue.lane_kind == 2) kind = "pedal";
+                else if (issue.lane_kind == 3) kind = "bgm";
+                lane.set("kind", kind);
+                lane.set("index", static_cast<std::int64_t>(issue.lane_index));
+                e.set("lane", std::move(lane));
+            }
+            if (issue.code == "dangling_ln" || issue.code == "unpaired_ln_note")
+                e.set("sample", static_cast<std::int64_t>(issue.sample));
+            arr.push_back(std::move(e));
+        }
+        Json out = Json::object();
+        out.set("issues", std::move(arr));
+        return out;
+    }
+};
+
 class NotePutCommand : public Command {
 public:
     std::string_view name() const override { return "note.put"; }
@@ -1575,6 +1622,8 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<NoteToggleLnCommand>());
     // M3 崩溃备份 / 自动保存开关（默认关自动保存）
     registry.add(std::make_unique<SessionAutosaveCommand>());
+    // M3 内存 lint（编辑后刷新 lint 面板；对活动会话 chart 跑 lint_chart）
+    registry.add(std::make_unique<SessionLintCommand>());
     // M3 元信息编辑（头部字段；批量一个 undo 步）
     registry.add(std::make_unique<MetaListCommand>());
     registry.add(std::make_unique<MetaEditCommand>());

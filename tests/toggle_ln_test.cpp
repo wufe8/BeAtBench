@@ -54,56 +54,68 @@ Chart make_chart() {
 
 }  // namespace
 
-// —— 单点 → LN（pos1/2 的 s1 key1 向前配 pos0 的 s1 key1） ——
+// —— 单点 → LN（只切本 note ln_channel；无伙伴时不配对，深色单点） ——
 
-TEST(ToggleLn, SingleToLnPairsForward) {
+TEST(ToggleLn, SingleToLnTogglesOwnChannel) {
     EditorSession s;
     s.load(make_chart());
     ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
         1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
-    // n1（pos0）与 n2（pos1/2）互指；n3 无配对
-    bool n1_ok = false, n2_ok = false, n3_ok = false;
+    // n2（pos1/2）ln_channel=true 但无伙伴（n1 未标）→ 无配对；n1/n3 普通
+    bool n2_ln = false, n2_paired = false;
+    for (const auto& e : s.chart().notes) {
+        if (e.measure == 1 && e.pos == Rational(1, 2) &&
+            e.value.lane == Lane{0, LaneKind::Key, 1}) {
+            n2_ln = e.value.ln_channel;
+            n2_paired = e.value.ln_pair.has_value();
+        }
+    }
+    EXPECT_TRUE(n2_ln);
+    EXPECT_FALSE(n2_paired);
+    // 再 toggle pos0（同为 s1 key1）→ 两个都 ln_channel → rebuild 配成 LN
+    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    bool n1_paired = false, n2_paired2 = false;
     for (const auto& e : s.chart().notes) {
         if (e.measure == 1 && e.pos == Rational(0, 1) &&
             e.value.lane == Lane{0, LaneKind::Key, 1})
-            n1_ok = e.value.ln_pair.has_value();
+            n1_paired = e.value.ln_pair.has_value();
         if (e.measure == 1 && e.pos == Rational(1, 2) &&
             e.value.lane == Lane{0, LaneKind::Key, 1})
-            n2_ok = e.value.ln_pair.has_value();
-        if (e.measure == 1 && e.value.lane == Lane{0, LaneKind::Key, 2})
-            n3_ok = !e.value.ln_pair.has_value();
+            n2_paired2 = e.value.ln_pair.has_value();
     }
-    EXPECT_TRUE(n1_ok);
-    EXPECT_TRUE(n2_ok);
-    EXPECT_TRUE(n3_ok);
-    // invert：清除配对 → 全部单点
-    ASSERT_TRUE(s.undo());
-    EXPECT_TRUE(ln_consistent(s.chart().notes));
-    for (const auto& e : s.chart().notes)
-        EXPECT_FALSE(e.value.ln_pair.has_value());
+    EXPECT_TRUE(n1_paired);
+    EXPECT_TRUE(n2_paired2);
 }
 
-// —— LN → 单点（断开两端） ——
+// —— LN → 单点（断开；undo 恢复） ——
 
 TEST(ToggleLn, LnToSingleBreaksBoth) {
     EditorSession s;
     s.load(make_chart());
-    // 先配成 LN
+    // 两个同轨同采样都切 ln_channel → rebuild 配成 LN
     ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
         1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1)));
-    // 再断开（对任一端）
+    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+    bool paired1 = false;
+    for (const auto& e : s.chart().notes)
+        if (e.value.ln_pair) paired1 = true;
+    EXPECT_TRUE(paired1);
+    // 再切 pos0 → 它 ln_channel=false → 只剩 pos1/2 一个 ln_channel → 断开
     ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
         1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     for (const auto& e : s.chart().notes)
         EXPECT_FALSE(e.value.ln_pair.has_value());
-    // undo 两次 → 恢复配对（第二次 undo 重建互指）
+    // undo 三次 → 恢复到「两 ln_channel 配对」状态
     ASSERT_TRUE(s.undo());
-    bool paired = false;
+    bool paired2 = false;
     for (const auto& e : s.chart().notes)
-        if (e.value.ln_pair) paired = true;
-    EXPECT_TRUE(paired);
+        if (e.value.ln_pair) paired2 = true;
+    EXPECT_TRUE(paired2);
 }
 
 // —— 找不到配对象 → 无操作（key2 的 s2 前后无同 lane 同 sample 单点） ——
