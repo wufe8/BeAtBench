@@ -129,7 +129,10 @@ public:
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
     /// 屏幕 x → 命中的可放置列（{valid, lanePlayer, laneKind, laneIndex}；横向改轨移动用）。
-    /// BPM/STOP 列不可放置 → valid=false。
+    /// 扩展（2026-09 跨命名空间移动）：额外带 bgmLine（BGM 展开列行号；-1 非 BGM）、
+    /// bgaLayer（BGA 图层列 0..3；-1 非 BGA）、metaKind（"bpm"/"stop"；空 = 非元事件轨）。
+    /// BPM/STOP 列不再拒绝（用户确认「格式可表示 id 就允许移动」——拖到该列 =
+    /// note → timing 事件转换）；BGA 图层列同理（note → BGA 事件）。
     Q_INVOKABLE QVariantMap laneAtX(qreal x) const;
 
     /// 诊断探针（--probe <x> <y>，调试）：返回 noteAt / laneAtX / hitTest 的合成结果，

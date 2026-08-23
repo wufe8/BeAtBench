@@ -235,6 +235,8 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     else if (c.lane.kind == beatbench::LaneKind::Bgm) kind = QStringLiteral("bgm");
     res.insert(QStringLiteral("laneKind"), kind);
     res.insert(QStringLiteral("label"), c.label);
+    res.insert(QStringLiteral("bgmLine"), c.bgmLine);
+    res.insert(QStringLiteral("bgaLayer"), c.bgaLayer);
     // BGM 展开列：该列即固定 #WAV id（放置用它，不取当前采样）
     if (c.bgm && c.bgmId != 0) res.insert(QStringLiteral("sampleHint"), static_cast<int>(c.bgmId));
     return res;
@@ -256,9 +258,20 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
         const QRectF& r = m_colRects[static_cast<std::size_t>(i)];
         if (x < r.left() || x > r.right()) continue;
         const Column& c = m_columns[static_cast<std::size_t>(i)];
-        // 仅元事件轨（BPM/STOP）不可作为横向移动目标；BGA 图层列（用户确认「不限格式，
-        // 只要保存格式一样」→ 背景/BGA/miss/layer 都允许移动，见问题1）。
-        if (c.bpm || c.stop) return res;
+        // 元事件轨（BPM/STOP）：2026-09 用户确认「格式可表示 id 就允许移动」——
+        // 拖到该列 = note → timing 事件转换（id 不变），不再拒绝。
+        if (c.bpm || c.stop) {
+            res.insert(QStringLiteral("valid"), true);
+            res.insert(QStringLiteral("metaKind"), c.bpm ? QStringLiteral("bpm")
+                                                         : QStringLiteral("stop"));
+            res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
+            res.insert(QStringLiteral("laneKind"), QStringLiteral("key"));
+            res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+            res.insert(QStringLiteral("label"), c.label);
+            res.insert(QStringLiteral("bgmLine"), -1);
+            res.insert(QStringLiteral("bgaLayer"), -1);
+            return res;
+        }
         QString kind = QStringLiteral("key");
         if (c.lane.kind == beatbench::LaneKind::Scratch) kind = QStringLiteral("scratch");
         else if (c.lane.kind == beatbench::LaneKind::Pedal) kind = QStringLiteral("pedal");
@@ -268,6 +281,8 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
         res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
         res.insert(QStringLiteral("laneKind"), kind);
         res.insert(QStringLiteral("label"), c.label);
+        res.insert(QStringLiteral("bgmLine"), c.bgmLine);
+        res.insert(QStringLiteral("bgaLayer"), c.bgaLayer);
         return res;
     }
     return res;
@@ -333,6 +348,8 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
         res.insert(QStringLiteral("lane"), lane);
         res.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
+        // BGM 行序号（同值多行 Bgm note 消歧；前端选中/删除/移动必带）
+        res.insert(QStringLiteral("bgmLine"), static_cast<int>(ev.value.bgm_line));
         // LN 选取模式（默认关）：命中 LN 任一段 → 返回配对段（lnPartner），
         // 前端据此自动多选两端（用户问题5）。配对段 = ln_pair 下标指向的 note。
         if (m_lnSelectMode && ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size()) {
@@ -356,6 +373,7 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
             plane.insert(QStringLiteral("index"), QVariant::fromValue(p.value.lane.index));
             pr.insert(QStringLiteral("lane"), plane);
             pr.insert(QStringLiteral("sample"), static_cast<int>(p.value.sample.id));
+            pr.insert(QStringLiteral("bgmLine"), static_cast<int>(p.value.bgm_line));
             res.insert(QStringLiteral("lnPartner"), pr);
         }
         return res;
@@ -405,6 +423,7 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
         lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
         ref.insert(QStringLiteral("lane"), lane);
         ref.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
+        ref.insert(QStringLiteral("bgmLine"), static_cast<int>(ev.value.bgm_line));
         hits.push_back(std::move(ref));
     }
     // 稳定升序（(measure,pos) → lane → sample），满足「顺序无关」的前提下给可预期结果
@@ -535,7 +554,16 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                 const qreal y = yOf(ev.measure + posDouble(ev.pos));
                 const QRectF hit(r.x() + 2, y - noteH, r.width() - 4, noteH);
                 if (hit.contains(pos)) {
-                    text += QStringLiteral(" · ") + m_columns[col].label;
+                    // 2026-09（问题4）：LN 尾（数据上不在游玩通道）hover 显示**实际 BMS
+                    // 通道**——BGM/BGA 层列显示 "BGM·bgmN"（行号）/ "BGA·LAYER" 等；
+                    // 游玩轨仍显示列名（键号/皿/踏板）。用 m_columns[col].label +
+                    // bgmLine 后缀；展开列 label 已含 bgmN，避免重复。
+                    QString laneText = m_columns[col].label;
+                    if (ev.value.lane.kind == beatbench::LaneKind::Bgm && !m_bgmExpanded) {
+                        laneText += QStringLiteral("·bgm%1").arg(
+                            static_cast<int>(ev.value.bgm_line) + 1);
+                    }
+                    text += QStringLiteral(" · ") + laneText;
                     if (ev.value.kind == beatbench::NoteKind::Landmine) {
                         text += QStringLiteral(" · 地雷");
                     } else {
