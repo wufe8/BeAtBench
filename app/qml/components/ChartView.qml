@@ -148,10 +148,12 @@ Item {
         _pressY = y
         _dragged = false
         _ctrlHeld = ctrl
-        // 拖选中 note（仅 select 工具）→ 移动（无门控：拖拽永远可移动，issue 5）。
-        // 「平移」勾选与否只决定轴锁定（方向主轴），见 handleRelease。note/ln/mine 工具
-        // 不进入移动（note=点击放置；点已有 note 不做移动，防误触）。
-        if (root.editorTool === "select") {
+        // 编辑工具（V 选择 / N 放置 / L LN / M 地雷）命中 note → 选中并进入移动准备。
+        // 拖动 note = 移动（任何编辑工具，设计确认 2026-09）；点击（无位移）→ release 时
+        // 走工具语义（放置或选中）。pan（H 拖拽=纯滚动）永不进入移动。
+        const isEditTool = root.editorTool === "select" || root.editorTool === "note" ||
+                           root.editorTool === "ln" || root.editorTool === "mine"
+        if (isEditTool) {
             const hit = view.noteAt(x, y)
             if (hit.valid) {
                 if (ctrl) {
@@ -168,7 +170,7 @@ Item {
                 return
             }
         }
-        // select 工具 = 框选（拖动）；pan 工具 = 滚动（拖动）；note = 点击放置
+        // select 工具空白 = 框选（拖动）；pan 工具 = 滚动（拖动）；note/ln/mine 空白 = 点击放置
         _boxSelect = root.editorTool === "select"
         if (_boxSelect) {
             selRect.x = x

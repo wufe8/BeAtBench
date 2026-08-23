@@ -171,6 +171,10 @@ private:
     /// apply 快照（invert 恢复；找不到 note 时为空）
     std::optional<Event<Note>> m_moved;
     std::optional<Event<Note>> m_partner;
+    /// 单 note 模式 apply 后移动端重连的新伙伴（m_paired_at = 移动端新下标，m_paired_with = 伙伴）；
+    /// invert 时用于清理该临时配对（否则新伙伴会悬挂指向已移回主 note 的旧下标）。
+    std::optional<std::size_t> m_paired_at;
+    std::optional<std::size_t> m_paired_with;
     Rational m_last_delta{0, 1};
 };
 

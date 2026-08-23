@@ -72,9 +72,11 @@ void ChartViewItem::onSessionChartChanged() {
 }
 
 void ChartViewItem::onSessionContentChanged() {
-    // 同文档内容变化（note.put/delete/undo…）：**不重建列**——列随文档加载时的通道集合
-    // 固定；每次编辑都重建会让列消失/位移（如删光某列唯一的 note），编辑动作全乱
-    // （2026-09 实测）。新 lane 出现在现有谱面的情况罕见，暂不支持自动加列（后续做）。
+    // 同文档内容变化（note.put/delete/move/undo…）：**重建列**（2026-09 用户确认：
+    // 拖 note 到原本无该轨道的背景/BGA 列时，列必须出现否则 note 无处渲染=「消失」）。
+    // 滚动位置不重置（rebuildColumns 不动 scrollX/Y；列宽变化时 contentWidth 由 clamp 兜底）。
+    // 注：删光某列唯一 note → 该列消失（数据驱动列的固有行为，合乎 iBMSC 惯例）。
+    rebuildColumns();
     emit contentHeightChanged();
     update();
 }

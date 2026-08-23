@@ -188,6 +188,32 @@ TEST(NoteMoveLane, LnSingleNoteBreaksPairCrossLane) {
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 }
 
+// —— 同通道单 note 移动 LN（2026-09 用户确认：移动端重连"向前找最近"，原端原位断开） ——
+
+TEST(NoteMoveLane, LnSingleMoveSameLaneReconnectsForward) {
+    EditorSession s;
+    s.load(ln_chart());  // 头 m1 pos0 + 尾 m1 pos1/2，互指
+    // 只移尾（同通道，m1 pos1/2 → m2 pos3/4）：尾在新位置向前找最近同通道未配对 note
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1,
+        2, Rational(3, 4), false)));
+    const auto& notes = s.chart().notes;
+    ASSERT_EQ(notes.size(), 2u);
+    EXPECT_TRUE(ln_consistent(notes));
+    // 尾移到 m2 pos3/4；向前找最近同通道未配对 = 头（m1 pos0，被断开后未配对）→ 重连
+    bool tail_reconnected = false;
+    for (const auto& e : notes) {
+        if (e.measure == 2 && e.pos == Rational(3, 4) &&
+            e.value.lane == Lane{0, LaneKind::Key, 1})
+            tail_reconnected = e.value.ln_pair.has_value();
+    }
+    EXPECT_TRUE(tail_reconnected);
+    // undo → 恢复原配对（头尾互指原位置）
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(ln_chart().notes));
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+}
+
 // —— 批量跨通道移动（CompositeCommand 一步 undo） ——
 
 TEST(NoteMoveLane, CompositeBatchCrossLaneOneUndo) {

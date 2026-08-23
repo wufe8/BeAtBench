@@ -400,6 +400,32 @@ void MoveNoteCommand::apply(Chart& chart) {
             chart.notes[a].value.ln_pair = b;
             chart.notes[b].value.ln_pair = a;
         }
+    } else if (m_partner && !m_move_ln_pair) {
+        // 单 note 模式（2026-09 用户确认）：移动的 note 在新位置**向前找最近同通道
+        // 同 sample 未配对 Normal note** 重连（无论是不是原 note）；不同通道（to_lane 换轨）
+        // 则不找（断开）。原伙伴（另一端）已在 apply 头部分开（334 行 reset，原位不动）。
+        // 前端靠 ln_pair 画 LN 线段；找不到 → 单点（ln_pair 空）。
+        const auto& me = chart.notes[main_at].value;
+        std::size_t new_partner = 0;
+        bool found = false;
+        if (!m_to_lane || *m_to_lane == m_lane) {  // 同通道（未换轨）才找
+            for (std::size_t i = main_at; i-- > 0;) {
+                const auto& n = chart.notes[i].value;
+                if (n.lane != me.lane || n.sample.id != me.sample.id) continue;  // 忽略其它通道
+                // 同通道同 sample：未配对 Normal → 候选；已配对/地雷 → 停止（该通道已成型 LN）
+                if (n.kind == NoteKind::Normal && !n.ln_pair) {
+                    new_partner = i;
+                    found = true;
+                }
+                break;
+            }
+        }
+        if (found) {
+            chart.notes[main_at].value.ln_pair = new_partner;
+            chart.notes[new_partner].value.ln_pair = main_at;
+            m_paired_at = main_at;       // invert 清理用
+            m_paired_with = new_partner;
+        }
     }
     m_last_delta = delta;
 }
@@ -480,8 +506,27 @@ void MoveNoteCommand::invert(Chart& chart) {
             chart.notes[*pp].value.ln_pair = main_at;
         }
     }
+    // 单 note 模式 invert：清理 apply 时移动端重连的**非原伙伴**（m_paired_with ≠ m_partner）——
+    // 否则该临时伙伴的 ln_pair 悬挂指向已移回原位的主 note。若重连伙伴恰是原伙伴
+    // （m_partner，上面已恢复互指），则不清理（避免误伤恢复后的正常配对）。
+    if (m_paired_with && m_partner && *m_paired_with < chart.notes.size()) {
+        const auto& pw = chart.notes[*m_paired_with];
+        const bool is_original = pw.measure == m_partner->measure && pw.pos == m_partner->pos &&
+                                 pw.value.lane == m_partner->value.lane &&
+                                 pw.value.sample.id == m_partner->value.sample.id;
+        if (!is_original) {
+            const auto cur = find_note(chart.notes, pw.measure, pw.pos, pw.value.lane,
+                                       pw.value.sample.id);
+            if (cur && *cur < chart.notes.size()) {
+                const auto& link = chart.notes[*cur].value.ln_pair;
+                if (link && *link == main_at) chart.notes[*cur].value.ln_pair.reset();
+            }
+        }
+    }
     m_moved.reset();
     m_partner.reset();
+    m_paired_at.reset();
+    m_paired_with.reset();
 }
 
 bool MoveNoteCommand::merge_with(const EditCommand& next) {
