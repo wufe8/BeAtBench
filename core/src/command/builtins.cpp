@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 
 #include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
@@ -1340,7 +1341,22 @@ public:
             }();
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
+        // LN 感知多选移动（2026-09 用户反馈问题4）：selection 中互为 ln_pair 的头尾
+        // **成对移动**（move_ln_pair=true）——两端一起、相对位置不变、互指保持（写回仍走
+        // 51-59/61-69 LN 通道）；partner 不再单独处理（否则单 note 模式逐端重连会断链）。
+        // 注意：仅当「LN 选取」模式已把两端都纳入 selection 时触发；未配对/单端照旧单 note 模式。
+        std::set<std::string> handled;  // NoteRef key（measure|pos.num|pos.den|player|kind|index|sample|bgm_line）
+        const auto ref_key = [](const edit::NoteRef& r) {
+            return std::to_string(r.measure) + "|" + std::to_string(r.pos.num) + "|" +
+                   std::to_string(r.pos.den) + "|" + std::to_string(r.lane.player) + "|" +
+                   std::to_string(static_cast<int>(r.lane.kind)) + "|" +
+                   std::to_string(r.lane.index) + "|" + std::to_string(r.sample) + "|" +
+                   std::to_string(r.bgm_line);
+        };
+        for (const auto& r : refs) handled.insert(ref_key(r));
+        const auto& chart = session.chart();
         for (const auto& r : refs) {
+            if (handled.count(ref_key(r)) == 0) continue;  // 已被 partner 命令覆盖
             std::int64_t to_m = static_cast<std::int64_t>(r.measure) + d_measure;
             Rational to_pos = r.pos + d_pos;  // 自动约分
             // 归一 [0,1)（可能产生整数借位/进位）：
@@ -1357,12 +1373,41 @@ public:
                 comp->add(std::make_unique<edit::ConvertNoteCommand>(
                     r.measure, r.pos, r.lane, r.sample, r.bgm_line, *convert_target,
                     static_cast<std::uint32_t>(to_m), to_pos));
-            } else {
-                comp->add(std::make_unique<edit::MoveNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample,
-                    static_cast<std::uint32_t>(to_m), to_pos, false, to_lane,
-                    r.bgm_line, to_bgm_line));
+                continue;
             }
+            // 查此 note 的 LN 配对：若 partner 也在 selection → 成对移动
+            bool pair_moved = false;
+            for (const auto& ev : chart.notes) {
+                if (ev.measure != r.measure || ev.pos != r.pos ||
+                    ev.value.lane != r.lane || ev.value.sample.id != r.sample ||
+                    (r.lane.kind == LaneKind::Bgm && ev.value.bgm_line != r.bgm_line))
+                    continue;
+                if (ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size()) {
+                    const auto& p = chart.notes[*ev.value.ln_pair];
+                    edit::NoteRef pref;
+                    pref.measure = p.measure;
+                    pref.pos = p.pos;
+                    pref.lane = p.value.lane;
+                    pref.sample = p.value.sample.id;
+                    pref.bgm_line = p.value.bgm_line;
+                    if (handled.count(ref_key(pref))) {
+                        // 成对：主 = 时间较早的一端（MoveNoteCommand 内部也按相对位置移动）
+                        comp->add(std::make_unique<edit::MoveNoteCommand>(
+                            r.measure, r.pos, r.lane, r.sample,
+                            static_cast<std::uint32_t>(to_m), to_pos, true, to_lane,
+                            r.bgm_line, to_bgm_line));
+                        handled.erase(ref_key(pref));  // partner 已含，跳过
+                        pair_moved = true;
+                    }
+                }
+                break;
+            }
+            if (pair_moved) continue;
+            // 未配对 / 单端：单 note 模式
+            comp->add(std::make_unique<edit::MoveNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample,
+                static_cast<std::uint32_t>(to_m), to_pos, false, to_lane,
+                r.bgm_line, to_bgm_line));
         }
         if (comp->size() == 0) {
             throw CommandError("bad_args", "平移后无有效 note（全部移到负小节）");

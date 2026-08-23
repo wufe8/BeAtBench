@@ -382,12 +382,21 @@ void MoveNoteCommand::apply(Chart& chart) {
         if (m_to_bgm_line) {
             main_ev.value.bgm_line = *m_to_bgm_line;
         } else {
+            // 自动分配（2026-09 用户反馈问题1）：目标小节 ch01 行号 = FIFO 虚拟子通道。
+            // 优先填目标小节中该 (pos,sample) 未占用的最小行号（同小节多行 ch01 的
+            // 行序连续）；否则追加到行尾（max+1）。
+            std::uint32_t used = 0;
             std::uint32_t max_line = 0;
             for (const auto& n : chart.notes) {
-                if (n.measure == m_to_measure && n.value.lane.kind == LaneKind::Bgm)
-                    max_line = std::max(max_line, n.value.bgm_line + 1);
+                if (n.measure != m_to_measure || n.value.lane.kind != LaneKind::Bgm) continue;
+                max_line = std::max(max_line, n.value.bgm_line + 1);
+                if (n.value.bgm_line < 32 && n.pos == m_to_pos &&
+                    n.value.sample.id == m_sample)
+                    used |= (1u << n.value.bgm_line);
             }
-            main_ev.value.bgm_line = max_line;
+            std::uint32_t line = 0;
+            while (line < 32 && (used & (1u << line))) ++line;
+            main_ev.value.bgm_line = (line < 32) ? line : max_line;
         }
     } else {
         main_ev.value.bgm_line = 0;

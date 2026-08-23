@@ -364,10 +364,17 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     // 3g. 逐行输出：槽位最小化（N = 各事件分母 LCM），空槽 "00"。
     // 同一 (measure, channel) 内同 pos 多事件（如未配对 LN 头退化普通通道后与
     // 普通 note 撞位）→ 分裂为多行输出（BMS 允许同通道多行，播放器按行序解析）。
+    // 2026-09 用户反馈（iBMSC 惯例）：**不同小节之间插入空行**（数据区手动编辑友好）。
     if (!rows.empty()) {
         ensure_block_sep(out);
+        bool have_last_measure = false;
+        std::uint32_t last_measure = 0;
         for (const auto& [key, cells] : rows) {
             const auto& [measure, channel] = key;
+            // 换小节 → 插入空行（上一小节已输出过内容时）
+            if (have_last_measure && measure != last_measure) out.push_back('\n');
+            last_measure = measure;
+            have_last_measure = true;
             // BGM（ch01）：按 bgm_line 分组写多行（保持解析时的行结构；空行也输出占位）。
             // 组数 = max(bgm_line)+1；缺失组输出全 "00" 行（保留 bgm3/bgm4 空层，iBMSC 式）。
             if (channel == "01") {
