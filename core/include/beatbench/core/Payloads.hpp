@@ -23,8 +23,16 @@ struct Note {
     SampleRef sample;
     NoteKind kind = NoteKind::Normal;
     std::optional<std::uint32_t> ln_pair;  ///< 配对 note 的下标（LN 头<->尾）
+    /// BGM 行序号（仅 LaneKind::Bgm 有意义）：该小节内第几次读到 ch01（2026-09 用户确认：
+    /// BGM 展开 = 按行序分列，非按 #WAV id；空行也占位）。展示辅助字段——不参与语义相等
+    /// （多个同 (pos,lane,sample) 的 Bgm note 仅因行号不同应视为同对象），parser 填初始值，
+    /// 移动/编辑后由命令层按新位置所在行更新；writer 按它分组写回保持原多行结构。
+    std::uint32_t bgm_line = 0;
 
-    friend bool operator==(const Note&, const Note&) = default;
+    friend bool operator==(const Note& a, const Note& b) {
+        return a.lane == b.lane && a.sample == b.sample && a.kind == b.kind &&
+               a.ln_pair == b.ln_pair;  // 排除 bgm_line（展示辅助）
+    }
 };
 
 /// BPM 事件（BMS ch03 内联值或 ch08/#BPMxx 引用解析后的落值）。

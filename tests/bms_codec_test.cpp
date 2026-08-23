@@ -741,6 +741,43 @@ TEST(BmsRoundTrip, SamePosConflictSplitsRows) {
     EXPECT_EQ(write_bms(r2.chart), out);                                          // 幂等
 }
 
+TEST(BmsRoundTrip, BgmMultiLineKeepsRows) {
+    // 2026-09 用户确认：BGM（ch01）同小节多行 = 独立背景音轨；解析记录 bgm_line（含空行占位），
+    // 写回按行序保持多行（字节级行结构无损）。
+    const auto src =
+        "#BPM 130\n#WAV01 a.wav\n#WAV03 b.wav\n#WAV32 c.wav\n"
+        "#00301:00000001\n"    // bgm1（行 0）
+        "#00301:0003030303000300\n"  // bgm2（行 1）
+        "#00301:00\n"          // bgm3（行 2，空占位）
+        "#00301:00\n"          // bgm4（行 3，空占位）
+        "#00301:0032323232000000\n";  // bgm5（行 4）
+    const auto r1 = read_bms(src);
+    // bgm_line 记录：行 0 的 note = 0，行 1 = 1，行 4 = 4（空行无 note 但计数保留）
+    std::uint32_t line0 = 99, line1 = 99, line4 = 99;
+    for (const auto& e : r1.chart.notes) {
+        if (e.value.lane.kind != LaneKind::Bgm) continue;
+        if (e.measure == 3) {
+            if (e.value.sample.id == 1) line0 = e.value.bgm_line;
+            if (e.value.sample.id == 3) line1 = e.value.bgm_line;
+            if (e.value.sample.id == 110) line4 = e.value.bgm_line;  // base36 "32" = 110
+        }
+    }
+    EXPECT_EQ(line0, 0u);
+    EXPECT_EQ(line1, 1u);
+    EXPECT_EQ(line4, 4u);
+    // 写回：仍 5 行（含 2 空行占位），行内容一致
+    const auto out = write_bms(r1.chart);
+    std::size_t n_rows = 0;
+    std::size_t pos = 0;
+    while ((pos = out.find("#00301:", pos)) != std::string::npos) {
+        ++n_rows;
+        pos += 7;
+    }
+    EXPECT_EQ(n_rows, 5u);
+    const auto r2 = read_bms(out);
+    EXPECT_EQ(r2.chart.notes.size(), r1.chart.notes.size());
+}
+
 TEST(BmsRoundTrip, LnType2RoundTrip) {
     // LNTYPE 2：头尾同在普通通道；尾槽位写回 #LNOBJ 文本
     const auto src = "#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n";

@@ -171,9 +171,11 @@ private:
     struct Column {
         beatbench::Lane lane;
         QString label;
-        bool bgm = false;            // 背景音轨列（ch01；bgmId==0 为聚合列）
+        bool bgm = false;            // 背景音轨列（ch01）
         bool p2 = false;             // 2P 列（浅主色底）
-        std::uint32_t bgmId = 0;     // 展开后：本列对应的 #WAV id（0 = 聚合）
+        std::uint32_t bgmId = 0;     // 遗留：按 #WAV id 分列（0 = 聚合）——已被 bgmLine 取代
+        int bgmLine = -1;            // BGM 展开列行号（2026-09：按 ch01 行序分列，非按 id；
+                                     // 0..N-1 = bgm1..bgmN；-1 = 聚合列/非 BGM）
         int bgaLayer = -1;           // BGA 图层列（0=base 1=poor 2=layer 3=layer2；-1 = 非 BGA）
         bool bpm = false;            // BPM 元事件轨（窄列，iBMSC 式；不随 scrollX 滚动）
         bool stop = false;           // STOP 元事件轨（同上）
@@ -190,7 +192,8 @@ private:
 
     /// 轨道列重算（谱面切换/尺寸/展开状态变化时；按谱面实际出现的 Lane 数据驱动）。
     void rebuildColumns();
-    int columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId = 0) const;
+    int columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId = 0,
+                  int bgmLine = -1) const;
     /// BGA 事件 → 图层列（-1 = 无该层列，如 showExtras 关闭）。
     int columnForBga(int layer) const;
     void clampScrollX();

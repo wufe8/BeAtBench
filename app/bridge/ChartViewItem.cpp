@@ -307,7 +307,8 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         if (static_cast<int>(ev.measure) < measure - 1 ||
             static_cast<int>(ev.measure) > measure + 1)
             continue;  // 只查相邻小节（控制开销；与 hover 一致）
-        const int col = columnFor(ev.value.lane, ev.value.sample.id);
+        const int col = columnFor(ev.value.lane, ev.value.sample.id,
+                                  static_cast<int>(ev.value.bgm_line));
         if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
         const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
         const qreal ny = yOf(ev.measure + posDouble(ev.pos));
@@ -378,7 +379,8 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
     std::vector<QVariantMap> hits;
     for (const auto& ev : chart.notes) {
         if (static_cast<int>(ev.measure) < m0 || static_cast<int>(ev.measure) > m1) continue;
-        const int col = columnFor(ev.value.lane, ev.value.sample.id);
+        const int col = columnFor(ev.value.lane, ev.value.sample.id,
+                                  static_cast<int>(ev.value.bgm_line));
         if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
         const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
         const qreal y = yOf(ev.measure + posDouble(ev.pos));
@@ -525,7 +527,8 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                 if (static_cast<int>(ev.measure) < measure - 1 ||
                     static_cast<int>(ev.measure) > measure + 1)
                     continue;
-                const int col = columnFor(ev.value.lane, ev.value.sample.id);
+                const int col = columnFor(ev.value.lane, ev.value.sample.id,
+                                  static_cast<int>(ev.value.bgm_line));
                 if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size())
                     continue;
                 const QRectF& r = m_colRects[col];
@@ -633,14 +636,18 @@ double ChartViewItem::beatsOf(const beatbench::Chart& chart, int measure) const 
     return beats;
 }
 
-int ChartViewItem::columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId) const {
-    // 第一遍：找 BGM 列（聚合/展开匹配）；跳过 BGA 图层列。
+int ChartViewItem::columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId,
+                             int bgmLine) const {
+    // 第一遍：找 BGM 列（聚合 bgmLine==-1 命中所有；展开列按 bgmLine 精确匹配）；
+    // 跳过 BGA 图层列。非 BGM lane 按 lane 匹配。
     for (std::size_t i = 0; i < m_columns.size(); ++i) {
         const auto& c = m_columns[i];
         if (c.bgaLayer >= 0) continue;  // BGA 图层列不匹配 note
         if (c.lane != lane) continue;
         if (c.bgm) {
-            if (c.bgmId == 0 || c.bgmId == bgmSampleId) return static_cast<int>(i);
+            // 聚合列（bgmLine==-1）：命中所有 Bgm note；展开列（bgmLine>=0）：按行号匹配
+            if (c.bgmLine < 0) return static_cast<int>(i);
+            if (c.bgmLine == bgmLine) return static_cast<int>(i);
             continue;
         }
         return static_cast<int>(i);
@@ -703,8 +710,10 @@ void ChartViewItem::rebuildColumns() {
             const auto add = [this](const beatbench::Lane& lane, const QString& label,
                                     bool bgmCol = false, bool p2 = false,
                                     std::uint32_t bgmId = 0, int bgaLayer = -1,
-                                    bool bpm = false, bool stop = false) {
-                m_columns.push_back({lane, label, bgmCol, p2, bgmId, bgaLayer, bpm, stop});
+                                    bool bpm = false, bool stop = false,
+                                    int bgmLine = -1) {
+                m_columns.push_back(
+                    {lane, label, bgmCol, p2, bgmId, bgmLine, bgaLayer, bpm, stop});
             };
             // 元事件轨（固定置左、轨窄，iBMSC 式）：BPM / STOP——始终显示（无事件也要能看拍位）
             add({0, beatbench::LaneKind::Pedal, 0}, QStringLiteral("BPM"), false, false, 0, -1,
@@ -760,11 +769,22 @@ void ChartViewItem::rebuildColumns() {
                 if (!m_bgmExpanded) {
                     add(bgmLane, columnLabel(bgmLane, QStringLiteral("BGM")), true);
                 } else {
-                    for (const auto id : bgmIds) {
-                        // 展示为 BMS 2 位 id 文本（01/0A/1A…，避免与键列数字混淆）
-                        const QString idText =
-                            QString::number(id, 36).toUpper().rightJustified(2, QLatin1Char('0'));
-                        add(bgmLane, idText, true, false, id);
+                    // 2026-09 用户确认：BGM 展开 = 按 ch01 **行序**分列（同小节多次读到的
+                    // 01 通道 = 独立背景音轨），非按 #WAV id。行数 = 各 measure 的最大
+                    // bgm_line+1（空行占位）；note 按 bgm_line 落列。
+                    std::uint32_t maxLine = 0;
+                    int maxLineSaw = -1;
+                    for (const auto& ev : chart->notes) {
+                        if (ev.value.lane.kind != beatbench::LaneKind::Bgm) continue;
+                        if (static_cast<int>(ev.value.bgm_line) > maxLineSaw) {
+                            maxLineSaw = static_cast<int>(ev.value.bgm_line);
+                            maxLine = ev.value.bgm_line;
+                        }
+                    }
+                    for (std::uint32_t line = 0; line <= maxLine; ++line) {
+                        const QString label =
+                            QStringLiteral("bgm%1").arg(static_cast<int>(line + 1));
+                        add(bgmLane, label, true, false, 0, -1, false, false, line);
                     }
                 }
             }
@@ -1086,7 +1106,8 @@ void ChartViewItem::paint(QPainter* p) {
         if (static_cast<int>(ev.measure) < first || static_cast<int>(ev.measure) > last)
             continue;
         ++m_lastVisibleNotes;
-        const int col = columnFor(ev.value.lane, ev.value.sample.id);
+        const int col = columnFor(ev.value.lane, ev.value.sample.id,
+                                  static_cast<int>(ev.value.bgm_line));
         if (col < 0) continue;
         const QRectF& r = m_colRects[col];
         const qreal y = yOf(ev.measure + posDouble(ev.pos));
