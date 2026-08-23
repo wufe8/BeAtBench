@@ -329,62 +329,43 @@ void MoveNoteCommand::apply(Chart& chart) {
     if (!idx) return;  // 找不到 → 无操作
     m_moved = chart.notes[*idx];  // 快照（invert 恢复）
     m_partner.reset();
+    m_paired_at.reset();
+    m_paired_with.reset();
 
-    // 配对端：成对模式 → 随动；单 note 模式 → 只记录快照（invert 恢复），但实际不动伙伴
-    std::optional<std::size_t> partner_idx;
-    if (const auto p = chart.notes[*idx].value.ln_pair) {
-        if (*p < chart.notes.size() && chart.notes[*p].value.ln_pair &&
-            *chart.notes[*p].value.ln_pair == *idx) {
-            m_partner = chart.notes[*p];  // 快照（两种模式都记，invert 恢复用）
-            if (m_move_ln_pair) {
-                partner_idx = *p;
-            } else {
-                // 单 note 模式：解除配对（伙伴 ln_pair 清空，防悬挂）
-                chart.notes[*p].value.ln_pair.reset();
-            }
-        }
+    // LN 语义（2026-09 用户最终确认）：移动**只移动选中的 note**，不移动伙伴、
+    // **不自动重连**（前几版「成对移动/向前找最近重连」导致串 note，已删除）。
+    // ln_pair 唯二作用：① LN 中段接线绘制 ②（BMS 用不着的）note 类型判断。
+    // 这里只做「按伙伴值重定位下标」：伙伴原地不动，主 note 移走后仍与伙伴互指。
+    std::optional<std::tuple<std::uint32_t, Rational, Lane, std::uint32_t, std::uint32_t>>
+        partner_val;
+    if (m_moved->value.ln_pair && *m_moved->value.ln_pair < chart.notes.size()) {
+        const auto& p = chart.notes[*m_moved->value.ln_pair];
+        partner_val = std::make_tuple(p.measure, p.pos, p.value.lane, p.value.sample.id,
+                                      p.value.bgm_line);
     }
 
-    // 位移 delta = 目标 - 源
-    const Rational delta = m_to_pos - m_from_pos;
-
-    // 快照式重排：先取走主 note（与配对端，若成对），从容器删除
-    std::vector<Event<Note>> moved;
-    moved.push_back(std::move(chart.notes[*idx]));
-    if (partner_idx) moved.push_back(std::move(chart.notes[*partner_idx]));
-
-    std::vector<std::size_t> del = {*idx};
-    if (partner_idx) del.push_back(*partner_idx);
-    std::sort(del.begin(), del.end(), std::greater<std::size_t>());
-    for (const auto d : del) {
-        chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(d));
-    }
-    // 其余配对端下标修正（删除点之前的数量）
+    // 从容器取走主 note（只这一个；伙伴不动）
+    Event<Note> main_ev = std::move(chart.notes[*idx]);
+    const std::size_t removed_at = *idx;
+    chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(removed_at));
+    // 其余配对端下标修正（删除点之后的 -1；主 note 自身 ln_pair 稍后按值重设）
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         auto& p = chart.notes[i].value.ln_pair;
         if (!p) continue;
-        std::size_t shift = 0;
-        for (const auto d : del) {
-            if (*p > d) ++shift;
-        }
-        *p = static_cast<std::uint32_t>(static_cast<std::size_t>(*p) - shift);
+        if (*p > removed_at) --*p;
+        if (*p == removed_at) p.reset();  // 指向被删 note 的伙伴（partner_val 场景重设；无伙伴=无关）
     }
 
-    // 重新插入：主 note 到目标；配对端（若成对）到 (目标 + delta)
-    Event<Note> main_ev = std::move(moved[0]);
+    // 主 note 落位：目标 (measure,pos) + 可选换轨 + BGM 行号更新
     main_ev.measure = m_to_measure;
     main_ev.pos = m_to_pos;
     if (m_to_lane) main_ev.value.lane = *m_to_lane;  // 跨通道：改到目标轨道
-    // BGM 行号更新（2026-09）：目标为 Bgm lane 时按目标行赋号（显式 to_bgm_line 优先，
-    // 否则按目标小节 ch01 现有行数分配——新建行 = 行数；空行占位由 writer 兜底）。
-    // 非 Bgm lane → 归 0（离开 BGM 命名空间，line 无意义）。
     if (main_ev.value.lane.kind == LaneKind::Bgm) {
         if (m_to_bgm_line) {
             main_ev.value.bgm_line = *m_to_bgm_line;
         } else {
             // 自动分配（2026-09 用户反馈问题1）：目标小节 ch01 行号 = FIFO 虚拟子通道。
-            // 优先填目标小节中该 (pos,sample) 未占用的最小行号（同小节多行 ch01 的
-            // 行序连续）；否则追加到行尾（max+1）。
+            // 优先填目标小节中该 (pos,sample) 未占用的最小行号；否则追加行尾（max+1）。
             std::uint32_t used = 0;
             std::uint32_t max_line = 0;
             for (const auto& n : chart.notes) {
@@ -401,68 +382,32 @@ void MoveNoteCommand::apply(Chart& chart) {
     } else {
         main_ev.value.bgm_line = 0;
     }
-    main_ev.value.ln_pair.reset();  // 单 note：无配对；成对：稍后重设
+    main_ev.value.ln_pair.reset();  // 稍后按伙伴值重设
     const std::size_t main_at = lower_bound_pos(chart.notes, m_to_measure, m_to_pos);
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(main_at),
                        std::move(main_ev));
 
-    std::optional<std::size_t> part_at;
-    if (moved.size() > 1) {
-        Event<Note> part_ev = std::move(moved[1]);
-        // 伙伴随主 note 移动：目标 = 主目标 + 伙伴相对主 note 的原始偏移
-        part_ev.measure = m_to_measure;
-        part_ev.pos = m_to_pos + (m_partner ? m_partner->pos - m_from_pos : Rational(0, 1));
-        if (m_to_lane) part_ev.value.lane = *m_to_lane;  // LN 头尾恒同轨道
-        part_ev.value.ln_pair.reset();
-        part_at = lower_bound_pos(chart.notes, part_ev.measure, part_ev.pos);
-        chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(*part_at),
-                           std::move(part_ev));
-    }
-
-    // 其余配对端下标修正（插入点后 +1）
+    // 主 note 插入后：其余配对端下标修正（插入点后 +1）
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         auto& p = chart.notes[i].value.ln_pair;
         if (!p) continue;
-        if (main_at < i && *p >= main_at) ++*p;
-        if (part_at && *part_at < i && *p >= *part_at) ++*p;
+        if (i == main_at) continue;  // 主 note 自身稍后重设
+        if (main_at <= i && *p >= main_at) ++*p;
     }
 
-    // 重设互指（成对模式：主 ↔ 配对端）
-    if (part_at) {
-        std::size_t a = main_at, b = *part_at;
-        if (a == b) b = a + 1;  // 同 pos 冲突（理论不可达）
-        if (a < chart.notes.size() && b < chart.notes.size()) {
-            chart.notes[a].value.ln_pair = b;
-            chart.notes[b].value.ln_pair = a;
-        }
-    } else if (m_partner && !m_move_ln_pair) {
-        // 单 note 模式（2026-09 用户确认）：移动的 note 在新位置**向前找最近同通道
-        // 同 sample 未配对 Normal note** 重连（无论是不是原 note）。**不因换轨而断开**：
-        // LN 尾/头移动后应在**对应键的 LN 通道**保持 LN（用户反馈：LN 尾拖到游玩轨变普通 note
-        // 的根因是换轨后未重连）。最终 lane = to_lane（换轨）或原 lane；在其上找。
-        // 原伙伴（另一端）已在 apply 头部分开（334 行 reset，原位不动）。
-        // 前端靠 ln_pair 画 LN 线段；找不到 → 单点（ln_pair 空）。
-        const auto& me = chart.notes[main_at].value;
-        std::size_t new_partner = 0;
-        bool found = false;
-        for (std::size_t i = main_at; i-- > 0;) {
-            const auto& n = chart.notes[i].value;
-            if (n.lane != me.lane || n.sample.id != me.sample.id) continue;  // 忽略其它通道
-            // 同通道同 sample：未配对 Normal → 候选；已配对/地雷 → 停止（该通道已成型 LN）
-            if (n.kind == NoteKind::Normal && !n.ln_pair) {
-                new_partner = i;
-                found = true;
-            }
-            break;
-        }
-        if (found) {
-            chart.notes[main_at].value.ln_pair = new_partner;
-            chart.notes[new_partner].value.ln_pair = main_at;
-            m_paired_at = main_at;       // invert 清理用
-            m_paired_with = new_partner;
+    // 按伙伴值重定位互指（伙伴原地不动；找不到（被删/异常）→ 主 note 单点，伙伴 ln_pair 已清）
+    if (partner_val) {
+        const auto& [pm, pp, pl, ps, pbl] = *partner_val;
+        const auto partner_idx =
+            find_note(chart.notes, pm, pp, pl, ps, pbl);
+        if (partner_idx && *partner_idx != main_at && main_at < chart.notes.size()) {
+            chart.notes[main_at].value.ln_pair =
+                static_cast<std::uint32_t>(*partner_idx);
+            chart.notes[*partner_idx].value.ln_pair =
+                static_cast<std::uint32_t>(main_at);
         }
     }
-    m_last_delta = delta;
+    m_last_delta = (m_to_pos - m_from_pos);
 }
 
 void MoveNoteCommand::invert(Chart& chart) {
@@ -490,92 +435,57 @@ void MoveNoteCommand::invert(Chart& chart) {
     const auto idx = find_note(chart.notes, m_to_measure, m_to_pos, cur_lane, m_sample,
                                cur_bgm_line);
     if (!idx) return;
-    // 配对端：成对模式 → 当前容器中随动伙伴；单 note 模式 → 无随动（伙伴留原位）
-    std::optional<std::size_t> partner_idx;
-    if (m_move_ln_pair && m_partner) {
-        partner_idx = find_partner(chart.notes, chart.notes[*idx], *idx);
+
+    // LN 语义（与 apply 对称）：只移回选中 note，保持与伙伴互指（按伙伴值重定位）。
+    // 伙伴原地不动（apply 期间伙伴从未移动）。
+    std::optional<std::tuple<std::uint32_t, Rational, Lane, std::uint32_t, std::uint32_t>>
+        partner_val;
+    if (chart.notes[*idx].value.ln_pair &&
+        *chart.notes[*idx].value.ln_pair < chart.notes.size()) {
+        const auto& p = chart.notes[*chart.notes[*idx].value.ln_pair];
+        partner_val = std::make_tuple(p.measure, p.pos, p.value.lane, p.value.sample.id,
+                                      p.value.bgm_line);
     }
-    // 快照式重排（对称反向）
-    std::vector<Event<Note>> moved;
-    moved.push_back(std::move(chart.notes[*idx]));
-    if (partner_idx) moved.push_back(std::move(chart.notes[*partner_idx]));
-    std::vector<std::size_t> del = {*idx};
-    if (partner_idx) del.push_back(*partner_idx);
-    std::sort(del.begin(), del.end(), std::greater<std::size_t>());
-    for (const auto d : del) {
-        chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(d));
-    }
+
+    Event<Note> main_ev = std::move(chart.notes[*idx]);
+    const std::size_t removed_at = *idx;
+    chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(removed_at));
+    // 其余配对端下标修正（删除点之后的 -1；主 note 自身 ln_pair 稍后按值重设）
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         auto& p = chart.notes[i].value.ln_pair;
         if (!p) continue;
-        std::size_t shift = 0;
-        for (const auto d : del) {
-            if (*p > d) ++shift;
-        }
-        *p = static_cast<std::uint32_t>(static_cast<std::size_t>(*p) - shift);
+        if (*p > removed_at) --*p;
+        if (*p == removed_at) p.reset();
     }
-    Event<Note> main_ev = std::move(moved[0]);
+
+    // 主 note 移回源位置 + 恢复源 lane + 源 BGM 行
     main_ev.measure = m_from_measure;
     main_ev.pos = m_from_pos;
-    if (m_to_lane) main_ev.value.lane = m_lane;  // 恢复源轨道（跨通道移动的逆）
+    if (m_to_lane) main_ev.value.lane = m_lane;
     main_ev.value.bgm_line =
         (main_ev.value.lane.kind == LaneKind::Bgm) ? m_from_bgm_line : 0;
     main_ev.value.ln_pair.reset();
     const std::size_t main_at = lower_bound_pos(chart.notes, m_from_measure, m_from_pos);
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(main_at),
                        std::move(main_ev));
-    std::optional<std::size_t> part_at;
-    if (moved.size() > 1) {
-        Event<Note> part_ev = std::move(moved[1]);
-        // 伙伴恢复回原始位置（快照；伙伴相对主 note 的偏移保持）
-        part_ev.measure = m_partner ? m_partner->measure : m_from_measure;
-        part_ev.pos = m_partner ? m_partner->pos : m_from_pos;
-        // 跨通道：伙伴 lane 恢复为 apply 前的快照 lane（moved[1] 是当前值，可能已被
-        // apply 改为 to_lane——LN 头尾恒同轨道，invert 需一并还原）
-        if (m_partner) part_ev.value.lane = m_partner->value.lane;
-        part_ev.value.ln_pair.reset();
-        part_at = lower_bound_pos(chart.notes, part_ev.measure, part_ev.pos);
-        chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(*part_at),
-                           std::move(part_ev));
-    }
+
+    // 插入后其余配对端下标修正
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         auto& p = chart.notes[i].value.ln_pair;
         if (!p) continue;
-        if (main_at < i && *p >= main_at) ++*p;
-        if (part_at && *part_at < i && *p >= *part_at) ++*p;
+        if (i == main_at) continue;
+        if (main_at <= i && *p >= main_at) ++*p;
     }
-    if (part_at) {
-        std::size_t a = main_at, b = *part_at;
-        if (a == b) b = a + 1;
-        if (a < chart.notes.size() && b < chart.notes.size()) {
-            chart.notes[a].value.ln_pair = b;
-            chart.notes[b].value.ln_pair = a;
-        }
-    } else if (m_partner) {
-        // 单 note 模式：恢复配对——按伙伴快照 (measure,pos,lane,sample) 找当前下标，
-        // 与主 note（已移回 m_from）互指。伙伴从未移动，值快照可直接定位。
-        const auto pp = find_note(chart.notes, m_partner->measure, m_partner->pos,
-                                  m_partner->value.lane, m_partner->value.sample.id);
-        if (pp && *pp != main_at && main_at < chart.notes.size()) {
-            chart.notes[main_at].value.ln_pair = *pp;
-            chart.notes[*pp].value.ln_pair = main_at;
-        }
-    }
-    // 单 note 模式 invert：清理 apply 时移动端重连的**非原伙伴**（m_paired_with ≠ m_partner）——
-    // 否则该临时伙伴的 ln_pair 悬挂指向已移回原位的主 note。若重连伙伴恰是原伙伴
-    // （m_partner，上面已恢复互指），则不清理（避免误伤恢复后的正常配对）。
-    if (m_paired_with && m_partner && *m_paired_with < chart.notes.size()) {
-        const auto& pw = chart.notes[*m_paired_with];
-        const bool is_original = pw.measure == m_partner->measure && pw.pos == m_partner->pos &&
-                                 pw.value.lane == m_partner->value.lane &&
-                                 pw.value.sample.id == m_partner->value.sample.id;
-        if (!is_original) {
-            const auto cur = find_note(chart.notes, pw.measure, pw.pos, pw.value.lane,
-                                       pw.value.sample.id);
-            if (cur && *cur < chart.notes.size()) {
-                const auto& link = chart.notes[*cur].value.ln_pair;
-                if (link && *link == main_at) chart.notes[*cur].value.ln_pair.reset();
-            }
+
+    // 按伙伴值重定位互指（伙伴原地未动）
+    if (partner_val) {
+        const auto& [pm, pp, pl, ps, pbl] = *partner_val;
+        const auto partner_idx = find_note(chart.notes, pm, pp, pl, ps, pbl);
+        if (partner_idx && *partner_idx != main_at && main_at < chart.notes.size()) {
+            chart.notes[main_at].value.ln_pair =
+                static_cast<std::uint32_t>(*partner_idx);
+            chart.notes[*partner_idx].value.ln_pair =
+                static_cast<std::uint32_t>(main_at);
         }
     }
     m_moved.reset();
