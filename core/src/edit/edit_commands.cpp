@@ -517,6 +517,83 @@ std::string MoveNoteCommand::describe() const {
     return s;
 }
 
+// ---------- ToggleLnCommand（单点 ↔ LN） ----------
+
+ToggleLnCommand::ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane,
+                                 std::uint32_t sample, std::uint32_t bgm_line)
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_bgm_line(bgm_line) {}
+
+void ToggleLnCommand::apply(Chart& chart) {
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    if (!idx) return;
+    m_did_change = false;
+    m_was_ln = false;
+    m_applied_partner.reset();
+    m_old_partner.reset();
+
+    const auto& note = chart.notes[*idx].value;
+    if (note.ln_pair && *note.ln_pair < chart.notes.size()) {
+        // LN → 单点：断开（本端 + 伙伴端都清 ln_pair）
+        const auto p = *note.ln_pair;
+        m_was_ln = true;
+        m_old_partner = chart.notes[p];  // 伙伴快照（invert 恢复）
+        chart.notes[*idx].value.ln_pair.reset();
+        chart.notes[p].value.ln_pair.reset();
+        m_did_change = true;
+        return;
+    }
+    // 单点 → LN：向前找最近同 lane 同 sample 未配对单点（忽略中间其它通道）
+    std::optional<std::size_t> head;
+    for (std::size_t i = *idx; i-- > 0;) {
+        const auto& n = chart.notes[i].value;
+        if (n.lane != m_lane || n.sample.id != m_sample) continue;
+        // 同 lane 同 sample：未配对 Normal → 候选；已配对/地雷 → 停止（不重复配）
+        if (n.kind == NoteKind::Normal && !n.ln_pair) {
+            head = i;
+        }
+        break;
+    }
+    if (head) {
+        chart.notes[*head].value.ln_pair = static_cast<std::uint32_t>(*idx);
+        chart.notes[*idx].value.ln_pair = static_cast<std::uint32_t>(*head);
+        m_applied_partner = static_cast<std::uint32_t>(*head);
+        m_did_change = true;
+    }
+}
+
+void ToggleLnCommand::invert(Chart& chart) {
+    if (!m_did_change) return;
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    if (!idx) return;
+    if (m_was_ln) {
+        // 恢复：本端与伙伴（按快照值）互指
+        if (m_old_partner) {
+            const auto pp = find_note(chart.notes, m_old_partner->measure,
+                                      m_old_partner->pos, m_old_partner->value.lane,
+                                      m_old_partner->value.sample.id,
+                                      m_old_partner->value.bgm_line);
+            if (pp && *pp != *idx) {
+                chart.notes[*idx].value.ln_pair = static_cast<std::uint32_t>(*pp);
+                chart.notes[*pp].value.ln_pair = static_cast<std::uint32_t>(*idx);
+            }
+        }
+    } else if (m_applied_partner) {
+        // 撤销配对：清除互指
+        if (*m_applied_partner < chart.notes.size()) {
+            chart.notes[*idx].value.ln_pair.reset();
+            chart.notes[*m_applied_partner].value.ln_pair.reset();
+        }
+    }
+    m_did_change = false;
+    m_was_ln = false;
+    m_applied_partner.reset();
+    m_old_partner.reset();
+}
+
+std::string ToggleLnCommand::describe() const {
+    return "单点/LN 转换 (m" + std::to_string(m_measure) + ")";
+}
+
 // ---------- ConvertNoteCommand（note ↔ BGA/BPM/STOP 跨命名空间转换） ----------
 
 ConvertNoteCommand::ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane lane,

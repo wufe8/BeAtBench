@@ -1217,6 +1217,33 @@ public:
     }
 };
 
+// —— 单点 ↔ LN 转换（2026-09 用户：工具栏「单点/LN」按钮；selection 批量一个 undo 步） ——
+// note.toggleLn：selection 中每个 note——LN → 断开两端变单点；单点 → 向前找最近
+// 同 lane 同 sample 未配对单点配成 LN（找不到则跳过）。返回 converted 数（实际改变）。
+class NoteToggleLnCommand : public Command {
+public:
+    std::string_view name() const override { return "note.toggleLn"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) {
+            throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        }
+        const auto refs = selection_from_json(args);
+        if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无可转换内容）");
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (const auto& r : refs) {
+            comp->add(std::make_unique<edit::ToggleLnCommand>(
+                r.measure, r.pos, r.lane, r.sample, r.bgm_line));
+        }
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("notes", static_cast<std::int64_t>(refs.size()));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 // —— note.convert：跨「id 命名空间」转换（note ↔ BGA/BPM/STOP 事件） ——
 // 语义：把 (measure, pos, lane, sample) 的 note 移除，在目标语义容器插入事件；
 // id 不变（note 的 #WAVxx id → #BMPxx / #BPMxx / #STOPxx 同文本 id），
@@ -1544,6 +1571,8 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<NoteMoveRegionCommand>());
     // M3 跨命名空间转换（note → BGA/BPM/STOP 事件；id 不变，同 undo 步）
     registry.add(std::make_unique<NoteConvertCommand>());
+    // M3 单点 ↔ LN 转换（工具栏按钮；selection 批量一个 undo 步）
+    registry.add(std::make_unique<NoteToggleLnCommand>());
     // M3 崩溃备份 / 自动保存开关（默认关自动保存）
     registry.add(std::make_unique<SessionAutosaveCommand>());
     // M3 元信息编辑（头部字段；批量一个 undo 步）

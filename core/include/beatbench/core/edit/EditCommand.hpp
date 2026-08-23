@@ -182,4 +182,36 @@ private:
     double m_value = 0.0;
 };
 
+/// 单点 ↔ LN 转换（2026-09 用户：工具栏按钮一键转换；对选中的 note）。
+/// 语义（apply）：
+/// - note 有 ln_pair（是 LN 一段）→ **断开**：本 note 与伙伴的 ln_pair 都清除
+///   （两端变两个独立单点；LN 中段线消失）；
+/// - note 无 ln_pair（单点）→ **配 LN**：向前找**最近同 lane 同 sample 未配对**
+///   单点配成 LN（互为 ln_pair；忽略中间其它通道）；找不到 → 无操作（命令成功，
+///   调用方按「转换数」提示）。
+/// invert：精确恢复（断开 → 恢复互指；配对 → 清除互指）。
+/// 批量 = CompositeCommand（一个 undo 步）；单选 = 本命令。
+class ToggleLnCommand : public EditCommand {
+public:
+    ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
+                    std::uint32_t bgm_line = 0);
+    std::string name() const override { return "note.toggleLn"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::uint32_t m_measure;
+    Rational m_pos;
+    Lane m_lane;
+    std::uint32_t m_sample;
+    std::uint32_t m_bgm_line;
+    /// apply 状态：was_ln（原来是否 LN）；paired_with（应用后互指的伙伴下标）
+    bool m_was_ln = false;
+    std::optional<std::uint32_t> m_applied_partner;  ///< 配对后伙伴下标（配 LN 时）
+    /// apply 断开前的伙伴快照（invert 恢复互指用）
+    std::optional<Event<Note>> m_old_partner;
+    bool m_did_change = false;  ///< apply 实际改变（找不到配对象时 false → invert 无操作）
+};
+
 }  // namespace beatbench::edit
