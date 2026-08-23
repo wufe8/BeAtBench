@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -115,6 +116,62 @@ TEST(MetaLint, LintDanglingLn) {
     EXPECT_TRUE(found);
 }
 
+// —— BGM 重叠豁免（2026-09 用户：bgm 通道允许同位置多 note，背景自动播放） ——
+
+TEST(MetaLint, LintBgmOverlapAllowed) {
+    Chart c;
+    c.meta["TITLE"] = "bgm 重叠";
+    c.meta["RANK"] = "3";
+    c.meta["TOTAL"] = "100";
+    // 同 (measure,pos) 两个 BGM note（不同 bgm_line 子轨）——不算问题
+    for (std::uint32_t line = 0; line < 2; ++line) {
+        Event<Note> n{1, Rational(0, 1), {}};
+        n.value.lane = {0, LaneKind::Bgm, 0};
+        n.value.sample.id = 1 + line;
+        n.value.bgm_line = line;
+        c.notes.push_back(n);
+    }
+    const auto issues = bms::lint_chart(c, std::filesystem::path());
+    for (const auto& issue : issues) {
+        EXPECT_NE(issue.code, "overlapping_notes") << issue.message;
+    }
+}
+
+// —— 扩展名不符：信息级（非阻塞）；缺失才 warning ——
+
+TEST(MetaLint, LintExtMismatchIsInfo) {
+    auto dir = std::filesystem::temp_directory_path() / "bb_lint_sev";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "kick.ogg", std::ios::binary);
+        f << "OggS";
+    }
+    Chart c;
+    c.meta["TITLE"] = "sev";
+    c.meta["RANK"] = "3";
+    c.meta["TOTAL"] = "100";
+    SampleDef def;
+    def.file = "kick.wav";
+    c.samples[{SampleKind::Wav, 1}] = def;
+    SampleDef miss;
+    miss.file = "absent.wav";
+    c.samples[{SampleKind::Wav, 2}] = miss;
+    const auto issues = bms::lint_chart(c, dir);
+    bool info_found = false, warn_found = false;
+    for (const auto& issue : issues) {
+        if (issue.code == "wav_ext_mismatch") {
+            info_found = true;
+            EXPECT_EQ(issue.severity, bms::Severity::Info);
+        } else if (issue.code == "missing_wav") {
+            warn_found = true;
+            EXPECT_EQ(issue.severity, bms::Severity::Warning);
+        }
+    }
+    EXPECT_TRUE(info_found);
+    EXPECT_TRUE(warn_found);
+    std::filesystem::remove_all(dir);
+}
+
 // —— 协议 dispatch ——
 
 TEST(MetaLint, ProtocolMetaEdit) {
@@ -158,4 +215,55 @@ TEST(MetaLint, ProtocolMetaEditBadArgs) {
     const Json resp = global_registry().dispatch(req);
     EXPECT_FALSE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
+}
+
+// —— session.lint：wav_ext_mismatch 聚合为一条 info ——
+
+TEST(MetaLint, ProtocolSessionLintAggregatesExtMismatch) {
+    namespace fs = std::filesystem;
+    auto& session = beatbench::edit::global_editor_session();
+    const auto dir = fs::temp_directory_path() / "bb_sess_lint";
+    fs::create_directories(dir);
+    {
+        std::ofstream f(dir / "k1.ogg", std::ios::binary);
+        f << "OggS";
+    }
+    {
+        std::ofstream f(dir / "k2.ogg", std::ios::binary);
+        f << "OggS";
+    }
+    const auto path = (dir / "t.bms").string();
+    {
+        std::ofstream f(path, std::ios::binary);
+        f << "*----- HEADER\n#PLAYER 1\n#TITLE sess\n#BPM 130\n"
+             "#RANK 3\n#TOTAL 100\n"
+             "#WAV01 k1.wav\n#WAV02 k2.wav\n#WAV03 miss.wav\n"
+             "#00111:0102\n";
+    }
+    Json largs = Json::object();
+    largs.set("path", path);
+    Json lreq = Json::object();
+    lreq.set("command", "session.load");
+    lreq.set("args", std::move(largs));
+    ASSERT_TRUE(global_registry().dispatch(lreq).at("ok").as_bool());
+    Json req = Json::object();
+    req.set("command", "session.lint");
+    req.set("args", Json::object());
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    const auto& issues = resp.at("result").at("issues").as_array();
+    int ext = 0, missing = 0;
+    for (const auto& e : issues) {
+        if (e.at("code").as_str() == "wav_ext_mismatch") {
+            ++ext;
+            EXPECT_EQ(e.at("severity").as_str(), "info");
+            EXPECT_NE(e.at("message").as_str().find("2 个"), std::string::npos);
+        } else if (e.at("code").as_str() == "missing_wav") {
+            ++missing;
+            EXPECT_EQ(e.at("severity").as_str(), "warning");
+        }
+    }
+    EXPECT_EQ(ext, 1);      // 两条 wav→ogg 合并为一条 info
+    EXPECT_EQ(missing, 1);  // 真缺失 → warning
+    fs::remove_all(dir);
 }

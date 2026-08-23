@@ -130,7 +130,10 @@ void LintListModel::loadFromIssues(const QString& issuesJson) {
         if (arr && arr->is_array()) {
             for (const auto& d : arr->as_array()) {
                 Entry e;
+                // severity 由 core 给出（session.lint 已按类型分级：warning / info）
                 e.severity = QStringLiteral("warning");
+                if (const Json* v = d.find("severity"))
+                    e.severity = QString::fromUtf8(v->as_str().c_str());
                 if (const Json* v = d.find("code"))
                     e.id = QString::fromUtf8(v->as_str().c_str());
                 if (const Json* v = d.find("message"))

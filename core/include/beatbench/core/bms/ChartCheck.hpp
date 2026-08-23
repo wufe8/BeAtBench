@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 
 namespace beatbench::bms {
 
@@ -44,6 +45,7 @@ std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> collect_sample_usage
 
 /// lint 单条结论：code = 稳定机器码（"missing_wav" 等，协议用），
 /// message = 中文展示文本。line 0 = 无行号。
+/// severity：error / warning / info（info = 不阻塞、仅提示；如扩展名不符）。
 /// missing_wav 额外携带 id（槽位）/ file（相对路径），供机器消费；
 /// wav_ext_mismatch 额外携带 resolved（实际存在的同名异扩展文件）；
 /// overlapping_notes 携带 measure（小节）/ pos（num/den）/ lane（轨道文本）供 GUI 定位；
@@ -51,6 +53,7 @@ std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> collect_sample_usage
 struct LintIssue {
     std::string code;
     std::string message;
+    Severity severity = Severity::Warning;
     int line = 0;
     std::string id;     ///< 采样槽位（missing_wav / wav_ext_mismatch）
     std::string file;   ///< 引用路径（missing_wav / wav_ext_mismatch）

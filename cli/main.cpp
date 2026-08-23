@@ -166,12 +166,37 @@ int cmd_check(const std::string& path, const std::string& format) {
     const auto lint =
         beatbench::bms::lint_chart(chart, std::filesystem::path(path).parent_path());
     std::size_t missing = 0;
+    std::size_t ext_mismatch = 0;
+    std::string ext_first, ext_resolved;
     for (const auto& issue : lint) {
-        std::printf("[WARN ] %s\n", issue.message.c_str());
         if (issue.code == "missing_wav") ++missing;
+        // wav_ext_mismatch：信息级（文件实际可用），多条聚合为一条提示
+        if (issue.code == "wav_ext_mismatch") {
+            ++ext_mismatch;
+            if (ext_mismatch == 1) {
+                ext_first = issue.file;
+                ext_resolved = issue.resolved;
+            }
+            continue;
+        }
+        const char* tag = issue.severity == beatbench::bms::Severity::Warning
+                              ? "[WARN ]"
+                              : (issue.severity == beatbench::bms::Severity::Error
+                                     ? "[ERROR]"
+                                     : "[INFO ]");
+        std::printf("%s %s\n", tag, issue.message.c_str());
+    }
+    if (ext_mismatch > 0) {
+        std::printf("[INFO ] %zu 个采样文件扩展名与引用不符（示例: %s → %s）\n",
+                    ext_mismatch, ext_first.c_str(), ext_resolved.c_str());
     }
 
-    std::printf("结果: %zu 错误, %zu 警告, 缺失采样 %zu 个, lint %zu 个\n",
+    std::size_t lint_warn = 0, lint_error = 0;
+    for (const auto& issue : lint) {
+        if (issue.severity == beatbench::bms::Severity::Error) ++lint_error;
+        else if (issue.severity == beatbench::bms::Severity::Warning) ++lint_warn;
+    }
+    std::printf("结果: %zu 错误, %zu 警告, 缺失采样 %zu 个, lint 警告 %zu 个, 信息 %zu 个\n",
                 static_cast<std::size_t>(std::count_if(
                     result.diagnostics.begin(), result.diagnostics.end(),
                     [](const auto& d) { return d.severity == beatbench::codec::Severity::Error; })),
@@ -180,9 +205,9 @@ int cmd_check(const std::string& path, const std::string& format) {
                     [](const auto& d) {
                         return d.severity == beatbench::codec::Severity::Warning;
                     })),
-                missing, lint.size());
+                missing, lint_warn, ext_mismatch);
 
-    bool failed = !lint.empty();
+    bool failed = lint_error != 0 || lint_warn != 0;
     for (const auto& d : result.diagnostics) {
         if (d.severity == beatbench::codec::Severity::Error) failed = true;
     }

@@ -103,6 +103,15 @@ std::string severity_str(beatbench::codec::Severity s) {
     }
 }
 
+// LintIssue 用 bms::Severity（与 codec::Severity 同语义、不同类型）
+std::string severity_str(beatbench::bms::Severity s) {
+    switch (s) {
+        case beatbench::bms::Severity::Error: return "error";
+        case beatbench::bms::Severity::Warning: return "warning";
+        default: return "info";
+    }
+}
+
 Json diags_json(const std::vector<beatbench::codec::Diagnostic>& diags) {
     Json arr = Json::array();
     for (const auto& d : diags) {
@@ -344,7 +353,18 @@ public:
         if (!l.find("missing_total")) l.set("missing_total", false);
         if (!l.find("empty")) l.set("empty", false);
         out.set("lint", std::move(l));
-        out.set("ok", errors == 0 && lint.empty());
+        // ok = 无 error/无 warning（info 级如扩展名不符不阻塞；2026-09 用户）
+        bool has_blocking = errors != 0;
+        if (!has_blocking) {
+            for (const auto& issue : lint) {
+                if (issue.severity == Severity::Error ||
+                    issue.severity == Severity::Warning) {
+                    has_blocking = true;
+                    break;
+                }
+            }
+        }
+        out.set("ok", !has_blocking);
         return out;
     }
 };
@@ -964,7 +984,8 @@ public:
 // —— session.lint：对**内存活动会话**的 chart 跑 lint（编辑后刷新 lint 面板用） ——
 // 与 check（读文件）区别：check 走磁盘，编辑后未保存时看不到内存状态；
 // 本命令直接 lint session.chart()（含 LN 通道未配对等编辑产生的问题）。
-// 返回 issues 数组（{code,severity,measure,pos,lane,sample,message}）+ 各分类。
+// 返回 issues 数组（{code,severity,message,measure,pos,lane,sample}）。
+// wav_ext_mismatch 聚合为**一条 info**（上千条同因不刷屏；2026-09 用户）。
 class SessionLintCommand : public Command {
 public:
     std::string_view name() const override { return "session.lint"; }
@@ -976,9 +997,33 @@ public:
             base_dir = std::filesystem::path(session.path()).parent_path();
         const auto lint = beatbench::bms::lint_chart(session.chart(), base_dir);
         Json arr = Json::array();
+        // 1) 聚合 wav_ext_mismatch（信息级，一条）
+        std::size_t ext_count = 0;
+        std::string ext_first_file, ext_first_resolved;
         for (const auto& issue : lint) {
+            if (issue.code != "wav_ext_mismatch") continue;
+            ++ext_count;
+            if (ext_count == 1) {
+                ext_first_file = issue.file;
+                ext_first_resolved = issue.resolved;
+            }
+        }
+        if (ext_count > 0) {
+            Json e = Json::object();
+            e.set("code", "wav_ext_mismatch");
+            e.set("severity", "info");
+            e.set("message", std::to_string(ext_count) +
+                                 " 个采样文件扩展名与引用不符（示例: " + ext_first_file +
+                                 " → " + ext_first_resolved + "）");
+            e.set("measure", static_cast<std::int64_t>(0));
+            arr.push_back(std::move(e));
+        }
+        // 2) 其余 issue 逐条
+        for (const auto& issue : lint) {
+            if (issue.code == "wav_ext_mismatch") continue;
             Json e = Json::object();
             e.set("code", issue.code);
+            e.set("severity", severity_str(issue.severity));
             e.set("message", issue.message);
             e.set("measure", static_cast<std::int64_t>(issue.measure));
             if (issue.pos_den != 0) {

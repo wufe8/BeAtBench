@@ -571,12 +571,17 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                     const QString posText =
                         QStringLiteral("(%1/%2)").arg(ev.pos.num).arg(ev.pos.den);
                     // LN：附加实际 BMS 通道（51-69 = 1P/2P LN 通道，LNTYPE 1）
+                    // 2026-09：看**数据真值**而非配对状态——未配对的 LN 通道 note
+                    // 也应显示 +LN(xx)（用户：实际确实是 LN 通道，只是缺伙伴）。
+                    // ln_channel = 源通道就是 5x/6x（parser 只对 51-69 置位）；
+                    // LNTYPE 2（#LNOBJ）配对 → ln_channel=false → 显示普通通道号。
                     QString lnText;
-                    if (ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size() &&
+                    bool paired = ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size() &&
                         chart.notes[*ev.value.ln_pair].value.ln_pair &&
-                        *chart.notes[*ev.value.ln_pair].value.ln_pair == evIdx) {
+                        *chart.notes[*ev.value.ln_pair].value.ln_pair == evIdx;
+                    if (ev.value.ln_channel || paired) {
                         const std::string ch = beatbench::bms::bms_channel_for(
-                            ev.value.lane, true, NoteKind::Normal);
+                            ev.value.lane, ev.value.ln_channel, NoteKind::Normal);
                         if (!ch.empty())
                             lnText = QStringLiteral("+LN(%1)").arg(QString::fromStdString(ch));
                     }
@@ -1225,8 +1230,9 @@ void ChartViewItem::paint(QPainter* p) {
             continue;
         }
 
+        // 普通单点（含 LN 通道但未配对：深色 + 无连线——数据已是 LN 通道，仅缺伙伴）
         p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
-                    noteColor(note.lane));
+                    noteColor(note.lane, note));
         drawSampleLabel(r, y, note);
         if (isSelected(ev)) {
             p->setPen(QPen(th->onAccent(), 1.2));

@@ -274,7 +274,8 @@ ApplicationWindow {
                     enabled: chartMeta !== null && window.selectionRefs.length > 0
                     onClicked: toggleLnSelection()
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("选中游玩轨 note：LN→断开两端变单点；单点→向前配最近同轨同采样单点为 LN")
+                    ToolTip.text: qsTr("按 LNTYPE 切换选中 note 的 LN 通道（LNTYPE 1：普通↔5x/6x）；"
+                                       + "配对由同通道时间序交替自动组成（无向前查询）")
                 }
                 // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
                 BbCheckBox {
@@ -779,7 +780,7 @@ ApplicationWindow {
         }
     }
     /// 单点 ↔ LN 转换（工具栏「单点/LN」按钮；selection 批量一个 undo 步）。
-    /// LN→断开两端变单点；单点→向前配最近同 lane 同 sample 未配对单点为 LN。
+    /// LNTYPE 翻转选中 note 的 LN 通道（LNTYPE 1：ln_channel ←→ 普通；配对由 rebuild 自动）。
     function toggleLnSelection() {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（点击/框选）再转换单点/LN"))

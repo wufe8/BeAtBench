@@ -117,6 +117,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         resolved_noext.erase(resolved_noext.size() - ext.size());
         LintIssue mismatch;
         mismatch.code = "wav_ext_mismatch";
+        mismatch.severity = Severity::Info;  // 信息级：文件实际可用（扩展名回退）
         mismatch.id = id_text(chart, key.second);
         mismatch.file = def.file;
         bool found_fallback = false;
@@ -138,6 +139,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         }
         LintIssue issue;
         issue.code = "missing_wav";
+        issue.severity = Severity::Warning;  // 找不到文件：真问题（用户：缺失才 warning）
         issue.message = "缺失采样文件 #WAV" + id_text(chart, key.second) + " " + def.file;
         issue.id = id_text(chart, key.second);
         issue.file = def.file;
@@ -145,27 +147,34 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
     }
     // 2) 缺失 #RANK / #TOTAL（播放器判定/回血依赖）
     if (!chart.meta.count("RANK")) {
-        issues.push_back({"missing_rank", "缺失 #RANK（判定难度，播放器将用默认值）", 0});
+        issues.push_back(
+            {"missing_rank", "缺失 #RANK（判定难度，播放器将用默认值）", Severity::Warning, 0});
     }
     if (!chart.meta.count("TOTAL")) {
-        issues.push_back({"missing_total", "缺失 #TOTAL（回血总量，播放器将用默认值）", 0});
+        issues.push_back(
+            {"missing_total", "缺失 #TOTAL（回血总量，播放器将用默认值）", Severity::Warning, 0});
     }
     // 3) 空谱面（无 note 无 BGA 无节奏事件）
     if (chart.notes.empty() && chart.bpm_events.empty() && chart.stop_events.empty() &&
         chart.measure_events.empty() && chart.bga_events.empty() && chart.raw_lines.empty()) {
-        issues.push_back({"empty_chart", "空谱面（未解析到任何内容）", 0});
+        issues.push_back(
+            {"empty_chart", "空谱面（未解析到任何内容）", Severity::Warning, 0});
     }
     // 4) 重叠 note（同 measure + pos + lane 多个；同 sample 也算——同值重叠也是问题）
     //    播放器行为不定（可能只响一个/相位抵消），谱师通常无意为之。
+    //    ⚠️ BGM 通道（ch01）除外：背景轨按行=子轨自动播放，允许同位置重叠
+    //    （用户 2026-09 确认：实际游戏 bgm 是背景自动播放，多个同时到达合法）。
     {
         std::map<std::tuple<std::uint32_t, Rational, Lane>, std::size_t> seen;
         for (const auto& ev : chart.notes) {
+            if (ev.value.lane.kind == LaneKind::Bgm) continue;  // BGM 豁免
             const auto key = std::make_tuple(ev.measure, ev.pos, ev.value.lane);
             auto& n = seen[key];
             ++n;
             if (n == 2) {  // 第二次出现才报（避免每组报 N-1 次）
                 LintIssue issue;
                 issue.code = "overlapping_notes";
+                issue.severity = Severity::Warning;
                 issue.measure = ev.measure;
                 issue.pos_num = ev.pos.num;
                 issue.pos_den = ev.pos.den;
@@ -196,6 +205,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         if (!bad) continue;
         LintIssue issue;
         issue.code = "dangling_ln";
+        issue.severity = Severity::Warning;
         issue.measure = ev.measure;
         issue.pos_num = ev.pos.num;
         issue.pos_den = ev.pos.den;
@@ -215,6 +225,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         if (!ev.value.ln_channel || ev.value.ln_pair) continue;
         LintIssue issue;
         issue.code = "unpaired_ln_note";
+        issue.severity = Severity::Warning;
         issue.measure = ev.measure;
         issue.pos_num = ev.pos.num;
         issue.pos_den = ev.pos.den;
