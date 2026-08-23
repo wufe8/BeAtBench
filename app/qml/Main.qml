@@ -26,6 +26,9 @@ ApplicationWindow {
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     property string statusText: qsTr("就绪")
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
+    // 文件格式/编码（底部状态栏右下角显示；info/check 返回）
+    property string chartFormat: ""
+    property string chartEncoding: ""
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换在 ChartView 内处理）
     property bool showChannelIds: false
     // note 上显示所用采样：0 隐藏 / 1 id / 2 文件名
@@ -370,6 +373,13 @@ ApplicationWindow {
                     text: chartMeta ? "SP7K · " + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
                 }
+                // 文件格式/编码（问题2：底部右下角，类似文本编辑器；info/check 返回）
+                Label {
+                    text: window.chartFormat !== "" ? window.chartFormat.toUpperCase() +
+                             (window.chartEncoding !== "" ? " · " + window.chartEncoding : "") : ""
+                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
+                    visible: window.chartFormat !== ""
+                }
             }
         }
     }
@@ -389,7 +399,7 @@ ApplicationWindow {
     FileDialog {
         id: fileDialog
         title: qsTr("打开 BMS 谱面")
-        nameFilters: [qsTr("BMS 谱面 (*.bms)"), qsTr("所有文件 (*)")]
+        nameFilters: [qsTr("BMS 谱面 (*.bms *.bml *.bme *.pms)"), qsTr("所有文件 (*)")]
         onAccepted: openChart(urlToPath(selectedFile))
         onRejected: { /* 用户取消 */ }
     }
@@ -433,13 +443,34 @@ ApplicationWindow {
         interval: 150
         onTriggered: editPage.clickLocal(debugClickX, debugClickY)
     }
+    // --drag x1 y1 x2 y2：模拟拖拽（按下→移动→释放；同一分发路径，复现移动交互问题）
+    property double debugDragX1: -1
+    property double debugDragY1: -1
+    property double debugDragX2: -1
+    property double debugDragY2: -1
+    Timer {
+        id: debugDragTimer
+        interval: 150
+        onTriggered: {
+            if (typeof editPage !== "undefined" && editPage && editPage.locateChartView)
+                editPage.locateChartView().dragAt(debugDragX1, debugDragY1, debugDragX2, debugDragY2)
+        }
+    }
+    function debugMaybeDrag() {
+        if (debugDragX1 < 0 || debugDragY1 < 0 || debugDragX2 < 0 || debugDragY2 < 0) return
+        debugDragTimer.restart()
+    }
+    onDebugDragX1Changed: debugMaybeDrag()
+    onDebugDragY1Changed: debugMaybeDrag()
+    onDebugDragX2Changed: debugMaybeDrag()
+    onDebugDragY2Changed: debugMaybeDrag()
 
     // 另存为（文件 → 另存为… / Ctrl+Shift+S）
     FileDialog {
         id: saveAsDialog
         title: qsTr("另存为 BMS 谱面")
         fileMode: FileDialog.SaveFile
-        nameFilters: [qsTr("BMS 谱面 (*.bms)"), qsTr("所有文件 (*)")]
+        nameFilters: [qsTr("BMS 谱面 (*.bms *.bml *.bme *.pms)"), qsTr("所有文件 (*)")]
         onAccepted: saveChartAs(urlToPath(selectedFile))
     }
 
@@ -450,6 +481,20 @@ ApplicationWindow {
         if (r.ok) {
             window.chartMeta = r.result.meta
             window.chartPath = r.result.path
+            window.chartFormat = r.result.format !== undefined ? r.result.format : ""
+            // 编码：从 info/check 的 diagnostics（"encoding: UTF-8 (path)"）提取
+            var enc = ""
+            if (r.result.diagnostics) {
+                for (var di = 0; di < r.result.diagnostics.length; di++) {
+                    var dm = r.result.diagnostics[di].message
+                    if (dm && dm.indexOf("encoding:") === 0) {
+                        var colon = dm.indexOf(":", 9)
+                        enc = dm.substring(9, colon > 9 ? colon : dm.length).trim()
+                        break
+                    }
+                }
+            }
+            window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
             // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
@@ -681,10 +726,27 @@ ApplicationWindow {
                 }
                 return
             }
-            args.to_lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
-                             index: targetLane.laneIndex }
-            if (targetLane.bgmLine !== undefined && targetLane.bgmLine >= 0)
-                args.to_bgm_line = targetLane.bgmLine
+            // 同一轨道（源 lane 与目标 lane 全等）→ 纯时间移动：不传 to_lane，
+            // 避免触发 to_bgm_line 行号重排 / 误判跨轨（问题1：纵向拖动看起来没动）。
+            // ⚠️ BGM 子轨（bgmLine>=0）例外：子轨间移动 = 行号变化，必须传 to_bgm_line。
+            var sameLane = true
+            for (var si = 0; si < window.selectionRefs.length; si++) {
+                var sr = window.selectionRefs[si]
+                if (sr.lane.kind !== targetLane.laneKind ||
+                        sr.lane.index !== targetLane.laneIndex ||
+                        sr.lane.player !== targetLane.lanePlayer) {
+                    sameLane = false
+                    break
+                }
+            }
+            if (sameLane && !(targetLane.bgmLine !== undefined && targetLane.bgmLine >= 0)) {
+                // 同轨且非 BGM 子轨：纯时间移动——不传 to_lane/to_bgm_line
+            } else {
+                args.to_lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
+                                 index: targetLane.laneIndex }
+                if (targetLane.bgmLine !== undefined && targetLane.bgmLine >= 0)
+                    args.to_bgm_line = targetLane.bgmLine
+            }
         }
         var r = sessionCmd("note.moveRegion", args)
         if (r) {

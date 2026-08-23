@@ -199,7 +199,8 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     if (!cs || !cs->chart() || m_measureHeight <= 0.0 || y < 18.0) return res;
     int col = -1;
     for (std::size_t i = 0; i < m_colRects.size(); ++i) {
-        if (m_colRects[i].contains(QPointF(x, y))) {
+        const QRectF& r = m_colRects[i];
+        if (x >= r.left() && x < r.right() && y >= r.top() && y < r.bottom()) {
             col = static_cast<int>(i);
             break;
         }
@@ -256,7 +257,9 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
     // 用给定 x 命中列（任意 y：列 rect 全高可命中，便于快速横向改轨）。取列的中点 y 带判定。
     for (std::size_t i = 0; i < m_colRects.size(); ++i) {
         const QRectF& r = m_colRects[static_cast<std::size_t>(i)];
-        if (x < r.left() || x > r.right()) continue;
+        // 命中判定用 [left, right)（右开）：相邻列共点（如 x == 右列 left == 左列 right）
+        // 应归右列（鼠标在列内而非边界悬空）；避免边界落在左列导致误判（问题1）。
+        if (x < r.left() || x >= r.right()) continue;
         const Column& c = m_columns[static_cast<std::size_t>(i)];
         // 元事件轨（BPM/STOP）：2026-09 用户确认「格式可表示 id 就允许移动」——
         // 拖到该列 = note → timing 事件转换（id 不变），不再拒绝。
@@ -538,11 +541,12 @@ void ChartViewItem::updateHover(const QPointF& pos) {
         const qreal mf = measureAt(pos.y());
         if (mf >= 0 && mf < cs->measureCount()) {
             measure = static_cast<int>(std::floor(mf));
-            text = QString::asprintf("%03d : %.2f", measure, mf - measure);
+            text = QString::asprintf("%03d:%.2f", measure, mf - measure);
             // 命中 note → 追加 轨道 + 采样（只查相邻小节，控制开销）
             const beatbench::Chart& chart = *cs->chart();
             const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
-            for (const auto& ev : chart.notes) {
+            for (std::size_t evIdx = 0; evIdx < chart.notes.size(); ++evIdx) {
+                const auto& ev = chart.notes[evIdx];
                 if (static_cast<int>(ev.measure) < measure - 1 ||
                     static_cast<int>(ev.measure) > measure + 1)
                     continue;
@@ -554,16 +558,30 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                 const qreal y = yOf(ev.measure + posDouble(ev.pos));
                 const QRectF hit(r.x() + 2, y - noteH, r.width() - 4, noteH);
                 if (hit.contains(pos)) {
-                    // 2026-09（问题4）：LN 尾（数据上不在游玩通道）hover 显示**实际 BMS
-                    // 通道**——BGM/BGA 层列显示 "BGM·bgmN"（行号）/ "BGA·LAYER" 等；
-                    // 游玩轨仍显示列名（键号/皿/踏板）。用 m_columns[col].label +
-                    // bgmLine 后缀；展开列 label 已含 bgmN，避免重复。
+                    // 2026-09（问题5）：显示**实际值**（note 真实 pos/通道/LN 通道），
+                    // 而非鼠标位置或合并显示。格式（用户示例）：
+                    //   003:0.31(1/4).3+LN(58).#WAV03
+                    //   └ mouse pos ┘└实际pos┘└轨┘└LN通道┘└采样┘
                     QString laneText = m_columns[col].label;
                     if (ev.value.lane.kind == beatbench::LaneKind::Bgm && !m_bgmExpanded) {
                         laneText += QStringLiteral("·bgm%1").arg(
                             static_cast<int>(ev.value.bgm_line) + 1);
                     }
-                    text += QStringLiteral(" · ") + laneText;
+                    // note 实际 pos：(num/den) 分数
+                    const QString posText =
+                        QStringLiteral("(%1/%2)").arg(ev.pos.num).arg(ev.pos.den);
+                    // LN：附加实际 BMS 通道（51-69 = 1P/2P LN 通道，LNTYPE 1）
+                    QString lnText;
+                    if (ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size() &&
+                        chart.notes[*ev.value.ln_pair].value.ln_pair &&
+                        *chart.notes[*ev.value.ln_pair].value.ln_pair == evIdx) {
+                        const std::string ch = beatbench::bms::bms_channel_for(
+                            ev.value.lane, true, NoteKind::Normal);
+                        if (!ch.empty())
+                            lnText = QStringLiteral("+LN(%1)").arg(QString::fromStdString(ch));
+                    }
+                    text += QStringLiteral(" · ") + posText + QStringLiteral(".") + laneText +
+                            lnText;
                     if (ev.value.kind == beatbench::NoteKind::Landmine) {
                         text += QStringLiteral(" · 地雷");
                     } else {
@@ -1195,6 +1213,13 @@ void ChartViewItem::paint(QPainter* p) {
                     p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
                                        noteH + 2.0));
                 }
+            } else if (isSelected(ev)) {
+                // 头可见（上面 isHead 分支已画整条 LN 的选中框）——尾自身也被选中
+                // （LN 选取模式点任一段选中两端）也要有明确选中框（2026-09 用户问题5）。
+                p->setPen(QPen(th->onAccent(), 1.2));
+                p->setBrush(Qt::NoBrush);
+                p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
+                                   noteH + 2.0));
             }
             continue;
         }
