@@ -64,9 +64,12 @@ ApplicationWindow {
     property bool moveMode: true
     // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
     property bool lnSelectMode: false
-    /// 文本输入焦点（工具快捷键让行，避免输入时误触）
+    /// 文本输入焦点（工具快捷键让行，避免输入时误触）。
+    /// ⚠️ 不能用「有 text 属性」判定：Label/Button 都有 text → activeFocusItem 落在
+    /// 那些 item 上时恒 true，工具快捷键全部禁用（用户反馈 2026-09 快捷键失效根因）。
+    /// 改用 TextInput/TextField 特有的 inputMethodHints 属性判断。
     readonly property bool textInputFocused:
-        window.activeFocusItem && typeof window.activeFocusItem.text === "string"
+        window.activeFocusItem && "inputMethodHints" in window.activeFocusItem
 
     // ---------- 全局快捷键（QML MenuItem 无 shortcut 属性，用 Shortcut 类型） ----------
     Shortcut { sequence: "Ctrl+O"; onActivated: fileDialog.open() }

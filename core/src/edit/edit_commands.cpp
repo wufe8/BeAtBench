@@ -402,23 +402,23 @@ void MoveNoteCommand::apply(Chart& chart) {
         }
     } else if (m_partner && !m_move_ln_pair) {
         // 单 note 模式（2026-09 用户确认）：移动的 note 在新位置**向前找最近同通道
-        // 同 sample 未配对 Normal note** 重连（无论是不是原 note）；不同通道（to_lane 换轨）
-        // 则不找（断开）。原伙伴（另一端）已在 apply 头部分开（334 行 reset，原位不动）。
+        // 同 sample 未配对 Normal note** 重连（无论是不是原 note）。**不因换轨而断开**：
+        // LN 尾/头移动后应在**对应键的 LN 通道**保持 LN（用户反馈：LN 尾拖到游玩轨变普通 note
+        // 的根因是换轨后未重连）。最终 lane = to_lane（换轨）或原 lane；在其上找。
+        // 原伙伴（另一端）已在 apply 头部分开（334 行 reset，原位不动）。
         // 前端靠 ln_pair 画 LN 线段；找不到 → 单点（ln_pair 空）。
         const auto& me = chart.notes[main_at].value;
         std::size_t new_partner = 0;
         bool found = false;
-        if (!m_to_lane || *m_to_lane == m_lane) {  // 同通道（未换轨）才找
-            for (std::size_t i = main_at; i-- > 0;) {
-                const auto& n = chart.notes[i].value;
-                if (n.lane != me.lane || n.sample.id != me.sample.id) continue;  // 忽略其它通道
-                // 同通道同 sample：未配对 Normal → 候选；已配对/地雷 → 停止（该通道已成型 LN）
-                if (n.kind == NoteKind::Normal && !n.ln_pair) {
-                    new_partner = i;
-                    found = true;
-                }
-                break;
+        for (std::size_t i = main_at; i-- > 0;) {
+            const auto& n = chart.notes[i].value;
+            if (n.lane != me.lane || n.sample.id != me.sample.id) continue;  // 忽略其它通道
+            // 同通道同 sample：未配对 Normal → 候选；已配对/地雷 → 停止（该通道已成型 LN）
+            if (n.kind == NoteKind::Normal && !n.ln_pair) {
+                new_partner = i;
+                found = true;
             }
+            break;
         }
         if (found) {
             chart.notes[main_at].value.ln_pair = new_partner;

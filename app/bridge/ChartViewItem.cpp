@@ -634,16 +634,25 @@ double ChartViewItem::beatsOf(const beatbench::Chart& chart, int measure) const 
 }
 
 int ChartViewItem::columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId) const {
+    // 第一遍：找 BGM 列（聚合/展开匹配）；跳过 BGA 图层列。
     for (std::size_t i = 0; i < m_columns.size(); ++i) {
         const auto& c = m_columns[i];
         if (c.bgaLayer >= 0) continue;  // BGA 图层列不匹配 note
         if (c.lane != lane) continue;
         if (c.bgm) {
-            // 聚合列（bgmId==0）命中所有；展开列按 #WAV id 精确匹配
             if (c.bgmId == 0 || c.bgmId == bgmSampleId) return static_cast<int>(i);
             continue;
         }
         return static_cast<int>(i);
+    }
+    // 第二遍（2026-09 用户反馈）：Bgm note 拖到 BGA 图层列后，若无 BGM 列匹配，
+    // 回退画到 BGA 图层列（第一个），**否则 note 无处渲染 =「消失」**。
+    // 注：BGA 层列 lane 也是 {0,Bgm,0}；同 lane 但无 BGM 列时用它兜底显示。
+    if (lane.kind == beatbench::LaneKind::Bgm) {
+        for (std::size_t i = 0; i < m_columns.size(); ++i) {
+            if (m_columns[i].bgaLayer >= 0 && m_columns[i].lane == lane)
+                return static_cast<int>(i);
+        }
     }
     return -1;
 }
