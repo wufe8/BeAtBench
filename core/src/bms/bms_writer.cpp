@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <map>
 #include <numeric>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -153,13 +154,22 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             stop_id_by_us[static_cast<std::int64_t>(sec * 1000000.0 / 192.0 + 0.5)] = id;
         }
         std::uint32_t next_id = 1;
+        // ref_id 占用的 id（写回保持原槽位文本；派生定义不得占用）
+        std::set<std::uint32_t> ref_used;
+        for (const auto& ev : chart.stop_events) {
+            if (ev.value.ref_id && *ev.value.ref_id != 0) ref_used.insert(*ev.value.ref_id);
+        }
         for (const auto& ev : chart.stop_events) {
             const auto us = ev.value.duration_us;
             if (stop_id_by_us.count(us)) continue;
+            // ⚠️ 有 ref_id 的事件（原始 #STOPxx 槽位引用）：写回直接输出 ref_id 文本，
+            // **不派生定义**——派生 id 可能与 ref_id 文本冲突（同 BPM 注，2026-09）。
+            if (ev.value.ref_id && *ev.value.ref_id != 0) continue;
             // id 空间上限（36 = 1295；62 = 3843）；全满时复用最后一个（退化，理论不可达）
             const std::uint32_t max_id =
                 chart.id_base == IdBase::Base62 ? 3843 : 1295;
-            while (stop_defs.count(next_id) && next_id < max_id) ++next_id;
+            while (next_id < max_id && (stop_defs.count(next_id) || ref_used.count(next_id)))
+                ++next_id;
             const auto text = format_num(us / 1000000.0 * 192.0);
             stop_id_by_us[us] = next_id;
             stop_defs[next_id] = text;
@@ -182,12 +192,22 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             bpm_id_by_value[v] = id;
         }
         std::uint32_t next_id = 1;
+        // ref_id 占用的 id（写回保持原槽位文本；派生定义不得占用——否则改变其解析值）
+        std::set<std::uint32_t> ref_used;
+        for (const auto& ev : chart.bpm_events) {
+            if (ev.value.ref_id && *ev.value.ref_id != 0) ref_used.insert(*ev.value.ref_id);
+        }
         for (const auto& ev : chart.bpm_events) {
             const auto v = ev.value.value;
             if (bpm_id_by_value.count(v)) continue;
+            // ⚠️ 有 ref_id 的事件（原始 #BPMxx 槽位引用）：写回直接输出 ref_id 文本，
+            // **不派生定义**——派生 id 可能与 ref_id 文本冲突（2026-09 roundtrip 回归）。
+            // 原始文件该引用无定义时靠 LR2 十六进制兼容；保持原样。
+            if (ev.value.ref_id && *ev.value.ref_id != 0) continue;
             const std::uint32_t max_id =
                 chart.id_base == IdBase::Base62 ? 3843 : 1295;
-            while (bpm_defs.count(next_id) && next_id < max_id) ++next_id;
+            while (next_id < max_id && (bpm_defs.count(next_id) || ref_used.count(next_id)))
+                ++next_id;
             const auto text = format_num(v);
             bpm_id_by_value[v] = next_id;
             bpm_defs[next_id] = text;
@@ -293,15 +313,30 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
 
     // 3c. BPM（ch03 定宽引用 #BPMxx；事件值 → id，见上方 bpm_id_by_value）
     for (const auto& ev : chart.bpm_events) {
-        const auto it = bpm_id_by_value.find(ev.value.value);
-        if (it == bpm_id_by_value.end()) continue;  // 理论上不会发生（上面已派生）
-        add_cell(ev.measure, "03", ev.pos, fmt_id(chart, it->second));
+        // 优先原始引用 id（保持「id 不变」，见 Payloads.hpp Bpm.ref_id）；
+        // 无引用（内联数值）→ 按值派生/复用定义。
+        std::uint32_t slot_id = 0;
+        if (ev.value.ref_id && *ev.value.ref_id != 0) {
+            slot_id = *ev.value.ref_id;
+        } else {
+            const auto it = bpm_id_by_value.find(ev.value.value);
+            if (it == bpm_id_by_value.end()) continue;  // 理论上不会发生（上面已派生）
+            slot_id = it->second;
+        }
+        add_cell(ev.measure, "03", ev.pos, fmt_id(chart, slot_id));
     }
     // 3d. STOP（ch09 引用恢复：us → id）
     for (const auto& ev : chart.stop_events) {
-        const auto it = stop_id_by_us.find(ev.value.duration_us);
-        if (it == stop_id_by_us.end()) continue;  // 理论上不会发生（上面已派生）
-        add_cell(ev.measure, "09", ev.pos, fmt_id(chart, it->second));
+        // 优先原始引用 id（同 BPM）；无引用 → 按时长派生/复用
+        std::uint32_t slot_id = 0;
+        if (ev.value.ref_id && *ev.value.ref_id != 0) {
+            slot_id = *ev.value.ref_id;
+        } else {
+            const auto it = stop_id_by_us.find(ev.value.duration_us);
+            if (it == stop_id_by_us.end()) continue;  // 理论上不会发生（上面已派生）
+            slot_id = it->second;
+        }
+        add_cell(ev.measure, "09", ev.pos, fmt_id(chart, slot_id));
     }
     // 3e. 节拍（ch02，pos 0；同 measure 多事件取最后）
     {

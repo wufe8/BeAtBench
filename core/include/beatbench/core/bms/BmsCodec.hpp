@@ -49,6 +49,8 @@ struct BmsReadResult {
 BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts = {});
 
 /// 读取 .bms 文件（含编码检测：BOM / #ENCODING / SJIS 启发式）。
+/// 路径为 UTF-8 编码的窄字符串（协议/JSON 起全程 UTF-8）；Windows 下自动转
+/// 宽字符 API 打开（修复日文/非 ASCII 目录打不开，2026-09）。
 BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts = {});
 
 /// 写出 BMS 文本（M1 实现；归一化策略见对齐稿 02 §4.3）。

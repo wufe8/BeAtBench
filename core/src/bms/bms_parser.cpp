@@ -470,17 +470,24 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 break;
                             }
                             case ChannelSemantics::BpmInline:
-                            case ChannelSemantics::BpmRef:
-                                chart.bpm_events.push_back(
-                                    {measure, pos,
-                                     Bpm{resolve_bpm(chart, slot, number,
-                                                     result.diagnostics)}});
+                            case ChannelSemantics::BpmRef: {
+                                // 保留原始引用 id（定宽 2 字符槽位）；内联数值（奇数长）无引用
+                                Bpm bpm;
+                                bpm.value = resolve_bpm(chart, slot, number, result.diagnostics);
+                                if (slot.size() == 2) {
+                                    bpm.ref_id = decode_id(chart, slot);
+                                }
+                                chart.bpm_events.push_back({measure, pos, bpm});
                                 break;
+                            }
                             case ChannelSemantics::StopRef: {
                                 const auto us = resolve_stop_us(chart, slot, number,
                                                                 result.diagnostics);
                                 if (us != 0) {
-                                    chart.stop_events.push_back({measure, pos, Stop{us}});
+                                    Stop stop;
+                                    stop.duration_us = us;
+                                    stop.ref_id = decode_id(chart, slot);
+                                    chart.stop_events.push_back({measure, pos, stop});
                                 }
                                 break;
                             }
@@ -603,7 +610,12 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
 BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts) {
     BmsReadResult result;
 
-    std::ifstream file(path, std::ios::binary);
+    // 路径处理（2026-09 修复日文/非 ASCII 路径打不开）：
+    // 协议/JSON 全程 UTF-8 窄字符串；std::filesystem::path 在 Windows 用宽字符，
+    // `std::ifstream(path)` 重载走宽 API（MSVC），避免 UTF-8 → ANSI 代码页误转换。
+    // 以下全部用 fs_path（文件打开 + 扩展名推断 + lint 相对路径）。
+    const std::filesystem::path fs_path = std::filesystem::u8path(path);
+    std::ifstream file(fs_path, std::ios::binary);
     if (!file.is_open()) {
         result.diagnostics.push_back(
             {Severity::Error, "无法打开文件: " + path, 0});
@@ -665,7 +677,7 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         } else if (player == 4) {
             effective.mode = "battle";
         } else {
-            std::string ext = std::filesystem::path(path).extension().string();
+            std::string ext = fs_path.extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".pms") effective.mode = "pms9k";

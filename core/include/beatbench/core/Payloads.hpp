@@ -38,8 +38,15 @@ struct Note {
 /// BPM 事件（BMS ch03 内联值或 ch08/#BPMxx 引用解析后的落值）。
 struct Bpm {
     double value = 130.0;  ///< 可为小数；负数按规范宽容处理（lint 告警）
+    /// 原始 #BPMxx 引用 id（可选）：解析自 ch03 定宽槽位 / ch08；
+    /// 写回优先用它输出槽位文本（保持「id 不变」，跨命名空间移动/往返保真基础）。
+    /// 内联数值（ch03 奇数长）无引用 → nullopt。
+    /// ⚠️ 辅助字段：不参与语义相等（roundtrip/命令比较按值；ref_id 只是文本表示辅助）。
+    std::optional<std::uint32_t> ref_id;
 
-    friend bool operator==(const Bpm&, const Bpm&) = default;
+    friend bool operator==(const Bpm& a, const Bpm& b) {
+        return a.value == b.value;  // 排除 ref_id（与 Note.bgm_line 同理）
+    }
     friend bool operator<(const Bpm& a, const Bpm& b) { return a.value < b.value; }
 };
 
@@ -48,8 +55,13 @@ struct Bpm {
 /// LR2/常见固定秒口径。两者在时间轴 STOP 栏的视觉长度可能不同，如后续谱面不符再校准。
 struct Stop {
     std::int64_t duration_us = 0;
+    /// 原始 #STOPxx 引用 id（可选）：解析自 ch09 槽位；写回优先用它（与 Bpm.ref_id 同理）。
+    /// ⚠️ 辅助字段：不参与语义相等。
+    std::optional<std::uint32_t> ref_id;
 
-    friend bool operator==(const Stop&, const Stop&) = default;
+    friend bool operator==(const Stop& a, const Stop& b) {
+        return a.duration_us == b.duration_us;  // 排除 ref_id
+    }
     friend bool operator<(const Stop& a, const Stop& b) {
         return a.duration_us < b.duration_us;
     }
