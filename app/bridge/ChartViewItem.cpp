@@ -661,8 +661,9 @@ QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
 
 QColor ChartViewItem::noteColor(const beatbench::Lane& lane, const beatbench::Note& note) const {
     QColor c = noteColor(lane);
-    // LN note（ln_pair 存在）：加深 35%——与单点直接分辨（2026-09 用户）。
-    if (note.ln_pair) c = c.darker(135);
+    // LN 通道 note（ln_channel）加深 35%——包括未配完整的深色单点（lint 提示），
+    // 与普通单点直接分辨（2026-09 用户）。
+    if (note.ln_channel) c = c.darker(135);
     return c;
 }
 
@@ -1199,8 +1200,14 @@ void ChartViewItem::paint(QPainter* p) {
             p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
                         noteColor(note.lane, note));
             drawSampleLabel(r, y, note);
-            // 体：时间早端画（连接两端 y；画在早端列）
-            if (isEarlier) {
+            // 体：时间早端画（连接两端 y；画在早端列）。
+            // ⚠️ 防呆（2026-09 用户）：仅当两端**同通道**（同 lane + 非 BGM 或同 bgm_line）
+            // 才画中段线——跨通道移动 LN 端后 ln_pair 已被 rebuild 清空，此处不再残留连线；
+            // 若因异常残留跨通道 ln_pair，也**不画**（帽各自显示、lint 提示未配对）。
+            const bool same_channel = note.lane == partner.value.lane &&
+                (note.lane.kind != LaneKind::Bgm ||
+                 note.bgm_line == partner.value.bgm_line);
+            if (isEarlier && same_channel) {
                 const qreal y2 = yOf(partner.measure + posDouble(partner.pos));
                 // 早端列（本端列 r）；若 partner 在同列则中段线直接连，跨列时也画在本列
                 const qreal ya = std::min(y, y2), yb = std::max(y, y2);

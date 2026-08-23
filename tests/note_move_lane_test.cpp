@@ -129,9 +129,11 @@ Chart ln_chart() {
     Event<Note> head{1, Rational(0, 1), {}};
     head.value.lane = {0, LaneKind::Key, 1};
     head.value.sample.id = 1;
+    head.value.ln_channel = true;  // 来自 51-69 LN 通道（rebuild 推导的前提）
     Event<Note> tail{1, Rational(1, 2), {}};
     tail.value.lane = {0, LaneKind::Key, 1};
     tail.value.sample.id = 1;
+    tail.value.ln_channel = true;
     head.value.ln_pair = 1;
     tail.value.ln_pair = 0;
     c.notes = {head, tail};
@@ -141,9 +143,9 @@ Chart ln_chart() {
 TEST(NoteMoveLane, LnPairMovesBothLanes) {
     EditorSession s;
     s.load(ln_chart());
-    // 2026-09 用户最终确认：移动只移动选中 note，ln_pair 保持（不成对随动）。
-    // `move_ln_pair=true` 参数保留（旧 API），但语义 = 只移主 note、配对互指保持。
-    // 头 m1 pos0 key1 → m2 pos0 key5；尾留 m1 pos1/2 key1；仍互指。
+    // 2026-09 用户最终确认（LN 跨通道断开）：移动只移动选中 note；跨通道（lane 变）
+    // → 不再是同通道 LN → **断开**（两端都变普通单点，ln_pair 清空）。
+    // 头 m1 pos0 key1 → m2 pos0 key5；尾留 m1 pos1/2 key1；两者不相连。
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
         1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
         2, Rational(0, 1), true, Lane{0, LaneKind::Key, 5})));
@@ -152,16 +154,16 @@ TEST(NoteMoveLane, LnPairMovesBothLanes) {
     bool head_ok = false, tail_ok = false;
     for (const auto& e : notes) {
         if (e.measure == 2 && e.value.lane == Lane{0, LaneKind::Key, 5}) {
-            head_ok = e.value.ln_pair.has_value();
+            head_ok = !e.value.ln_pair.has_value();  // 断开
         }
         if (e.measure == 1 && e.value.lane == Lane{0, LaneKind::Key, 1}) {
-            tail_ok = e.value.ln_pair.has_value();
+            tail_ok = !e.value.ln_pair.has_value();
         }
     }
     EXPECT_TRUE(head_ok);
     EXPECT_TRUE(tail_ok);
     EXPECT_TRUE(ln_consistent(notes));
-    // undo → 回源位置 + 源 lane + 配对
+    // undo → 回源位置 + 源 lane + 配对恢复（rebuild 重建同通道 LN）
     ASSERT_TRUE(s.undo());
     EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(ln_chart().notes));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
@@ -170,27 +172,27 @@ TEST(NoteMoveLane, LnPairMovesBothLanes) {
 TEST(NoteMoveLane, LnSingleNoteBreaksPairCrossLane) {
     EditorSession s;
     s.load(ln_chart());
-    // 单 note 模式跨通道：只移头（key1→key7），配对**保持**（2026-09 用户最终确认：
-    // 移动只移动选中 note，ln_pair 保持——不自动重连也不断开，只按伙伴值重定位）。
+    // 单 note 模式跨通道：只移头（key1→key7），**断开**（跨通道不构成 LN）——
+    // 2026-09 用户最终确认：要么移动到普通游玩通道（断开变单点），要么留在 LN 通道。
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
         1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
         2, Rational(0, 1), false, Lane{0, LaneKind::Key, 7})));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 2u);
-    // 头在 m2 key7 仍与尾（m1 key1）互指；尾也仍指向头
+    // 头在 m2 key7 无配对；尾在 m1 key1 无配对（断开）
     bool head_ok = false, tail_ok = false;
     for (const auto& e : notes) {
         if (e.measure == 2 && e.value.lane == Lane{0, LaneKind::Key, 7}) {
-            head_ok = e.value.ln_pair.has_value();
+            head_ok = !e.value.ln_pair.has_value();
         }
         if (e.measure == 1 && e.value.lane == Lane{0, LaneKind::Key, 1}) {
-            tail_ok = e.value.ln_pair.has_value();
+            tail_ok = !e.value.ln_pair.has_value();
         }
     }
     EXPECT_TRUE(head_ok);
     EXPECT_TRUE(tail_ok);
     EXPECT_TRUE(ln_consistent(notes));
-    // undo → 完全还原（含配对）
+    // undo → 完全还原（rebuild 重建同通道 LN）
     ASSERT_TRUE(s.undo());
     EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(ln_chart().notes));
     EXPECT_TRUE(ln_consistent(s.chart().notes));

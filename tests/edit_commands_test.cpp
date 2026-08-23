@@ -173,10 +173,13 @@ TEST(EditCommands, MoveDoesNotMergeDifferentNote) {
 
 TEST(EditCommands, DeleteLnBreaksPair) {
     EditorSession s;
-    // 构造 LN 对：两个 key1 note（m1 pos0 与 m1 pos1/2）互指
+    // 构造 LN 对：两个 key1 note（m1 pos0 与 m1 pos1/2）互指，同 sample
     Chart c = make_chart();
     c.notes[0].value.lane = {0, LaneKind::Key, 1};  // 确保同 lane
     c.notes[1].value.lane = {0, LaneKind::Key, 1};
+    c.notes[1].value.sample.id = 1;  // 与 n1 同 sample（rebuild 分组前提）
+    c.notes[0].value.ln_channel = true;
+    c.notes[1].value.ln_channel = true;
     c.notes[0].value.ln_pair = 1;
     c.notes[1].value.ln_pair = 0;
     s.load(std::move(c));
@@ -197,10 +200,14 @@ TEST(EditCommands, DeleteLnBreaksPair) {
 TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
     // 2026-09 用户最终确认：移动只移动选中 note，ln_pair 保持（不自动重连也不断开）。
     // 默认（move_ln_pair=false）：只移主 note 到 m3，配对端留原位，互指按伙伴值保持。
+    // ⚠️ n1/n2 须同 sample（rebuild 按 (lane,sample) 分组交替配对）。
     EditorSession s;
     Chart c = make_chart();
     c.notes[0].value.lane = {0, LaneKind::Key, 1};
     c.notes[1].value.lane = {0, LaneKind::Key, 1};
+    c.notes[1].value.sample.id = 1;  // 与 n1 同 sample（关键）
+    c.notes[0].value.ln_channel = true;
+    c.notes[1].value.ln_channel = true;
     c.notes[0].value.ln_pair = 1;
     c.notes[1].value.ln_pair = 0;
     s.load(std::move(c));
@@ -232,6 +239,9 @@ TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
     Chart c = make_chart();
     c.notes[0].value.lane = {0, LaneKind::Key, 1};
     c.notes[1].value.lane = {0, LaneKind::Key, 1};
+    c.notes[1].value.sample.id = 1;  // 与 n1 同 sample
+    c.notes[0].value.ln_channel = true;
+    c.notes[1].value.ln_channel = true;
     c.notes[0].value.ln_pair = 1;
     c.notes[1].value.ln_pair = 0;
     s.load(std::move(c));

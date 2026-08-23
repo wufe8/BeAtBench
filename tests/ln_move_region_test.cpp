@@ -41,9 +41,11 @@ Chart ln_chart() {
     Event<Note> head{1, Rational(0, 1), {}};
     head.value.lane = {0, LaneKind::Key, 1};
     head.value.sample.id = 1;
+    head.value.ln_channel = true;
     Event<Note> tail{1, Rational(1, 2), {}};
     tail.value.lane = {0, LaneKind::Key, 1};
     tail.value.sample.id = 1;
+    tail.value.ln_channel = true;
     head.value.ln_pair = 1;
     tail.value.ln_pair = 0;
     c.notes = {head, tail};
