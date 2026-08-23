@@ -208,6 +208,25 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
                         " 轨道 " + lane_text(ev.value.lane);
         issues.push_back(std::move(issue));
     }
+    // 5b) LN 通道 note 未组成完整 LN（2026-09 用户：跨通道移出 LN 端后残留深色单点，
+    //      lint 提示「存在未组成完整 LN 的 LN 通道 note」）。
+    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
+        const auto& ev = chart.notes[i];
+        if (!ev.value.ln_channel || ev.value.ln_pair) continue;
+        LintIssue issue;
+        issue.code = "unpaired_ln_note";
+        issue.measure = ev.measure;
+        issue.pos_num = ev.pos.num;
+        issue.pos_den = ev.pos.den;
+        issue.lane_player = ev.value.lane.player;
+        issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
+        issue.lane_index = ev.value.lane.index;
+        issue.sample = ev.value.sample.id;
+        issue.message = "LN 通道 note 未组成完整 LN: " + std::to_string(ev.measure) +
+                        " 小节 " + std::to_string(ev.pos.num) + "/" +
+                        std::to_string(ev.pos.den) + " 轨道 " + lane_text(ev.value.lane);
+        issues.push_back(std::move(issue));
+    }
     return issues;
 }
 

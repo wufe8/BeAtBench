@@ -462,6 +462,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 note.sample.id = id;
                                 note.kind = rule->note_kind;
                                 note.bgm_line = bgm_line;
+                                note.ln_channel = rule->ln_channel;  // 51-69（LNTYPE 1 通道）
                                 chart.notes.push_back({measure, pos, note});
                                 note_infos.push_back(
                                     {static_cast<std::uint32_t>(chart.notes.size() - 1),

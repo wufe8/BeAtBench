@@ -206,12 +206,11 @@ private:
     Lane m_lane;
     std::uint32_t m_sample;
     std::uint32_t m_bgm_line;
-    /// apply 状态：was_ln（原来是否 LN）；paired_with（应用后互指的伙伴下标）
+    /// apply 前本 note 是否在 LN 通道（invert 恢复原值）
     bool m_was_ln = false;
-    std::optional<std::uint32_t> m_applied_partner;  ///< 配对后伙伴下标（配 LN 时）
-    /// apply 断开前的伙伴快照（invert 恢复互指用）
-    std::optional<Event<Note>> m_old_partner;
-    bool m_did_change = false;  ///< apply 实际改变（找不到配对象时 false → invert 无操作）
+    /// 单点→LN 时被标记的伙伴下标（invert 清除标记）
+    std::optional<std::uint32_t> m_applied_partner;
+    bool m_did_change = false;  ///< apply 实际执行（找到 note）
 };
 
 }  // namespace beatbench::edit
