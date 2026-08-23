@@ -286,6 +286,14 @@ Item {
         handleRelease(x, y)
     }
 
+    /// 调试入口（--drag x1 y1 x2 y2）：模拟按下→移动→释放（真实拖拽同一分发路径，
+    /// 用于复现 BGM 子轨移动等交互问题；与 clickAt 同为一次事件序列）。
+    function dragAt(x1, y1, x2, y2) {
+        handlePress(x1, y1, false, false)
+        handleMove(x2, y2)
+        handleRelease(x2, y2)
+    }
+
     /// 缩放重置（工具条「缩放」按钮）：恢复默认小节高度。
     function resetZoom() {
         root.measureHeight = 96

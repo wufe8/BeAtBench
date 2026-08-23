@@ -234,6 +234,23 @@ int main(int argc, char** argv) {
         if (QObject* root = engine.rootObjects().value(0))
             root->setProperty("debugDeleteSelection", true);
     }
+    // --drag x1 y1 x2 y2：模拟拖拽（按下→移动→释放；复现 BGM 子轨移动等交互问题）
+    const int dragIdx = args.indexOf(QStringLiteral("--drag"));
+    if (dragIdx >= 0 && dragIdx + 4 < args.size()) {
+        bool ok1 = false, ok2 = false, ok3 = false, ok4 = false;
+        const double x1 = args.at(dragIdx + 1).toDouble(&ok1);
+        const double y1 = args.at(dragIdx + 2).toDouble(&ok2);
+        const double x2 = args.at(dragIdx + 3).toDouble(&ok3);
+        const double y2 = args.at(dragIdx + 4).toDouble(&ok4);
+        if (ok1 && ok2 && ok3 && ok4) {
+            if (QObject* root = engine.rootObjects().value(0)) {
+                root->setProperty("debugDragX1", x1);
+                root->setProperty("debugDragY1", y1);
+                root->setProperty("debugDragX2", x2);
+                root->setProperty("debugDragY2", y2);
+            }
+        }
+    }
     // --probe <x> <y>：诊断探针（输出 noteAt/laneAtX/hitTest 命中结果到 QML 消息日志）
     const int probeIdx = args.indexOf(QStringLiteral("--probe"));
     if (probeIdx >= 0 && probeIdx + 2 < args.size()) {

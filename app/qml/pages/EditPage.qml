@@ -73,6 +73,11 @@ Item {
         if (chartView) chartView.clickAt(x, y)
     }
 
+    /// 调试入口（--drag）：模拟按下→移动→释放（ChartView 局部坐标，与 --click 同路径）。
+    function dragLocal(x1, y1, x2, y2) {
+        if (chartView) chartView.dragAt(x1, y1, x2, y2)
+    }
+
     /// 缩放重置（工具条「缩放」按钮）。
     function resetZoom() {
         if (chartView) chartView.resetZoom()
