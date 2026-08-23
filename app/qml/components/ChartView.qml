@@ -24,6 +24,7 @@ Item {
     property bool showChannelIds: false  // 列头显示实际 BMS 通道 id（工具条勾选）
     property bool bgmExpanded: false     // BGM 轨展开（列头点击切换；--bgm-expand 调试）
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
+    property bool lnSelectMode: false    // LN 选取模式（默认关）：点 LN 任一段自动选配对两端
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
@@ -60,6 +61,7 @@ Item {
         snapNum: root.snapNum
         snapDen: root.snapDen
         noteSampleMode: root.noteSampleMode
+        lnSelectMode: root.lnSelectMode
         showExtras: root.showExtras
         selection: root.selection
         perfLog: root.perfLog
@@ -69,6 +71,11 @@ Item {
             // 谱面切换 → 定位到开头（hi-top 下小节 0 在视口底部）
             view.scrollY = view.topHigh ? Math.max(0, view.contentHeight - view.height) : 0
         }
+    }
+
+    /// 诊断探针（--probe）：转发到 ChartViewItem.probe(x,y)，返回命中/列布局诊断。
+    function probe(x, y) {
+        return view.probe(x, y)
     }
 
     WheelHandler {
@@ -147,6 +154,12 @@ Item {
         if (root.editorTool === "select") {
             const hit = view.noteAt(x, y)
             if (hit.valid) {
+                if (ctrl) {
+                    // Ctrl+点击：多选切换（toggle），不进入移动——保持交互清晰（选中态预览）。
+                    // ⚠️ 旧代码硬编码 noteClicked(hit, false) 丢失 Ctrl → 多选失效（问题1根因）。
+                    root.noteClicked(hit, true)
+                    return
+                }
                 if (!isSelectedNote(hit)) root.noteClicked(hit, false)
                 _moving = true
                 _moveDeltaF = 0

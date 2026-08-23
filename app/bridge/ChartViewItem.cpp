@@ -204,8 +204,9 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     }
     if (col < 0 || static_cast<std::size_t>(col) >= m_columns.size()) return res;
     const Column& c = m_columns[static_cast<std::size_t>(col)];
-    // 元事件轨（BPM/STOP）/ BGA 图层列：不可放置；BGM 列可放（展开列 = 固定该列采样）
-    if (c.bpm || c.stop || c.bgaLayer >= 0) return res;
+    // 仅元事件轨（BPM/STOP）不可放置；BGA 图层列（用户确认「不限格式，保存格式一样就允许」，
+    // 见问题1）与 BGM 列均可放。
+    if (c.bpm || c.stop) return res;
     const qreal mf = measureAt(y);
     if (mf < 0.0 || mf >= cs->measureCount()) return res;
     const int measure = static_cast<int>(std::floor(mf));
@@ -253,8 +254,9 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
         const QRectF& r = m_colRects[static_cast<std::size_t>(i)];
         if (x < r.left() || x > r.right()) continue;
         const Column& c = m_columns[static_cast<std::size_t>(i)];
-        // 元事件轨（BPM/STOP）/ BGA 图层列：不可作为横向移动目标
-        if (c.bpm || c.stop || c.bgaLayer >= 0) return res;
+        // 仅元事件轨（BPM/STOP）不可作为横向移动目标；BGA 图层列（用户确认「不限格式，
+        // 只要保存格式一样」→ 背景/BGA/miss/layer 都允许移动，见问题1）。
+        if (c.bpm || c.stop) return res;
         QString kind = QStringLiteral("key");
         if (c.lane.kind == beatbench::LaneKind::Scratch) kind = QStringLiteral("scratch");
         else if (c.lane.kind == beatbench::LaneKind::Pedal) kind = QStringLiteral("pedal");
@@ -266,6 +268,27 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
         res.insert(QStringLiteral("label"), c.label);
         return res;
     }
+    return res;
+}
+
+QVariantMap ChartViewItem::probe(qreal x, qreal y) const {
+    QVariantMap res;
+    res.insert(QStringLiteral("noteAt"), noteAt(x, y));
+    res.insert(QStringLiteral("hitTest"), hitTest(x, y));
+    res.insert(QStringLiteral("laneAtX"), laneAtX(x));
+    // 列布局（诊断）：label + x 范围，用于倒推 BGM/BGA 列位置
+    QVariantList cols;
+    for (std::size_t i = 0; i < m_columns.size(); ++i) {
+        if (i >= m_colRects.size()) continue;
+        QVariantMap cm;
+        cm.insert(QStringLiteral("label"), m_columns[i].label);
+        cm.insert(QStringLiteral("x"), m_colRects[i].x());
+        cm.insert(QStringLiteral("w"), m_colRects[i].width());
+        cols.push_back(cm);
+    }
+    res.insert(QStringLiteral("columns"), cols);
+    res.insert(QStringLiteral("contentsH"), contentHeight());
+    res.insert(QStringLiteral("measureH"), m_measureHeight);
     return res;
 }
 
@@ -307,6 +330,31 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
         res.insert(QStringLiteral("lane"), lane);
         res.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
+        // LN 选取模式（默认关）：命中 LN 任一段 → 返回配对段（lnPartner），
+        // 前端据此自动多选两端（用户问题5）。配对段 = ln_pair 下标指向的 note。
+        if (m_lnSelectMode && ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size()) {
+            const auto& p = chart.notes[*ev.value.ln_pair];
+            QVariantMap pr;
+            pr.insert(QStringLiteral("measure"), static_cast<int>(p.measure));
+            QVariantMap ppos;
+            ppos.insert(QStringLiteral("num"), static_cast<qlonglong>(p.pos.num));
+            ppos.insert(QStringLiteral("den"), static_cast<qlonglong>(p.pos.den));
+            pr.insert(QStringLiteral("pos"), ppos);
+            QVariantMap plane;
+            plane.insert(QStringLiteral("player"), QVariant::fromValue(p.value.lane.player));
+            plane.insert(QStringLiteral("kind"),
+                         p.value.lane.kind == beatbench::LaneKind::Scratch
+                             ? QStringLiteral("scratch")
+                             : p.value.lane.kind == beatbench::LaneKind::Pedal
+                                   ? QStringLiteral("pedal")
+                                   : p.value.lane.kind == beatbench::LaneKind::Bgm
+                                         ? QStringLiteral("bgm")
+                                         : QStringLiteral("key"));
+            plane.insert(QStringLiteral("index"), QVariant::fromValue(p.value.lane.index));
+            pr.insert(QStringLiteral("lane"), plane);
+            pr.insert(QStringLiteral("sample"), static_cast<int>(p.value.sample.id));
+            res.insert(QStringLiteral("lnPartner"), pr);
+        }
         return res;
     }
     return res;
@@ -382,6 +430,13 @@ void ChartViewItem::setNoteSampleMode(int v) {
     if (m_noteSampleMode == clamped) return;
     m_noteSampleMode = clamped;
     emit noteSampleModeChanged();
+    update();
+}
+
+void ChartViewItem::setLnSelectMode(bool v) {
+    if (m_lnSelectMode == v) return;
+    m_lnSelectMode = v;
+    emit lnSelectModeChanged();
     update();
 }
 
@@ -536,16 +591,20 @@ qreal ChartViewItem::posDouble(const beatbench::Rational& r) const {
 QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
     const ThemeManager* th = themeObj();
     if (!th) return QColor(QStringLiteral("#8b9cf8"));
-    if (lane.kind == beatbench::LaneKind::Scratch) return th->scratch();
-    if (lane.kind == beatbench::LaneKind::Bgm) return th->textMuted();  // 灰 = 自动播放轨，非击打
+    // 用户配色（2026-09）：S(皿 ch16)=红；key 1/3/5/7(ch11/13/15/19)=白；其它 key 循环浅色。
+    if (lane.kind == beatbench::LaneKind::Scratch)
+        return QColor(QStringLiteral("#ef5350"));  // 红（皿，高对比）
     if (lane.kind == beatbench::LaneKind::Key) {
-        switch ((lane.index - 1) % 4) {  // 键 1/5 → n1，2/6 → n2，3/7 → n3，4 → n4
-            case 1: return th->n2();
-            case 2: return th->n3();
-            case 3: return th->n4();
+        if (lane.index % 2 == 1)  // 键 1/3/5/7（奇数）→ 白（ch11/13/15/19）
+            return QColor(QStringLiteral("#ffffff"));
+        // 偶数键（2/4/6/8）：保持浅紫蓝循环（与背景区分）
+        switch (lane.index % 4) {
+            case 2: return th->n2();
             default: return th->n1();
         }
     }
+    if (lane.kind == beatbench::LaneKind::Bgm)
+        return QColor(QStringLiteral("#4ade80"));  // 背景轨 → 绿（与 BGA 层一致,自动播放）
     return th->textMuted();  // Pedal 等罕见轨：弱化色
 }
 
@@ -1100,12 +1159,13 @@ void ChartViewItem::paint(QPainter* p) {
             if (col < 0) continue;
             const QRectF& r = m_colRects[col];
             const qreal y = yOf(ev.measure + posDouble(ev.pos));
+            // 用户配色（2026-09）：BGA 层四列（04/06/07/0A）用绿色系；层间以深浅区分保对比。
             QColor c;
             switch (ev.value.layer) {
-                case 1: c = th->danger(); break;    // poor
-                case 2: c = th->primary(); break;   // layer
-                case 3: c = th->accent2(); break;   // layer2
-                default: c = th->n1(); break;       // base
+                case 1: c = QColor(QStringLiteral("#16a34a")); break;  // poor：深绿
+                case 2: c = QColor(QStringLiteral("#4ade80")); break;  // layer：亮绿
+                case 3: c = QColor(QStringLiteral("#22c55e")); break;  // layer2：中绿
+                default: c = QColor(QStringLiteral("#86efac")); break;  // base：浅绿
             }
             c.setAlpha(200);
             p->fillRect(QRectF(r.x() + 3, y - noteH, r.width() - 6, noteH), c);

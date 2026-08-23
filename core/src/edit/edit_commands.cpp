@@ -259,17 +259,22 @@ void PutNoteCommand::apply(Chart& chart) {
     m_paired_head.reset();
     // 先修下标（插入点后所有 ln_pair +1），再配对（用新下标）
     shift_pairs_after(chart.notes, at, +1);
-    // LN 放置：找同 lane 同 sample 的未配对 note（时间上往前最近）→ 自动配成尾
+    // LN 放置（2026-09 交互最终确认）：向前找**最近一个**未配对同 lane 同 sample 的
+    // Normal note 配成尾；**忽略中间其它通道/sample 的 note**（用户问题2：同轨道往后
+    // 放置应配尾，即使中间隔了别的轨道 note）。但若向前遇到同 lane 同 sample 却是
+    // **已配对**或**地雷**，则停止 —— 说明该通道已成型 LN 或混杂物件，不重复配。
+    // 注意：普通 note 与 LN 头在 model 均 kind=Normal 无 ln_pair，无法区分；
+    // 此处按「未配对 Normal」近似，用户用 LN 工具放置序列天然满足。
     if (m_ln_kind && m_kind == NoteKind::Normal) {
         std::optional<std::size_t> head;
-        // 从 at 往前找同 lane 同 sample 且未配对的 note（at 是新插入位，跳过自身）
         for (std::size_t i = at; i-- > 0;) {
             const auto& n = chart.notes[i].value;
-            if (n.lane == m_lane && n.sample.id == m_sample && n.kind == NoteKind::Normal &&
-                !n.ln_pair) {
+            if (n.lane != m_lane || n.sample.id != m_sample) continue;  // 忽略其它通道/sample
+            // 同 lane 同 sample 出现：未配对 Normal → 候选头；否则（已配对/地雷）→ 停止
+            if (n.kind == NoteKind::Normal && !n.ln_pair) {
                 head = i;
-                break;
             }
+            break;
         }
         if (head) {
             chart.notes[*head].value.ln_pair = at;  // 头 → 尾

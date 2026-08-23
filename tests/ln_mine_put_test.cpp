@@ -221,3 +221,94 @@ TEST(LnMinePut, ProtocolPutBadKind) {
     EXPECT_FALSE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
 }
+
+// —— LN 配对（最终规则 2026-09）：向前找最近一个未配对同 lane 同 sample Normal 头；
+//    忽略中间其它通道/sample 的 note。遇到同通道但已配对/地雷 → 停止。 ——
+
+// 核心（问题2）：头 A → key2 普通 note（中间）→ 尾 A，忽略中间其它通道 note 仍配对。
+
+TEST(LnMinePut, CrossLaneMiddleStillPairs) {
+    EditorSession s;
+    s.load(make_chart());
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));   // 头 A
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, true)));   // B（不同通道，普通候选）
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));   // 尾 A：忽略中间 B，配到 A 头
+    ASSERT_EQ(s.chart().notes.size(), 3u);
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+    // 头 A（pos0）与尾 A（pos3/4）配对；B（key2）保持未配对
+    bool a_paired_pair = false, a_tail = false, b_unpaired = false;
+    for (const auto& e : s.chart().notes) {
+        if (e.pos == Rational(0, 1) && e.value.lane == Lane{0, LaneKind::Key, 1})
+            a_paired_pair = e.value.ln_pair.has_value();
+        if (e.pos == Rational(3, 4) && e.value.lane == Lane{0, LaneKind::Key, 1})
+            a_tail = e.value.ln_pair.has_value();
+        if (e.pos == Rational(1, 2) && e.value.lane == Lane{0, LaneKind::Key, 2})
+            b_unpaired = !e.value.ln_pair.has_value();
+    }
+    EXPECT_TRUE(a_paired_pair);
+    EXPECT_TRUE(a_tail);
+    EXPECT_TRUE(b_unpaired);
+}
+
+// 对照：同通道相邻头尾仍正常配对。
+
+TEST(LnMinePut, AdjacentSameLaneStillPairs) {
+    EditorSession s;
+    s.load(make_chart());
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_EQ(s.chart().notes.size(), 2u);
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+    EXPECT_EQ(s.chart().notes[0].value.ln_pair.value_or(999), 1u);
+    EXPECT_EQ(s.chart().notes[1].value.ln_pair.value_or(999), 0u);
+}
+
+// 对照：中间隔一个不同通道普通 note（非 ln），忽略它仍配对（问题2 场景）。
+
+TEST(LnMinePut, MiddleOtherLaneOrdinaryNoteStillPairs) {
+    EditorSession s;
+    s.load(make_chart());
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, false)));  // 普通 note（非 ln）
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_EQ(s.chart().notes.size(), 3u);
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+    // 两个 key1 note 配对（头 pos0 + 尾 pos3/4）
+    auto find_pair = [&](const Rational& p) {
+        for (const auto& e : s.chart().notes)
+            if (e.pos == p && e.value.lane == Lane{0, LaneKind::Key, 1})
+                return e.value.ln_pair.has_value();
+        return false;
+    };
+    EXPECT_TRUE(find_pair(Rational(0, 1)));
+    EXPECT_TRUE(find_pair(Rational(3, 4)));
+}
+
+// 对照：同通道已形成 LN（头尾配对）后再放第 3 个 → 停止不重复配（作为新头）。
+
+TEST(LnMinePut, AlreadyPairedStopsRescan) {
+    EditorSession s;
+    s.load(make_chart());
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));   // 头
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));   // 尾（配成 LN）
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));   // 再放：向前遇到已配对 → 新头
+    ASSERT_EQ(s.chart().notes.size(), 3u);
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+    // 第 3 个（pos3/4）未配对（不重复配）
+    for (const auto& e : s.chart().notes)
+        if (e.pos == Rational(3, 4) && e.value.lane == Lane{0, LaneKind::Key, 1})
+            EXPECT_FALSE(e.value.ln_pair.has_value());
+}
+
+

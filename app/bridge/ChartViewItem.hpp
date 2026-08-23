@@ -48,6 +48,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(bool showChannelIds READ showChannelIds WRITE setShowChannelIds NOTIFY showChannelIdsChanged)
     /// note 上显示所用采样：0=隐藏 1=显示 id（01） 2=显示文件名（#WAVxx 文件）
     Q_PROPERTY(int noteSampleMode READ noteSampleMode WRITE setNoteSampleMode NOTIFY noteSampleModeChanged)
+    /// LN 选取模式（默认关）：开启后点选 LN 任一段，noteAt 返回配对的两段（lnPartner）。
+    Q_PROPERTY(bool lnSelectMode READ lnSelectMode WRITE setLnSelectMode NOTIFY lnSelectModeChanged)
     /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式，doc 参考 local/doc 截图）
     Q_PROPERTY(bool showExtras READ showExtras WRITE setShowExtras NOTIFY showExtrasChanged)
     /// 水平滚动（列区；轨道列超宽时用——底部滚动条 / Shift+滚轮 / Shift+拖拽）
@@ -98,6 +100,8 @@ public:
     void setShowChannelIds(bool v);
     int noteSampleMode() const { return m_noteSampleMode; }
     void setNoteSampleMode(int v);
+    bool lnSelectMode() const { return m_lnSelectMode; }
+    void setLnSelectMode(bool v);
     bool showExtras() const { return m_showExtras; }
     void setShowExtras(bool v);
     qreal scrollX() const { return m_scrollX; }
@@ -125,8 +129,12 @@ public:
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
     /// 屏幕 x → 命中的可放置列（{valid, lanePlayer, laneKind, laneIndex}；横向改轨移动用）。
-    /// BPM/STOP/BGA 列不可放置 → valid=false。
+    /// BPM/STOP 列不可放置 → valid=false。
     Q_INVOKABLE QVariantMap laneAtX(qreal x) const;
+
+    /// 诊断探针（--probe <x> <y>，调试）：返回 noteAt / laneAtX / hitTest 的合成结果，
+    /// 用于定位选中/移动/放置的命中问题（如 BGM 背景轨内移动失败）。不含逻辑，仅诊断输出。
+    Q_INVOKABLE QVariantMap probe(qreal x, qreal y) const;
 
 signals:
     void sessionChanged();
@@ -144,6 +152,7 @@ signals:
     void bgmExpandedChanged();
     void showChannelIdsChanged();
     void noteSampleModeChanged();
+    void lnSelectModeChanged();
     void showExtrasChanged();
     void scrollXChanged();
     void contentWidthChanged();
@@ -218,6 +227,7 @@ private:
     bool m_bgmExpanded = false;
     bool m_showChannelIds = false;
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
+    bool m_lnSelectMode = false;  // LN 选取模式（默认关）：点 LN 任一段自动返回配对
     bool m_showExtras = false;  // BGA 图层通道列（d场景更多轨道）
     qreal m_scrollX = 0.0;
     bool m_perfLog = false;  // paint 帧耗时采样（--perf-log）

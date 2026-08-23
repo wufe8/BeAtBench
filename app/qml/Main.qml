@@ -62,6 +62,8 @@ ApplicationWindow {
     property int snapDen: 16
     // 平移模式（checkbox 开关，默认开）：拖拽选中 note = 时间轴移动（不改轨道）
     property bool moveMode: true
+    // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
+    property bool lnSelectMode: false
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）
     readonly property bool textInputFocused:
         window.activeFocusItem && typeof window.activeFocusItem.text === "string"
@@ -250,6 +252,15 @@ ApplicationWindow {
                                      + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
                 }
                 Item { Layout.fillWidth: true }
+                // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
+                BbCheckBox {
+                    id: lnSelectCheck
+                    text: qsTr("LN 选取")
+                    checked: window.lnSelectMode
+                    onToggled: window.lnSelectMode = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("勾选=点 LN 任一段自动选中配对两端（整体移动/删除）；未勾=LNs 当单 note")
+                }
                 // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
                 BbCheckBox {
                     id: channelIdCheck
@@ -294,6 +305,7 @@ ApplicationWindow {
                 chartPath: window.chartPath
                 showChannelIds: window.showChannelIds
                 noteSampleMode: window.noteSampleMode
+                lnSelectMode: window.lnSelectMode
                 showExtras: window.showExtras
                 editorTool: window.editorTool
                 moveMode: window.moveMode
@@ -381,13 +393,32 @@ ApplicationWindow {
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
     property string debugOpenPath: ""
     onDebugOpenPathChanged: if (debugOpenPath !== "") openChart(debugOpenPath)
-    // --tool / --click 调试参数（配 --screenshot 验收点击链）：工具 + 一次模拟点击
+    // --tool / --click / --probe 调试参数（配 --screenshot 验收点击链）：工具 + 一次模拟点击
     property string debugTool: ""
     property double debugClickX: -1
     property double debugClickY: -1
+    property double debugProbeX: -1
+    property double debugProbeY: -1
     onDebugToolChanged: if (debugTool !== "") window.editorTool = debugTool
     onDebugClickXChanged: debugMaybeClick()
     onDebugClickYChanged: debugMaybeClick()
+    onDebugProbeXChanged: debugMaybeProbe()
+    onDebugProbeYChanged: debugMaybeProbe()
+    // --probe：等首帧渲染后调 ChartView.probe(x,y)，把命中结果打到 QML 日志（诊断定位用）
+    function debugMaybeProbe() {
+        if (debugProbeX < 0 || debugProbeY < 0) return
+        probeTimer.restart()
+    }
+    Timer {
+        id: probeTimer
+        interval: 150
+        onTriggered: {
+            if (typeof editPage !== "undefined" && editPage && editPage.locateChartView) {
+                const r = editPage.locateChartView().probe(debugProbeX, debugProbeY)
+                console.log("PROBE " + JSON.stringify(r))
+            }
+        }
+    }
     function debugMaybeClick() {
         if (debugClickX < 0 || debugClickY < 0) return
         // 等 openChart + 首帧渲染（hitTest 依赖 paint 后的 m_colRects）
@@ -550,6 +581,25 @@ ApplicationWindow {
                a.pos.num === b.pos.num && a.pos.den === b.pos.den
     }
     function onNoteClicked(ref, ctrl) {
+        // LN 选取模式（默认关）：点 LN 任一段 → 自动纳入配对段。ref 由 noteAt 返回，
+        // 命中 LN 时带 lnPartner（配对段的 NoteRef）。选中集可整体移动/删除。
+        if (window.lnSelectMode && ref.lnPartner) {
+            var picked = [ref.lnPartner, ref]
+            if (!ctrl) { window.selectionRefs = picked }
+            else {
+                // Ctrl+点击：把两端整体加入（若已含则移除）——简单化：追加未含的段
+                var arr = window.selectionRefs.slice()
+                for (var i = 0; i < picked.length; i++) {
+                    var exists = false
+                    for (var j = 0; j < arr.length; j++)
+                        if (refEquals(arr[j], picked[i])) { exists = true; break }
+                    if (!exists) arr.push(picked[i])
+                }
+                window.selectionRefs = arr
+            }
+            setStatus(qsTr("已选中 LN（%1 段）").arg(window.selectionRefs.length))
+            return
+        }
         if (ctrl) {
             // 多选切换（Ctrl+点击，文件管理器逻辑）：已选中 → 移除；否则追加
             var arr = window.selectionRefs.slice()

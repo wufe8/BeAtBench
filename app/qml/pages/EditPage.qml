@@ -19,6 +19,8 @@ Item {
     property bool bgmExpanded: false
     /// note 采样标签：0 隐藏 / 1 id / 2 文件名
     property int noteSampleMode: 0
+    /// LN 选取模式（默认关）：点 LN 任一段自动选配对两端（整体移动/删除）
+    property bool lnSelectMode: false
     /// 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     property bool showExtras: false
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
@@ -59,6 +61,11 @@ Item {
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
         return chartView ? chartView.centerMeasure() : 0
+    }
+
+    /// 诊断探针（--probe）：返回 ChartViewItem（含 probe(x,y)），定位选中/移动命中问题。
+    function locateChartView() {
+        return chartView
     }
 
     /// 调试入口（--click）：视口局部坐标 → ChartView 同一手势分发路径（与 DPR/布局无关）。
@@ -190,6 +197,7 @@ Item {
                     showChannelIds: root.showChannelIds
                     bgmExpanded: root.bgmExpanded
                     noteSampleMode: root.noteSampleMode
+                    lnSelectMode: root.lnSelectMode
                     showExtras: root.showExtras
                     editorTool: root.editorTool
                     moveMode: root.moveMode

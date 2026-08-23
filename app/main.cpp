@@ -234,6 +234,19 @@ int main(int argc, char** argv) {
         if (QObject* root = engine.rootObjects().value(0))
             root->setProperty("debugDeleteSelection", true);
     }
+    // --probe <x> <y>：诊断探针（输出 noteAt/laneAtX/hitTest 命中结果到 QML 消息日志）
+    const int probeIdx = args.indexOf(QStringLiteral("--probe"));
+    if (probeIdx >= 0 && probeIdx + 2 < args.size()) {
+        bool okx = false, oky = false;
+        const double cx = args.at(probeIdx + 1).toDouble(&okx);
+        const double cy = args.at(probeIdx + 2).toDouble(&oky);
+        if (okx && oky) {
+            if (QObject* root = engine.rootObjects().value(0)) {
+                root->setProperty("debugProbeX", cx);
+                root->setProperty("debugProbeY", cy);
+            }
+        }
+    }
 
     if (engine.rootObjects().isEmpty())
         return -1;
