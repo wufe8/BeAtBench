@@ -392,7 +392,8 @@ public:
         }
 
         const std::string text = codec->write(result.chart, wopts);
-        std::ofstream out(out_path, std::ios::binary);
+        // 路径为 UTF-8 → std::filesystem::path（宽字符 API），修复非 ASCII 路径
+        std::ofstream out(std::filesystem::u8path(out_path), std::ios::binary);
         if (!out.is_open()) {
             throw CommandError("write_failed", "无法写入: " + out_path);
         }
@@ -502,6 +503,7 @@ std::uint32_t u32_arg(const Json& args, const char* key) {
 
 // 解析 selection 数组（NoteRef 列表：{measure, pos, lane:{player,kind,index}, sample}）→
 // NoteRef 向量。空数组 / 非数组 → bad_args。lane 支持子对象优先 + 顶层平铺兼容。
+// bonus：可选 bgm_line（BGM 行序号，Bgm note 同值消歧；缺省 0）。
 std::vector<edit::NoteRef> selection_from_json(const Json& args) {
     const Json* sel = args.find("selection");
     if (!sel) throw CommandError("bad_args", "缺少 selection 数组");
@@ -518,6 +520,10 @@ std::vector<edit::NoteRef> selection_from_json(const Json& args) {
             ref.lane = lane_from_json(item);  // 顶层平铺兼容
         }
         ref.sample = u32_arg(item, "sample");
+        if (const Json* bl = item.find("bgm_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
+            ref.bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        }
         refs.push_back(std::move(ref));
     }
     return refs;
@@ -578,7 +584,8 @@ edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
     return [codec](const Chart& chart, const std::string& path) -> bool {
         try {
             const std::string text = codec->write(chart, beatbench::codec::WriteOptions{});
-            std::ofstream out(path, std::ios::binary);
+            // 路径为 UTF-8 → std::filesystem::path（宽字符 API），修复非 ASCII 路径
+            std::ofstream out(std::filesystem::u8path(path), std::ios::binary);
             if (!out.is_open()) return false;
             out << text;
             out.close();
@@ -909,7 +916,8 @@ public:
             }
         }
         const std::string text = codec->write(session.chart(), wopts);
-        std::ofstream out(out_path, std::ios::binary);
+        // 路径为 UTF-8 → std::filesystem::path（宽字符 API），修复非 ASCII 路径
+        std::ofstream out(std::filesystem::u8path(out_path), std::ios::binary);
         if (!out.is_open()) {
             throw CommandError("write_failed", "无法写入: " + out_path);
         }
@@ -976,6 +984,12 @@ public:
             return lane_from_json(args);  // 顶层字段兼容（旧测试）
         }();
         const std::uint32_t sample = u32_arg(args, "sample");
+        // BGM 行序号（放置到指定 ch01 行；非 BGM 忽略）
+        std::uint32_t bgm_line = 0;
+        if (const Json* bl = args.find("bgm_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
+            bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        }
         // kind 语义（2026-09，LN/地雷放置）：normal（默认）/ ln（LN 自动配对）/ mine（地雷）
         // 地雷：kind=Landmine（写出走 D1-D9/E1-E9 通道）；LN：配对逻辑在命令层
         bool ln_kind = false;
@@ -994,7 +1008,7 @@ public:
             }
         }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
-            measure, pos, lane, sample, ln_kind, kind));
+            measure, pos, lane, sample, ln_kind, kind, bgm_line));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", ln_kind ? "ln" : (kind == NoteKind::Landmine ? "mine" : "normal"));
@@ -1026,6 +1040,12 @@ public:
             return lane_from_json(*from);
         }();
         const std::uint32_t sample = u32_arg(*from, "sample");
+        // 源 BGM 行序号（消歧；非 Bgm = 0）
+        std::uint32_t from_bgm_line = 0;
+        if (const Json* bl = from->find("bgm_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "from.bgm_line 应为整数");
+            from_bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        }
         const Json* to = move.find("to");
         if (!to || !to->is_object()) throw CommandError("bad_args", "缺少 to 对象");
         const std::uint32_t to_m = u32_arg(*to, "measure");
@@ -1038,8 +1058,15 @@ public:
             }
             to_lane = lane_from_json(*tl);
         }
+        // 可选 to.bgm_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 自动分配）
+        std::optional<std::uint32_t> to_bgm_line;
+        if (const Json* bl = to->find("bgm_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "to.bgm_line 应为整数");
+            to_bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        }
         return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m,
-                                                       to_pos, false, to_lane);
+                                                       to_pos, false, to_lane, from_bgm_line,
+                                                       to_bgm_line);
     }
 
     Json run(const Json& args) const override {
@@ -1097,8 +1124,14 @@ public:
             return lane_from_json(args);  // 顶层字段兼容（旧测试）
         }();
         const std::uint32_t sample = u32_arg(args, "sample");
+        // BGM 行序号（消歧；非 Bgm = 0）
+        std::uint32_t bgm_line = 0;
+        if (const Json* bl = args.find("bgm_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
+            bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        }
         const bool ok = session.exec(
-            std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample));
+            std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, bgm_line));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -1184,6 +1217,81 @@ public:
     }
 };
 
+// —— note.convert：跨「id 命名空间」转换（note ↔ BGA/BPM/STOP 事件） ——
+// 语义：把 (measure, pos, lane, sample) 的 note 移除，在目标语义容器插入事件；
+// id 不变（note 的 #WAVxx id → #BMPxx / #BPMxx / #STOPxx 同文本 id），
+// 即「只要 BMS 格式上 id 可表示就允许移动」（2026-09 用户确认）。
+// 单个 undo 步；批量 = CompositeCommand（与 note.move 同族）。
+// args: {selection:[NoteRef...], target:"bga_base"/"bga_poor"/"bga_layer"/"bga_layer2"/"bpm"/"stop",
+//        to_measure?, to_pos?}（to_* 缺省 = 原位，时间不动的纯转换）
+namespace {
+edit::ConvertTarget convert_target_from_json(const Json& args) {
+    const auto& s = arg_str(args, "target");
+    if (s == "bga_base") return edit::ConvertTarget::BgaBase;
+    if (s == "bga_poor") return edit::ConvertTarget::BgaPoor;
+    if (s == "bga_layer") return edit::ConvertTarget::BgaLayer;
+    if (s == "bga_layer2") return edit::ConvertTarget::BgaLayer2;
+    if (s == "bpm") return edit::ConvertTarget::Bpm;
+    if (s == "stop") return edit::ConvertTarget::Stop;
+    throw CommandError("bad_args", "未知 target '" + s +
+                                       "'（支持 bga_base/bga_poor/bga_layer/bga_layer2/bpm/stop）");
+}
+}  // namespace
+
+class NoteConvertCommand : public Command {
+public:
+    std::string_view name() const override { return "note.convert"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) {
+            throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        }
+        const auto refs = selection_from_json(args);
+        if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无可转换内容）");
+        const auto target = convert_target_from_json(args);
+        // 位移语义（2026-09）：支持绝对 to_measure/to_pos（单 note 精调）
+        // 或统一 delta（{measure,pos}，与 moveRegion 同语义——多选整组位移，逐个加）。
+        // 两者可给出则 delta 优先；都不给 = 原位转换。
+        std::uint32_t delta_m = 0; Rational delta_p(0, 1);
+        bool has_delta = false;
+        if (const Json* d = args.find("delta")) {
+            if (!d->is_object()) throw CommandError("bad_args", "delta 应为对象 {measure,pos}");
+            if (const Json* dm = d->find("measure")) delta_m = static_cast<std::uint32_t>(dm->as_i64());
+            if (const Json* dp = d->find("pos")) delta_p = pos_from_json(*d);
+            has_delta = true;
+        }
+        std::uint32_t abs_m = 0; Rational abs_p(0, 1);
+        bool has_abs = args.find("to_measure") || args.find("to_pos");
+        if (const Json* v = args.find("to_measure")) abs_m = u32_arg(args, "to_measure");
+        if (const Json* v = args.find("to_pos")) abs_p = pos_from_json(args);
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        for (const auto& r : refs) {
+            std::uint32_t tm; Rational tp;
+            if (has_delta) {
+                std::int64_t to_m = static_cast<std::int64_t>(r.measure) + delta_m;
+                Rational to_pos = r.pos + delta_p;
+                while (to_pos.num < 0) { to_pos = to_pos + Rational(1, 1); --to_m; }
+                while (to_pos.num >= to_pos.den) { to_pos = to_pos - Rational(1, 1); ++to_m; }
+                if (to_m < 0) continue;
+                tm = static_cast<std::uint32_t>(to_m); tp = to_pos;
+            } else if (has_abs) {
+                tm = abs_m; tp = abs_p;
+            } else {
+                tm = r.measure; tp = r.pos;
+            }
+            comp->add(std::make_unique<edit::ConvertNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample, r.bgm_line, target, tm, tp));
+        }
+        if (comp->size() == 0) throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("notes", static_cast<std::int64_t>(refs.size()));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 // —— 区域平移（框选整段 / 多选统一位移 → note.moveRegion，2026-09） ——
 // 语义：对 selection 内所有 note 施加**统一**时间位移 delta（+ 可选统一换轨 to_lane），
 // 各 note 相对位置不变。用户「框选整个副歌段游玩轨整体拖」属此类——不是逐 note 精调
@@ -1214,6 +1322,23 @@ public:
             if (!tl->is_object()) throw CommandError("bad_args", "to_lane 应为对象 {player,kind,index}");
             to_lane = lane_from_json(*tl);
         }
+        // 可选 to_bgm_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 按目标小节行数自动分配）
+        std::optional<std::uint32_t> to_bgm_line;
+        if (const Json* tl = args.find("to_bgm_line")) {
+            if (!tl->is_int()) throw CommandError("bad_args", "to_bgm_line 应为整数");
+            to_bgm_line = static_cast<std::uint32_t>(tl->as_i64());
+        }
+        // 可选 target（跨命名空间转换目标：bga_*/bpm/stop——整组 note → 同语义事件）；
+        // 传了 = 替换 to_lane（note 不再是 note，无 lane 概念）
+        std::optional<edit::ConvertTarget> convert_target;
+        if (const Json* v = args.find("target")) {
+            convert_target = [&] {
+                // 临时对象：把 args 名字换一下复用解析（no-copy 风格）
+                Json tmp = Json::object();
+                tmp.set("target", *v);
+                return convert_target_from_json(tmp);
+            }();
+        }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
             std::int64_t to_m = static_cast<std::int64_t>(r.measure) + d_measure;
@@ -1228,9 +1353,16 @@ public:
                 ++to_m;
             }
             if (to_m < 0) continue;  // 移到负小节 → 跳过
-            comp->add(std::make_unique<edit::MoveNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample,
-                static_cast<std::uint32_t>(to_m), to_pos, false, to_lane));
+            if (convert_target) {
+                comp->add(std::make_unique<edit::ConvertNoteCommand>(
+                    r.measure, r.pos, r.lane, r.sample, r.bgm_line, *convert_target,
+                    static_cast<std::uint32_t>(to_m), to_pos));
+            } else {
+                comp->add(std::make_unique<edit::MoveNoteCommand>(
+                    r.measure, r.pos, r.lane, r.sample,
+                    static_cast<std::uint32_t>(to_m), to_pos, false, to_lane,
+                    r.bgm_line, to_bgm_line));
+            }
         }
         if (comp->size() == 0) {
             throw CommandError("bad_args", "平移后无有效 note（全部移到负小节）");
@@ -1406,6 +1538,8 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<NoteQuantizeCommand>());
     registry.add(std::make_unique<NoteTransformCommand>());
     registry.add(std::make_unique<NoteMoveRegionCommand>());
+    // M3 跨命名空间转换（note → BGA/BPM/STOP 事件；id 不变，同 undo 步）
+    registry.add(std::make_unique<NoteConvertCommand>());
     // M3 崩溃备份 / 自动保存开关（默认关自动保存）
     registry.add(std::make_unique<SessionAutosaveCommand>());
     // M3 元信息编辑（头部字段；批量一个 undo 步）

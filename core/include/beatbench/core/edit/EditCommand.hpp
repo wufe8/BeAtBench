@@ -20,6 +20,17 @@ enum class TimingKind : std::uint8_t {
     Measure,  ///< 节拍事件（ch02；值 = 每小节拍数，4/4 = 4）
 };
 
+/// note → 跨命名空间事件的目标种类（BGA 层 / BPM / STOP）。
+/// 与 TimingKind 平行但语义不同：BGA 用 image.id、BPM/STOP 用 ref_id + 定义值。
+enum class ConvertTarget : std::uint8_t {
+    BgaBase = 0,  ///< BGA base 层（ch04）
+    BgaPoor = 1,  ///< BGA poor 层（ch06）
+    BgaLayer = 2, ///< BGA layer 层（ch07）
+    BgaLayer2 = 3,///< BGA layer2 层（ch0A）
+    Bpm = 4,      ///< BPM 事件（ch03；id → #BPMxx 引用）
+    Stop = 5,     ///< STOP 事件（ch09；id → #STOPxx 引用）
+};
+
 /// 把 TimingKind 转协议字符串（"bpm"/"stop"/"measure"）。未知 → 空串。
 std::string_view timing_kind_name(TimingKind kind);
 
@@ -126,6 +137,49 @@ private:
     std::vector<Event<MeasureLen>> m_measure_evs;
     /// 删除位置（invert 尽量原位恢复）
     std::size_t m_index = 0;
+};
+
+/// note → 时间轴/BGA 事件转换（跨「id 命名空间」移动，2026-09 用户确认：
+/// 只要 BMS 格式上 id 可表示就允许移动——游玩轨 note → BGA/BPM/STOP 轨，
+/// 其 id 不变，只是查找文件的引用命名空间变了）。
+/// 语义：把 (measure, pos, lane, sample) 的 note 移除，在目标位置
+/// (to_measure, to_pos) 的目标语义容器（bga_events / bpm_events / stop_events）
+/// 插入事件（支持同时时间位移——自由 2D 拖动到 BGA/BPM 轨）：
+/// - BGA：sample.id 直接作为 #BMPxx id（WAV↔BMP id 文本相同；#WAV22 ↔ #BMP22）；
+/// - BPM：sample.id 作为 #BPMxx 引用 id（ref_id），value 由该 #BPMxx 定义解析；
+/// - STOP：sample.id 作为 #STOPxx 引用 id（ref_id），value 由该 #STOPxx 定义解析。
+/// 逆操作：反向转换（事件 → note；id 回填 note.sample.id，位置回到 (measure,pos)）。
+/// 单个 undo 步；批量 = CompositeCommand（与 note.move 同族）。
+class ConvertNoteCommand : public EditCommand {
+public:
+    ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
+                       std::uint32_t bgm_line, ConvertTarget target,
+                       std::uint32_t to_measure = 0, Rational to_pos = Rational(0, 1));
+    std::string name() const override { return "note.convert"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::uint32_t m_measure;      ///< 源 (measure, pos)
+    Rational m_pos;
+    Lane m_lane;
+    std::uint32_t m_sample;
+    std::uint32_t m_bgm_line;
+    ConvertTarget m_target;
+    std::uint32_t m_to_measure;   ///< 目标位置（转换后事件落点；可同一 position）
+    Rational m_to_pos;
+    /// apply 删除的 note 快照（invert 恢复）
+    std::optional<Event<Note>> m_removed;
+    /// apply 断开配对的伙伴快照（invert 恢复互指）
+    std::optional<Event<Note>> m_partner;
+    /// BGA 层号（target==Bga）或 BPM/STOP 的 ref_id；invert 恢复用
+    std::int32_t m_bga_layer = -1;
+    std::optional<std::uint32_t> m_ref_id;
+    /// apply 插入的事件下标（invert 精确移除）
+    std::optional<std::size_t> m_insert_index;
+    /// 写入 BPM/STOP 的 value 快照（invert 恢复；值 = 由定义表解析）
+    double m_value = 0.0;
 };
 
 }  // namespace beatbench::edit
