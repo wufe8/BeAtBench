@@ -33,6 +33,9 @@ public:
     /// 装载 check 命令的响应信封（lint.missing_wav + diagnostics）。
     Q_INVOKABLE void loadFromCheck(const QString& checkJson);
 
+    /// 装载 session.lint 的 issues 数组（编辑后刷新 lint 面板；内存 chart 的 lint）。
+    Q_INVOKABLE void loadFromIssues(const QString& issuesJson);
+
     int count() const { return static_cast<int>(m_rows.size()); }
 
 signals:

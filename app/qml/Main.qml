@@ -542,6 +542,7 @@ ApplicationWindow {
             return null
         }
         chartSession.refresh()
+        refreshLint()  // 编辑后刷新 lint 面板（内存 lint：LN 未配对等）
         return resp.result
     }
     /// 只 dispatch 不 refresh（批删除循环里用；调用方完成后统一 refresh 一次）。
@@ -553,6 +554,12 @@ ApplicationWindow {
             return null
         }
         return resp.result
+    }
+    /// 内存 lint（session.lint）→ lintModel（编辑后「LN 通道 note 未组成完整 LN」等提示）。
+    function refreshLint() {
+        var req = JSON.stringify({ command: "session.lint", args: {} })
+        var resp = beatbench.dispatch(req)
+        lintModel.loadFromIssues(resp)
     }
     function deleteNoteAt(ref) {
         var args = {

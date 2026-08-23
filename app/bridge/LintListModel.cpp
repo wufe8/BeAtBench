@@ -121,4 +121,29 @@ void LintListModel::loadFromCheck(const QString& checkJson) {
     emit countChanged(static_cast<int>(m_rows.size()));
 }
 
+void LintListModel::loadFromIssues(const QString& issuesJson) {
+    QVector<Entry> rows;
+    try {
+        const Json req = Json::parse(issuesJson.toStdString());
+        const Json* result = req.find("result");
+        const Json* arr = result ? result->find("issues") : nullptr;
+        if (arr && arr->is_array()) {
+            for (const auto& d : arr->as_array()) {
+                Entry e;
+                e.severity = QStringLiteral("warning");
+                if (const Json* v = d.find("code"))
+                    e.id = QString::fromUtf8(v->as_str().c_str());
+                if (const Json* v = d.find("message"))
+                    e.message = QString::fromUtf8(v->as_str().c_str());
+                if (!e.message.isEmpty()) rows.push_back(std::move(e));
+            }
+        }
+    } catch (const JsonError&) {
+    }
+    beginResetModel();
+    m_rows = std::move(rows);
+    endResetModel();
+    emit countChanged(static_cast<int>(m_rows.size()));
+}
+
 }  // namespace beatbench::app
