@@ -196,7 +196,11 @@ ApplicationWindow {
                     editable: true
                     stepFactor: 2   // 2026-09：上下按钮 ×2/÷2（音乐拍子）；手填仍 1/3、1/5
                     implicitWidth: 56
-                    onValueModified: window.snapNum = Math.max(1, value)
+                    // 2026-09 修复：BbSpinBox 的上下按钮/回车都是**程序化**设 root.value，
+                    // 而 SpinBox「用户修改」信号 valueModified 对程序化赋值不触发（已实测）→
+                    // 改用 onValueChanged（任何赋值都触发），否则 window.snapNum 不更新、
+                    // 编辑区拍子线纹丝不动。
+                    onValueChanged: window.snapNum = Math.max(1, value)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("snap 分子（槽数步长 = snapNum/snapDen 小节；上下按钮 ×2/÷2）")
                 }
@@ -207,7 +211,7 @@ ApplicationWindow {
                     editable: true
                     stepFactor: 2   // 同上：×2/÷2
                     implicitWidth: 56
-                    onValueModified: window.snapDen = Math.max(1, value)
+                    onValueChanged: window.snapDen = Math.max(1, value)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线；上下按钮 ×2/÷2）")
                 }

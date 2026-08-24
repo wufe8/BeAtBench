@@ -89,20 +89,54 @@ Item {
         root.measureHeight = view.measureHeight
     }
 
+    // ---- 缩放级别（等比，无漂移）----
+    // 滚轮缩放改成**离散级别跳步**（索引移动），不再连续乘除——否则从上限 480px 连续 ÷1.2
+    // 无法整除回 96px（会落到 107%/97% 这类非 100% 值；2026-09 用户实测反馈）。
+    // 级别 = 以 96px(100%) 为基准向两端等比(ratio=1.2)延伸，上下限钳到 24px(25%)/480px(500%)；
+    // 96px 恒为精确级别（25%/500% 滚回即达 100%）。
+    property var _zoomLevels: buildZoomLevels(1.2)
+    function buildZoomLevels(ratio) {
+        const up = []
+        let v = 96
+        while (true) { v = v * ratio; if (v > 480) break; up.push(v) }
+        const down = []
+        v = 96
+        while (true) { v = v / ratio; if (v < 24) break; down.push(v) }
+        const levels = down.slice().reverse()   // 下半段升序（>24）
+        levels.push(96)
+        for (let i = 0; i < up.length; i++) levels.push(up[i])  // 上半段升序
+        if (levels[0] > 24) levels.unshift(24)                  // 钳下端点（25%）
+        if (levels[levels.length - 1] < 480) levels.push(480)   // 钳上端点（500%）
+        return levels
+    }
+    function nearestIndex(arr, val) {
+        let bi = 0, bd = Infinity
+        for (let i = 0; i < arr.length; i++) {
+            const d = Math.abs(arr[i] - val)
+            if (d < bd) { bd = d; bi = i }
+        }
+        return bi
+    }
+    /// 滚轮缩放一步：从当前 measureHeight 所在级别向上/下跳一级。光标锚点分支用
+    /// zoomAt(cursor, factor=相邻级别比) 保持鼠标处拍位不动；中心锚点分支直接设新级别。
+    function zoomStep(y, up) {
+        const lv = root._zoomLevels
+        const idx = nearestIndex(lv, root.measureHeight)
+        const nIdx = up ? Math.min(lv.length - 1, idx + 1) : Math.max(0, idx - 1)
+        if (nIdx === idx) return
+        if (root.zoomToCursor) root.zoomAt(y, lv[nIdx] / lv[idx])
+        else root.measureHeight = lv[nIdx]
+    }
+
     WheelHandler {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         onWheel: (event) => {
             if (event.modifiers & Qt.ControlModifier) {
-                // 缩放：指小节高度（内容比例不变，仅视口密度）
-                // 2026-09 用户：最大 500%（→ 480px 小节高度；原 240px = 250% 封顶）；
-                // 可选「鼠标位置缩放」（默认开）——锚点 = 鼠标 y，放大后鼠标处拍位不动。
-                const f = event.angleDelta.y > 0 ? 1.2 : (event.angleDelta.y < 0 ? 1.0 / 1.2 : 1.0)
-                if (f !== 1.0) {
-                    if (root.zoomToCursor)
-                        root.zoomAt(event.position.y, f)   // 走包装函数：锚点 + 回写 root.measureHeight
-                    else
-                        root.measureHeight = Math.min(480, Math.max(24, root.measureHeight * f))
-                }
+                // 缩放：指小节高度（内容比例不变，仅视口密度）——**离散级别跳步**（等比，无漂移，
+                // 100% 恒可达；2026-09 用户：旧实现连乘除碰顶非整除 → 滚回只能到 107%/97%）。
+                // 锚点 = 鼠标 y（zoomToCursor 开，默认）/ 视口中心（关）。
+                const dy = event.angleDelta.y
+                if (dy !== 0) root.zoomStep(event.y, dy > 0)
                 event.accepted = true
                 return
             }

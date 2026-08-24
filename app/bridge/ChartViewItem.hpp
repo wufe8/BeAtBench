@@ -217,6 +217,9 @@ private:
     qreal measureAt(qreal screenY) const;
     qreal posDouble(const beatbench::Rational& r) const;
     void clampScroll();
+    /// note 高度：随缩放浮动但带上下限（clamp(measureHeight * scale, min, max)）。
+    /// 小 = 不随放大无界膨胀；下限保证 100% 缩放下 1/16 相邻 note 可分。hit/paint/hover 共用。
+    qreal noteHeight() const;
 
     QColor noteColor(const beatbench::Lane& lane) const;
     /// LN note 专用色（2026-09 用户：位于 LN 轨的 note 加深，直接分辨单点/LN）。

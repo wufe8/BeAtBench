@@ -178,7 +178,8 @@ Item {
                         anchors.rightMargin: 12
                         spacing: 12
                         Label {
-                            text: qsTr("编辑工作区 · <b>SP7K</b> · 1/16 snap")
+                            text: qsTr("编辑工作区 · <b>SP7K</b> · %1/%2 snap")
+                                    .arg(root.snapNum).arg(root.snapDen)
                             color: Theme.textMuted
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fsSmall

@@ -21,9 +21,21 @@
 namespace beatbench::app {
 
 namespace {
-// note 高度：**固定像素**（2026-09 用户：不随缩放改变——缩放到 500% 时 note 仍 ~8px，
-// 只变小节间距/槽线密度）。4 处 hit/paint/hover 共用，避免漂移。
-constexpr qreal kNoteHeight = 8.0;
+// note 高度：**随缩放浮动且带上下限**（2026-09 用户：不再固定，也非无界随 measureHeight 缩放）。
+//   - 上限 = 12px（当前固定值；500% 缩放时不至于过大——旧 `m_measureHeight*0.08` 在 500%
+//     时高达 38px，故必须封顶）；
+//   - 下限 = 100% 缩放（96px）时相邻 **1/8** note 不重叠（1/8 槽距 = 96/8 = 12px，note 须 < 12px；
+//     2026-09 用户：1/16 作下限太窄 → 放宽到 1/8，note 更大更好读）。
+//   公式：note = clamp(measureHeight * kNoteHeightScale, kNoteHeightMin, kNoteHeightMax)。
+//   100% → 96*0.1 = 9.6px（<12px，1/8 不重叠）；125%(120px) → 达上限 12px；再高保持 12px。
+//   11 处 hit/paint/hover 共用，避免漂移（noteHeight() 单点计算）。
+constexpr qreal kNoteHeightScale = 0.10;
+constexpr qreal kNoteHeightMin = 8.0;
+constexpr qreal kNoteHeightMax = 12.0;
+/// note 横向内边距（距通道左/右缘的像素；缩小 = note 更宽；右侧分隔线仍可见）。
+constexpr qreal kNoteHMargin = 1.0;
+// note 选中框相对 note 的外扩：向左右各外扩 0.5px（略大于 note，明确高亮边界）。
+constexpr qreal kNoteSelectExpand = 0.5;
 }  // namespace
 
 ChartViewItem::ChartViewItem(QQuickItem* parent) : QQuickPaintedItem(parent) {
@@ -32,7 +44,7 @@ ChartViewItem::ChartViewItem(QQuickItem* parent) : QQuickPaintedItem(parent) {
     m_rulerFont.setFamily(QStringLiteral("Consolas"));
     m_rulerFont.setPixelSize(11);
     m_noteLabelFont.setFamily(QStringLiteral("Consolas"));
-    m_noteLabelFont.setPixelSize(9);
+    m_noteLabelFont.setPixelSize(11);
 }
 
 ChartSession* ChartViewItem::sessionObj() const {
@@ -339,7 +351,7 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
     const ChartSession* cs = sessionObj();
     if (!cs || !cs->chart() || m_measureHeight <= 0.0 || y < 18.0) return res;
     const beatbench::Chart& chart = *cs->chart();
-    const qreal noteH = kNoteHeight;
+    const qreal noteH = noteHeight();
     const int measure = static_cast<int>(std::floor(measureAt(y)));
     if (measure < 0 || measure >= cs->measureCount()) return res;
     for (const auto& ev : chart.notes) {
@@ -351,7 +363,8 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
         const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
         const qreal ny = yOf(ev.measure + posDouble(ev.pos));
-        const QRectF nr(r.x() + 2, ny - noteH, r.width() - 4, noteH);
+        const QRectF nr(r.x() + kNoteHMargin, ny - noteH,
+                        r.width() - 2.0 * kNoteHMargin, noteH);
         if (!nr.contains(QPointF(x, y))) continue;
         res.insert(QStringLiteral("valid"), true);
         res.insert(QStringLiteral("measure"), static_cast<int>(ev.measure));
@@ -417,7 +430,7 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
     const int m1 = std::min(cs->measureCount() - 1,
                             static_cast<int>(std::ceil(mfHi)) + 1);
     const beatbench::Chart& chart = *cs->chart();
-    const qreal noteH = kNoteHeight;
+    const qreal noteH = noteHeight();
     std::vector<QVariantMap> hits;
     for (const auto& ev : chart.notes) {
         if (static_cast<int>(ev.measure) < m0 || static_cast<int>(ev.measure) > m1) continue;
@@ -426,7 +439,8 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
         if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
         const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
         const qreal y = yOf(ev.measure + posDouble(ev.pos));
-        const QRectF nr(r.x() + 2, y - noteH, r.width() - 4, noteH);
+        const QRectF nr(r.x() + kNoteHMargin, y - noteH,
+                        r.width() - 2.0 * kNoteHMargin, noteH);
         if (!nr.intersects(sel)) continue;
         QVariantMap ref;
         ref.insert(QStringLiteral("measure"), static_cast<int>(ev.measure));
@@ -565,7 +579,7 @@ void ChartViewItem::updateHover(const QPointF& pos) {
             text = QString::asprintf("%03d:%.2f", measure, mf - measure);
             // 命中 note → 追加 轨道 + 采样（只查相邻小节，控制开销）
             const beatbench::Chart& chart = *cs->chart();
-            const qreal noteH = kNoteHeight;
+            const qreal noteH = noteHeight();
             for (std::size_t evIdx = 0; evIdx < chart.notes.size(); ++evIdx) {
                 const auto& ev = chart.notes[evIdx];
                 if (static_cast<int>(ev.measure) < measure - 1 ||
@@ -577,7 +591,8 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                     continue;
                 const QRectF& r = m_colRects[col];
                 const qreal y = yOf(ev.measure + posDouble(ev.pos));
-                const QRectF hit(r.x() + 2, y - noteH, r.width() - 4, noteH);
+                const QRectF hit(r.x() + kNoteHMargin, y - noteH,
+                                 r.width() - 2.0 * kNoteHMargin, noteH);
                 if (hit.contains(pos)) {
                     // 2026-09（问题5）：显示**实际值**（note 真实 pos/通道/LN 通道），
                     // 而非鼠标位置或合并显示。格式（用户示例）：
@@ -663,6 +678,10 @@ qreal ChartViewItem::measureAt(qreal screenY) const {
 
 qreal ChartViewItem::posDouble(const beatbench::Rational& r) const {
     return static_cast<qreal>(r.num) / static_cast<qreal>(r.den);
+}
+
+qreal ChartViewItem::noteHeight() const {
+    return std::clamp(m_measureHeight * kNoteHeightScale, kNoteHeightMin, kNoteHeightMax);
 }
 
 QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
@@ -1089,7 +1108,7 @@ void ChartViewItem::paint(QPainter* p) {
     }
 
     // ---- note / LN / 地雷（note 底边 = 实际时间点） ----
-    const qreal noteH = kNoteHeight;
+    const qreal noteH = noteHeight();
     // 选中高亮：NoteRef 键集（框选/粘贴后 QML 回填 selection）
     std::unordered_set<std::string> selKeys;
     if (!m_selection.isEmpty()) {
@@ -1122,9 +1141,11 @@ void ChartViewItem::paint(QPainter* p) {
                                         ev.value.sample.id)
                                  .toStdString()) > 0;
     };
-    // 描边标签（文件名模式/控制轨）：文字居中于格子、允许越出 note。性能：raster 引擎下
-    // QPainterPath(文本) 每帧每标签构建+描边+填充极慢（用户反馈文件名模式 <10fps）→ 改为
-    // 8 方向 0.6px 偏移 drawText（快）；文本不超过 note 宽时单次深色绘制（贴亮 note 可读）。
+    // 描边标签（note id/文件名/控制轨）：文字居中于格子、允许越出 note（不裁剪——窄 note/矮 note
+    // 也可读）。性能：raster 引擎下 QPainterPath(文本) 每帧每标签构建+描边+填充极慢（用户反馈
+    // 文件名模式 <10fps）→ 改为 8 方向 0.6px 偏移 drawText（快）。2026-09 用户：**id 与文件名都
+    // 要描边**（原来 id 模式贴 note 内裁剪、无描边，note 窄时看不清）→ 统一走 halo，不再区分
+    // 短文本单次深色绘制（短文本也在亮 note 上叠同色 halo，贴深底溢出部分才可见，无副作用）。
     const auto drawHaloLabel = [&](const QRectF& cell, const qreal y, const QString& label,
                                    const QColor& halo) {
         if (label.isEmpty()) return;
@@ -1133,12 +1154,7 @@ void ChartViewItem::paint(QPainter* p) {
         const int tw = fm.horizontalAdvance(label);
         const qreal baseline = (y - noteH / 2.0) + (fm.ascent() - fm.descent()) / 2.0;
         const QPointF bp(cell.center().x() - tw / 2.0, baseline);
-        if (tw <= static_cast<int>(cell.width()) - 2) {
-            p->setPen(th->bg());  // 短文本：深色（在亮 note 上）
-            p->drawText(bp, label);
-            return;
-        }
-        // 长文本：8 方向浅色描边 + 中心深色（深底也清晰）
+        // 8 方向浅色描边 + 中心深色（深底也清晰；亮 note 上描边同色不可见，无副作用）
         static constexpr qreal kR = 0.6;
         p->setPen(halo);
         for (int i = 0; i < 8; ++i) {
@@ -1150,7 +1166,8 @@ void ChartViewItem::paint(QPainter* p) {
         p->setPen(th->bg());
         p->drawText(bp, label);
     };
-    // note 内采样标签：id 只显示 00-ZZ（无 #WAV 前缀，贴 note 内裁剪）；文件名去扩展名
+    // note 内采样标签：id 只显示 00-ZZ（无 #WAV 前缀）；文件名去扩展名。两者统一走 drawHaloLabel
+    //（带描边、不裁剪——2026-09 用户：原来 id 模式贴 note 内裁剪，note 窄/矮时看不清）。
     const auto drawSampleLabel = [&](const QRectF& colRect, const qreal y,
                                      const beatbench::Note& note) {
         if (m_noteSampleMode == 0 || note.kind == beatbench::NoteKind::Landmine) return;
@@ -1166,21 +1183,8 @@ void ChartViewItem::paint(QPainter* p) {
             if (dot > 0) label.truncate(dot);  // 去扩展名（.wav/.ogg…）
         }
         if (label.isEmpty()) return;
-        if (m_noteSampleMode == 2) {
-            // 文件名可能比 note 长：不裁剪、居中、同轨浅色描边（深底也清晰）
-            drawHaloLabel(colRect, y, label, noteColor(note.lane));
-            return;
-        }
-        p->save();
-        p->setFont(m_noteLabelFont);
-        p->setPen(th->bg());  // 深色文字（note 底色为亮色）
-        const QRectF nr(colRect.x() + 2, y - noteH, colRect.width() - 4, noteH);
-        p->setClipRect(nr);
-        const int tw = QFontMetrics(m_noteLabelFont).horizontalAdvance(label);
-        const int flags = (tw <= nr.width() ? Qt::AlignCenter : Qt::AlignLeft) |
-                          Qt::AlignVCenter | Qt::TextSingleLine;
-        p->drawText(nr, flags, label);
-        p->restore();
+        // id / 文件名统一：居中、带描边、不裁剪（窄/矮 note 也可读）。
+        drawHaloLabel(colRect, y, label, noteColor(note.lane));
     };
     m_lastVisibleNotes = 0;
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
@@ -1225,7 +1229,8 @@ void ChartViewItem::paint(QPainter* p) {
                 (ev.measure == partner.measure &&
                  posDouble(ev.pos) < posDouble(partner.pos));
             // 自己帽（各列）；LN note 用加深色（2026-09）
-            p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
+            p->fillRect(QRectF(r.x() + kNoteHMargin, y - noteH,
+                               r.width() - 2.0 * kNoteHMargin, noteH),
                         noteColor(note.lane, note));
             drawSampleLabel(r, y, note);
             // 体：时间早端画（连接两端 y；画在早端列）。
@@ -1247,20 +1252,26 @@ void ChartViewItem::paint(QPainter* p) {
             if (isSelected(ev)) {
                 p->setPen(QPen(th->onAccent(), 1.2));
                 p->setBrush(Qt::NoBrush);
-                p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0,
+                p->drawRect(QRectF(r.x() + kNoteHMargin - kNoteSelectExpand,
+                                   y - noteH - 1.0,
+                                   r.width() - 2.0 * kNoteHMargin + 2.0 * kNoteSelectExpand,
                                    noteH + 2.0));
             }
             continue;
         }
 
         // 普通单点（含 LN 通道但未配对：深色 + 无连线——数据已是 LN 通道，仅缺伙伴）
-        p->fillRect(QRectF(r.x() + 2, y - noteH, r.width() - 4, noteH),
+        p->fillRect(QRectF(r.x() + kNoteHMargin, y - noteH,
+                           r.width() - 2.0 * kNoteHMargin, noteH),
                     noteColor(note.lane, note));
         drawSampleLabel(r, y, note);
         if (isSelected(ev)) {
             p->setPen(QPen(th->onAccent(), 1.2));
             p->setBrush(Qt::NoBrush);
-            p->drawRect(QRectF(r.x() + 1.5, y - noteH - 1.0, r.width() - 3.0, noteH + 2.0));
+            p->drawRect(QRectF(r.x() + kNoteHMargin - kNoteSelectExpand,
+                               y - noteH - 1.0,
+                               r.width() - 2.0 * kNoteHMargin + 2.0 * kNoteSelectExpand,
+                               noteH + 2.0));
         }
     }
 
