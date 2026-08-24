@@ -23,6 +23,8 @@ Item {
     property bool lnSelectMode: false
     /// 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     property bool showExtras: false
+    /// 槽位弱线显示开关（「网格」按钮；默认开）。吸附不依赖此开关。
+    property bool showGrid: true
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
     property string editorTool: "select"
     /// 平移开关（拖拽选中 note；默认关=自由 2D，勾选=轴锁定）
@@ -59,10 +61,19 @@ Item {
     signal noteRightDeleted(var ref)
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）
     signal moveSelectionRequested(real deltaF, var targetLane)
+    /// 元信息保存成功 → Main 刷新视图/lint + 状态栏
+    signal metaSaved()
+    /// 元信息操作状态提示 → Main 置状态栏
+    signal metaMessage(string msg)
 
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
         return chartView ? chartView.centerMeasure() : 0
+    }
+
+    /// 元信息载入（Main 打开谱面后调用 → metaPanel.reload()）。
+    function reloadMeta() {
+        if (metaPanel) metaPanel.reload()
     }
 
     /// 诊断探针（--probe）：返回 ChartViewItem（含 probe(x,y)），定位选中/移动命中问题。
@@ -141,7 +152,13 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     currentIndex: leftTabs.currentIndex
-                    MetaPanel { meta: root.chartMeta; chartPath: root.chartPath }
+                    MetaPanel {
+                        id: metaPanel
+                        meta: root.chartMeta
+                        chartPath: root.chartPath
+                        onMetaSaved: root.metaSaved()
+                        onMetaMessage: (msg) => root.metaMessage(msg)
+                    }
                     SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file) }
                     LintPanel {
                         onIssuePicked: (id) => {
@@ -214,6 +231,7 @@ Item {
                     noteSampleMode: root.noteSampleMode
                     lnSelectMode: root.lnSelectMode
                     showExtras: root.showExtras
+                    showGrid: root.showGrid
                     editorTool: root.editorTool
                     moveMode: root.moveMode
                     sampleId: root.sampleId

@@ -27,6 +27,7 @@ Item {
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
     property bool lnSelectMode: false    // LN 选取模式（默认关）：点 LN 任一段自动选配对两端
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
+    property bool showGrid: true         // 槽位弱线显示开关（「网格」按钮；吸附不依赖此开关）
     /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
     // ---- 编辑接线（M3） ----
@@ -66,6 +67,7 @@ Item {
         noteSampleMode: root.noteSampleMode
         lnSelectMode: root.lnSelectMode
         showExtras: root.showExtras
+        showGrid: root.showGrid
         selection: root.selection
         perfLog: root.perfLog
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）

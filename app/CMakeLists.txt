@@ -34,6 +34,7 @@ qt_add_qml_module(beatbench
         qml/components/BbTabStrip.qml
         qml/components/BbCheckBox.qml
         qml/components/BbSpinBox.qml
+        qml/components/BbTextField.qml
         qml/components/BbComboBox.qml
         qml/components/SamplePanel.qml
         qml/components/LintPanel.qml

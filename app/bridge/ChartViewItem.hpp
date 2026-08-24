@@ -52,6 +52,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(bool lnSelectMode READ lnSelectMode WRITE setLnSelectMode NOTIFY lnSelectModeChanged)
     /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式，doc 参考 local/doc 截图）
     Q_PROPERTY(bool showExtras READ showExtras WRITE setShowExtras NOTIFY showExtrasChanged)
+    /// 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
+    Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
     /// 水平滚动（列区；轨道列超宽时用——底部滚动条 / Shift+滚轮 / Shift+拖拽）
     Q_PROPERTY(qreal scrollX READ scrollX WRITE setScrollX NOTIFY scrollXChanged)
     Q_PROPERTY(qreal contentWidth READ contentWidth NOTIFY contentWidthChanged)
@@ -104,6 +106,8 @@ public:
     void setLnSelectMode(bool v);
     bool showExtras() const { return m_showExtras; }
     void setShowExtras(bool v);
+    bool showGrid() const { return m_showGrid; }
+    void setShowGrid(bool v);
     qreal scrollX() const { return m_scrollX; }
     void setScrollX(qreal v);
     qreal contentWidth() const;
@@ -161,6 +165,7 @@ signals:
     void noteSampleModeChanged();
     void lnSelectModeChanged();
     void showExtrasChanged();
+    void showGridChanged();
     void scrollXChanged();
     void contentWidthChanged();
     void hoverChanged();
@@ -245,6 +250,7 @@ private:
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
     bool m_lnSelectMode = false;  // LN 选取模式（默认关）：点 LN 任一段自动返回配对
     bool m_showExtras = false;  // BGA 图层通道列（d场景更多轨道）
+    bool m_showGrid = true;   // 槽位弱线显示开关（「网格」按钮）
     qreal m_scrollX = 0.0;
     bool m_perfLog = false;  // paint 帧耗时采样（--perf-log）
     std::vector<Column> m_columns;

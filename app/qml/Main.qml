@@ -82,6 +82,8 @@ ApplicationWindow {
     property bool moveMode: false
     // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
     property bool lnSelectMode: false
+    // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
+    property bool showGrid: true
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）。
     /// ⚠️ 不能用「有 text 属性」判定：Label/Button 都有 text → activeFocusItem 落在
     /// 那些 item 上时恒 true，工具快捷键全部禁用（用户反馈 2026-09 快捷键失效根因）。
@@ -215,8 +217,35 @@ ApplicationWindow {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线；上下按钮 ×2/÷2）")
                 }
-                BbToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
-                BbToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
+                BbToolButton {
+                    text: qsTr("量化")
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    onClicked: quantizeSelection()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
+                }
+                BbToolButton {
+                    text: qsTr("网格")
+                    checkable: false
+                    enabled: chartMeta !== null
+                    onClicked: toggleGrid()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("开/关槽位弱线（网格显示开关；吸附不依赖此开关）")
+                }
+                BbToolButton {
+                    text: qsTr("镜像")
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    onClicked: transformSelection(true, 0)
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")
+                }
+                BbToolButton {
+                    text: qsTr("旋转")
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    onClicked: transformSelection(false, 1)
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")
+                }
                 // 更多轨道：BGA 图层通道列（04/06/07/0A，游玩轨与背景轨之间，iBMSC 式）
                 BbCheckBox {
                     id: extrasCheck
@@ -350,6 +379,7 @@ ApplicationWindow {
                 noteSampleMode: window.noteSampleMode
                 lnSelectMode: window.lnSelectMode
                 showExtras: window.showExtras
+                showGrid: window.showGrid
                 editorTool: window.editorTool
                 moveMode: window.moveMode
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
@@ -370,6 +400,12 @@ ApplicationWindow {
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onMoveSelectionRequested: (deltaF, targetLane) => moveSelection(deltaF, targetLane)
+                onMetaSaved: {
+                    // 元信息保存成功：刷新视图 + lint（状态栏由 metaMessage 设置）
+                    chartSession.refresh()
+                    refreshLint()
+                }
+                onMetaMessage: (msg) => setStatus(msg)
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
                               ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
@@ -534,6 +570,8 @@ ApplicationWindow {
             window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
+            // 元信息可编辑表单载入（meta.list；session 已 load，此后编辑保存走 meta.edit）
+            if (typeof editPage !== "undefined" && editPage) editPage.reloadMeta()
             // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
             // 预计算 + 链式单参 .arg（经典稳妥形式）
             var wavCount = r.result.samples && r.result.samples.wav
@@ -834,6 +872,42 @@ ApplicationWindow {
             window.selectionRefs = []
             setStatus(qsTr("已转换 %1 个 note（单点↔LN）").arg(r.notes))
         }
+    }
+    /// 量化：把选中 note 的 pos 吸附到当前 snap 网格（note.quantize；一个 undo 步）。
+    function quantizeSelection() {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("先选中 note（点击/框选）再量化"))
+            return
+        }
+        var r = sessionCmd("note.quantize", {
+            selection: window.selectionRefs.slice(),
+            snap: { num: window.snapNum, den: window.snapDen }
+        })
+        if (r) {
+            window.selectionRefs = []
+            setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(window.snapNum).arg(window.snapDen))
+        }
+    }
+    /// 变换：镜像（mirror=true）/ 旋转（rotate=±1）；note.transform；一个 undo 步。
+    function transformSelection(mirror, rotate) {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("先选中 note（点击/框选）再变换"))
+            return
+        }
+        var args = { selection: window.selectionRefs.slice() }
+        if (mirror) args.mirror = true
+        if (rotate !== 0) args.rotate = rotate
+        var r = sessionCmd("note.transform", args)
+        if (r) {
+            window.selectionRefs = []
+            setStatus(mirror ? qsTr("已镜像 %1 个 note").arg(r.notes)
+                             : qsTr("已旋转 %1 个 note").arg(r.notes))
+        }
+    }
+    /// 网格开关：折叠/展开槽位弱线显示（不影响吸附）。
+    function toggleGrid() {
+        window.showGrid = !window.showGrid
+        setStatus(window.showGrid ? qsTr("网格显示：开") : qsTr("网格显示：关"))
     }
     function copySelection() {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {

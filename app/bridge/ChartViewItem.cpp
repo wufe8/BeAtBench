@@ -509,6 +509,13 @@ void ChartViewItem::setShowExtras(bool v) {
     update();
 }
 
+void ChartViewItem::setShowGrid(bool v) {
+    if (m_showGrid == v) return;
+    m_showGrid = v;
+    emit showGridChanged();
+    update();
+}
+
 void ChartViewItem::setPerfLog(bool v) {
     if (m_perfLog == v) return;
     m_perfLog = v;
@@ -1005,9 +1012,10 @@ void ChartViewItem::paint(QPainter* p) {
     for (int m = first; m <= last; ++m) {
         // 槽位弱线（= snap 粒度 snapNum/snapDen 小节；BMS 时间单位 = 切分槽位，显示与吸附同源。
         // snapDen/snapNum > 64 粒度过密（如 1/192），只画小节线不画弱线）
+        // m_showGrid = false 时不画弱线（「网格」按钮；吸附计算不依赖此开关）
         const int num = std::max(1, m_snapNum), den = std::max(1, m_snapDen);
         const int slotCount = std::max(1, den / num);  // 每小节槽数（整数步长）
-        if (slotCount > 1 && slotCount <= 64) {
+        if (m_showGrid && slotCount > 1 && slotCount <= 64) {
             for (int i = 1; i < slotCount; ++i) {
                 p->setPen(weak);
                 p->drawLine(QPointF(metaRight, yOf(m + i / static_cast<qreal>(slotCount))),
