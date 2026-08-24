@@ -33,6 +33,11 @@ SpinBox {
         inputMethodHints: Qt.ImhFormattedNumbersOnly
         onAccepted: root.value = root.textFromValue(text, root.locale)
         selectByMouse: true
+        // 2026-09：Esc 释放焦点（否则焦点粘住 → 快捷键被文本框吞掉）
+        Keys.onEscapePressed: {
+            root.focus = false
+            deselect()
+        }
     }
 
     // 上下按钮：stepFactor>0 时用 MouseArea 完全接管（吞掉点击，底层 QQuickIndicatorButton

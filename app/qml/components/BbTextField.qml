@@ -22,4 +22,10 @@ TextField {
         border.color: root.activeFocus ? Theme.primary : Theme.borderStrong
         color: Theme.surface2
     }
+
+    // 2026-09：Esc 释放焦点 + 清除文本选中（否则焦点粘住 → 快捷键被文本框吞掉）
+    Keys.onEscapePressed: {
+        root.focus = false
+        root.deselect()
+    }
 }

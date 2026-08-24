@@ -59,12 +59,15 @@ Item {
     signal canvasClicked()
     /// 右键命中 note（删除）
     signal noteRightDeleted(var ref)
-    /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）
-    signal moveSelectionRequested(real deltaF, var targetLane)
+    /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
+    /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
+    signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
     /// 元信息保存成功 → Main 刷新视图/lint + 状态栏
     signal metaSaved()
     /// 元信息操作状态提示 → Main 置状态栏
     signal metaMessage(string msg)
+    /// 编辑区任意按下 → Main 释放文本框焦点
+    signal editAreaPressed()
 
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
@@ -247,7 +250,8 @@ Item {
                     onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
                     onCanvasClicked: () => root.canvasClicked()
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
-                    onMoveSelectionRequested: (deltaF, targetLane) => root.moveSelectionRequested(deltaF, targetLane)
+                    onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => root.moveSelectionRequested(deltaF, targetLane, sourceLane)
+                    onEditAreaPressed: root.editAreaPressed()
                 }
             }
         }

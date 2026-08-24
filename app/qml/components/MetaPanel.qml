@@ -109,7 +109,7 @@ ColumnLayout {
                     Label {
                         text: modelData.key + ":"
                         color: Theme.textMuted
-                        Layout.preferredWidth: 108
+                        Layout.preferredWidth: 92
                         font.family: Theme.fontMono
                         font.pixelSize: Theme.fsBase
                     }
@@ -142,7 +142,7 @@ ColumnLayout {
                         Label {
                             text: modelData.key + ":"
                             color: Theme.textMuted
-                            Layout.preferredWidth: 108
+                            Layout.preferredWidth: 92
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fsBase
                         }

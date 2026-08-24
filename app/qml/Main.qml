@@ -91,6 +91,12 @@ ApplicationWindow {
     readonly property bool textInputFocused:
         window.activeFocusItem && "inputMethodHints" in window.activeFocusItem
 
+    /// 释放文本框焦点（2026-09）：点击编辑区/空白时，把焦点从文本框移走，避免快捷键被文本框吞掉。
+    function clearTextFocus() {
+        if (window.activeFocusItem && "inputMethodHints" in window.activeFocusItem)
+            window.contentItem.forceActiveFocus()
+    }
+
     // ---------- 全局快捷键（QML MenuItem 无 shortcut 属性，用 Shortcut 类型） ----------
     Shortcut { sequence: "Ctrl+O"; onActivated: fileDialog.open() }
     Shortcut { sequence: "Ctrl+S"; onActivated: saveChart() }
@@ -218,14 +224,6 @@ ApplicationWindow {
                     ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线；上下按钮 ×2/÷2）")
                 }
                 BbToolButton {
-                    text: qsTr("量化")
-                    // 2026-09：始终可点（未选中时给「先选中」提示），避免「未解封无法点击」困惑
-                    enabled: chartMeta !== null
-                    onClicked: quantizeSelection()
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
-                }
-                BbToolButton {
                     text: qsTr("网格")
                     // 外部态驱动高亮（外部激活而非 checkable 自翻，避免断绑定，doc/04 §5）
                     active: window.showGrid
@@ -235,15 +233,23 @@ ApplicationWindow {
                     ToolTip.text: qsTr("开/关槽位弱线（网格显示开关；吸附不依赖此开关）")
                 }
                 BbToolButton {
+                    text: qsTr("量化")
+                    // 2026-09：变换类按钮需先选中 note 才点亮（量化/镜像/旋转一致）
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    onClicked: quantizeSelection()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
+                }
+                BbToolButton {
                     text: qsTr("镜像")
-                    enabled: chartMeta !== null
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
                     onClicked: transformSelection(true, 0)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")
                 }
                 BbToolButton {
                     text: qsTr("旋转")
-                    enabled: chartMeta !== null
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
                     onClicked: transformSelection(false, 1)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")
@@ -329,7 +335,7 @@ ApplicationWindow {
                 // 单点 ↔ LN 转换（2026-09 用户）：选中游玩轨 note 一键转换
                 BbToolButton {
                     text: qsTr("单点/LN")
-                    enabled: chartMeta !== null
+                    enabled: chartMeta !== null && window.selectionRefs.length > 0
                     onClicked: toggleLnSelection()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("按 LNTYPE 切换选中 note 的 LN 通道（LNTYPE 1：普通↔5x/6x）；"
@@ -401,13 +407,14 @@ ApplicationWindow {
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
-                onMoveSelectionRequested: (deltaF, targetLane) => moveSelection(deltaF, targetLane)
+                onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => moveSelection(deltaF, targetLane, sourceLane)
                 onMetaSaved: {
                     // 元信息保存成功：刷新视图 + lint（状态栏由 metaMessage 设置）
                     chartSession.refresh()
                     refreshLint()
                 }
                 onMetaMessage: (msg) => setStatus(msg)
+                onEditAreaPressed: clearTextFocus()
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
                               ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
@@ -775,31 +782,30 @@ ApplicationWindow {
     /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）。
     /// 2026-09 跨命名空间：targetLane 带 metaKind（bpm/stop）→ note.convert（id 不变）；
     /// BGA 图层列（bgaLayer >= 0）→ note.convert（bga_*）；其余 = note.moveRegion。
-    /// ⚠️ 用 note.moveRegion：selection + 统一 delta（{measure,pos}+可选 to_lane）→ 一个 undo 步。
-    function moveSelection(deltaF, targetLane) {
+    /// 移动选中 note（统一位移：拖拽/框选整段/多选）。
+    /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）；
+    /// sourceLane = 拖起 note 所在轨（{player,kind,index}）。跨命名空间（BPM/STOP/BGA）→ note.convert；
+    /// 普通轨 → note.move（moves 数组，**跨通道只把「拖起轨 sourceLane 的 note」改到目标轨**，
+    /// 其余 note 仅时间移动、保持原轨道——修复 2026-09 多选跨通道全部挤到松开通道的 bug）。
+    /// ⚠️ note.move = CompositeCommand 一个 undo 步。移动后**保持选中**（selectionRefs 更新到新位置）。
+    function moveSelection(deltaF, targetLane, sourceLane) {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（选择工具点击/框选）再移动"))
             return
         }
+        const refs = window.selectionRefs.slice()
         // delta snap：把连续拍位位移吸附到当前槽（snapNum/snapDen 小节），再拆成
         // {measure(int 小节分量), pos(节内分数分量)}。BMS 槽位为离散步长，吸附后对齐网格。
-        var num = window.snapNum, den = window.snapDen
-        var slots = Math.max(1, Math.floor(den / num))
-        var snappedF = Math.round(deltaF * slots) / slots  // 吸附到整槽
-        var m = Math.floor(snappedF)
-        var frac = snappedF - m
-        var deltaPos = { num: Math.round(frac * den), den: den }
-        var delta = { measure: m, pos: deltaPos }
-        var args = { selection: window.selectionRefs.slice(), delta: delta }
+        const num = window.snapNum, den = window.snapDen
+        const slots = Math.max(1, Math.floor(den / num))
+        const snappedF = Math.round(deltaF * slots) / slots
+        const m = Math.floor(snappedF)
+        const frac = snappedF - m
+        const delta = { measure: m, pos: { num: Math.round(frac * den), den: den } }
         if (targetLane && targetLane.valid) {
-            // 跨命名空间：BPM/STOP 列（metaKind）→ note.convert；BGA 图层列 →
-            // note.convert（bga_*）；BGM 子轨（bgmLine >= 0）→ moveRegion 的 to_bgm_line。
+            // 跨命名空间：BPM/STOP 列（metaKind）→ note.convert；BGA 图层列 → note.convert（bga_*）
             if (targetLane.metaKind === "bpm" || targetLane.metaKind === "stop") {
-                var r0 = sessionCmd("note.convert", {
-                    selection: window.selectionRefs.slice(),
-                    target: targetLane.metaKind,
-                    delta: delta
-                })
+                const r0 = sessionCmd("note.convert", { selection: refs, target: targetLane.metaKind, delta: delta })
                 if (r0) {
                     window.selectionRefs = []
                     setStatus(qsTr("已转换 %1 个 note → %2（id 不变）").arg(r0.notes).arg(targetLane.metaKind.toUpperCase()))
@@ -807,52 +813,70 @@ ApplicationWindow {
                 return
             }
             if (targetLane.bgaLayer !== undefined && targetLane.bgaLayer >= 0) {
-                var bgaTarget = "bga_base"
-                if (targetLane.bgaLayer === 1) bgaTarget = "bga_poor"
-                else if (targetLane.bgaLayer === 2) bgaTarget = "bga_layer"
-                else if (targetLane.bgaLayer === 3) bgaTarget = "bga_layer2"
-                var r1 = sessionCmd("note.convert", {
-                    selection: window.selectionRefs.slice(),
-                    target: bgaTarget,
-                    delta: delta
-                })
+                const bgaTarget = targetLane.bgaLayer === 1 ? "bga_poor"
+                                  : targetLane.bgaLayer === 2 ? "bga_layer"
+                                  : targetLane.bgaLayer === 3 ? "bga_layer2" : "bga_base"
+                const r1 = sessionCmd("note.convert", { selection: refs, target: bgaTarget, delta: delta })
                 if (r1) {
                     window.selectionRefs = []
                     setStatus(qsTr("已转换 %1 个 note → BGA（id 不变）").arg(r1.notes))
                 }
                 return
             }
-            // 同一轨道（源 lane 与目标 lane 全等）→ 纯时间移动：不传 to_lane，
-            // 避免触发 to_bgm_line 行号重排 / 误判跨轨（问题1：纵向拖动看起来没动）。
-            // ⚠️ BGM 子轨（bgmLine>=0）例外：子轨间移动 = 行号变化，必须传 to_bgm_line。
-            var sameLane = true
-            for (var si = 0; si < window.selectionRefs.length; si++) {
-                var sr = window.selectionRefs[si]
-                if (sr.lane.kind !== targetLane.laneKind ||
-                        sr.lane.index !== targetLane.laneIndex ||
-                        sr.lane.player !== targetLane.lanePlayer) {
-                    sameLane = false
-                    break
-                }
-            }
-            if (sameLane && !(targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)) {
-                // 同轨且非 BGM 子轨：纯时间移动——不传 to_lane/to_bgm_line
-            } else {
-                args.to_lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
-                                 index: targetLane.laneIndex }
+        }
+        // 普通轨道移动：逐 note 计算 to（绝对位置 = 源 + delta，带进位），跨通道只改「拖起轨」note。
+        const moves = []
+        const newRefs = []
+        for (let i = 0; i < refs.length; i++) {
+            const ref = refs[i]
+            const to = addPosDelta(ref, delta)
+            let changedLane = false
+            if (targetLane && targetLane.valid && sourceLane &&
+                    laneEquals(ref.lane, sourceLane.kind, sourceLane.index, sourceLane.player) &&
+                    !laneEquals(ref.lane, targetLane.laneKind, targetLane.laneIndex, targetLane.lanePlayer)) {
+                to.lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
+                            index: targetLane.laneIndex }
                 if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
-                    args.to_bgm_line = targetLane.bgm_line
+                    to.bgm_line = targetLane.bgm_line
+                changedLane = true
             }
+            moves.push({ from: ref, to: to })
+            // 移动后保持选中：selectionRefs 更新到新位置（measure/pos/lane/bgm_line）
+            const nr = { measure: to.measure, pos: to.pos,
+                         lane: changedLane ? { player: targetLane.lanePlayer,
+                                               kind: targetLane.laneKind,
+                                               index: targetLane.laneIndex } : ref.lane,
+                         sample: ref.sample }
+            if (to.bgm_line !== undefined) nr.bgm_line = to.bgm_line
+            else if (ref.bgm_line !== undefined) nr.bgm_line = ref.bgm_line
+            newRefs.push(nr)
         }
-        var r = sessionCmd("note.moveRegion", args)
+        const r = sessionCmd("note.move", { moves: moves })
         if (r) {
-            window.selectionRefs = []
-            // 文案：有实际时间位移 → +拍；纯换轨（deltaF≈0 且有目标列）→ 改通道
-            if (targetLane && targetLane.valid && Math.abs(deltaF) < 0.0001)
-                setStatus(qsTr("已移动 %1 个 note（改通道）").arg(r.notes))
-            else
-                setStatus(qsTr("已移动 %1 个 note（+%2 拍）").arg(r.notes).arg(deltaF.toFixed(3)))
+            window.selectionRefs = newRefs   // 保持选中（新位置）
+            const chan = targetLane && targetLane.valid && Math.abs(deltaF) < 0.0001
+            setStatus(chan ? qsTr("已移动 %1 个 note（改通道）").arg(r.moved)
+                           : qsTr("已移动 %1 个 note（+%2 拍）").arg(r.moved).arg(deltaF.toFixed(3)))
         }
+    }
+    /// 源位置 + 位移增量 → 绝对目标位置（带小节进位；分数约分，保证与 core Rational 一致）。
+    function addPosDelta(ref, delta) {
+        const rn = ref.pos.num, rd = ref.pos.den
+        const dn = delta.pos.num, dd = delta.pos.den
+        const newNum = rn * dd + dn * rd
+        const newDen = rd * dd
+        const carry = Math.floor(newNum / newDen)
+        const g = gcd(newNum - carry * newDen, newDen)
+        return { measure: ref.measure + delta.measure + carry,
+                 pos: { num: (newNum - carry * newDen) / g, den: newDen / g } }
+    }
+    function gcd(a, b) {
+        a = Math.abs(a); b = Math.abs(b)
+        while (b) { const t = b; b = a % b; a = t }
+        return a || 1
+    }
+    function laneEquals(lane, kind, index, player) {
+        return lane && lane.kind === kind && lane.index === index && lane.player === player
     }
     /// 单点 ↔ LN 转换（工具栏「单点/LN」按钮；selection 批量一个 undo 步）。
     /// LNTYPE 翻转选中 note 的 LN 通道（LNTYPE 1：ln_channel ←→ 普通；配对由 rebuild 自动）。
@@ -876,21 +900,34 @@ ApplicationWindow {
         }
     }
     /// 量化：把选中 note 的 pos 吸附到当前 snap 网格（note.quantize；一个 undo 步）。
+    /// 量化后**保持选中**（selectionRefs 的 pos 更新到吸附值）。
     function quantizeSelection() {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（点击/框选）再量化"))
             return
         }
+        const sn = window.snapNum, sd = window.snapDen
         var r = sessionCmd("note.quantize", {
             selection: window.selectionRefs.slice(),
-            snap: { num: window.snapNum, den: window.snapDen }
+            snap: { num: sn, den: sd }
         })
         if (r) {
-            window.selectionRefs = []
-            setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(window.snapNum).arg(window.snapDen))
+            // 保持选中：pos 更新到吸附值（k*snapNum/snapDen，约分）
+            window.selectionRefs = window.selectionRefs.map(function(ref) {
+                const p = ref.pos.num / ref.pos.den
+                const k = Math.round(p * sd / sn)
+                const nnum = k * sn, nden = sd
+                const g = gcd(nnum, nden)
+                return { measure: ref.measure, pos: { num: nnum / g, den: nden / g },
+                         lane: ref.lane, sample: ref.sample,
+                         bgm_line: ref.bgm_line }
+            })
+            setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(sn).arg(sd))
         }
     }
     /// 变换：镜像（mirror=true）/ 旋转（rotate=±1）；note.transform；一个 undo 步。
+    /// 变换后**保持选中**（selectionRefs 的 key 轨道更新为镜像/旋转后的下标；相对位置不变）。
+    /// ⚠️ 只处理 key 轨（镜像/旋转不影响皿/踏板/BGM）；按 7key 映射（key i ↔ key 8-i）。
     function transformSelection(mirror, rotate) {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（点击/框选）再变换"))
@@ -901,7 +938,14 @@ ApplicationWindow {
         if (rotate !== 0) args.rotate = rotate
         var r = sessionCmd("note.transform", args)
         if (r) {
-            window.selectionRefs = []
+            window.selectionRefs = window.selectionRefs.map(function(ref) {
+                if (ref.lane.kind !== "key") return ref   // 非 key 轨不变
+                const idx = ref.lane.index
+                const nidx = mirror ? (8 - idx) : (((idx - 1 + rotate) % 7 + 7) % 7 + 1)
+                return { measure: ref.measure, pos: ref.pos,
+                         lane: { player: ref.lane.player, kind: "key", index: nidx },
+                         sample: ref.sample, bgm_line: ref.bgm_line }
+            })
             setStatus(mirror ? qsTr("已镜像 %1 个 note").arg(r.notes)
                              : qsTr("已旋转 %1 个 note").arg(r.notes))
         }

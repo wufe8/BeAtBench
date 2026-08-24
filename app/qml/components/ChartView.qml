@@ -47,9 +47,11 @@ Item {
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
+    signal editAreaPressed()                // 编辑区任意按下 → Main 释放文本框焦点（2026-09）
     // 平移：deltaF = 时间轴位移（拍位小数，0=不动）；targetLane = 横向移动目标列
-    // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）
-    signal moveSelectionRequested(real deltaF, var targetLane)
+    // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）；
+    // sourceLane = 拖起的 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note，2026-09）
+    signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
 
     onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
 
@@ -174,6 +176,7 @@ Item {
     property real _moveStartF: 0    // 按下的拍位（measure + pos 小数）
     property real _moveDeltaF: 0    // 当前时间位移（拍位小数）
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
+    property var _moveSourceLane: null  // 拖起的 note 所在轨（{player,kind,index}；跨通道多换轨判定用）
 
     /// 平移判定：按下点在选中集内的某个 note 上？
     function isSelectedNote(hit) {
@@ -220,6 +223,7 @@ Item {
                 _moving = true
                 _moveDeltaF = 0
                 _moveTargetLane = null
+                _moveSourceLane = hit.lane   // 拖起 note 的轨（跨通道多选移动只动此轨，2026-09）
                 _moveStartF = view.measureAtY(y)
                 return
             }
@@ -298,7 +302,7 @@ Item {
             }
             if (Math.abs(deltaF) > 0.001 || targetLane) {
                 // 应用前 snap 时间（拍位吸附到 snapNum/snapDen；在 Main 侧再做）
-                root.moveSelectionRequested(deltaF, targetLane)
+                root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane)
             }
             _dragged = false
             return
@@ -359,6 +363,8 @@ Item {
                      : Qt.ArrowCursor
 
         onPressed: (mouse) => {
+            // 2026-09：编辑区任意按下 → Main 释放文本框焦点（否则快捷键被文本框吞掉）
+            root.editAreaPressed()
             if (mouse.button === Qt.RightButton) {
                 // 右键命中 note → 直接删除（BMS 编辑器惯例；select/pan/note 工具下可用）
                 if (root.editorTool === "select" || root.editorTool === "pan" ||
