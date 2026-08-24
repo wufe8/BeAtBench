@@ -1570,6 +1570,45 @@ public:
     }
 };
 
+// —— 原始控制行「扩展代码」（2026-09，格式兜底）——
+// meta.raw：列出 chart.raw_lines（#RANDOM/#IF/#SWITCH 块、未知控制指令；写回原样输出）。
+// meta.rawEdit：{lines:[...]} 整组替换（RawLinesEditCommand，一个 undo 步；空值=清空）。
+
+class MetaRawCommand : public Command {
+public:
+    std::string_view name() const override { return "meta.raw"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        Json out = Json::object();
+        Json lines = Json::array();
+        for (const auto& l : session.chart().raw_lines) lines.push_back(l);
+        out.set("lines", std::move(lines));
+        return out;
+    }
+};
+
+class MetaRawEditCommand : public Command {
+public:
+    std::string_view name() const override { return "meta.rawEdit"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const Json* lines = args.find("lines");
+        if (!lines || !lines->is_array()) throw CommandError("bad_args", "缺少 lines 数组");
+        std::vector<std::string> lv;
+        for (const auto& e : lines->as_array()) {
+            if (!e.is_string()) throw CommandError("bad_args", "lines 元素应为字符串");
+            lv.push_back(e.as_str());
+        }
+        session.exec(std::make_unique<edit::RawLinesEditCommand>(std::move(lv)));
+        Json out = Json::object();
+        out.set("ok", true);
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 class SessionUndoCommand : public Command {
 public:
     std::string_view name() const override { return "session.undo"; }
@@ -1695,6 +1734,8 @@ void register_builtin_commands(Registry& registry) {
     // M3 元信息编辑（头部字段；批量一个 undo 步）
     registry.add(std::make_unique<MetaListCommand>());
     registry.add(std::make_unique<MetaEditCommand>());
+    registry.add(std::make_unique<MetaRawCommand>());
+    registry.add(std::make_unique<MetaRawEditCommand>());
 }
 
 }  // namespace beatbench::cmd

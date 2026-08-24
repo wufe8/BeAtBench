@@ -1102,4 +1102,24 @@ std::string MetaEditCommand::describe() const {
     return s;
 }
 
+RawLinesEditCommand::RawLinesEditCommand(std::vector<std::string> lines)
+    : m_lines(std::move(lines)) {}
+
+void RawLinesEditCommand::apply(Chart& chart) {
+    m_old = chart.raw_lines;             // 快照旧原始行
+    m_changed = m_old != m_lines;        // 无变化 → invert 无操作
+    if (!m_changed) return;
+    chart.raw_lines = m_lines;           // 整组替换（格式兜底）
+}
+
+void RawLinesEditCommand::invert(Chart& chart) {
+    if (!m_changed) return;
+    chart.raw_lines = m_old;             // 恢复旧原始行
+    m_changed = false;
+}
+
+std::string RawLinesEditCommand::describe() const {
+    return "编辑扩展代码（原始行 " + std::to_string(m_lines.size()) + " 行）";
+}
+
 }  // namespace beatbench::edit

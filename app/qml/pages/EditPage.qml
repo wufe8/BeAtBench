@@ -62,10 +62,10 @@ Item {
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
     /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
-    /// 元信息保存成功 → Main 刷新视图/lint + 状态栏
-    signal metaSaved()
     /// 元信息操作状态提示 → Main 置状态栏
     signal metaMessage(string msg)
+    /// 元信息面板修改（保存前须先应用：CollectMetaEdits / applyRawEdits）
+    signal metaDirty()
     /// 编辑区任意按下 → Main 释放文本框焦点
     signal editAreaPressed()
 
@@ -77,6 +77,18 @@ Item {
     /// 元信息载入（Main 打开谱面后调用 → metaPanel.reload()）。
     function reloadMeta() {
         if (metaPanel) metaPanel.reload()
+    }
+    /// 元信息重置（放弃改动）→ Main 调用。
+    function resetMeta() {
+        if (metaPanel) metaPanel.reset()
+    }
+    /// 元信息脏字段编辑集（Main 在保存前调用；空数组 = 无改动）。
+    function collectMetaEdits() {
+        return metaPanel ? metaPanel.collectEdits() : []
+    }
+    /// 应用「扩展代码」原始行改动（Main 在保存前调用；返回是否应用）。
+    function applyRawEdits() {
+        return metaPanel ? metaPanel.applyRawEdits() : false
     }
 
     /// 诊断探针（--probe）：返回 ChartViewItem（含 probe(x,y)），定位选中/移动命中问题。
@@ -159,7 +171,6 @@ Item {
                         id: metaPanel
                         meta: root.chartMeta
                         chartPath: root.chartPath
-                        onMetaSaved: root.metaSaved()
                         onMetaMessage: (msg) => root.metaMessage(msg)
                     }
                     SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file) }

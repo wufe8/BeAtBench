@@ -287,4 +287,21 @@ private:
     bool m_changed = false;
 };
 
+/// 原始控制行整体替换（「扩展代码」格式兜底，2026-09）：把 chart.raw_lines 整组换成新值。
+/// 只替换「原始行」（#RANDOM/#IF/#SWITCH 块、未知控制指令；写回时原样输出），
+/// 不触碰结构化字段（meta/notes/timing）。原子 undo（快照旧/新整组）。
+class RawLinesEditCommand : public EditCommand {
+public:
+    explicit RawLinesEditCommand(std::vector<std::string> lines);
+    std::string name() const override { return "meta.rawEdit"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::vector<std::string> m_lines;   ///< 新原始行
+    std::vector<std::string> m_old;     ///< 旧原始行（invert 恢复）
+    bool m_changed = false;
+};
+
 }  // namespace beatbench::edit

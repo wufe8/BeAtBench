@@ -408,11 +408,6 @@ ApplicationWindow {
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => moveSelection(deltaF, targetLane, sourceLane)
-                onMetaSaved: {
-                    // 元信息保存成功：刷新视图 + lint（状态栏由 metaMessage 设置）
-                    chartSession.refresh()
-                    refreshLint()
-                }
                 onMetaMessage: (msg) => setStatus(msg)
                 onEditAreaPressed: clearTextFocus()
                 onToolNotReady: (tool) => {
@@ -824,16 +819,32 @@ ApplicationWindow {
                 return
             }
         }
-        // 普通轨道移动：逐 note 计算 to（绝对位置 = 源 + delta，带进位），跨通道只改「拖起轨」note。
+        // 普通轨道移动：逐 note 计算 to（绝对位置 = 源 + delta，带进位）。
+        // **通道「同距离偏移」**（2026-09 用户：拖动时每个选中 note 都移动相同距离）：
+        // 拖起轨 key i → 目标轨 key j，偏移 = j-i；所有选中 key note 左/右移相同量（保相对位置），
+        // 不再「全部挤到目标轨」或「只动拖起轨」。非 key note（皿/踏板/BGM）不变；
+        // 跨 kind（如 key→皿）走 sourceLane 兜底（拖起轨 note 改到目标 kind）。
+        let channelOffset = 0
+        const keyToKey = sourceLane && sourceLane.kind === "key" &&
+                         targetLane && targetLane.valid && targetLane.laneKind === "key"
+        if (keyToKey) channelOffset = targetLane.laneIndex - sourceLane.index
         const moves = []
         const newRefs = []
         for (let i = 0; i < refs.length; i++) {
             const ref = refs[i]
             const to = addPosDelta(ref, delta)
             let changedLane = false
-            if (targetLane && targetLane.valid && sourceLane &&
+            if (channelOffset !== 0 && ref.lane.kind === "key") {
+                // 同距离偏移（key 轨；钳到合法 key 范围 1..7）
+                const ni = Math.max(1, Math.min(7, ref.lane.index + channelOffset))
+                if (ni !== ref.lane.index) {
+                    to.lane = { player: ref.lane.player, kind: "key", index: ni }
+                    changedLane = true
+                }
+            } else if (targetLane && targetLane.valid && sourceLane &&
                     laneEquals(ref.lane, sourceLane.kind, sourceLane.index, sourceLane.player) &&
                     !laneEquals(ref.lane, targetLane.laneKind, targetLane.laneIndex, targetLane.lanePlayer)) {
+                // 跨 kind 兜底：拖起轨 note 改到目标 kind（其余 keep）
                 to.lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
                             index: targetLane.laneIndex }
                 if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
@@ -843,9 +854,7 @@ ApplicationWindow {
             moves.push({ from: ref, to: to })
             // 移动后保持选中：selectionRefs 更新到新位置（measure/pos/lane/bgm_line）
             const nr = { measure: to.measure, pos: to.pos,
-                         lane: changedLane ? { player: targetLane.lanePlayer,
-                                               kind: targetLane.laneKind,
-                                               index: targetLane.laneIndex } : ref.lane,
+                         lane: changedLane ? to.lane : ref.lane,
                          sample: ref.sample }
             if (to.bgm_line !== undefined) nr.bgm_line = to.bgm_line
             else if (ref.bgm_line !== undefined) nr.bgm_line = ref.bgm_line
@@ -1000,6 +1009,16 @@ ApplicationWindow {
         }
     }
     function saveChart() {
+        // 2026-09：元信息修改交整个文件保存——先应用元信息编辑 + 扩展代码，再 session.save。
+        if (typeof editPage !== "undefined" && editPage) {
+            const edits = editPage.collectMetaEdits()
+            if (edits && edits.length > 0) {
+                const em = sessionCmd("meta.edit", { edits: edits })
+                if (em) setStatus(qsTr("元信息已保存 %1 处").arg(edits.length))
+            }
+            editPage.applyRawEdits()
+            refreshLint()
+        }
         var r = sessionCmd("session.save", { overwrite: true })
         if (r) {
             window.chartPath = r.output
@@ -1007,6 +1026,11 @@ ApplicationWindow {
         }
     }
     function saveChartAs(path) {
+        if (typeof editPage !== "undefined" && editPage) {
+            const edits = editPage.collectMetaEdits()
+            if (edits && edits.length > 0) sessionCmd("meta.edit", { edits: edits })
+            editPage.applyRawEdits()
+        }
         var r = sessionCmd("session.save", { path: path, overwrite: true })
         if (r) {
             window.chartPath = r.output
