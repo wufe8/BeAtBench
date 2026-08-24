@@ -219,14 +219,16 @@ ApplicationWindow {
                 }
                 BbToolButton {
                     text: qsTr("量化")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    // 2026-09：始终可点（未选中时给「先选中」提示），避免「未解封无法点击」困惑
+                    enabled: chartMeta !== null
                     onClicked: quantizeSelection()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
                 }
                 BbToolButton {
                     text: qsTr("网格")
-                    checkable: false
+                    // 外部态驱动高亮（外部激活而非 checkable 自翻，避免断绑定，doc/04 §5）
+                    active: window.showGrid
                     enabled: chartMeta !== null
                     onClicked: toggleGrid()
                     ToolTip.visible: hovered
@@ -234,14 +236,14 @@ ApplicationWindow {
                 }
                 BbToolButton {
                     text: qsTr("镜像")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    enabled: chartMeta !== null
                     onClicked: transformSelection(true, 0)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")
                 }
                 BbToolButton {
                     text: qsTr("旋转")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    enabled: chartMeta !== null
                     onClicked: transformSelection(false, 1)
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")
@@ -327,7 +329,7 @@ ApplicationWindow {
                 // 单点 ↔ LN 转换（2026-09 用户）：选中游玩轨 note 一键转换
                 BbToolButton {
                     text: qsTr("单点/LN")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
+                    enabled: chartMeta !== null
                     onClicked: toggleLnSelection()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("按 LNTYPE 切换选中 note 的 LN 通道（LNTYPE 1：普通↔5x/6x）；"

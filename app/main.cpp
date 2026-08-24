@@ -204,6 +204,16 @@ int main(int argc, char** argv) {
             root->setProperty("debugPerfLog", true);
     }
 
+    // --grid <0|1>：调试网格开关（验证 showGrid → 槽位弱线绘制链路；配 --screenshot）
+    const int gridIdx = args.indexOf(QStringLiteral("--grid"));
+    if (gridIdx >= 0 && gridIdx + 1 < args.size()) {
+        bool ok = false;
+        const int g = args.at(gridIdx + 1).toInt(&ok);
+        if (ok && g >= 0 && g <= 1)
+            if (QObject* root = engine.rootObjects().value(0))
+                root->setProperty("showGrid", g == 1);
+    }
+
     // --zoom-at <y> <factor>：调试缩放锚点（ChartView 局部 y；验证 zoomToCursor 数学）
     const int zoomYIdx = args.indexOf(QStringLiteral("--zoom-at"));
     if (zoomYIdx >= 0 && zoomYIdx + 2 < args.size()) {

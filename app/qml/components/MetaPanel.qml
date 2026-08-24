@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 元信息面板（左 Dock）：显示 + 编辑 dispatch(info)/meta.list 返回的 Chart.meta 常用字段。
-// 2026-09 用户：原只读、UI 密度过小不适合修改 → 加大 DPI（fsBase 字号 + 8px 间距 + BbTextField
-// 控件）+ 改为可编辑表单（meta.list 载入 / meta.edit 保存 / 重置 / 脏标记）。
-// 保存成功 → 发 metaSaved（Main 刷新视图/lint + 状态栏）；meta.edit 为 CompositeCommand 可撤销。
+// 元信息面板（左 Dock）：显示 + 编辑 dispatch(info)/meta.list 返回的 Chart.meta 字段。
+// 2026-09 用户迭代：加大 DPI（fsBase + 8px 间距 + BbTextField）+ 可编辑表单（meta.list / meta.edit /
+// 重置）+ **标题已收窄（spacing 2，去掉标题↔字段大间隙）** + **去掉底部路径**（右上角已显示路径）
+// + **次要字段「更多字段」折叠组**（对照 iBMSC 文件头/扩展区，只做信息参考，不做其右 dock 布局）。
+// 常用字段（TITLE/ARTIST/GENRE/BPM 等）恒显；BACKBMP/STAGEFILE 等其余字段收进可折叠组。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -18,6 +19,13 @@ ColumnLayout {
 
     /// 编辑字段状态（orig = 载入时的原始值，用于脏判定；value = 当前编辑值）
     property var fields: []
+    /// 常用字段（恒显）；其余收进「更多字段」折叠组（对照文档元信息清单）
+    readonly property var primaryKeys: ["TITLE", "SUBTITLE", "ARTIST", "GENRE", "BPM",
+        "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
+    property bool expandSecondary: false
+    readonly property var primaryFields: root.fields.filter(f => root.isPrimary(f.key))
+    readonly property var secondaryFields: root.fields.filter(f => !root.isPrimary(f.key))
+    function isPrimary(k) { return root.primaryKeys.indexOf(k) >= 0 }
 
     /// 载入元数据（Main 在打开谱面后调用；无谱面则清空并提示）
     function reload() {
@@ -57,6 +65,8 @@ ColumnLayout {
         }
     }
 
+    spacing: 2   // 标题↔字段收窄（去除大间隙）
+
     RowLayout {
         spacing: 8
         Label { text: qsTr("元信息"); font.bold: true; color: Theme.text; font.pixelSize: Theme.fsBase }
@@ -90,8 +100,9 @@ ColumnLayout {
         ColumnLayout {
             width: parent.width
             spacing: 8
+            // 常用字段恒显
             Repeater {
-                model: root.fields
+                model: root.primaryFields
                 delegate: RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
@@ -109,14 +120,41 @@ ColumnLayout {
                     }
                 }
             }
-            Item { height: 6 }
-            Label {
-                text: qsTr("路径：%1").arg(root.chartPath)
-                color: Theme.textFaint
+            // 次要字段折叠组（「更多字段」；对照文档元信息清单，其余字段收进这）
+            BbToolButton {
+                text: (root.expandSecondary ? "▾ " : "▸ ") +
+                      qsTr("更多字段（%1）").arg(root.secondaryFields.length)
+                flatStyle: true
+                active: root.expandSecondary
+                enabled: root.secondaryFields.length > 0
+                onClicked: root.expandSecondary = !root.expandSecondary
                 font.pixelSize: Theme.fsSmall
-                elide: Text.ElideMiddle
                 Layout.fillWidth: true
             }
+            ColumnLayout {
+                visible: root.expandSecondary
+                spacing: 8
+                Repeater {
+                    model: root.secondaryFields
+                    delegate: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: modelData.key + ":"
+                            color: Theme.textMuted
+                            Layout.preferredWidth: 108
+                            font.family: Theme.fontMono
+                            font.pixelSize: Theme.fsBase
+                        }
+                        BbTextField {
+                            text: modelData.value
+                            Layout.fillWidth: true
+                            onTextChanged: modelData.value = text
+                        }
+                    }
+                }
+            }
+            Item { height: 4 }
         }
     }
 }
