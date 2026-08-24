@@ -792,6 +792,35 @@ TEST(BmsRoundTrip, LnType2RoundTrip) {
     EXPECT_EQ(write_bms(r2.chart), out);
 }
 
+// ch08（#BPMxx 引用）不得被改写成 ch03（十六进制 BPM）——2026-09 用户实测
+// `#00108:00000002` → `#00103:00000002` 是格式破坏（后者标准读取 = 2 BPM）。
+TEST(BmsWrite, BpmCh08StaysCh08) {
+    const auto src =
+        "#BPM 280\n#BPM01 9999280\n#BPM02 280\n"
+        "#00008:01\n"      // m0 pos0 ch08 引用 #BPM01（>255 必须 ch08）
+        "#00108:00000002\n"  // m1 3/4 ch08 引用 #BPM02
+        "#00203:8C\n";     // m2 pos0 ch03 十六进制 140（≤255 合法 ch03）
+    const auto r1 = read_bms(src);
+    ASSERT_EQ(r1.chart.bpm_events.size(), 3u);
+    EXPECT_TRUE(r1.chart.bpm_events[0].value.ch08);
+    EXPECT_TRUE(r1.chart.bpm_events[1].value.ch08);
+    EXPECT_FALSE(r1.chart.bpm_events[2].value.ch08);
+    const auto out = write_bms(r1.chart);
+    // ch08 事件仍在 ch08；ch03 事件仍是十六进制 8C
+    EXPECT_NE(out.find("#00008:01"), std::string::npos);
+    EXPECT_NE(out.find("#00108:00000002"), std::string::npos);
+    EXPECT_NE(out.find("#00203:8C"), std::string::npos);
+    EXPECT_EQ(out.find("#00103:00000002"), std::string::npos);
+    // 往返值一致（含 ch08 标志语义）
+    const auto r2 = read_bms(out);
+    ASSERT_EQ(r2.chart.bpm_events.size(), 3u);
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(r2.chart.bpm_events[i].value.value, r1.chart.bpm_events[i].value.value);
+        EXPECT_EQ(r2.chart.bpm_events[i].value.ch08, r1.chart.bpm_events[i].value.ch08);
+    }
+    EXPECT_EQ(write_bms(r2.chart), out);
+}
+
 TEST(BmsRoundTrip, StopRefRestored) {
     const auto src = "#STOP01 96\n#00109:01\n#00209:01\n";
     const auto r1 = read_bms(src);

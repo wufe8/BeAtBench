@@ -48,9 +48,15 @@ struct Bpm {
     /// 内联数值（ch03 奇数长）无引用 → nullopt。
     /// ⚠️ 辅助字段：不参与语义相等（roundtrip/命令比较按值；ref_id 只是文本表示辅助）。
     std::optional<std::uint32_t> ref_id;
+    /// 源通道是 ch08（#BPMxx/#EXBPMxx 引用通道）（2026-09 用户修复）：
+    /// ch03 是 `00-FF` 十六进制 BPM 值（最大 255），ch08 才是 #BPMxx 引用通道；
+    /// 写回必须按源通道输出——否则 `#00108:00000002`（引用 #BPM02=280）会被写成
+    /// `#00103:00000002`，标准播放器按十六进制读成 2 BPM（格式破坏）。
+    /// ⚠️ 辅助字段：不参与语义相等。
+    bool ch08 = false;
 
     friend bool operator==(const Bpm& a, const Bpm& b) {
-        return a.value == b.value;  // 排除 ref_id（与 Note.bgm_line 同理）
+        return a.value == b.value;  // 排除 ref_id/ch08（与 Note.bgm_line 同理）
     }
     friend bool operator<(const Bpm& a, const Bpm& b) { return a.value < b.value; }
 };

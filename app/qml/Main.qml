@@ -597,6 +597,12 @@ ApplicationWindow {
         var kind = "normal"
         if (window.editorTool === "ln") kind = "ln"
         else if (window.editorTool === "mine") kind = "mine"
+        // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」——BMS 中 BGM（ch01）无 LN 通道表示
+        //（映射层 bms_channel_for(Bgm,ln) 为空，写出会丢/降级）。前端先行阻止。
+        if (kind === "ln" && hit.laneKind === "bgm") {
+            setStatus(qsTr("BGM 轨不能放置 LN（格式无 LN 通道表示）；请用「3 放置」放普通背景音"))
+            return
+        }
         // BGM 展开列带 sampleHint（该列固定 #WAV id）→ 直接用；否则取当前采样
         if (hit.sampleHint !== undefined && hit.sampleHint >= 0) {
             var putArgs = {
@@ -786,7 +792,15 @@ ApplicationWindow {
             setStatus(qsTr("先选中 note（点击/框选）再转换单点/LN"))
             return
         }
-        var r = sessionCmd("note.toggleLn", { selection: window.selectionRefs.slice() })
+        // 2026-09：BGM 轨无 LN 通道表示，过滤掉这类 note（其余继续转换）
+        var playable = window.selectionRefs.filter(function (r) {
+            return r.lane && r.lane.kind !== "bgm"
+        })
+        if (playable.length === 0) {
+            setStatus(qsTr("选中的都是 BGM 轨 note（无 LN 通道表示），无法转换"))
+            return
+        }
+        var r = sessionCmd("note.toggleLn", { selection: playable.slice() })
         if (r) {
             window.selectionRefs = []
             setStatus(qsTr("已转换 %1 个 note（单点↔LN）").arg(r.notes))

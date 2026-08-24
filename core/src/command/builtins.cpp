@@ -95,6 +95,15 @@ std::string mode_arg(const Json& args) {
     return v->as_str();
 }
 
+/// LN 可表示性检查（2026-09 用户：LN 只能放在「游玩轨/LN 轨」——具体通道由文件格式决定；
+/// BMS 用独立 5x/6x 通道表达 LNTYPE 1，BGM（ch01）无 LN 表示）。
+/// 以通道映射为权威（bms_channel_for(..., ln=true) 返回空 = 无法表示）。
+/// mode 从会话 chart 取；非 BMS 格式各自映射（格式无关原则：值域检查在格式层）。
+bool lane_can_ln(const Chart& chart, const Lane& lane) {
+    const auto mode = chart.mode_id.value_or("sp7k");
+    return !bms::bms_channel_for_mode(mode, lane, true, NoteKind::Normal).empty();
+}
+
 std::string severity_str(beatbench::codec::Severity s) {
     switch (s) {
         case beatbench::codec::Severity::Error: return "error";
@@ -1099,6 +1108,13 @@ public:
                 }
             }
         }
+        // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
+        // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
+        // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
+        if (ln_kind && !lane_can_ln(session.chart(), lane)) {
+            throw CommandError("bad_args",
+                               "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
+        }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
             measure, pos, lane, sample, ln_kind, kind, bgm_line));
         Json out = Json::object();
@@ -1322,6 +1338,13 @@ public:
         }
         const auto refs = selection_from_json(args);
         if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无可转换内容）");
+        // 2026-09：同 note.put——BGM/无 LN 表示的轨道不接受单点↔LN 转换
+        for (const auto& r : refs) {
+            if (!lane_can_ln(session.chart(), r.lane)) {
+                throw CommandError("bad_args",
+                                   "含 BGM 轨道 note（格式映射中无 LN 通道表示），不能转换");
+            }
+        }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
             comp->add(std::make_unique<edit::ToggleLnCommand>(

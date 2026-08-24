@@ -222,6 +222,105 @@ TEST(LnMinePut, ProtocolPutBadKind) {
     EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
 }
 
+// —— LN 可表示性（2026-09 用户：BGM 轨无 LN 通道表示，放置/转换应被拒绝） ——
+
+TEST(LnMinePut, ProtocolPutLnOnBgmRejected) {
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+    Json req = Json::object();
+    req.set("command", "note.put");
+    Json args = Json::object();
+    args.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "bgm");
+    lane.set("index", 0);
+    args.set("lane", std::move(lane));
+    args.set("sample", 1);
+    args.set("kind", "ln");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    EXPECT_FALSE(resp.at("ok").as_bool());
+    EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
+    EXPECT_TRUE(session.chart().notes.empty());  // 未产生脏数据
+}
+
+TEST(LnMinePut, ProtocolPutLnOnKeyAllowed) {
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+    Json req = Json::object();
+    req.set("command", "note.put");
+    Json args = Json::object();
+    args.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "key");
+    lane.set("index", 1);
+    args.set("lane", std::move(lane));
+    args.set("sample", 1);
+    args.set("kind", "ln");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    ASSERT_EQ(session.chart().notes.size(), 1u);
+    EXPECT_TRUE(session.chart().notes[0].value.ln_channel);
+}
+
+TEST(LnMinePut, ProtocolToggleLnOnBgmRejected) {
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+    // 先放一个普通 BGM note
+    Json req = Json::object();
+    req.set("command", "note.put");
+    Json args = Json::object();
+    args.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "bgm");
+    lane.set("index", 0);
+    args.set("lane", std::move(lane));
+    args.set("sample", 1);
+    req.set("args", std::move(args));
+    ASSERT_TRUE(global_registry().dispatch(req).at("ok").as_bool());
+    // 再尝试 toggleLn（选择含 BGM 轨 ref）→ bad_args
+    req = Json::object();
+    req.set("command", "note.toggleLn");
+    Json sel = Json::array();
+    Json r = Json::object();
+    r.set("measure", 1);
+    Json rpos = Json::object();
+    rpos.set("num", 0);
+    rpos.set("den", 1);
+    r.set("pos", std::move(rpos));
+    Json rlane = Json::object();
+    rlane.set("player", 0);
+    rlane.set("kind", "bgm");
+    rlane.set("index", 0);
+    r.set("lane", std::move(rlane));
+    r.set("sample", 1);
+    sel.push_back(std::move(r));
+    args = Json::object();
+    args.set("selection", std::move(sel));
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    EXPECT_FALSE(resp.at("ok").as_bool());
+    EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
+    // BGM note 未变（仍普通）
+    EXPECT_FALSE(session.chart().notes[0].value.ln_channel);
+}
+
 // —— LN 配对（最终规则 2026-09）：向前找最近一个未配对同 lane 同 sample Normal 头；
 //    忽略中间其它通道/sample 的 note。遇到同通道但已配对/地雷 → 停止。 ——
 

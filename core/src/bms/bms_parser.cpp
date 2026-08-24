@@ -478,6 +478,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 if (slot.size() == 2) {
                                     bpm.ref_id = decode_id(chart, slot);
                                 }
+                                // ch08 = #BPMxx 引用通道（2026-09 修复：写回须区分 03/08）
+                                bpm.ch08 = rule->semantics == ChannelSemantics::BpmRef;
                                 chart.bpm_events.push_back({measure, pos, bpm});
                                 break;
                             }

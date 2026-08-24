@@ -299,11 +299,15 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             }
         }
         const auto mode = chart.mode_id.value_or("sp7k");
+        // BGM（ch01）：无 LN 表示（通道映射 ln_channel=false 且 bms_channel_for(Bgm,ln)==""）。
+        // 即使模型异常残留 ln_channel/配对，也按普通背景 note 写回（绝不丢数据）。
+        const bool want_ln =
+            !lntype2 && (is_head || is_tail) && n.lane.kind != LaneKind::Bgm;
         const auto channel =
-            bms_channel_for_mode(mode, n.lane, !lntype2 && (is_head || is_tail), n.kind);
+            bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
         if (channel.empty()) continue;  // 无法表示的 Lane（罕见）→ 丢弃并依赖诊断
         std::string slot_text;
-        if (is_tail && lntype2) {
+        if (is_tail && lntype2 && n.lane.kind != LaneKind::Bgm) {
             slot_text = lnobj_text;
         } else {
             slot_text = fmt_id(chart, n.sample.id);
@@ -311,19 +315,32 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         add_cell(ev.measure, channel, ev.pos, std::move(slot_text), n.bgm_line);
     }
 
-    // 3c. BPM（ch03 定宽引用 #BPMxx；事件值 → id，见上方 bpm_id_by_value）
+    // 3c. BPM：按源通道语义输出（2026-09 用户修复：ch08 不得改写成 ch03）——
+    //   ch03 = `00-FF` 十六进制 BPM 值（整数 1..255，最大 255）；超出/非整数/0/负
+    //     必须走 ch08（#BPMxx 引用）。ch08 事件（Bpm.ch08=true）恒走 ch08。
+    //   之前一律写成 ch03 定宽 #BPMxx 引用 → `#00108:00000002` 被改成
+    //   `#00103:00000002`，标准播放器按十六进制读成 2 BPM（语义破坏）。
     for (const auto& ev : chart.bpm_events) {
-        // 优先原始引用 id（保持「id 不变」，见 Payloads.hpp Bpm.ref_id）；
-        // 无引用（内联数值）→ 按值派生/复用定义。
+        const auto& b = ev.value;
+        const double v = b.value;
+        const bool hex_ok = !b.ch08 && v >= 1.0 && v <= 255.0 && v == std::floor(v);
+        if (hex_ok) {
+            char hex[3];
+            std::snprintf(hex, sizeof(hex), "%02X", static_cast<int>(v));
+            add_cell(ev.measure, "03", ev.pos, hex);
+            continue;
+        }
+        // ch08 引用：优先原始引用 id（保持「id 不变」，见 Payloads.hpp Bpm.ref_id）；
+        // 无引用（新值/内联超范围）→ 按值派生/复用定义（见上方 bpm_id_by_value）。
         std::uint32_t slot_id = 0;
-        if (ev.value.ref_id && *ev.value.ref_id != 0) {
-            slot_id = *ev.value.ref_id;
+        if (b.ref_id && *b.ref_id != 0) {
+            slot_id = *b.ref_id;
         } else {
-            const auto it = bpm_id_by_value.find(ev.value.value);
+            const auto it = bpm_id_by_value.find(v);
             if (it == bpm_id_by_value.end()) continue;  // 理论上不会发生（上面已派生）
             slot_id = it->second;
         }
-        add_cell(ev.measure, "03", ev.pos, fmt_id(chart, slot_id));
+        add_cell(ev.measure, "08", ev.pos, fmt_id(chart, slot_id));
     }
     // 3d. STOP（ch09 引用恢复：us → id）
     for (const auto& ev : chart.stop_events) {
