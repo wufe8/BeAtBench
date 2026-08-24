@@ -19,6 +19,7 @@ Item {
 
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
     property bool topHigh: true          // 默认「顶部=高小节」（preview.html，note 自上而下落）
+    property bool zoomToCursor: true     // 缩放锚点：true = 鼠标位置放大（推荐，默认开）；false = 视口中心
     property int snapNum: 1              // 吸附粒度分子（放置吸附 + 槽位弱线）
     property int snapDen: 16             // 吸附粒度分母
     property bool showChannelIds: false  // 列头显示实际 BMS 通道 id（工具条勾选）
@@ -80,14 +81,28 @@ Item {
         return view.probe(x, y)
     }
 
+    /// 以屏幕 y 为锚点缩放（--zoom-at / 滚轮缩放锚点；转发 ChartViewItem.zoomAt）。
+    /// ⚠️ zoomAt 直接改 C++ measureHeight（锚点滚动计算），完成后回写 root.measureHeight
+    /// 保持工具条「缩放 %」显示同步（root→view 单向绑定，回写同值不会二次缩放）。
+    function zoomAt(y, factor) {
+        view.zoomAt(y, factor)
+        root.measureHeight = view.measureHeight
+    }
+
     WheelHandler {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         onWheel: (event) => {
             if (event.modifiers & Qt.ControlModifier) {
                 // 缩放：指小节高度（内容比例不变，仅视口密度）
+                // 2026-09 用户：最大 500%（→ 480px 小节高度；原 240px = 250% 封顶）；
+                // 可选「鼠标位置缩放」（默认开）——锚点 = 鼠标 y，放大后鼠标处拍位不动。
                 const f = event.angleDelta.y > 0 ? 1.2 : (event.angleDelta.y < 0 ? 1.0 / 1.2 : 1.0)
-                if (f !== 1.0)
-                    root.measureHeight = Math.min(240, Math.max(24, root.measureHeight * f))
+                if (f !== 1.0) {
+                    if (root.zoomToCursor)
+                        root.zoomAt(event.position.y, f)   // 走包装函数：锚点 + 回写 root.measureHeight
+                    else
+                        root.measureHeight = Math.min(480, Math.max(24, root.measureHeight * f))
+                }
                 event.accepted = true
                 return
             }

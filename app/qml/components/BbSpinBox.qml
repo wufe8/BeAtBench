@@ -9,6 +9,9 @@ SpinBox {
     id: root
 
     property color textColor: Theme.text
+    /// 2026-09 用户：snap 上下按钮 ×2/÷2（音乐常用拍子）；manual 输入不受影响（1/3、1/5 可手填）。
+    /// 0 = 默认 ±1；>0 = 点击上下箭头时 value ×/÷ stepFactor（整数除，下限 from / 上限 to）。
+    property int stepFactor: 0
 
     font.pixelSize: Theme.fsSmall
     font.family: Theme.fontSans
@@ -32,6 +35,8 @@ SpinBox {
         selectByMouse: true
     }
 
+    // 上下按钮：stepFactor>0 时用 MouseArea 完全接管（吞掉点击，底层 QQuickIndicatorButton
+    // 的默认 ±1 不再触发），在 onClicked 里直接设 ×2/÷2 结果。
     up.indicator: Item {
         x: root.width - 18
         y: 0
@@ -49,6 +54,14 @@ SpinBox {
                 ctx.beginPath()
                 ctx.moveTo(0, 4); ctx.lineTo(3, 0); ctx.lineTo(6, 4)
                 ctx.closePath(); ctx.fill()
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                if (root.stepFactor <= 0) return
+                const target = Math.min(root.to, root.value * root.stepFactor)
+                root.value = Math.max(root.from, target)
             }
         }
     }
@@ -71,7 +84,18 @@ SpinBox {
                 ctx.closePath(); ctx.fill()
             }
         }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                if (root.stepFactor <= 0) return
+                const target = Math.floor(root.value / root.stepFactor)
+                root.value = Math.max(root.from, target)
+            }
+        }
     }
+
+    // stepFactor>0：默认 ±1 步长置 0（键盘/自动步进也只走 ×/÷ 语义）
+    stepSize: root.stepFactor > 0 ? 0 : 1
 
     background: Rectangle {
         radius: Theme.radiusSm

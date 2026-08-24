@@ -41,6 +41,18 @@ ApplicationWindow {
     property int debugNoteSampleMode: 0
     property bool debugShowExtras: false
     property bool debugPerfLog: false
+    // --zoom-at <y> <factor>：调试缩放锚点（验证 zoomToCursor；不等同真实滚轮事件）
+    property real debugZoomY: -1
+    property real debugZoomFactor: 1
+    onDebugZoomFactorChanged: if (debugZoomFactor > 0 && debugZoomY >= 0) debugZoomTimer.restart()
+    Timer {
+        id: debugZoomTimer
+        interval: 400
+        onTriggered: {
+            if (typeof editPage !== "undefined" && editPage && editPage.locateChartView())
+                editPage.locateChartView().zoomAt(debugZoomY, debugZoomFactor)
+        }
+    }
     // --delete-selection：点击后自动 Del（验收删除链）
     property bool debugDeleteSelection: false
     onDebugDeleteSelectionChanged: if (debugDeleteSelection) debugDeleteTimer.restart()
@@ -63,6 +75,8 @@ ApplicationWindow {
     // 吸附（放置用）：snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）
     property int snapNum: 1
     property int snapDen: 16
+    // 缩放锚点（2026-09 用户：鼠标滚轮缩放时往鼠标位置放大；默认开）
+    property bool zoomToCursor: true
     // 平移模式（checkbox 开关，默认关）：拖拽选中 note = 移动；勾选=按方向轴锁定
     // （纵向→时间/通道不变；横向→通道/时间不变）。未勾=自由 2D（时间+通道都动）。
     property bool moveMode: false
@@ -180,20 +194,22 @@ ApplicationWindow {
                     from: 1; to: 999
                     value: window.snapNum
                     editable: true
+                    stepFactor: 2   // 2026-09：上下按钮 ×2/÷2（音乐拍子）；手填仍 1/3、1/5
                     implicitWidth: 56
                     onValueModified: window.snapNum = Math.max(1, value)
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("snap 分子（槽数步长 = snapNum/snapDen 小节）")
+                    ToolTip.text: qsTr("snap 分子（槽数步长 = snapNum/snapDen 小节；上下按钮 ×2/÷2）")
                 }
                 Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
                 BbSpinBox {
                     from: 1; to: 192
                     value: window.snapDen
                     editable: true
+                    stepFactor: 2   // 同上：×2/÷2
                     implicitWidth: 56
                     onValueModified: window.snapDen = Math.max(1, value)
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线）")
+                    ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线；上下按钮 ×2/÷2）")
                 }
                 BbToolButton { text: qsTr("量化"); enabled: chartMeta !== null }
                 BbToolButton { text: qsTr("网格"); enabled: chartMeta !== null }
@@ -210,7 +226,14 @@ ApplicationWindow {
                                enabled: chartMeta !== null
                                onClicked: { editPage.resetZoom(); setStatus(qsTr("缩放已重置")) }
                                ToolTip.visible: hovered
-                               ToolTip.text: qsTr("当前缩放（点击恢复 100% = 小节高度 96px）；Ctrl+滚轮缩放") }
+                               ToolTip.text: qsTr("当前缩放（点击恢复 100% = 小节高度 96px）；Ctrl+滚轮缩放（最大 500%）") }
+                BbCheckBox {
+                    text: qsTr("光标缩放")
+                    checked: window.zoomToCursor
+                    onToggled: window.zoomToCursor = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("勾选=Ctrl+滚轮缩放时往鼠标位置放大（锚点=光标拍位）；"
+                                       + "未勾=固定往视口中心放大") }
                 Item { Layout.fillWidth: true }
                 BbToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
                 Label { text: "SP7K"; color: Theme.accent; font.family: Theme.fontMono
@@ -330,6 +353,7 @@ ApplicationWindow {
                 selection: window.selectionRefs
                 snapNum: window.snapNum
                 snapDen: window.snapDen
+                zoomToCursor: window.zoomToCursor
                 perfLog: window.debugPerfLog
                 onSamplePicked: (id, file) => {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
@@ -588,6 +612,7 @@ ApplicationWindow {
         }
         if (done > 0) {
             chartSession.refresh()
+            refreshLint()  // 2026-09 用户：删除后 lint 也要刷新（之前只刷新视图没刷新 lint）
             window.selectionRefs = []
             setStatus(qsTr("已删除 %1 个 note（Undo 可恢复）").arg(done))
         }

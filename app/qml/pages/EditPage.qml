@@ -36,6 +36,8 @@ Item {
     /// 吸附粒度（放置用：snapNum/snapDen 槽/小节；Main snap 分子分母）
     property int snapNum: 1
     property int snapDen: 16
+    /// 缩放锚点模式（2026-09 用户）：true=鼠标位置缩放（默认开）
+    property bool zoomToCursor: true
     /// paint 帧耗时采样（--perf-log）
     property bool perfLog: false
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
@@ -218,6 +220,7 @@ Item {
                     selection: root.selection
                     snapNum: root.snapNum
                     snapDen: root.snapDen
+                    zoomToCursor: root.zoomToCursor
                     perfLog: root.perfLog
                     onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
                     onSelectionFinished: (refs) => root.selectionFinished(refs)

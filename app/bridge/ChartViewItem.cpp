@@ -20,6 +20,12 @@
 
 namespace beatbench::app {
 
+namespace {
+// note 高度：**固定像素**（2026-09 用户：不随缩放改变——缩放到 500% 时 note 仍 ~8px，
+// 只变小节间距/槽线密度）。4 处 hit/paint/hover 共用，避免漂移。
+constexpr qreal kNoteHeight = 8.0;
+}  // namespace
+
 ChartViewItem::ChartViewItem(QQuickItem* parent) : QQuickPaintedItem(parent) {
     setAntialiasing(true);
     setAcceptHoverEvents(true);  // 状态栏鼠标位置 + note 信息（M2 跟进）
@@ -100,6 +106,21 @@ void ChartViewItem::setMeasureHeight(qreal v) {
                                     ? (contentHeight() - centerMf * m_measureHeight)
                                     : (centerMf * m_measureHeight);
     setScrollY(centerContent - height() / 2.0);
+    emit measureHeightChanged();
+    emit contentHeightChanged();
+    update();
+}
+
+void ChartViewItem::zoomAt(qreal screenY, qreal factor) {
+    if (factor <= 0.0) return;
+    const qreal anchorMf = measureAt(screenY);  // 锚点拍位（缩放前后不变）
+    const qreal newH = qBound(24.0, m_measureHeight * factor, 480.0);
+    if (qFuzzyCompare(m_measureHeight, newH)) return;
+    m_measureHeight = newH;
+    const qreal anchorContent = m_topHigh
+                                    ? (contentHeight() - anchorMf * m_measureHeight)
+                                    : (anchorMf * m_measureHeight);
+    setScrollY(anchorContent - screenY);
     emit measureHeightChanged();
     emit contentHeightChanged();
     update();
@@ -318,7 +339,7 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
     const ChartSession* cs = sessionObj();
     if (!cs || !cs->chart() || m_measureHeight <= 0.0 || y < 18.0) return res;
     const beatbench::Chart& chart = *cs->chart();
-    const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
+    const qreal noteH = kNoteHeight;
     const int measure = static_cast<int>(std::floor(measureAt(y)));
     if (measure < 0 || measure >= cs->measureCount()) return res;
     for (const auto& ev : chart.notes) {
@@ -396,7 +417,7 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
     const int m1 = std::min(cs->measureCount() - 1,
                             static_cast<int>(std::ceil(mfHi)) + 1);
     const beatbench::Chart& chart = *cs->chart();
-    const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
+    const qreal noteH = kNoteHeight;
     std::vector<QVariantMap> hits;
     for (const auto& ev : chart.notes) {
         if (static_cast<int>(ev.measure) < m0 || static_cast<int>(ev.measure) > m1) continue;
@@ -544,7 +565,7 @@ void ChartViewItem::updateHover(const QPointF& pos) {
             text = QString::asprintf("%03d:%.2f", measure, mf - measure);
             // 命中 note → 追加 轨道 + 采样（只查相邻小节，控制开销）
             const beatbench::Chart& chart = *cs->chart();
-            const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
+            const qreal noteH = kNoteHeight;
             for (std::size_t evIdx = 0; evIdx < chart.notes.size(); ++evIdx) {
                 const auto& ev = chart.notes[evIdx];
                 if (static_cast<int>(ev.measure) < measure - 1 ||
@@ -648,11 +669,13 @@ QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
     const ThemeManager* th = themeObj();
     if (!th) return QColor(QStringLiteral("#8b9cf8"));
     // 用户配色（2026-09）：S(皿 ch16)=红；key 1/3/5/7(ch11/13/15/19)=白；其它 key 循环浅色。
+    // ⚠️ 颜色全部收敛到 ThemeManager token（keyOdd/scratchNote/bgmNote/n1..n4）——
+    //    换皮肤/贴图从 theme.json 注入（2026-09 用户问）。
     if (lane.kind == beatbench::LaneKind::Scratch)
-        return QColor(QStringLiteral("#ef5350"));  // 红（皿，高对比）
+        return th->scratchNote();  // 红（皿，高对比）
     if (lane.kind == beatbench::LaneKind::Key) {
         if (lane.index % 2 == 1)  // 键 1/3/5/7（奇数）→ 白（ch11/13/15/19）
-            return QColor(QStringLiteral("#ffffff"));
+            return th->keyOdd();
         // 偶数键（2/4/6/8）：保持浅紫蓝循环（与背景区分）
         switch (lane.index % 4) {
             case 2: return th->n2();
@@ -660,7 +683,7 @@ QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
         }
     }
     if (lane.kind == beatbench::LaneKind::Bgm)
-        return QColor(QStringLiteral("#4ade80"));  // 背景轨 → 绿（与 BGA 层一致,自动播放）
+        return th->bgmNote();  // 背景轨 → 绿（与 BGA 层一致,自动播放）
     return th->textMuted();  // Pedal 等罕见轨：弱化色
 }
 
@@ -1066,7 +1089,7 @@ void ChartViewItem::paint(QPainter* p) {
     }
 
     // ---- note / LN / 地雷（note 底边 = 实际时间点） ----
-    const qreal noteH = std::max(5.0, m_measureHeight * 0.08);
+    const qreal noteH = kNoteHeight;
     // 选中高亮：NoteRef 键集（框选/粘贴后 QML 回填 selection）
     std::unordered_set<std::string> selKeys;
     if (!m_selection.isEmpty()) {
@@ -1252,12 +1275,13 @@ void ChartViewItem::paint(QPainter* p) {
             const QRectF& r = m_colRects[col];
             const qreal y = yOf(ev.measure + posDouble(ev.pos));
             // 用户配色（2026-09）：BGA 层四列（04/06/07/0A）用绿色系；层间以深浅区分保对比。
+            // ⚠️ 颜色收敛到 ThemeManager token（bgaBase/bgaPoor/bgaLayer/bgaLayer2）。
             QColor c;
             switch (ev.value.layer) {
-                case 1: c = QColor(QStringLiteral("#16a34a")); break;  // poor：深绿
-                case 2: c = QColor(QStringLiteral("#4ade80")); break;  // layer：亮绿
-                case 3: c = QColor(QStringLiteral("#22c55e")); break;  // layer2：中绿
-                default: c = QColor(QStringLiteral("#86efac")); break;  // base：浅绿
+                case 1: c = th->bgaPoor(); break;      // poor：深绿
+                case 2: c = th->bgaLayer(); break;     // layer：亮绿
+                case 3: c = th->bgaLayer2(); break;    // layer2：中绿
+                default: c = th->bgaBase(); break;     // base：浅绿
             }
             c.setAlpha(200);
             p->fillRect(QRectF(r.x() + 3, y - noteH, r.width() - 6, noteH), c);

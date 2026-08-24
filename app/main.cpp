@@ -204,6 +204,20 @@ int main(int argc, char** argv) {
             root->setProperty("debugPerfLog", true);
     }
 
+    // --zoom-at <y> <factor>：调试缩放锚点（ChartView 局部 y；验证 zoomToCursor 数学）
+    const int zoomYIdx = args.indexOf(QStringLiteral("--zoom-at"));
+    if (zoomYIdx >= 0 && zoomYIdx + 2 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0)) {
+            bool okY = false, okF = false;
+            const double y = args.at(zoomYIdx + 1).toDouble(&okY);
+            const double f = args.at(zoomYIdx + 2).toDouble(&okF);
+            if (okY && okF && f > 0) {
+                root->setProperty("debugZoomY", y);
+                root->setProperty("debugZoomFactor", f);
+            }
+        }
+    }
+
     // --tool <select|note|ln|mine|pan>：编辑工具（配 --click 验收手势分发）
     const int toolIdx = args.indexOf(QStringLiteral("--tool"));
     if (toolIdx >= 0 && toolIdx + 1 < args.size()) {

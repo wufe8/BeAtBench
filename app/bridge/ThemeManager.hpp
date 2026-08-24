@@ -49,6 +49,16 @@ public:
     BB_THEME_COLOR_PROP(ln)             // LN 体（rgba(139,156,248,.26)）
     BB_THEME_COLOR_PROP(wave)           // BGM 波形底（rgba(139,156,248,.12)）
     BB_THEME_COLOR_PROP(accent2)        // 强调别名（styles.html accent2 = 青）
+    // —— 时间轴 note 配色（2026-09 用户指定；原硬编码在 ChartViewItem，收敛到主题 token，
+    //    替换皮肤/贴图时从 theme.json 注入）——
+    BB_THEME_COLOR_PROP(keyOdd)         // 奇数键（键 1/3/5/7 = ch11/13/15/19）→ 白
+    BB_THEME_COLOR_PROP(scratchNote)    // 皿（ch16）→ 红（高对比）
+    BB_THEME_COLOR_PROP(bgmNote)        // 背景轨（ch01）→ 绿（与 BGA 层一致）
+    // BGA 图层四列（04/06/07/0A；用户配色绿色系，层间深浅区分）
+    BB_THEME_COLOR_PROP(bgaBase)        // ch04 base：浅绿
+    BB_THEME_COLOR_PROP(bgaPoor)        // ch06 poor：深绿
+    BB_THEME_COLOR_PROP(bgaLayer)       // ch07 layer：亮绿
+    BB_THEME_COLOR_PROP(bgaLayer2)      // ch0A layer2：中绿
 #undef BB_THEME_COLOR_PROP
 
     // ---- 非颜色 token ----
@@ -105,6 +115,13 @@ private:
     BB_THEME_COLOR_MEMBER(ln, "#428b9cf8")           // AARRGGBB：rgba(139,156,248,.26)
     BB_THEME_COLOR_MEMBER(wave, "#1f8b9cf8")         // AARRGGBB：rgba(139,156,248,.12)
     BB_THEME_COLOR_MEMBER(accent2, "#22d3ee")
+    BB_THEME_COLOR_MEMBER(keyOdd, "#ffffff")         // 奇数键（1/3/5/7）→ 白
+    BB_THEME_COLOR_MEMBER(scratchNote, "#ef5350")    // 皿 → 红（用户配色）
+    BB_THEME_COLOR_MEMBER(bgmNote, "#4ade80")        // 背景轨 → 绿（与 BGA 层一致）
+    BB_THEME_COLOR_MEMBER(bgaBase, "#86efac")        // ch04 base：浅绿
+    BB_THEME_COLOR_MEMBER(bgaPoor, "#16a34a")        // ch06 poor：深绿
+    BB_THEME_COLOR_MEMBER(bgaLayer, "#4ade80")       // ch07 layer：亮绿
+    BB_THEME_COLOR_MEMBER(bgaLayer2, "#22c55e")      // ch0A layer2：中绿
 #undef BB_THEME_COLOR_MEMBER
 };
 

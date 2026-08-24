@@ -117,6 +117,10 @@ public:
     /// BGM 轨可放置（展开列带 sampleHint = 固定 id）；列头/元轨/BGA 无效。
     Q_INVOKABLE QVariantMap hitTest(qreal x, qreal y) const;
 
+    /// 以屏幕 y 为锚点缩放（2026-09：鼠标滚轮缩放时保持鼠标处拍位不动）。
+    /// factor > 1 放大；内部换算锚点拍位 → 新 measureHeight → 反推 scrollY。
+    Q_INVOKABLE void zoomAt(qreal screenY, qreal factor);
+
     /// 屏幕矩形内 note 枚举（clipboard.copy 的 selection 数组：{measure, pos:{num,den},
     /// lane:{player,kind,index}, sample}；按 (measure,pos) 稳定升序）。
     Q_INVOKABLE QVariantList notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) const;
