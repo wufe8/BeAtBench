@@ -402,6 +402,7 @@ ApplicationWindow {
                     window.currentSampleId = id
                     setStatus(qsTr("当前采样：#WAV%1 %2").arg(id, file))
                 }
+                onSampleRenameRequested: (from, to) => renameSampleId(from, to)
                 onHitPlaceRequested: (hit) => placeNote(hit)
                 onSelectionFinished: (refs) => onSelectionMade(refs)
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
@@ -409,6 +410,7 @@ ApplicationWindow {
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => moveSelection(deltaF, targetLane, sourceLane)
                 onMetaMessage: (msg) => setStatus(msg)
+                onMetaSaveRequested: saveMetaEdits()
                 onEditAreaPressed: clearTextFocus()
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
@@ -1008,6 +1010,20 @@ ApplicationWindow {
                 setStatus(qsTr("无可重做"))
         }
     }
+    /// 重命名采样 #WAV id（双击采样行编辑；sample.rename 一个 undo 步）。成功后从内存会话
+    /// 刷新采样面板（id/file/引用数；session.samples 与 info 同构）。
+    function renameSampleId(fromId, toId) {
+        if (!fromId || !toId || fromId === toId) return
+        const r = sessionCmd("sample.rename", { from: fromId, to: toId })
+        if (!r) return
+        const sresp = beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} }))
+        if (sresp) {
+            const r2 = JSON.parse(sresp)
+            if (r2.ok) sampleModel.loadFromInfo(JSON.stringify({ ok: true, result: r2.result }))
+        }
+        setStatus(qsTr("已重命名 #WAV%1 → #WAV%2（Undo 可恢复）").arg(fromId, toId))
+    }
+
     function saveChart() {
         // 2026-09：元信息修改交整个文件保存——先应用元信息编辑 + 扩展代码，再 session.save。
         if (typeof editPage !== "undefined" && editPage) {
@@ -1024,6 +1040,24 @@ ApplicationWindow {
             window.chartPath = r.output
             setStatus(qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes))
         }
+    }
+    /// 元信息面板「保存」按钮：只应用元信息编辑 + 扩展代码到内存会话（不写文件）。
+    /// 之后 Ctrl+S / 另存为会随整个文件一并落盘。成功后提交基线（orig=value）清脏。
+    function saveMetaEdits() {
+        if (typeof editPage === "undefined" || !editPage) return
+        const edits = editPage.collectMetaEdits()
+        let n = 0
+        if (edits && edits.length > 0) {
+            const em = sessionCmd("meta.edit", { edits: edits })
+            if (!em) return   // 失败：sessionCmd 已置状态栏
+            n = edits.length
+        }
+        if (editPage.applyRawEdits()) n++
+        editPage.commitMeta()
+        refreshLint()
+        setStatus(n > 0
+                  ? qsTr("元信息已保存 %1 处（写文件时随整体保存落盘）").arg(n)
+                  : qsTr("元信息无改动"))
     }
     function saveChartAs(path) {
         if (typeof editPage !== "undefined" && editPage) {

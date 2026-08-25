@@ -213,4 +213,36 @@ private:
     bool m_did_change = false;  ///< apply 实际执行（找到 note）
 };
 
+/// 重命名「定义表」条目 id（2026-09 用户：双击手动编辑采样 id，为 BGA 编辑打基础）。
+/// 语义：定义表键 (kind, from_id) → (kind, to_id)，并把所有引用该 id 的对象一并改到 to_id：
+/// - Wav → notes[].sample.id；Bmp → bga_events[].image.id；
+/// - Bpm/Stop → bpm_events/stop_events 的 ref_id。
+/// 这是**定义表重映射**：文本表示的 #WAVxx 编号变化，实际音频文件不变。
+/// 逆操作：反向重映射（to → from），精确恢复（含碰撞时原 to_id 的定义与引用）。
+/// 单个 undo 步。
+class RenameSampleCommand : public EditCommand {
+public:
+    RenameSampleCommand(SampleKind kind, std::uint32_t from_id, std::uint32_t to_id);
+    std::string name() const override { return "sample.rename"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    SampleKind m_kind;
+    std::uint32_t m_from_id;
+    std::uint32_t m_to_id;
+    /// apply 前 (kind, from_id) 是否存在（invert：存在→还回，不存在→维持移除）
+    bool m_had_from = false;
+    SampleDef m_old_def;               ///< apply 前 (kind, from_id) 的定义
+    bool m_had_to = false;             ///< apply 前 (kind, to_id) 已有不同定义（碰撞）
+    SampleDef m_old_to_def;            ///< 碰撞时原目标定义（invert 恢复）
+    /// 引用 from_id 的对象下标（invert 精确还原；按 kind 只用对应容器）
+    std::vector<std::size_t> m_note_idx;
+    std::vector<std::size_t> m_bga_idx;
+    std::vector<std::size_t> m_bpm_idx;
+    std::vector<std::size_t> m_stop_idx;
+    bool m_changed = false;            ///< apply 实际执行了重映射
+};
+
 }  // namespace beatbench::edit

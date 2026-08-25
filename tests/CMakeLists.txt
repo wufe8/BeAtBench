@@ -15,7 +15,7 @@ add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.
     note_move_lane_test.cpp transform_quantize_test.cpp autosave_test.cpp
     meta_lint_test.cpp ln_mine_put_test.cpp move_region_test.cpp
     convert_note_test.cpp bgm_line_move_test.cpp ln_move_region_test.cpp
-    toggle_ln_test.cpp)
+    toggle_ln_test.cpp sample_rename_test.cpp)
 target_link_libraries(beatbench_tests PRIVATE beatbench_core GTest::gtest_main)
 target_compile_definitions(beatbench_tests PRIVATE
     BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

@@ -1122,4 +1122,74 @@ std::string RawLinesEditCommand::describe() const {
     return "编辑扩展代码（原始行 " + std::to_string(m_lines.size()) + " 行）";
 }
 
+RenameSampleCommand::RenameSampleCommand(SampleKind kind, std::uint32_t from_id,
+                                         std::uint32_t to_id)
+    : m_kind(kind), m_from_id(from_id), m_to_id(to_id) {}
+
+void RenameSampleCommand::apply(Chart& chart) {
+    const auto key_from = std::make_pair(m_kind, m_from_id);
+    const auto key_to = std::make_pair(m_kind, m_to_id);
+    const auto it_from = chart.samples.find(key_from);
+    const auto it_to = chart.samples.find(key_to);
+    m_had_from = it_from != chart.samples.end();
+    if (m_had_from) m_old_def = it_from->second;
+    m_had_to = it_to != chart.samples.end() && it_to != it_from;
+    if (m_had_to) m_old_to_def = it_to->second;
+
+    // 收集引用 from_id 的对象下标（按 kind 只用对应容器）
+    m_note_idx.clear(); m_bga_idx.clear(); m_bpm_idx.clear(); m_stop_idx.clear();
+    switch (m_kind) {
+        case SampleKind::Wav:
+            for (std::size_t i = 0; i < chart.notes.size(); ++i)
+                if (chart.notes[i].value.sample.id == m_from_id) m_note_idx.push_back(i);
+            break;
+        case SampleKind::Bmp:
+            for (std::size_t i = 0; i < chart.bga_events.size(); ++i)
+                if (chart.bga_events[i].value.image.id == m_from_id) m_bga_idx.push_back(i);
+            break;
+        case SampleKind::Bpm:
+            for (std::size_t i = 0; i < chart.bpm_events.size(); ++i)
+                if (chart.bpm_events[i].value.ref_id &&
+                    *chart.bpm_events[i].value.ref_id == m_from_id)
+                    m_bpm_idx.push_back(i);
+            break;
+        case SampleKind::Stop:
+            for (std::size_t i = 0; i < chart.stop_events.size(); ++i)
+                if (chart.stop_events[i].value.ref_id &&
+                    *chart.stop_events[i].value.ref_id == m_from_id)
+                    m_stop_idx.push_back(i);
+            break;
+    }
+    m_changed = m_had_from || !m_note_idx.empty() || !m_bga_idx.empty() ||
+                !m_bpm_idx.empty() || !m_stop_idx.empty();
+    if (!m_changed) return;
+
+    // 定义表：移除旧键、设置新键（覆盖碰撞）
+    if (m_had_from) chart.samples.erase(key_from);
+    if (m_had_from) chart.samples[key_to] = m_old_def;
+
+    // 更新引用
+    for (const auto i : m_note_idx) chart.notes[i].value.sample.id = m_to_id;
+    for (const auto i : m_bga_idx) chart.bga_events[i].value.image.id = m_to_id;
+    for (const auto i : m_bpm_idx) chart.bpm_events[i].value.ref_id = m_to_id;
+    for (const auto i : m_stop_idx) chart.stop_events[i].value.ref_id = m_to_id;
+}
+
+void RenameSampleCommand::invert(Chart& chart) {
+    if (!m_changed) return;
+    chart.samples.erase({m_kind, m_to_id});
+    if (m_had_from) chart.samples[{m_kind, m_from_id}] = m_old_def;
+    if (m_had_to) chart.samples[{m_kind, m_to_id}] = m_old_to_def;
+    for (const auto i : m_note_idx) chart.notes[i].value.sample.id = m_from_id;
+    for (const auto i : m_bga_idx) chart.bga_events[i].value.image.id = m_from_id;
+    for (const auto i : m_bpm_idx) chart.bpm_events[i].value.ref_id = m_from_id;
+    for (const auto i : m_stop_idx) chart.stop_events[i].value.ref_id = m_from_id;
+    m_changed = false;
+}
+
+std::string RenameSampleCommand::describe() const {
+    return std::string("重命名定义表 id（") + std::to_string(m_from_id) + " → " +
+           std::to_string(m_to_id) + "）";
+}
+
 }  // namespace beatbench::edit

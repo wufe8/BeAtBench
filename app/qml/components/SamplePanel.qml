@@ -12,6 +12,9 @@ ColumnLayout {
     id: root
 
     signal samplePicked(string id, string file)
+    /// 双击行 → 手动重命名该采样的 #WAV id（2026-09 用户；为 BGA 编辑打基础）。
+    /// from = 旧 id 文本，to = 新 id 文本；→ Main 走 sample.rename 并刷新面板。
+    signal sampleRenameRequested(string from, string to)
 
     function requireId(id) {
         const idx = sampleModel.indexOfId(id)
@@ -116,13 +119,16 @@ ColumnLayout {
                 required property int refs
                 required property bool missing
                 required property bool extMismatch
+                /// 双击编辑 id 模式（2026-09）：显示内联 TextField 改 #WAV id，Enter/失焦提交。
+                property bool editing: false
+                onEditingChanged: if (editing) idEdit.forceActiveFocus()
 
                 width: ListView.view.width
                 height: 26
                 radius: Theme.radiusSm
-                color: mouse.containsMouse ? Theme.surface3
-                                           : (sampleModel.currentSample === id ? Theme.primarySoft
-                                                                               : "transparent")
+                color: mouse.containsMouse && !row.editing ? Theme.surface3
+                                                           : (sampleModel.currentSample === id ? Theme.primarySoft
+                                                                                              : "transparent")
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 6
@@ -130,9 +136,38 @@ ColumnLayout {
                     spacing: 6
                     Label {
                         text: "#WAV" + row.id
+                        visible: !row.editing
                         color: sampleModel.currentSample === row.id ? Theme.primary : Theme.textMuted
                         font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall
+                    }
+                    TextField {
+                        id: idEdit
+                        visible: row.editing
+                        Layout.preferredWidth: 84
+                        text: row.id
+                        selectByMouse: true
+                        color: Theme.text
+                        placeholderTextColor: Theme.textFaint
+                        font.family: Theme.fontMono
+                        font.pixelSize: Theme.fsSmall
+                        background: Rectangle {
+                            radius: Theme.radiusSm
+                            border.width: 1
+                            border.color: idEdit.activeFocus ? Theme.primary : Theme.borderStrong
+                            color: Theme.surface2
+                        }
+                        onAccepted: {
+                            const newId = text.trim()
+                            row.editing = false
+                            if (newId !== "" && newId !== row.id)
+                                root.sampleRenameRequested(row.id, newId)
+                        }
+                        Keys.onEscapePressed: { row.editing = false }
+                        Keys.onReleased: (event) => {
+                            if (event.key === Qt.Key_Tab) row.editing = false
+                        }
+                        onActiveFocusChanged: if (!activeFocus) row.editing = false
                     }
                     Label {
                         text: row.file
@@ -161,10 +196,12 @@ ColumnLayout {
                     id: mouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    enabled: !row.editing
                     onClicked: {
                         sampleModel.selectId(row.id)
                         root.samplePicked(row.id, row.file)
                     }
+                    onDoubleClicked: row.editing = true
                     ToolTip.visible: mouse.containsMouse && row.missing
                     ToolTip.text: qsTr("文件缺失")
                     ToolTip.delay: 400

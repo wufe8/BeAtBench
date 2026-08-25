@@ -1694,6 +1694,50 @@ public:
     }
 };
 
+// —— 采样定义 id 重映射（2026-09 用户：双击手动编辑采样 id，为 BGA 编辑打基础） ——
+// sample.rename：{from:"01", to:"1A"}（#WAV 定义的 id 文本，按谱面 id_base 解码）。
+// 重映射定义表键 + 所有引用该 id 的 note/BGA/BPM/STOP 引用（一个 undo 步）。
+
+class SampleRenameCommand : public Command {
+public:
+    std::string_view name() const override { return "sample.rename"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::string& from = arg_str(args, "from");
+        const std::string& to = arg_str(args, "to");
+        if (from.empty() || to.empty()) throw CommandError("bad_args", "缺少 from/to");
+        const auto& chart = session.chart();
+        const auto decode = [&chart](const std::string& s) {
+            return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+        };
+        const std::uint32_t from_id = decode(from);
+        const std::uint32_t to_id = decode(to);
+        if (from_id == to_id) throw CommandError("same_id", "from 与 to 相同");
+        session.exec(std::make_unique<edit::RenameSampleCommand>(SampleKind::Wav, from_id, to_id));
+        Json out = Json::object();
+        out.set("ok", true);
+        out.set("from", static_cast<std::int64_t>(from_id));
+        out.set("to", static_cast<std::int64_t>(to_id));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// session.samples：返回当前内存会话的定义表（WAV 列表；供面板在编辑后刷新，与 info 同构）。
+
+class SessionSamplesCommand : public Command {
+public:
+    std::string_view name() const override { return "session.samples"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        Json out = Json::object();
+        out.set("samples", samples_json(session.chart()));
+        return out;
+    }
+};
+
 void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<VersionCommand>());
     registry.add(std::make_unique<CapabilitiesCommand>());
@@ -1736,6 +1780,8 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<MetaEditCommand>());
     registry.add(std::make_unique<MetaRawCommand>());
     registry.add(std::make_unique<MetaRawEditCommand>());
+    registry.add(std::make_unique<SessionSamplesCommand>());
+    registry.add(std::make_unique<SampleRenameCommand>());
 }
 
 }  // namespace beatbench::cmd

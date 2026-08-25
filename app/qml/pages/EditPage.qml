@@ -47,6 +47,8 @@ Item {
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)
+    /// 采样 id 重命名请求（双击采样行编辑 id）→ Main 走 sample.rename 并刷新面板
+    signal sampleRenameRequested(string from, string to)
     /// note 工具点击（hitTest 结果）→ Main 走 note.put
     signal hitPlaceRequested(var hit)
     /// 框选完成 → Main 存 selection + 复制到剪贴板
@@ -64,6 +66,8 @@ Item {
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
     /// 元信息操作状态提示 → Main 置状态栏
     signal metaMessage(string msg)
+    /// 元信息面板「保存」→ Main 只保存元信息（应用 meta.edit + meta.rawEdit，不写文件）
+    signal metaSaveRequested()
     /// 元信息面板修改（保存前须先应用：CollectMetaEdits / applyRawEdits）
     signal metaDirty()
     /// 编辑区任意按下 → Main 释放文本框焦点
@@ -89,6 +93,10 @@ Item {
     /// 应用「扩展代码」原始行改动（Main 在保存前调用；返回是否应用）。
     function applyRawEdits() {
         return metaPanel ? metaPanel.applyRawEdits() : false
+    }
+    /// 保存后把当前编辑值设为基线（orig=value）并清脏（元信息「保存」按钮成功后在 Main 调用）。
+    function commitMeta() {
+        if (metaPanel) metaPanel.commit()
     }
 
     /// 诊断探针（--probe）：返回 ChartViewItem（含 probe(x,y)），定位选中/移动命中问题。
@@ -145,8 +153,8 @@ Item {
 
         // ---------- 左 Dock（面板容器） ----------
         Rectangle {
-            SplitView.preferredWidth: 240
-            SplitView.minimumWidth: 180
+            SplitView.preferredWidth: 300
+            SplitView.minimumWidth: 220
             color: Theme.surface
             border.color: Theme.border
 
@@ -172,8 +180,10 @@ Item {
                         meta: root.chartMeta
                         chartPath: root.chartPath
                         onMetaMessage: (msg) => root.metaMessage(msg)
+                        onSaveRequested: root.metaSaveRequested()
                     }
-                    SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file) }
+                    SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file);
+                                  onSampleRenameRequested: (from, to) => root.sampleRenameRequested(from, to) }
                     LintPanel {
                         onIssuePicked: (id) => {
                             // lint → 采样 双向往返：切到采样标签并定位该行
