@@ -26,6 +26,10 @@ ApplicationWindow {
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     property string statusText: qsTr("就绪")
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
+    // 当前 BPM/STOP 值（路线 A：工具栏值放置用；选中逻辑方案2 = 独立于左 Dock 采样选中——
+    // 在什么时序轨放置就用哪种值，互不冲突）。打开谱面时用元信息 BPM 兜底。
+    property real currentBpmValue: 130
+    property real currentStopValue: 5000
     // 文件格式/编码（底部状态栏右下角显示；info/check 返回）
     property string chartFormat: ""
     property string chartEncoding: ""
@@ -362,6 +366,36 @@ ApplicationWindow {
                     onActivated: (idx) => window.noteSampleMode = idx
                     Layout.preferredWidth: 130
                 }
+                // 时序值（路线 A：BPM/STOP 值放置；选中逻辑方案2 = 独立于采样选中——
+                // 在 BPM 轨放置用 BPM 值、STOP 轨用 STOP 值，互不冲突）
+                Label { text: qsTr("时序"); color: Theme.textFaint
+                        font.pixelSize: Theme.fsTiny; padding: 4 }
+                BbTextField {
+                    id: bpmValueField
+                    Layout.preferredWidth: 52
+                    text: String(window.currentBpmValue)
+                    validator: DoubleValidator { bottom: 0.001; top: 9999; locale: "C" }
+                    onEditingFinished: {
+                        const v = parseFloat(text)
+                        if (isFinite(v) && v > 0) window.currentBpmValue = v
+                        else text = String(window.currentBpmValue)
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("当前 BPM 值（点击时间轴 BPM 列放置；Enter/失焦生效）")
+                }
+                BbTextField {
+                    id: stopValueField
+                    Layout.preferredWidth: 58
+                    text: String(window.currentStopValue)
+                    validator: IntValidator { bottom: 0; top: 99999999 }
+                    onEditingFinished: {
+                        const v = parseInt(text, 10)
+                        if (isFinite(v) && v >= 0) window.currentStopValue = v
+                        else text = String(window.currentStopValue)
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("当前 STOP 值（微秒；点击时间轴 STOP 列放置；Enter/失焦生效）")
+                }
                 // 当前采样（M3 放置落点；检索/选择在左 Dock 采样面板）
                 Label {
                     text: sampleModel.currentSampleText
@@ -569,6 +603,11 @@ ApplicationWindow {
         var r = JSON.parse(resp)
         if (r.ok) {
             window.chartMeta = r.result.meta
+            // 当前 BPM 值兜底 = 元信息 BPM（路线 A 值放置默认）
+            if (window.chartMeta && window.chartMeta.BPM !== undefined) {
+                const b = parseFloat(window.chartMeta.BPM)
+                if (isFinite(b) && b > 0) window.currentBpmValue = b
+            }
             window.chartPath = r.result.path
             window.chartFormat = r.result.format !== undefined ? r.result.format : ""
             // 编码：从 info/check 的 diagnostics（"encoding: UTF-8 (path)"）提取
@@ -677,6 +716,20 @@ ApplicationWindow {
         }
     }
     function placeNote(hit) {
+        // 元事件轨（BPM/STOP，路线 A：工具栏值 + 点击列放置）→ timing.put；值取当前 BPM/STOP 值。
+        if (hit.metaKind === "bpm" || hit.metaKind === "stop") {
+            const tKind = hit.metaKind
+            const value = tKind === "bpm" ? window.currentBpmValue : window.currentStopValue
+            const tArgs = { kind: tKind, measure: hit.measure,
+                            pos: { num: hit.num, den: hit.den }, value: value }
+            const tr = sessionCmd("timing.put", tArgs)
+            if (tr) {
+                refreshTiming()
+                setStatus(qsTr("放置 %1：小节 %2 · %3/%4 = %5")
+                          .arg(tKind.toUpperCase()).arg(hit.measure).arg(hit.num).arg(hit.den).arg(value))
+            }
+            return
+        }
         // kind 语义（M3 note.put 已支持）：note→normal / ln→LN 自动配对 / mine→地雷。
         var kind = "normal"
         if (window.editorTool === "ln") kind = "ln"

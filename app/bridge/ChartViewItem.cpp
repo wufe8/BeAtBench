@@ -240,9 +240,9 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     }
     if (col < 0 || static_cast<std::size_t>(col) >= m_columns.size()) return res;
     const Column& c = m_columns[static_cast<std::size_t>(col)];
-    // 仅元事件轨（BPM/STOP）不可放置；BGA 图层列（用户确认「不限格式，保存格式一样就允许」，
-    // 见问题1）与 BGM 列均可放。
-    if (c.bpm || c.stop) return res;
+    // BPM/STOP 元事件轨：2026-09 用户确认「格式可表示 id 就允许放置」——点击该列在 note 工具
+    // 下 = 放置一个带当前值的 timing 事件（timing.put；metakind 标记给前端分发）。BGA 图层列
+    // 与 BGM 列亦可放（note.convert / note.put，sampleHint）。
     const qreal mf = measureAt(y);
     if (mf < 0.0 || mf >= cs->measureCount()) return res;
     const int measure = static_cast<int>(std::floor(mf));
@@ -271,6 +271,10 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     res.insert(QStringLiteral("label"), c.label);
     res.insert(QStringLiteral("bgm_line"), c.bgmLine);
     res.insert(QStringLiteral("bgaLayer"), c.bgaLayer);
+    // 元事件轨（BPM/STOP）：标记 metaKind，前端据此走 timing.put 而非 note.put
+    if (c.bpm || c.stop)
+        res.insert(QStringLiteral("metaKind"), c.bpm ? QStringLiteral("bpm")
+                                                      : QStringLiteral("stop"));
     // BGM 展开列：该列即固定 #WAV id（放置用它，不取当前采样）
     if (c.bgm && c.bgmId != 0) res.insert(QStringLiteral("sampleHint"), static_cast<int>(c.bgmId));
     return res;
