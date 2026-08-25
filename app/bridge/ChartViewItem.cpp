@@ -848,14 +848,16 @@ void ChartViewItem::rebuildColumns() {
                 add(l, columnLabel(l, QStringLiteral("P")));
             }
             if (scratch2 || maxKey2 > 0 || pedal2) {
-                if (scratch2) {
-                    const beatbench::Lane l{1, beatbench::LaneKind::Scratch, 0};
-                    add(l, columnLabel(l, QStringLiteral("2P·S")), false, true);
-                }
+                // 2P 布局（2026-09 用户：1P 皿在左、2P 皿在右——中间 key 不做对称，只调转盘顺序）
+                // 顺序 = 2P 键 1..max → 2P 皿（S，右移到键后）→ 2P 踏板（最右）。
                 for (int k = 1; k <= maxKey2; ++k) {
                     const beatbench::Lane l{1, beatbench::LaneKind::Key,
                                             static_cast<std::uint8_t>(k)};
                     add(l, columnLabel(l, QStringLiteral("2P·%1").arg(k)), false, true);
+                }
+                if (scratch2) {
+                    const beatbench::Lane l{1, beatbench::LaneKind::Scratch, 0};
+                    add(l, columnLabel(l, QStringLiteral("2P·S")), false, true);
                 }
                 if (pedal2) {
                     const beatbench::Lane l{1, beatbench::LaneKind::Pedal, 0};
