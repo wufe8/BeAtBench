@@ -153,8 +153,8 @@ Item {
 
         // ---------- 左 Dock（面板容器） ----------
         Rectangle {
-            SplitView.preferredWidth: 300
-            SplitView.minimumWidth: 220
+            SplitView.preferredWidth: 240
+            SplitView.minimumWidth: 180
             color: Theme.surface
             border.color: Theme.border
 

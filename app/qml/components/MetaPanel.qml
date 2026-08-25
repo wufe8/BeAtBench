@@ -225,7 +225,16 @@ ColumnLayout {
                         model: root.comboOptions(modelData.key, modelData.value)
                         textRole: "label"
                         valueRole: "value"
-                        editable: true
+                        // 非可编辑：contentItem 用 Label（点击整块/箭头即开下拉，不再与文本框
+                        // 重叠抢点击）。下拉始终含当前值（comboOptions 追补非标准值）。
+                        contentItem: Label {
+                            text: combo.displayText
+                            color: Theme.text
+                            font: combo.font
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: 8
+                            rightPadding: 22   // 预留右侧箭头区，点击区清楚易点
+                        }
                         Layout.fillWidth: true
                         Layout.minimumWidth: 120
                         font.pixelSize: Theme.fsBase
@@ -271,10 +280,6 @@ ColumnLayout {
                             border.color: combo.hovered ? Theme.accent : Theme.borderStrong
                             color: Theme.surface2
                             opacity: combo.enabled ? 1.0 : 0.45
-                        }
-                        onEditTextChanged: {
-                            const v = root.resolveComboValue(source.key, editText)
-                            if (source.value !== v) { source.value = v; root.dirtyTick++ }
                         }
                         popup: Popup {
                             y: combo.height
@@ -353,7 +358,15 @@ ColumnLayout {
                             model: root.comboOptions(modelData.key, modelData.value)
                             textRole: "label"
                             valueRole: "value"
-                            editable: true
+                            // 非可编辑（同主字段 combo）：Label contentItem，整块/箭头可点。
+                            contentItem: Label {
+                                text: combo.displayText
+                                color: Theme.text
+                                font: combo.font
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 8
+                                rightPadding: 22
+                            }
                             Layout.fillWidth: true
                             Layout.minimumWidth: 120
                             font.pixelSize: Theme.fsBase
@@ -397,10 +410,6 @@ ColumnLayout {
                                 border.color: combo.hovered ? Theme.accent : Theme.borderStrong
                                 color: Theme.surface2
                                 opacity: combo.enabled ? 1.0 : 0.45
-                            }
-                            onEditTextChanged: {
-                                const v = root.resolveComboValue(source.key, editText)
-                                if (source.value !== v) { source.value = v; root.dirtyTick++ }
                             }
                             popup: Popup {
                                 y: combo.height
@@ -461,6 +470,7 @@ ColumnLayout {
                 Layout.preferredHeight: 120
                 text: root.rawText
                 wrapMode: TextEdit.NoWrap
+                color: Theme.text
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 onTextChanged: { root.rawText = text; root.dirtyTick++ }
