@@ -37,6 +37,9 @@ public:
     /// 采样 id 文本（"0A"）→ 数值 id（按活动文档 id_base；未知/不存在 → -1）。
     Q_INVOKABLE int sampleValueOf(const QString& idText) const;
 
+    /// 数值 id → 采样 id 文本（按活动文档 id_base；无文档 → 空串）。
+    Q_INVOKABLE QString idTextOf(int id) const;
+
     /// 活动会话视图（core 所有；不可 delete；documentChanged 后须 refresh 或重取）。
     const beatbench::Chart* chart() const { return m_chart; }
     const beatbench::TimingEngine* timing() const { return m_timing.get(); }

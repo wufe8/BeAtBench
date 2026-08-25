@@ -402,12 +402,13 @@ ApplicationWindow {
                     window.currentSampleId = id
                     setStatus(qsTr("当前采样：#WAV%1 %2").arg(id, file))
                 }
-                onSampleRenameRequested: (from, to) => renameSampleId(from, to)
+                onSampleFileRequested: (id, file) => setSampleFile(id, file)
                 onHitPlaceRequested: (hit) => placeNote(hit)
                 onSelectionFinished: (refs) => onSelectionMade(refs)
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
+                onNoteEditRequested: (ref) => editNoteSample(ref)
                 onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => moveSelection(deltaF, targetLane, sourceLane)
                 onMetaMessage: (msg) => setStatus(msg)
                 onMetaSaveRequested: saveMetaEdits()
@@ -1010,18 +1011,26 @@ ApplicationWindow {
                 setStatus(qsTr("无可重做"))
         }
     }
-    /// 重命名采样 #WAV id（双击采样行编辑；sample.rename 一个 undo 步）。成功后从内存会话
-    /// 刷新采样面板（id/file/引用数；session.samples 与 info 同构）。
-    function renameSampleId(fromId, toId) {
-        if (!fromId || !toId || fromId === toId) return
-        const r = sessionCmd("sample.rename", { from: fromId, to: toId })
+    /// 设置采样槽位绑定的文件名（双击采样行编辑；sample.setFile 一个 undo 步）。成功后
+    /// 从内存会话刷新采样面板（id/file/引用数；session.samples 与 info 同构，枚举全部槽位）。
+    function setSampleFile(id, file) {
+        if (id === undefined || id === null || id === "") return
+        const r = sessionCmd("sample.setFile", { id: id, file: file })
         if (!r) return
         const sresp = beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} }))
         if (sresp) {
             const r2 = JSON.parse(sresp)
             if (r2.ok) sampleModel.loadFromInfo(JSON.stringify({ ok: true, result: r2.result }))
         }
-        setStatus(qsTr("已重命名 #WAV%1 → #WAV%2（Undo 可恢复）").arg(fromId, toId))
+        setStatus(qsTr("#WAV%1 → %2（Undo 可恢复）").arg(id, file))
+    }
+
+    /// 编辑区双击 note → 改其引用采样 id（切音手工版）。弹出对话框，收新 #WAV id → note.setSample。
+    function editNoteSample(ref) {
+        if (!ref) return
+        noteSampleDialog.ref = ref
+        noteIdInput.text = chartSession.idTextOf(ref.sample)
+        noteSampleDialog.open()
     }
 
     function saveChart() {
@@ -1086,6 +1095,54 @@ ApplicationWindow {
             Label { text: "BeAtBench " + qsTr("0.1.0（M2）"); font.bold: true }
             Label { text: qsTr("BMS 谱面编辑器 · Qt Quick/QML · GPL-3.0") }
             Label { text: qsTr("协议：命令即接口（doc/06 §3）"); color: Theme.textMuted }
+        }
+    }
+
+    // 编辑区双击 note → 改引用采样 id（切音手工版；note.setSample）
+    Dialog {
+        id: noteSampleDialog
+        title: qsTr("修改 note 引用采样 #WAV id")
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        property var ref: null
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onOpened: noteIdInput.forceActiveFocus()
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 6
+            Label {
+                text: noteSampleDialog.ref
+                      ? qsTr("当前引用：#WAV%1").arg(chartSession.idTextOf(noteSampleDialog.ref.sample))
+                      : ""
+                color: Theme.textMuted
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+            }
+            BbTextField {
+                id: noteIdInput
+                Layout.preferredWidth: 150
+                font.family: Theme.fontMono
+                placeholderText: qsTr("#WAV id（如 1A）")
+            }
+            Label { text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
+                    font.pixelSize: Theme.fsTiny }
+        }
+        onAccepted: {
+            const r = noteSampleDialog.ref
+            if (!r) return
+            const to = noteIdInput.text.trim()
+            if (to === "") { setStatus(qsTr("未填 #WAV id")); return }
+            const args = {
+                measure: r.measure,
+                pos: { num: r.pos.num, den: r.pos.den },
+                lane: r.lane,
+                sample: r.sample,
+                to: to
+            }
+            if (r.bgm_line !== undefined) args.bgm_line = r.bgm_line
+            const res = sessionCmd("note.setSample", args)
+            if (res) setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
         }
     }
 }

@@ -82,6 +82,12 @@ int ChartSession::sampleValueOf(const QString& idText) const {
     return static_cast<int>(id);
 }
 
+QString ChartSession::idTextOf(int id) const {
+    if (!m_chart) return QString();
+    return QString::fromStdString(beatbench::bms::id_text(
+        *m_chart, static_cast<std::uint32_t>(id)));
+}
+
 void ChartSession::attachActive(bool rebuildTiming) {
     auto& reg = beatbench::edit::session_registry();
     auto& s = reg.active();

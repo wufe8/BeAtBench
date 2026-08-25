@@ -47,6 +47,7 @@ Item {
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
+    signal noteEditRequested(var ref)       // 双击命中 note（切音手工版：改引用采样 id）
     signal editAreaPressed()                // 编辑区任意按下 → Main 释放文本框焦点（2026-09）
     // 平移：deltaF = 时间轴位移（拍位小数，0=不动）；targetLane = 横向移动目标列
     // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）；
@@ -408,6 +409,13 @@ Item {
             }
             if (mouse.button === Qt.RightButton) return
             root.handleRelease(mouse.x, mouse.y)
+        }
+        onDoubleClicked: (mouse) => {
+            // 切音手工版：双击命中 note（select 工具）→ 改引用采样 id（Main 弹对话框）
+            if (mouse.button === Qt.LeftButton && root.editorTool === "select" && mouse.y > 18) {
+                const hit = view.noteAt(mouse.x, mouse.y)
+                if (hit.valid) root.noteEditRequested(hit)
+            }
         }
     }
 

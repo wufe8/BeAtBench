@@ -136,47 +136,58 @@ Json diags_json(const std::vector<beatbench::codec::Diagnostic>& diags) {
 Json samples_json(const Chart& chart) {
     Json wav = Json::array(), bmp = Json::array(), bpm = Json::array(), stop = Json::array();
     const auto usage = collect_sample_usage(chart);
-    // samples 按键 (kind, id) 有序：kind 序 + id 升序
-    for (const auto& [key, def] : chart.samples) {
+    // 生成单个条目（id 文本 + 使用统计 + file/value；未绑定 → 空 file）
+    const auto make_entry = [&](SampleKind kind, std::uint32_t id, const SampleDef* def,
+                                bool has_def) {
         Json e = Json::object();
-        e.set("id", id_text(chart, key.second));
-        // 使用统计（采样面板检索/排序；bpm/stop 无统计，默认 0）
-        {
-            const auto it = usage.find(key);
-            e.set("refs", static_cast<std::int64_t>(it != usage.end() ? it->second.refs : 0));
-            e.set("first_measure",
-                  static_cast<std::int64_t>(it != usage.end() ? it->second.first_measure : 0));
-            Json u = Json::array();
-            if (it != usage.end()) {
-                // token：keys/scratch/pedal = 1P，*2 = 2P，bgm = 背景音轨
-                // （面板按 player 动态分组，未用组不出现）
-                if (it->second.key1) u.push_back("keys");
-                if (it->second.scratch1) u.push_back("scratch");
-                if (it->second.pedal1) u.push_back("pedal");
-                if (it->second.key2) u.push_back("keys2");
-                if (it->second.scratch2) u.push_back("scratch2");
-                if (it->second.pedal2) u.push_back("pedal2");
-                if (it->second.bgm) u.push_back("bgm");
-            }
-            e.set("usage", std::move(u));
+        e.set("id", id_text(chart, id));
+        const auto it = usage.find({kind, id});
+        e.set("refs", static_cast<std::int64_t>(it != usage.end() ? it->second.refs : 0));
+        e.set("first_measure",
+              static_cast<std::int64_t>(it != usage.end() ? it->second.first_measure : 0));
+        Json u = Json::array();
+        if (it != usage.end()) {
+            if (it->second.key1) u.push_back("keys");
+            if (it->second.scratch1) u.push_back("scratch");
+            if (it->second.pedal1) u.push_back("pedal");
+            if (it->second.key2) u.push_back("keys2");
+            if (it->second.scratch2) u.push_back("scratch2");
+            if (it->second.pedal2) u.push_back("pedal2");
+            if (it->second.bgm) u.push_back("bgm");
         }
+        e.set("usage", std::move(u));
+        if (has_def) {
+            if (kind == SampleKind::Wav || kind == SampleKind::Bmp) e.set("file", def->file);
+            else e.set("value", def->value);
+        } else {
+            e.set("file", "");  // 未绑定采样槽位（切音工作区手工版）
+        }
+        return e;
+    };
+    // Wav：枚举全部 id（00..ZZ；36/62 进制），含未绑定/未使用槽位（切音工作区手工版）。
+    const std::uint32_t base = chart.id_base == IdBase::Base62 ? 62u : 36u;
+    const std::uint32_t wav_count = base * base;
+    for (std::uint32_t id = 0; id < wav_count; ++id) {
+        const auto it = chart.samples.find({SampleKind::Wav, id});
+        if (it != chart.samples.end())
+            wav.push_back(make_entry(SampleKind::Wav, id, &it->second, true));
+        else
+            wav.push_back(make_entry(SampleKind::Wav, id, nullptr, false));
+    }
+    // 其它定义表（BMP/BPM/STOP）：仅已绑定，按键升序
+    for (const auto& [key, def] : chart.samples) {
         switch (key.first) {
-            case SampleKind::Wav:
-                e.set("file", def.file);
-                wav.push_back(std::move(e));
-                break;
             case SampleKind::Bmp:
-                e.set("file", def.file);
-                bmp.push_back(std::move(e));
+                bmp.push_back(make_entry(SampleKind::Bmp, key.second, &def, true));
                 break;
             case SampleKind::Bpm:
-                e.set("value", def.value);
-                bpm.push_back(std::move(e));
+                bpm.push_back(make_entry(SampleKind::Bpm, key.second, &def, true));
                 break;
             case SampleKind::Stop:
-                e.set("value", def.value);
-                stop.push_back(std::move(e));
+                stop.push_back(make_entry(SampleKind::Stop, key.second, &def, true));
                 break;
+            case SampleKind::Wav:
+                break;  // 已在上面枚举
         }
     }
     Json out = Json::object();
@@ -1738,6 +1749,70 @@ public:
     }
 };
 
+// —— 切音工作区手工版（2026-09）：给采样槽位绑定/改文件 + 给 note 改引用采样 id ——
+// sample.setFile：{id:"03", file:"kick.wav"} → samples[(Wav,id)].file 设置/创建（一个 undo 步）。
+// note.setSample：{measure, pos, lane, sample:<当前id>, to:"<新id文本>", bgm_line?} →
+//   定位该 note，把其引用采样改为 to（一个 undo 步；仅改这一条 note）。
+
+class SampleSetFileCommand : public Command {
+public:
+    std::string_view name() const override { return "sample.setFile"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::string& id = arg_str(args, "id");
+        const std::string& file = arg_str(args, "file");
+        const auto& chart = session.chart();
+        const auto decode = [&chart](const std::string& s) {
+            return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+        };
+        const std::uint32_t id_num = decode(id);
+        session.exec(std::make_unique<edit::SetSampleFileCommand>(SampleKind::Wav, id_num, file));
+        Json out = Json::object();
+        out.set("ok", true);
+        out.set("id", static_cast<std::int64_t>(id_num));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+class NoteSetSampleCommand : public Command {
+public:
+    std::string_view name() const override { return "note.setSample"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::uint32_t measure = u32_arg(args, "measure");
+        const Rational pos = pos_from_json(args);
+        const Lane lane = [&] {
+            if (const Json* lj = args.find("lane")) {
+                if (lj->is_object()) return lane_from_json(*lj);
+                throw CommandError("bad_args", "lane 应为对象 {player,kind,index}");
+            }
+            return lane_from_json(args);
+        }();
+        const std::uint32_t sample = u32_arg(args, "sample");
+        const std::string& to = arg_str(args, "to");
+        std::uint32_t bgm_line = 0;
+        if (const Json* bl = args.find("bgm_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
+            bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        }
+        const auto& chart = session.chart();
+        const auto decode = [&chart](const std::string& s) {
+            return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+        };
+        const std::uint32_t to_id = decode(to);
+        const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(
+            measure, pos, lane, sample, bgm_line, to_id));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("to", static_cast<std::int64_t>(to_id));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<VersionCommand>());
     registry.add(std::make_unique<CapabilitiesCommand>());
@@ -1782,6 +1857,8 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<MetaRawEditCommand>());
     registry.add(std::make_unique<SessionSamplesCommand>());
     registry.add(std::make_unique<SampleRenameCommand>());
+    registry.add(std::make_unique<SampleSetFileCommand>());
+    registry.add(std::make_unique<NoteSetSampleCommand>());
 }
 
 }  // namespace beatbench::cmd

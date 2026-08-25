@@ -47,8 +47,8 @@ Item {
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)
-    /// 采样 id 重命名请求（双击采样行编辑 id）→ Main 走 sample.rename 并刷新面板
-    signal sampleRenameRequested(string from, string to)
+    /// 采样槽位文件名编辑请求（双击采样行）→ Main 走 sample.setFile 并刷新面板
+    signal sampleFileRequested(string id, string file)
     /// note 工具点击（hitTest 结果）→ Main 走 note.put
     signal hitPlaceRequested(var hit)
     /// 框选完成 → Main 存 selection + 复制到剪贴板
@@ -61,6 +61,8 @@ Item {
     signal canvasClicked()
     /// 右键命中 note（删除）
     signal noteRightDeleted(var ref)
+    /// 双击命中 note（切音手工版：改引用采样 id）
+    signal noteEditRequested(var ref)
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
     /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
@@ -183,7 +185,7 @@ Item {
                         onSaveRequested: root.metaSaveRequested()
                     }
                     SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file);
-                                  onSampleRenameRequested: (from, to) => root.sampleRenameRequested(from, to) }
+                                  onSampleFileRequested: (id, file) => root.sampleFileRequested(id, file) }
                     LintPanel {
                         onIssuePicked: (id) => {
                             // lint → 采样 双向往返：切到采样标签并定位该行
@@ -271,6 +273,7 @@ Item {
                     onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
                     onCanvasClicked: () => root.canvasClicked()
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
+                    onNoteEditRequested: (ref) => root.noteEditRequested(ref)
                     onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => root.moveSelectionRequested(deltaF, targetLane, sourceLane)
                     onEditAreaPressed: root.editAreaPressed()
                 }

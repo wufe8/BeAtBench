@@ -232,7 +232,6 @@ ColumnLayout {
                             color: Theme.text
                             font: combo.font
                             verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight   // 文字随可用宽度截断省略，箭头始终有空间
                             leftPadding: 8
                             rightPadding: 22   // 预留右侧箭头区，点击区清楚易点
                         }
@@ -364,7 +363,6 @@ ColumnLayout {
                                 color: Theme.text
                                 font: combo.font
                                 verticalAlignment: Text.AlignVCenter
-                                elide: Text.ElideRight
                                 leftPadding: 8
                                 rightPadding: 22
                             }

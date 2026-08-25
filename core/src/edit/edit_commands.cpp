@@ -1192,4 +1192,56 @@ std::string RenameSampleCommand::describe() const {
            std::to_string(m_to_id) + "）";
 }
 
+SetSampleFileCommand::SetSampleFileCommand(SampleKind kind, std::uint32_t id, std::string file)
+    : m_kind(kind), m_id(id), m_file(std::move(file)) {}
+
+void SetSampleFileCommand::apply(Chart& chart) {
+    const auto key = std::make_pair(m_kind, m_id);
+    const auto it = chart.samples.find(key);
+    m_existed = it != chart.samples.end();
+    if (m_existed) m_old_file = it->second.file;
+    m_changed = !m_existed || m_old_file != m_file;
+    if (!m_changed) return;
+    chart.samples[key].file = m_file;  // 不存在则创建
+}
+
+void SetSampleFileCommand::invert(Chart& chart) {
+    if (!m_changed) return;
+    const auto key = std::make_pair(m_kind, m_id);
+    if (m_existed) {
+        chart.samples[key].file = m_old_file;
+    } else {
+        chart.samples.erase(key);
+    }
+    m_changed = false;
+}
+
+std::string SetSampleFileCommand::describe() const {
+    return "设置采样文件（#" + m_file + "）";
+}
+
+SetNoteSampleCommand::SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane,
+                                           std::uint32_t sample, std::uint32_t bgm_line,
+                                           std::uint32_t to)
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_bgm_line(bgm_line),
+      m_to(to) {}
+
+void SetNoteSampleCommand::apply(Chart& chart) {
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    if (!idx) return;
+    m_applied_index = idx;
+    m_did_change = chart.notes[*idx].value.sample.id != m_to;
+    if (m_did_change) chart.notes[*idx].value.sample.id = m_to;
+}
+
+void SetNoteSampleCommand::invert(Chart& chart) {
+    if (!m_did_change || !m_applied_index) return;
+    chart.notes[*m_applied_index].value.sample.id = m_sample;
+    m_did_change = false;
+}
+
+std::string SetNoteSampleCommand::describe() const {
+    return "修改 note 引用采样 id";
+}
+
 }  // namespace beatbench::edit

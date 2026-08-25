@@ -164,9 +164,19 @@ TEST(Command, InfoOnSyntheticChart) {
     EXPECT_EQ(result.at("meta").at("TITLE").as_str(), "JSON 测试谱");
     EXPECT_EQ(result.at("meta").at("RANK").as_str(), "3");
     const auto& samples = result.at("samples");
-    EXPECT_EQ(samples.at("wav").as_array().size(), 1);
-    EXPECT_EQ(samples.at("wav").as_array()[0].at("id").as_str(), "01");
-    EXPECT_EQ(samples.at("wav").as_array()[0].at("file").as_str(), "kick.wav");
+    // 2026-09：Wav 枚举全部槽位（00..ZZ，36 进制 = 1296），含未绑定（空 file）。
+    EXPECT_EQ(samples.at("wav").as_array().size(), 1296);
+    // 未绑定槽位 00 → 空 file；已绑定的 01 → kick.wav
+    EXPECT_EQ(samples.at("wav").as_array()[0].at("id").as_str(), "00");
+    EXPECT_EQ(samples.at("wav").as_array()[0].at("file").as_str(), "");
+    bool found_kick = false;
+    for (const auto& item : samples.at("wav").as_array()) {
+        if (item.at("id").as_str() == "01") {
+            EXPECT_EQ(item.at("file").as_str(), "kick.wav");
+            found_kick = true;
+        }
+    }
+    EXPECT_TRUE(found_kick);
     EXPECT_EQ(samples.at("bpm").as_array().size(), 1);
     EXPECT_EQ(samples.at("bpm").as_array()[0].at("value").as_str(), "150");
 

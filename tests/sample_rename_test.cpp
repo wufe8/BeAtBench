@@ -154,3 +154,79 @@ TEST(SampleRename, ProtocolAndSessionSamples) {
     }
     EXPECT_TRUE(found) << resp2.dump();
 }
+
+// —— sample.setFile：改现有定义文件 / 新键创建 / invert 恢复 ——
+
+TEST(SampleRename, SetFileExistingAndCreate) {
+    EditorSession s;
+    s.load(make_chart());
+    // 现有 #WAV1 改文件
+    ASSERT_TRUE(s.exec(std::make_unique<SetSampleFileCommand>(SampleKind::Wav, 1, "x.wav")));
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Wav, 1}).file, "x.wav");
+    // 新键 #WAV9 创建（原本不存在）
+    ASSERT_TRUE(s.exec(std::make_unique<SetSampleFileCommand>(SampleKind::Wav, 9, "new.wav")));
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Wav, 9}).file, "new.wav");
+    // undo 两次：9 移除、1 恢复 a.wav
+    ASSERT_TRUE(s.undo());
+    EXPECT_FALSE(has_sample(s.chart(), SampleKind::Wav, 9));
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Wav, 1}).file, "a.wav");
+}
+
+// —— note.setSample：改单条 note 引用、invert 恢复、找不到无操作 ——
+
+TEST(SampleRename, SetNoteSampleChangesOne) {
+    EditorSession s;
+    s.load(make_chart());
+    // m1 key1 pos0 的 s1 note → s5
+    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 0, 5)));
+    int s5 = 0, s2 = 0;
+    for (const auto& e : s.chart().notes) {
+        if (e.value.sample.id == 5) s5++;
+        if (e.value.sample.id == 2) s2++;
+    }
+    EXPECT_EQ(s5, 1);  // 只有 pos0 那条改了
+    EXPECT_EQ(s2, 1);
+    ASSERT_TRUE(s.undo());
+    int s1 = 0;
+    for (const auto& e : s.chart().notes)
+        if (e.value.sample.id == 1) s1++;
+    EXPECT_EQ(s1, 2);
+}
+
+TEST(SampleRename, SetNoteSampleNoMatchNoOp) {
+    EditorSession s;
+    s.load(make_chart());
+    // 不存在 (measure 9, pos0, lane key9, sample 7) → 无操作
+    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(
+        9, Rational(0, 1), Lane{0, LaneKind::Key, 9}, 7, 0, 5)));
+    for (const auto& e : s.chart().notes)
+        EXPECT_FALSE(e.value.sample.id == 5);
+}
+
+// —— 协议 note.setSample（id 文本 to） ——
+
+TEST(SampleRename, ProtocolSetNoteSample) {
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+    Json req = Json::object();
+    req.set("command", "note.setSample");
+    Json args = Json::object();
+    args.set("measure", static_cast<std::int64_t>(1));
+    Json pos = Json::object();
+    pos.set("num", 0); pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0); lane.set("kind", "key"); lane.set("index", 1);
+    args.set("lane", std::move(lane));
+    args.set("sample", static_cast<std::int64_t>(1));
+    args.set("to", "1A");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    int s46 = 0;
+    for (const auto& e : session.chart().notes)
+        if (e.value.sample.id == 46) s46++;
+    EXPECT_EQ(s46, 1);  // 1A 解码 = 46
+}

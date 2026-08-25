@@ -12,9 +12,9 @@ ColumnLayout {
     id: root
 
     signal samplePicked(string id, string file)
-    /// 双击行 → 手动重命名该采样的 #WAV id（2026-09 用户；为 BGA 编辑打基础）。
-    /// from = 旧 id 文本，to = 新 id 文本；→ Main 走 sample.rename 并刷新面板。
-    signal sampleRenameRequested(string from, string to)
+    /// 双击行 → 手动编辑该采样槽位绑定的**文件名**（切音工作区手工版；→ Main 走 sample.setFile）。
+    /// id = 槽位 #WAV id 文本，file = 新文件名。
+    signal sampleFileRequested(string id, string file)
 
     function requireId(id) {
         const idx = sampleModel.indexOfId(id)
@@ -119,9 +119,9 @@ ColumnLayout {
                 required property int refs
                 required property bool missing
                 required property bool extMismatch
-                /// 双击编辑 id 模式（2026-09）：显示内联 TextField 改 #WAV id，Enter/失焦提交。
+                /// 双击编辑文件名模式（切音工作区手工版）：显示内联 TextField 改文件名，Enter/失焦提交。
                 property bool editing: false
-                onEditingChanged: if (editing) idEdit.forceActiveFocus()
+                onEditingChanged: if (editing) fileEdit.forceActiveFocus()
 
                 width: ListView.view.width
                 height: 26
@@ -136,16 +136,23 @@ ColumnLayout {
                     spacing: 6
                     Label {
                         text: "#WAV" + row.id
-                        visible: !row.editing
                         color: sampleModel.currentSample === row.id ? Theme.primary : Theme.textMuted
                         font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall
                     }
+                    Label {
+                        text: row.file
+                        visible: !row.editing
+                        color: Theme.textFaint
+                        elide: Text.ElideMiddle
+                        Layout.fillWidth: true
+                        font.pixelSize: Theme.fsTiny
+                    }
                     TextField {
-                        id: idEdit
+                        id: fileEdit
                         visible: row.editing
-                        Layout.preferredWidth: 84
-                        text: row.id
+                        Layout.fillWidth: true
+                        text: row.file
                         selectByMouse: true
                         color: Theme.text
                         placeholderTextColor: Theme.textFaint
@@ -154,27 +161,20 @@ ColumnLayout {
                         background: Rectangle {
                             radius: Theme.radiusSm
                             border.width: 1
-                            border.color: idEdit.activeFocus ? Theme.primary : Theme.borderStrong
+                            border.color: fileEdit.activeFocus ? Theme.primary : Theme.borderStrong
                             color: Theme.surface2
                         }
                         onAccepted: {
-                            const newId = text.trim()
+                            const newFile = text.trim()
                             row.editing = false
-                            if (newId !== "" && newId !== row.id)
-                                root.sampleRenameRequested(row.id, newId)
+                            if (newFile !== row.file)
+                                root.sampleFileRequested(row.id, newFile)
                         }
                         Keys.onEscapePressed: { row.editing = false }
                         Keys.onReleased: (event) => {
                             if (event.key === Qt.Key_Tab) row.editing = false
                         }
                         onActiveFocusChanged: if (!activeFocus) row.editing = false
-                    }
-                    Label {
-                        text: row.file
-                        color: Theme.textFaint
-                        elide: Text.ElideMiddle
-                        Layout.fillWidth: true
-                        font.pixelSize: Theme.fsTiny
                     }
                     // 状态点（缺失=黄；扩展名不符=青）——精简徽标；仅「缺失」提供悬停提示
                     // （扩展名不符为信息级，lint 面板聚合说明，此处不提示）

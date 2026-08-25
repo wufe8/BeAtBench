@@ -245,4 +245,48 @@ private:
     bool m_changed = false;            ///< apply 实际执行了重映射
 };
 
+/// 设置「定义表」条目的文件路径（切音工作区手工版：双击采样行改绑定的文件，sample.setFile）。
+/// 语义：samples[(kind, id)].file = file；键不存在则创建（含空文件）。
+/// 逆操作：恢复到 apply 前（存在→还回旧值；不存在→移除新键）。单个 undo 步。
+class SetSampleFileCommand : public EditCommand {
+public:
+    SetSampleFileCommand(SampleKind kind, std::uint32_t id, std::string file);
+    std::string name() const override { return "sample.setFile"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    SampleKind m_kind;
+    std::uint32_t m_id;
+    std::string m_file;
+    bool m_existed = false;
+    std::string m_old_file;
+    bool m_changed = false;
+};
+
+/// 修改某个 note 引用的采样 id（编辑区双击 note 改 #WAV id，note.setSample）。
+/// 语义：按 (measure, pos, lane, sample, bgm_line) 定位 note，把其 sample 引用改为 to。
+/// 仅改这一条 note 的引用（不重命名定义表；音频文件不变）。找不到 → 无操作。
+/// 逆操作：恢复原 sample 引用。单个 undo 步。
+class SetNoteSampleCommand : public EditCommand {
+public:
+    SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
+                         std::uint32_t bgm_line, std::uint32_t to);
+    std::string name() const override { return "note.setSample"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::uint32_t m_measure;
+    Rational m_pos;
+    Lane m_lane;
+    std::uint32_t m_sample;
+    std::uint32_t m_bgm_line;
+    std::uint32_t m_to;
+    std::optional<std::size_t> m_applied_index;  ///< 命中的 note 下标（invert 定位）
+    bool m_did_change = false;
+};
+
 }  // namespace beatbench::edit
