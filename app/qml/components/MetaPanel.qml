@@ -57,9 +57,10 @@ ColumnLayout {
             return arr
         }
         if (key === "RANK") {
-            const names = ["", "Beginner", "Normal", "Easy", "Hard", "Very Hard"]
+            // #RANK：难度判定，区间 0-4，播放器默认 3（Easy）。0 最硬 → 4 最易（2026-09 用户）。
+            const names = ["Very Hard", "Hard", "Normal", "Easy", "Very Easy"]
             const arr = []
-            for (let i = 1; i <= 5; i++)
+            for (let i = 0; i <= 4; i++)
                 arr.push({ label: i + " - " + names[i], value: String(i) })
             return arr
         }

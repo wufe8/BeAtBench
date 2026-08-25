@@ -1086,39 +1086,27 @@ void ChartViewItem::paint(QPainter* p) {
     }
     if (stopColI >= 0 && static_cast<std::size_t>(stopColI) < m_colRects.size()) {
         const QRectF r = m_colRects[stopColI];
+        const qreal noteH = noteHeight();
         p->setFont(m_rulerFont);
         for (const auto& ev : chart.stop_events) {
             if (static_cast<int>(ev.measure) < first - 1 ||
                 static_cast<int>(ev.measure) > last + 1)
                 continue;
             const qreal y = yOf(ev.measure + posDouble(ev.pos));
-            if (y < -14 || y > h + 14) continue;
-            QColor tick = th->warning();
-            tick.setAlpha(200);
-            p->fillRect(QRectF(r.x() + 1, y - 1, r.width() - 2, 2), tick);
-            p->setPen(th->warning());
+            if (y < -noteH - 2 || y > h + noteH + 2) continue;
+            // STOP 按「普通 note」看待（2026-09 用户）：只在 STOP 列画位置标记，不预览停止
+            // 时长段——刻度线为小节的编辑态无法准确呈现持续时间（精确时长需 TimingEngine，
+            // 秒标尺后置）；时长段预览留待视图切换模式。颜色走 warning（黄），与 note 同高。
+            p->setPen(Qt::NoPen);
+            p->fillRect(QRectF(r.x() + kNoteHMargin, y - noteH,
+                               r.width() - 2.0 * kNoteHMargin, noteH), th->warning());
+            p->setPen(th->bg());
             QString t = QString::number(ev.value.duration_us / 1e6, 'f', 2);
             while (t.endsWith(QLatin1Char('0')) && t.contains(QLatin1Char('.'))) t.chop(1);
             if (t.endsWith(QLatin1Char('.'))) t.chop(1);
-            p->drawText(QRectF(r.x() + 2, y + 2, r.width() - 3, 12),
-                        Qt::AlignLeft | Qt::AlignTop, t);
+            p->drawText(QRectF(r.x() + 1, y - noteH, r.width() - 2, noteH),
+                        Qt::AlignCenter, t);
         }
-    }
-
-    // ---- STOP 段（按当前 BPM 换算为小节分数；精确秒换算 = TimingEngine，秒标尺后置） ----
-    for (const auto& ev : chart.stop_events) {
-        if (static_cast<int>(ev.measure) < first || static_cast<int>(ev.measure) > last)
-            continue;
-        const qreal y = yOf(ev.measure + posDouble(ev.pos));
-        const double frac = (ev.value.duration_us / 1e6 * bpmAt(chart, ev.measure) / 60.0) /
-                            std::max(beatsOf(chart, ev.measure), 0.001);
-        QColor sc = th->warning();
-        sc.setAlpha(64);
-        // hi-top：后一时间在上方 → 带需跨 [y(尾), y(头)]（min..max）
-        const qreal y2 = yOf(ev.measure + posDouble(ev.pos) + frac);
-        p->fillRect(QRectF(metaRight, std::min(y, y2), w - metaRight,
-                           std::max<qreal>(std::abs(y2 - y), 2.0)),
-                    sc);
     }
 
     // ---- note / LN / 地雷（note 底边 = 实际时间点） ----
