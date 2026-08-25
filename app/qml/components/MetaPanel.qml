@@ -194,12 +194,15 @@ ColumnLayout {
     }
 
     ScrollView {
+        id: metaScroll
         Layout.fillWidth: true
         Layout.fillHeight: true
         clip: true
         visible: root.meta !== null
         ColumnLayout {
-            width: parent.width
+            // 内容填充视口宽（= dock 宽）：绑定 ScrollView.width，不复用 contentItem 宽
+            // （后者按内容自适应，导致字段不随 dock 变宽/或超出 dock）。
+            width: metaScroll.width
             spacing: 6
             Repeater {
                 model: root.primaryFields

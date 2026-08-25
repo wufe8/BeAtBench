@@ -1022,6 +1022,9 @@ ApplicationWindow {
             const r2 = JSON.parse(sresp)
             if (r2.ok) sampleModel.loadFromInfo(JSON.stringify({ ok: true, result: r2.result }))
         }
+        // 保持视图停在编辑的那一行（避免 reload 后回到顶部 id 00）
+        if (typeof editPage !== "undefined" && editPage && editPage.samplePanelObj)
+            editPage.samplePanelObj.requireId(id)
         setStatus(qsTr("#WAV%1 → %2（Undo 可恢复）").arg(id, file))
     }
 

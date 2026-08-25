@@ -44,6 +44,8 @@ Item {
     property bool perfLog: false
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
     readonly property string hoverText: chartView ? chartView.hoverText : ""
+    /// 暴露采样面板（Main 在文件编辑后 scrollTo 定位，避免列表回到顶部）
+    readonly property var samplePanelObj: samplePanel
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)

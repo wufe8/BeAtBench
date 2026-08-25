@@ -121,7 +121,18 @@ ColumnLayout {
                 required property bool extMismatch
                 /// 双击编辑文件名模式（切音工作区手工版）：显示内联 TextField 改文件名，Enter/失焦提交。
                 property bool editing: false
+                property bool committing: false
                 onEditingChanged: if (editing) fileEdit.forceActiveFocus()
+                /// 保存（Enter/失焦/Tab）：改了就请求 sample.setFile；只有一次（committing 防重入，
+                /// 且 `editing` 在 blur（由本函数置 false 引起）时为 false → 不再提交）。
+                function commitEdit() {
+                    if (!row.editing || row.committing) return
+                    row.committing = true
+                    row.editing = false
+                    const newFile = fileEdit.text.trim()
+                    if (newFile !== row.file) root.sampleFileRequested(row.id, newFile)
+                    row.committing = false
+                }
 
                 width: ListView.view.width
                 height: 26
@@ -164,17 +175,13 @@ ColumnLayout {
                             border.color: fileEdit.activeFocus ? Theme.primary : Theme.borderStrong
                             color: Theme.surface2
                         }
-                        onAccepted: {
-                            const newFile = text.trim()
-                            row.editing = false
-                            if (newFile !== row.file)
-                                root.sampleFileRequested(row.id, newFile)
-                        }
+                        // 文件管理器改名语义：Enter/失焦 = 保存；Esc = 取消（还原旧值）。
+                        onAccepted: row.commitEdit()
+                        onActiveFocusChanged: if (!activeFocus && row.editing) row.commitEdit()
                         Keys.onEscapePressed: { row.editing = false }
                         Keys.onReleased: (event) => {
-                            if (event.key === Qt.Key_Tab) row.editing = false
+                            if (event.key === Qt.Key_Tab) row.commitEdit()
                         }
-                        onActiveFocusChanged: if (!activeFocus) row.editing = false
                     }
                     // 状态点（缺失=黄；扩展名不符=青）——精简徽标；仅「缺失」提供悬停提示
                     // （扩展名不符为信息级，lint 面板聚合说明，此处不提示）
