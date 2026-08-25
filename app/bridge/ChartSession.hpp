@@ -40,6 +40,10 @@ public:
     /// 数值 id → 采样 id 文本（按活动文档 id_base；无文档 → 空串）。
     Q_INVOKABLE QString idTextOf(int id) const;
 
+    /// 轨道 → 实际 BMS 通道号文本（"11"=键1、"16"=皿…；属性检查器显示用；
+    /// 无法表示 / 无文档 → 空串）。kind：key/scratch/pedal/bgm。
+    Q_INVOKABLE QString laneChannel(int player, const QString& kind, int index) const;
+
     /// 活动会话视图（core 所有；不可 delete；documentChanged 后须 refresh 或重取）。
     const beatbench::Chart* chart() const { return m_chart; }
     const beatbench::TimingEngine* timing() const { return m_timing.get(); }

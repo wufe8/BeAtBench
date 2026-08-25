@@ -35,6 +35,9 @@ Item {
     property string sampleText: ""
     /// 选中 note 集合（NoteRef；框选后回填 → 高亮）
     property var selection: []
+    /// 时间轴事件（timing.list 结果；Main 在打开谱面/编辑后重取回填，供右 Dock 时间轴面板）
+    property var timingBpm: []
+    property var timingStop: []
     /// 吸附粒度（放置用：snapNum/snapDen 槽/小节；Main snap 分子分母）
     property int snapNum: 1
     property int snapDen: 16
@@ -65,6 +68,10 @@ Item {
     signal noteRightDeleted(var ref)
     /// 双击命中 note（切音手工版：改引用采样 id）
     signal noteEditRequested(var ref)
+    /// 时间轴事件编辑（添加/改值）→ Main 走 timing.put
+    signal timingEditRequested(string kind, int measure, int num, int den, double value)
+    /// 时间轴事件删除 → Main 走 timing.delete
+    signal timingDeleteRequested(string kind, int measure, int num, int den)
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
     /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
@@ -282,27 +289,45 @@ Item {
             }
         }
 
-        // ---------- 右 Dock（属性面板占位） ----------
+        // ---------- 右 Dock（属性检查器 / 时间轴 标签页） ----------
         Rectangle {
             SplitView.preferredWidth: 230
             SplitView.minimumWidth: 160
             color: Theme.surface
             border.color: Theme.border
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 6
-                Label { text: qsTr("属性"); font.bold: true; color: Theme.text;
-                        font.pixelSize: Theme.fsBase }
-                Label {
-                    text: root.chartMeta ? (root.chartMeta.TITLE !== undefined ? root.chartMeta.TITLE : "") : qsTr("未选中")
-                    color: Theme.textMuted
-                    elide: Text.ElideRight
+                // 标签页（可横向滚动；窄 dock 不截断）
+                BbTabStrip {
+                    id: rightTabs
+                    objectName: "rightTabs"  // 调试 --rtab N 用（当前 main.cpp 未接，预留）
                     Layout.fillWidth: true
-                    font.pixelSize: Theme.fsSmall
+                    Layout.preferredHeight: 30
+                    model: [qsTr("属性"), qsTr("时间轴")]
+                    onIndexRequested: (index) => rightTabs.currentIndex = index
                 }
-                Label { text: qsTr("lane / 时间 / 采样（M3）"); color: Theme.textFaint;
-                        font.pixelSize: Theme.fsSmall }
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: rightTabs.currentIndex
+                    PropertiesPanel {
+                        id: propPanel
+                        selection: root.selection
+                        onNoteEditRequested: (ref) => root.noteEditRequested(ref)
+                    }
+                    TimelinePanel {
+                        id: timelinePanel
+                        bpmEvents: root.timingBpm
+                        stopEvents: root.timingStop
+                        onTimingEditRequested: (kind, measure, num, den, value) =>
+                            root.timingEditRequested(kind, measure, num, den, value)
+                        onTimingDeleteRequested: (kind, measure, num, den) =>
+                            root.timingDeleteRequested(kind, measure, num, den)
+                    }
+                }
             }
         }
     }

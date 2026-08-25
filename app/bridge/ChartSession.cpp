@@ -7,6 +7,7 @@
 
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
+#include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
@@ -86,6 +87,20 @@ QString ChartSession::idTextOf(int id) const {
     if (!m_chart) return QString();
     return QString::fromStdString(beatbench::bms::id_text(
         *m_chart, static_cast<std::uint32_t>(id)));
+}
+
+QString ChartSession::laneChannel(int player, const QString& kindStr, int index) const {
+    if (!m_chart) return QString();
+    beatbench::Lane lane;
+    lane.player = static_cast<std::uint8_t>(player);
+    lane.index = static_cast<std::uint8_t>(index);
+    if (kindStr == QLatin1String("scratch")) lane.kind = beatbench::LaneKind::Scratch;
+    else if (kindStr == QLatin1String("pedal")) lane.kind = beatbench::LaneKind::Pedal;
+    else if (kindStr == QLatin1String("bgm")) lane.kind = beatbench::LaneKind::Bgm;
+    else lane.kind = beatbench::LaneKind::Key;
+    const std::string ch =
+        beatbench::bms::bms_channel_for(lane, false, beatbench::NoteKind::Normal);
+    return ch.empty() ? QString() : QString::fromStdString(ch);
 }
 
 void ChartSession::attachActive(bool rebuildTiming) {

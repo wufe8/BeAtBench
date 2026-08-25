@@ -72,6 +72,9 @@ ApplicationWindow {
     property var clipboardLines: []
     // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
     property var selectionRefs: []
+    // 时间轴事件（timing.list 结果；打开谱面/编辑后 refreshTiming 重取，供右 Dock 时间轴面板）
+    property var timingBpm: []
+    property var timingStop: []
     // 吸附（放置用）：snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）
     property int snapNum: 1
     property int snapDen: 16
@@ -393,6 +396,8 @@ ApplicationWindow {
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs
+                timingBpm: window.timingBpm
+                timingStop: window.timingStop
                 snapNum: window.snapNum
                 snapDen: window.snapDen
                 zoomToCursor: window.zoomToCursor
@@ -413,6 +418,10 @@ ApplicationWindow {
                 onMetaMessage: (msg) => setStatus(msg)
                 onMetaSaveRequested: saveMetaEdits()
                 onEditAreaPressed: clearTextFocus()
+                onTimingEditRequested: (kind, measure, num, den, value) =>
+                    editTiming(kind, measure, num, den, value)
+                onTimingDeleteRequested: (kind, measure, num, den) =>
+                    deleteTiming(kind, measure, num, den)
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
                               ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
@@ -577,6 +586,7 @@ ApplicationWindow {
             window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
+            refreshTiming()  // 时间轴面板（BPM/STOP）数据源
             // 元信息可编辑表单载入（meta.list；session 已 load，此后编辑保存走 meta.edit）
             if (typeof editPage !== "undefined" && editPage) editPage.reloadMeta()
             // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
@@ -1034,6 +1044,43 @@ ApplicationWindow {
         noteSampleDialog.ref = ref
         noteIdInput.text = chartSession.idTextOf(ref.sample)
         noteSampleDialog.open()
+    }
+
+    /// 时间轴事件（BPM/STOP）列表重取（timing.list）→ 回填右 Dock 时间轴面板。
+    function refreshTiming() {
+        var bpm = [], stop = []
+        var rb = beatbench.dispatch(JSON.stringify({ command: "timing.list", args: { kind: "bpm" } }))
+        if (rb) {
+            var rbp = JSON.parse(rb)
+            if (rbp.ok) bpm = rbp.result.events || []
+        }
+        var rs = beatbench.dispatch(JSON.stringify({ command: "timing.list", args: { kind: "stop" } }))
+        if (rs) {
+            var rsp = JSON.parse(rs)
+            if (rsp.ok) stop = rsp.result.events || []
+        }
+        window.timingBpm = bpm
+        window.timingStop = stop
+    }
+    /// 添加/改值时间轴事件（timing.put；一个 undo 步；成功后重取列表）。
+    function editTiming(kind, measure, num, den, value) {
+        var args = { kind: kind, measure: measure, pos: { num: num, den: den }, value: value }
+        var r = sessionCmd("timing.put", args)
+        if (r) {
+            refreshTiming()
+            setStatus(qsTr("已设置 %1 事件：小节 %2 · %3/%4 = %5")
+                      .arg(kind.toUpperCase()).arg(measure).arg(num).arg(den).arg(value))
+        }
+    }
+    /// 删除时间轴事件（timing.delete；一个 undo 步；成功后重取列表）。
+    function deleteTiming(kind, measure, num, den) {
+        var args = { kind: kind, measure: measure, pos: { num: num, den: den } }
+        var r = sessionCmd("timing.delete", args)
+        if (r) {
+            refreshTiming()
+            setStatus(qsTr("已删除 %1 事件：小节 %2 · %3/%4")
+                      .arg(kind.toUpperCase()).arg(measure).arg(num).arg(den))
+        }
     }
 
     function saveChart() {

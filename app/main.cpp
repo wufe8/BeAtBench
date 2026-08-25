@@ -176,6 +176,19 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --rtab N：右 Dock 标签（0 属性 1 时间轴；配合 --screenshot 验收面板）
+    const int rtabIdx = args.indexOf(QStringLiteral("--rtab"));
+    if (rtabIdx >= 0 && rtabIdx + 1 < args.size()) {
+        bool ok = false;
+        const int t = args.at(rtabIdx + 1).toInt(&ok);
+        if (ok) {
+            if (QObject* root = engine.rootObjects().value(0)) {
+                if (QObject* tabBar = root->findChild<QObject*>(QStringLiteral("rightTabs")))
+                    tabBar->setProperty("currentIndex", t);
+            }
+        }
+    }
+
     // --bgm-expand / --channel-ids / --note-labels N：视觉验收调试参数（配 --screenshot）
     if (args.contains(QStringLiteral("--bgm-expand"))) {
         if (QObject* root = engine.rootObjects().value(0))
