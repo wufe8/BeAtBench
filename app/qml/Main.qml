@@ -1174,6 +1174,8 @@ ApplicationWindow {
                 Layout.preferredWidth: 150
                 font.family: Theme.fontMono
                 placeholderText: qsTr("#WAV id（如 1A）")
+                // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
+                escapeHandler: function() { noteSampleDialog.reject() }
             }
             Label { text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
                     font.pixelSize: Theme.fsTiny }

@@ -138,8 +138,11 @@ ColumnLayout {
     Dialog {
         id: dialog
         modal: true
+        // 以本面板（右 Dock 内容区）为视口中心。宽度收窄到面板内（避免超出 dock→「出界」，
+        // 用户报告原 260 宽在 230 dock 内溢出）；anchors.centerIn 让其在面板内居中并随
+        // dock 缩放重算。
+        width: Math.min(root.width - 4, 260)
         anchors.centerIn: parent
-        width: 260
         title: qsTr("时间轴事件")
         standardButtons: Dialog.Ok | Dialog.Cancel
 
@@ -210,6 +213,8 @@ ColumnLayout {
                     placeholderText: dialog.kind === "bpm" ? qsTr("如 130") : qsTr("如 5000")
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: dialog.accept()
+                    // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
+                    escapeHandler: function() { dialog.reject() }
                 }
             }
             Label {

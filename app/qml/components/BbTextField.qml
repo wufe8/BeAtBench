@@ -15,6 +15,11 @@ TextField {
     implicitHeight: 28
     leftPadding: 8
     rightPadding: 8
+    /// 2026-09：Esc 行为钩子。对话框内文本框（如 noteSampleDialog / TimelinePanel 的值输入）
+    /// 需一次 Esc 即关闭整个 Dialog——默认 BbTextField 的 Esc=释放焦点会让第二次 Esc 才到 Dialog
+    /// （用户报告「要按两次才关」）。设置后本字段先调用该钩子（对话框自己 reject/close），
+    /// 再释放焦点（无副作用，对话框已关闭）。MetaPanel 等非对话框字段保持 null → 默认行为不变。
+    property var escapeHandler: null
 
     background: Rectangle {
         radius: Theme.radiusSm
@@ -25,6 +30,7 @@ TextField {
 
     // 2026-09：Esc 释放焦点 + 清除文本选中（否则焦点粘住 → 快捷键被文本框吞掉）
     Keys.onEscapePressed: {
+        if (root.escapeHandler) root.escapeHandler()
         root.focus = false
         root.deselect()
     }
