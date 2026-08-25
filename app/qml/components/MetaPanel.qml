@@ -232,11 +232,11 @@ ColumnLayout {
                             color: Theme.text
                             font: combo.font
                             verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight   // 文字随可用宽度截断省略，箭头始终有空间
                             leftPadding: 8
                             rightPadding: 22   // 预留右侧箭头区，点击区清楚易点
                         }
                         Layout.fillWidth: true
-                        Layout.minimumWidth: 120
                         font.pixelSize: Theme.fsBase
                         font.family: Theme.fontSans
                         // currentIndex 不用绑定：QML 绑定对 delegate 的 JS 字段写（onActivated/输入）
@@ -364,11 +364,11 @@ ColumnLayout {
                                 color: Theme.text
                                 font: combo.font
                                 verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
                                 leftPadding: 8
                                 rightPadding: 22
                             }
                             Layout.fillWidth: true
-                            Layout.minimumWidth: 120
                             font.pixelSize: Theme.fsBase
                             font.family: Theme.fontSans
                             // currentIndex 显式管理（见主字段 combo 注释）：字段变化 → source 重绑
