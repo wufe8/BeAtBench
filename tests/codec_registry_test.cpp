@@ -156,24 +156,32 @@ TEST(CodecRegistry, BmsPmsExtensionInfersMode) {
     EXPECT_EQ(res.chart.notes[0].value.lane, (beatbench::Lane{0, beatbench::LaneKind::Key, 1}));
 }
 
-TEST(CodecRegistry, PmsExtensionDoesNotOverridePlayer3) {
-    // 真实谱面守卫（2026-08 修复）：.pms 后缀但 #PLAYER 3（DP）的谱面存在
-    // （Doppelganger/_R9.pms）——玩家数语义强于后缀，必须推断 dp 而非 pms9k。
+TEST(CodecRegistry, PmsExtensionBeatsPlayerForMode) {
+    // 2026-09 修正：.pms 后缀即 9key（PMS），即使 #PLAYER 3——用户实测 _EX9.pms/_R9.pms
+    // 均为 9key 非 DP（它们的 2P 侧通道 22-25 是键6-9，不是玩家2）；DP 谱用 .bms 表示。
+    // 故后缀语义优先于 #PLAYER。
     const auto& reg = beatbench::codec::global_codec_registry();
-    const std::string path =
-        write_temp("dp.pms", "*----- HEADER\n#PLAYER 3\n#BPM 130\n#00111:0100\n#00121:0100\n");
+    const std::string path = write_temp(
+        "dp.pms", "*----- HEADER\n#PLAYER 3\n#BPM 130\n"
+                  "#00111:0100\n#00121:0100\n#00122:0100\n");
     const Codec* bms = reg.by_path(path);
     ASSERT_NE(bms, nullptr);
     ReadOptions opts;
     const auto res = bms->read(path, opts);
     ASSERT_TRUE(res.chart.mode_id.has_value());
-    EXPECT_EQ(*res.chart.mode_id, "dp");
-    // 2P note 存在（DP 语义：21-29 通道 → player=1）
-    bool found_2p = false;
+    EXPECT_EQ(*res.chart.mode_id, "pms9k");
+    // ch11 → 键1(p0)；ch22 → 键6(p0)（9key 宽松：22-25=键6-9）；ch21 → 未映射(KeepRaw，无 note)
+    bool has_key1 = false, has_key6 = false, has_2p = false;
     for (const auto& ev : res.chart.notes) {
-        if (ev.value.lane.player == 1) found_2p = true;
+        if (ev.value.lane.player != 0) has_2p = true;
+        if (ev.value.lane.kind == beatbench::LaneKind::Key && ev.value.lane.index == 1)
+            has_key1 = true;
+        if (ev.value.lane.kind == beatbench::LaneKind::Key && ev.value.lane.index == 6)
+            has_key6 = true;
     }
-    EXPECT_TRUE(found_2p);
+    EXPECT_TRUE(has_key1);
+    EXPECT_TRUE(has_key6);   // 22 → 键6（旧兼容约定读取）
+    EXPECT_FALSE(has_2p);    // 不再被推断为 DP 2P
 }
 
 TEST(CodecRegistry, BmsModeOverrideWins) {

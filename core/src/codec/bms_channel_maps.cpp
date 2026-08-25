@@ -53,7 +53,8 @@ struct Table {
     std::array<Rule, kTotal> rules{};
     std::size_t count = 0;
 
-    constexpr Table(const std::uint8_t (&key_index)[9], const LaneKind (&kinds)[9]) {
+    constexpr Table(const std::uint8_t (&key_index)[9], const LaneKind (&kinds)[9],
+                    bool nineKey = false) {
         constexpr Rule specials[kSpecialCount] = {
             // ch01 = 背景音/BGM：到达即自动播放，游戏不可见（BMS 笔记「通道」节）
             {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm},
@@ -77,7 +78,28 @@ struct Table {
         };
         for (const auto& r : specials) rules[count++] = r;
         add_group('1', 0, false, NoteKind::Normal, key_index, kinds);   // 11-19（1P 游玩轨）
-        add_group('2', 1, false, NoteKind::Normal, key_index, kinds);   // 21-29（2P 游玩轨）
+        if (nineKey) {
+            // 9key（PMS）2P 侧（21-29）：仅 22-25 = 键6-9（1P）——旧兼容约定（11-15+22-25），
+            // 与 group '1' 的 16-19=键6-9（BMS 笔记派）并存 → 宽松：两种 9key 约定都能读。
+            // 21/26-29 不用（KeepRaw，查找不到即 nullopt）。写回（lane_slot 走 group '1'）
+            // 归一化到 16-19（音序不变、通道号变，只读兼容可接受）。
+            for (int i = 0; i < 9; ++i) {
+                if (i >= 1 && i <= 4) {
+                    Rule r;
+                    r.ch[0] = '2';
+                    r.ch[1] = static_cast<char>('1' + i);
+                    r.sem = ChannelSemantics::Note;
+                    r.kind = LaneKind::Key;
+                    r.index = static_cast<std::uint8_t>(i + 5);  // 22→6 23→7 24→8 25→9
+                    r.nk = NoteKind::Normal;
+                    r.ln_channel = false;
+                    r.player = 0;
+                    rules[count++] = r;
+                }
+            }
+        } else {
+            add_group('2', 1, false, NoteKind::Normal, key_index, kinds);  // 21-29（2P 游玩轨）
+        }
         add_group('5', 0, true, NoteKind::Normal, key_index, kinds);    // 51-59（1P LN 通道）
         add_group('6', 1, true, NoteKind::Normal, key_index, kinds);    // 61-69（2P LN 通道）
         add_group('D', 0, false, NoteKind::Landmine, key_index, kinds); // D1-D9 地雷（1P）
@@ -107,7 +129,7 @@ const Table& table7() {
     return t;
 }
 const Table& table9() {
-    static const Table t(kKeyIndex9, kLaneKinds9);
+    static const Table t(kKeyIndex9, kLaneKinds9, true);  // 9key（关键 22-25=键6-9 兼容）
     return t;
 }
 

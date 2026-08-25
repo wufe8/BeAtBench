@@ -17,6 +17,7 @@
 #include "bridge/ChartSession.hpp"
 #include "bridge/ThemeManager.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 namespace beatbench::app {
 
@@ -786,11 +787,20 @@ int ChartViewItem::columnForBga(int layer) const {
 QString ChartViewItem::columnLabel(const beatbench::Lane& lane,
                                    const QString& displayName) const {
     if (!m_showChannelIds) return displayName;
-    const std::string ch = beatbench::bms::bms_channel_for(lane, false,
-                                                           beatbench::NoteKind::Normal);
+    // 通道号按**游玩模式**反向映射（pms9k=9key 表：键6-9→16-19；sp7k/dp/battle=7key 表）。
+    // ⚠️ 用 bms_channel_for_mode（带 mode_id），而非 bms_channel_for（恒 7key）——否则 9key
+    // 谱的键6-9 显示错通道号/空（用户看 _EX9.pms 列头错乱）。
+    std::string mode = "sp7k";
+    if (const ChartSession* cs = sessionObj()) {
+        if (const beatbench::Chart* c = cs->chart()) {
+            if (c->mode_id) mode = *c->mode_id;
+        }
+    }
+    const std::string ch = beatbench::bms::bms_channel_for_mode(
+        mode, lane, false, beatbench::NoteKind::Normal);
     if (!ch.empty()) return QString::fromStdString(ch);
-    const std::string dm =
-        beatbench::bms::bms_channel_for(lane, false, beatbench::NoteKind::Landmine);
+    const std::string dm = beatbench::bms::bms_channel_for_mode(
+        mode, lane, false, beatbench::NoteKind::Landmine);
     if (!dm.empty()) return QString::fromStdString(dm);
     return displayName;
 }

@@ -626,11 +626,11 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     }
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-    // 模式推断优先级（2026-08 修正，真实谱面验证）：
+    // 模式推断优先级（2026-09 修正：.pms 后缀语义优先于 #PLAYER）：
     //   1. 显式 opts.mode（调用方指定，最高）；
-    //   2. #PLAYER 3 → dp、4 → battle（玩家数语义强于后缀——真实谱面存在
-    //      .pms 后缀但 #PLAYER 3 的 DP 谱，如 Doppelganger/_R9.pms）；
-    //   3. .pms 后缀 → pms9k（仅当 #PLAYER 非 3/4 时；PMS 9key 谱面惯例）；
+    //   2. .pms 后缀 → pms9k（9key：游玩轨映射与 BMS 不同；真实 .pms 即使 #PLAYER 3 也属
+    //      9key，如 Doppelganger/_EX9.pms、_R9.pms——用户实测确认，非 DP）；
+    //   3. #PLAYER 3 → dp、4 → battle（玩家数语义；DP 谱用 .bms 表示）；
     //   4. 其余 → sp7k（read_bms 内按 #PLAYER 1/2/缺失推断）。
     // #PLAYER 扫描需在编码解码前对原始字节做（ASCII 指令，编码无关）。
     BmsReadOptions effective = opts;
@@ -675,17 +675,20 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
             if (e == std::string_view::npos) break;
             pos = e + 1;
         }
-        if (player == 3) {
+        std::string ext = fs_path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (ext == ".pms") {
+            // .pms 后缀 → 9key（PMS）：游玩轨映射与 BMS 不同，后缀语义优先于 #PLAYER。
+            // （2026-09 用户实测：_EX9.pms/_R9.pms 均为 9key，即使 #PLAYER 3——原实把它们
+            //  推断成 dp 才导致显示成 2P；DP 谱用 .bms 表示，不靠 .pms。）
+            effective.mode = "pms9k";
+        } else if (player == 3) {
             effective.mode = "dp";
         } else if (player == 4) {
             effective.mode = "battle";
-        } else {
-            std::string ext = fs_path.extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (ext == ".pms") effective.mode = "pms9k";
-            // 否则留空 → read_bms 内按 #PLAYER 推断 sp7k
         }
+        // 否则留空 → read_bms 内按 #PLAYER 推断 sp7k
     }
 
     // UTF-16 BOM：本阶段不支持（后续按需）
