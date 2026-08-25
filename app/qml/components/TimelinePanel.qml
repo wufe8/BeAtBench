@@ -115,6 +115,11 @@ ColumnLayout {
                 }
                 MouseArea {
                     id: rowMouse
+                    // ⚠️ 必须放在行内容（含「×」删除按钮）之下：本 MouseArea 声明在 RowLayout
+                    // 之后，若默认 z，它会盖住行内容 → 左侧「×」点击被它拦截（其 onClicked 只处理
+                    // 右键删除，左键点了无反应——用户反馈）。置 z:-1 让按钮在顶层接收点击，
+                    // 而本 MouseArea 仍能收到行体（空白/标签处）的悬停、双击编辑与右键删除。
+                    z: -1
                     anchors.fill: parent
                     hoverEnabled: true
                     // 右键删除 / 双击编辑值

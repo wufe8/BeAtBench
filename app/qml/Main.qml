@@ -1006,6 +1006,7 @@ ApplicationWindow {
     function undoEdit() {
         var r = sessionCmd("session.undo")
         if (r) {
+            refreshTiming()  // 撤销可能恢复/移除 BPM/STOP 事件 → 时间轴面板列表须重取
             if (r.ok)
                 setStatus(qsTr("已撤销（可重做 %1 步）").arg(r.redo_depth))
             else
@@ -1015,6 +1016,7 @@ ApplicationWindow {
     function redoEdit() {
         var r = sessionCmd("session.redo")
         if (r) {
+            refreshTiming()  // 同上：重做改变时间轴事件 → 重取列表
             if (r.ok)
                 setStatus(qsTr("已重做（可撤销 %1 步）").arg(r.undo_depth))
             else
