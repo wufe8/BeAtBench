@@ -230,12 +230,28 @@ ColumnLayout {
                         Layout.minimumWidth: 120
                         font.pixelSize: Theme.fsBase
                         font.family: Theme.fontSans
-                        currentIndex: root.comboIndexOf(modelData.key, modelData.value)
+                        // currentIndex 不用绑定：QML 绑定对 delegate 的 JS 字段写（onActivated/输入）
+                        // 不触发重算，且内联编辑会断绑定 → 重置后显示不更新。
+                        // 改为显式管理：字段变化（重置/载入，modelData 上下文属性重绑）→ source 重绑
+                        // → onSourceChanged 重算 currentIndex；点选/输入 → 各 handler 直接更新。
+                        property var source: modelData
+                        onSourceChanged: combo.syncFromField()
+                        Component.onCompleted: combo.syncFromField()
+                        function syncFromField() {
+                            currentIndex = root.comboIndexOf(source.key, source.value)
+                        }
+                        onCurrentIndexChanged: {
+                            const idx = currentIndex
+                            if (idx >= 0) {
+                                const v = root.comboOptions(source.key, source.value)[idx].value
+                                if (source.value !== v) { source.value = v; root.dirtyTick++ }
+                            }
+                        }
                         indicator: Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 7; height: 5
+                            width: 14; height: 8
                             Canvas {
                                 anchors.fill: parent
                                 onPaint: {
@@ -243,7 +259,7 @@ ColumnLayout {
                                     ctx.reset()
                                     ctx.fillStyle = Theme.textMuted
                                     ctx.beginPath()
-                                    ctx.moveTo(0, 0); ctx.lineTo(3.5, 5); ctx.lineTo(7, 0)
+                                    ctx.moveTo(0, 0); ctx.lineTo(7, 8); ctx.lineTo(14, 0)
                                     ctx.closePath(); ctx.fill()
                                 }
                             }
@@ -256,13 +272,9 @@ ColumnLayout {
                             color: Theme.surface2
                             opacity: combo.enabled ? 1.0 : 0.45
                         }
-                        onActivated: (index) => {
-                            const v = root.comboOptions(modelData.key, modelData.value)[index].value
-                            if (modelData.value !== v) { modelData.value = v; root.dirtyTick++ }
-                        }
                         onEditTextChanged: {
-                            const v = root.resolveComboValue(modelData.key, editText)
-                            if (modelData.value !== v) { modelData.value = v; root.dirtyTick++ }
+                            const v = root.resolveComboValue(source.key, editText)
+                            if (source.value !== v) { source.value = v; root.dirtyTick++ }
                         }
                         popup: Popup {
                             y: combo.height
@@ -296,7 +308,6 @@ ColumnLayout {
                                     }
                                     onClicked: {
                                         combo.currentIndex = index
-                                        combo.activated(index)
                                         combo.popup.close()
                                     }
                                 }
@@ -347,12 +358,26 @@ ColumnLayout {
                             Layout.minimumWidth: 120
                             font.pixelSize: Theme.fsBase
                             font.family: Theme.fontSans
-                            currentIndex: root.comboIndexOf(modelData.key, modelData.value)
+                            // currentIndex 显式管理（见主字段 combo 注释）：字段变化 → source 重绑
+                            // → onSourceChanged 重算；点选/输入 → 各 handler 直接更新。
+                            property var source: modelData
+                            onSourceChanged: combo.syncFromField()
+                            Component.onCompleted: combo.syncFromField()
+                            function syncFromField() {
+                                currentIndex = root.comboIndexOf(source.key, source.value)
+                            }
+                            onCurrentIndexChanged: {
+                                const idx = currentIndex
+                                if (idx >= 0) {
+                                    const v = root.comboOptions(source.key, source.value)[idx].value
+                                    if (source.value !== v) { source.value = v; root.dirtyTick++ }
+                                }
+                            }
                             indicator: Item {
                                 anchors.right: parent.right
                                 anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 7; height: 5
+                                width: 14; height: 8
                                 Canvas {
                                     anchors.fill: parent
                                     onPaint: {
@@ -360,7 +385,7 @@ ColumnLayout {
                                         ctx.reset()
                                         ctx.fillStyle = Theme.textMuted
                                         ctx.beginPath()
-                                        ctx.moveTo(0, 0); ctx.lineTo(3.5, 5); ctx.lineTo(7, 0)
+                                        ctx.moveTo(0, 0); ctx.lineTo(7, 8); ctx.lineTo(14, 0)
                                         ctx.closePath(); ctx.fill()
                                     }
                                 }
@@ -373,13 +398,9 @@ ColumnLayout {
                                 color: Theme.surface2
                                 opacity: combo.enabled ? 1.0 : 0.45
                             }
-                            onActivated: (index) => {
-                                const v = root.comboOptions(modelData.key, modelData.value)[index].value
-                                if (modelData.value !== v) { modelData.value = v; root.dirtyTick++ }
-                            }
                             onEditTextChanged: {
-                                const v = root.resolveComboValue(modelData.key, editText)
-                                if (modelData.value !== v) { modelData.value = v; root.dirtyTick++ }
+                                const v = root.resolveComboValue(source.key, editText)
+                                if (source.value !== v) { source.value = v; root.dirtyTick++ }
                             }
                             popup: Popup {
                                 y: combo.height
@@ -413,7 +434,6 @@ ColumnLayout {
                                         }
                                         onClicked: {
                                             combo.currentIndex = index
-                                            combo.activated(index)
                                             combo.popup.close()
                                         }
                                     }
