@@ -1476,6 +1476,34 @@ std::string SetSampleFileCommand::describe() const {
     return "设置采样文件（#" + m_file + "）";
 }
 
+SetSampleValueCommand::SetSampleValueCommand(SampleKind kind, std::uint32_t id, std::string value)
+    : m_kind(kind), m_id(id), m_value(std::move(value)) {}
+
+void SetSampleValueCommand::apply(Chart& chart) {
+    const auto key = std::make_pair(m_kind, m_id);
+    const auto it = chart.samples.find(key);
+    m_existed = it != chart.samples.end();
+    if (m_existed) m_old_value = it->second.value;
+    m_changed = !m_existed || m_old_value != m_value;
+    if (!m_changed) return;
+    chart.samples[key].value = m_value;  // 不存在则创建
+}
+
+void SetSampleValueCommand::invert(Chart& chart) {
+    if (!m_changed) return;
+    const auto key = std::make_pair(m_kind, m_id);
+    if (m_existed) {
+        chart.samples[key].value = m_old_value;
+    } else {
+        chart.samples.erase(key);
+    }
+    m_changed = false;
+}
+
+std::string SetSampleValueCommand::describe() const {
+    return "设置定义值（#" + m_value + "）";
+}
+
 DeleteSampleCommand::DeleteSampleCommand(SampleKind kind, std::uint32_t id)
     : m_kind(kind), m_id(id) {}
 

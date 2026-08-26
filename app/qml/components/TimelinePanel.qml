@@ -15,11 +15,21 @@ ColumnLayout {
     /// 时间轴事件（timing.list 结果；升序）。value 语义：bpm=数值，stop=微秒。
     property var bpmEvents: []
     property var stopEvents: []
+    /// BPM/STOP 定义表（session.samples 的 bpm/stop；[{id(文本), value, refs}]）。
+    property var bpmDefs: []
+    property var stopDefs: []
+    readonly property var defs: kind === "bpm" ? bpmDefs : stopDefs
+    /// 定义表折叠区是否展开。
+    property bool expandDefs: false
     /// 编辑（添加/改值）→ Main 走 timing.put。pos 以 num/den 分开传（避免对象绑定歧义）。
     /// ref = 手动绑定的 #BPMxx/#STOPxx id 文本（空 = codec 自动派生）。
     signal timingEditRequested(string kind, int measure, int num, int den, double value, string ref)
     /// 删除 → Main 走 timing.delete。
     signal timingDeleteRequested(string kind, int measure, int num, int den)
+    /// 添加/覆盖一个 BPM/STOP 定义（id → 值文本）→ Main 走 sample.setValue。
+    signal timingDefAddRequested(string kind, string id, string value)
+    /// 删除一个 BPM/STOP 定义 → Main 走 sample.delete(kind)。
+    signal timingDefDeleteRequested(string kind, string id)
 
     property string kind: "bpm"   // bpm / stop
     readonly property var events: kind === "bpm" ? bpmEvents : stopEvents
@@ -161,6 +171,150 @@ ColumnLayout {
                             root.timingDeleteRequested(
                                 root.kind, row.modelData.measure,
                                 row.modelData.pos.num, row.modelData.pos.den)
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- #BPM/#STOP 定义表（折叠；镜像左 Dock BGA 面板：明确区分「创建 id+绑定值」与「时间轴使用 id」） ----
+    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+    BbToolButton {
+        text: (root.expandDefs ? "▾ " : "▸ ") + qsTr("#%1 定义（%2）")
+              .arg(root.kind === "stop" ? "STOP" : "BPM").arg(root.defs.length)
+        flatStyle: true
+        active: root.expandDefs
+        onClicked: root.expandDefs = !root.expandDefs
+        font.pixelSize: Theme.fsSmall
+        Layout.fillWidth: true
+        ToolTip.visible: hovered
+        ToolTip.text: qsTr("%1 定义表（#%2xx → 数值）；事件在时间轴引用这些 id")
+                      .arg(root.kind === "stop" ? "STOP" : "BPM").arg(root.kind === "stop" ? "STOP" : "BPM")
+    }
+    ColumnLayout {
+        visible: root.expandDefs
+        Layout.fillWidth: true
+        spacing: 4
+
+        // 添加行：id + 值 + 添加按钮（空 id → 自动分配新 id）
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 4
+            BbTextField {
+                id: addDefId
+                Layout.fillWidth: true
+                placeholderText: qsTr("id（如 01/ZZ）")
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+            }
+            BbTextField {
+                id: addDefValue
+                Layout.fillWidth: true
+                placeholderText: root.kind === "stop" ? qsTr("计数") : qsTr("BPM 值")
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+            }
+            BbToolButton {
+                text: qsTr("添加")
+                Layout.preferredWidth: 40
+                Layout.preferredHeight: 24
+                onClicked: {
+                    const id = addDefId.text.trim()
+                    const value = addDefValue.text.trim()
+                    if (id === "") { addDefId.forceActiveFocus(); return }
+                    if (value === "") { addDefValue.forceActiveFocus(); return }
+                    root.timingDefAddRequested(root.kind, id, value)
+                    addDefId.text = ""; addDefValue.text = ""
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("添加/覆盖一个 #%1 定义（显式填 id；「+」事件添加才是自动派生新 id）")
+                              .arg(root.kind === "stop" ? "STOP" : "BPM")
+            }
+        }
+
+        // 定义列表（id + 值 + 引用数 + 删除；双击行 → 复用事件对话框改值，绑定该 id）
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(160, root.defs.length * 24 + 4)
+            Label {
+                visible: root.defs.length === 0
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                text: qsTr("（暂无 #%1 定义；上方 id+值 添加）").arg(root.kind === "stop" ? "STOP" : "BPM")
+                color: Theme.textFaint
+                font.pixelSize: Theme.fsTiny
+                wrapMode: Text.WordWrap
+            }
+            ListView {
+                anchors.fill: parent
+                clip: true
+                model: root.defs
+                spacing: 2
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                delegate: Rectangle {
+                    id: defRow
+                    required property var modelData
+                    width: ListView.view.width
+                    height: 24
+                    radius: Theme.radiusSm
+                    color: defMouse.containsMouse ? Theme.surface3 : "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        spacing: 6
+                        Label {
+                            text: "#" + (root.kind === "stop" ? "STOP" : "BPM") + defRow.modelData.id
+                            color: Theme.textMuted
+                            font.family: Theme.fontMono
+                            font.pixelSize: Theme.fsTiny
+                        }
+                        Label {
+                            text: defRow.modelData.value
+                            color: root.kind === "stop" ? Theme.warning : Theme.accent
+                            font.family: Theme.fontMono
+                            font.pixelSize: Theme.fsSmall
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            text: defRow.modelData.refs > 0 ? "×" + defRow.modelData.refs : ""
+                            color: Theme.textFaint
+                            font.family: Theme.fontMono
+                            font.pixelSize: Theme.fsTiny
+                        }
+                        BbToolButton {
+                            text: "×"
+                            Layout.preferredWidth: 20
+                            Layout.preferredHeight: 18
+                            flatStyle: true
+                            onClicked: root.timingDefDeleteRequested(root.kind, defRow.modelData.id)
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("删除该 #%1 定义（引用保留 id，写回自动派生；Undo 可恢复）")
+                                          .arg(root.kind === "stop" ? "STOP" : "BPM")
+                        }
+                    }
+                    MouseArea {
+                        id: defMouse
+                        z: -1
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        // 双击定义行 → 打开事件对话框，预填该 id 绑定（改该定义值并引用）
+                        onDoubleClicked: {
+                            const evs = root.events
+                            for (let i = 0; i < evs.length; ++i) {
+                                if (evs[i].ref === defRow.modelData.id) {
+                                    dialog.openForEdit(root.kind, evs[i].measure, evs[i].pos.num,
+                                                       evs[i].pos.den, evs[i].value, defRow.modelData.id)
+                                    return
+                                }
+                            }
+                            // 无引用该 id 的事件 → 用该 id 添加一个事件（值 = 定义值）
+                            dialog.openForAdd(root.kind)
+                            dialog.baseRef = defRow.modelData.id
+                            dialog.refField.text = defRow.modelData.id
+                        }
                     }
                 }
             }

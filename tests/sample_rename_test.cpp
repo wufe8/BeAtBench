@@ -173,6 +173,24 @@ TEST(SampleRename, SetFileExistingAndCreate) {
     EXPECT_EQ(s.chart().samples.at({SampleKind::Wav, 1}).file, "a.wav");
 }
 
+// —— sample.setValue：BPM/STOP 定义表 值设置 / 新键创建 / invert 恢复 ——
+
+TEST(SampleRename, SetValueExistingAndCreate) {
+    EditorSession s;
+    s.load(make_chart());
+    // 现有 #BPM4（make_chart 值 "280"）改值
+    ASSERT_TRUE(s.exec(std::make_unique<SetSampleValueCommand>(SampleKind::Bpm, 4, "240")));
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "240");
+    // 新键 #STOP9 创建（原本不存在）
+    ASSERT_TRUE(s.exec(std::make_unique<SetSampleValueCommand>(SampleKind::Stop, 9, "192")));
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Stop, 9}).value, "192");
+    // undo 两次：9 移除、BPM4 恢复 "280"
+    ASSERT_TRUE(s.undo());
+    EXPECT_FALSE(has_sample(s.chart(), SampleKind::Stop, 9));
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "280");
+}
+
 // —— note.setSample：改单条 note 引用、invert 恢复、找不到无操作 ——
 
 TEST(SampleRename, SetNoteSampleChangesOne) {

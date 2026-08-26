@@ -115,6 +115,9 @@ ApplicationWindow {
     // 时间轴事件（timing.list 结果；打开谱面/编辑后 refreshTiming 重取，供右 Dock 时间轴面板）
     property var timingBpm: []
     property var timingStop: []
+    // 时间轴定义表（session.samples 的 bpm/stop；供「#BPM/#STOP 定义」区）
+    property var timingBpmDefs: []
+    property var timingStopDefs: []
     // 吸附（放置用）：snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）
     property int snapNum: 1
     property int snapDen: 16
@@ -480,6 +483,8 @@ ApplicationWindow {
                 metaSelection: window.metaSelection
                 timingBpm: window.timingBpm
                 timingStop: window.timingStop
+                timingBpmDefs: window.timingBpmDefs
+                timingStopDefs: window.timingStopDefs
                 snapNum: window.snapNum
                 snapDen: window.snapDen
                 stopUnit: window.stopUnit
@@ -510,6 +515,10 @@ ApplicationWindow {
                     editTiming(kind, measure, num, den, value, ref)
                 onTimingDeleteRequested: (kind, measure, num, den) =>
                     deleteTiming(kind, measure, num, den)
+                onTimingDefAddRequested: (kind, id, value) =>
+                    timingDefAdd(kind, id, value)
+                onTimingDefDeleteRequested: (kind, id) =>
+                    timingDefDelete(kind, id)
                 onBgaEditRequested: (layer, measure, num, den, bmpId) =>
                     editBga(layer, measure, num, den, bmpId)
                 onBgaDeleteRequested: (layer, measure, num, den) =>
@@ -798,6 +807,8 @@ ApplicationWindow {
     function dispatchCmd(name, args) { return session.dispatchCmd(name, args) }
     function editBga(layer, measure, num, den, bmpId) { return session.editBga(layer, measure, num, den, bmpId) }
     function editTiming(kind, measure, num, den, value, ref) { return session.editTiming(kind, measure, num, den, value, ref) }
+    function timingDefAdd(kind, id, value) { return session.timingDefAdd(kind, id, value) }
+    function timingDefDelete(kind, id) { return session.timingDefDelete(kind, id) }
     function gcd(a, b) { return session.gcd(a, b) }
     function laneEquals(lane, kind, index, player) { return session.laneEquals(lane, kind, index, player) }
     function metaKey(o) { return session.metaKey(o) }

@@ -2025,6 +2025,31 @@ public:
     }
 };
 
+// sample.setValue：{id:"XX", value:"200", kind?:"bpm"|"stop"} → 设置定义表 (kind,id) 的数值原文本。
+// 用于右 Dock「#BPM/#STOP 定义」手工编辑 id→值（与 BGA/WAV 的 sample.setFile 平行）。
+class SampleSetValueCommand : public Command {
+public:
+    std::string_view name() const override { return "sample.setValue"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::string& id = arg_str(args, "id");
+        const std::string& value = arg_str(args, "value");
+        const auto& chart = session.chart();
+        const auto decode = [&chart](const std::string& s) {
+            return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+        };
+        const std::uint32_t id_num = decode(id);
+        const auto kind = sample_kind_arg(args);  // bpm / stop（BMS 数值定义表）
+        session.exec(std::make_unique<edit::SetSampleValueCommand>(kind, id_num, value));
+        Json out = Json::object();
+        out.set("ok", true);
+        out.set("id", static_cast<std::int64_t>(id_num));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 // sample.delete：{id:"XX", kind?:"bmp"|"wav"|"bpm"|"stop"} → 从定义表移除 (kind,id) 条目。
 // 引用仍保留 id（只删定义，不删引用——文件管理器「解绑文件」语义）；写回时缺定义会派生。
 class SampleDeleteCommand : public Command {
@@ -2138,6 +2163,7 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<SessionSamplesCommand>());
     registry.add(std::make_unique<SampleRenameCommand>());
     registry.add(std::make_unique<SampleSetFileCommand>());
+    registry.add(std::make_unique<SampleSetValueCommand>());
     registry.add(std::make_unique<SampleDeleteCommand>());
     registry.add(std::make_unique<NoteSetSampleCommand>());
 }

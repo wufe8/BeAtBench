@@ -696,6 +696,38 @@ QtObject {
         }
         window.timingBpm = bpm
         window.timingStop = stop
+        // 定义表（#BPM/#STOP 定义区数据源：session.samples 的 bpm/stop）
+        var sb = beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} }))
+        if (sb) {
+            var sbp = JSON.parse(sb)
+            if (sbp.ok && sbp.result.samples) {
+                window.timingBpmDefs = sbp.result.samples.bpm || []
+                window.timingStopDefs = sbp.result.samples.stop || []
+            }
+        }
+    }
+    /// 添加/覆盖一个 BPM/STOP 定义（sample.setValue；一个 undo 步；成功后重取列表+定义区）。
+    /// id 必填（左 Dock BGA 面板同语义：显式「创建 id + 绑定值」；「+」事件添加才是自动派生新 id）。
+    function timingDefAdd(kind, id, value) {
+        if (id === undefined || id === null || id === "") {
+            setStatus(qsTr("请填 #%1 id（如 %2）").arg(kind.toUpperCase()).arg(kind === "stop" ? "01" : "01"))
+            return
+        }
+        var r = sessionCmd("sample.setValue", { kind: kind, id: id, value: value })
+        if (r) {
+            refreshTiming()
+            setStatus(qsTr("已设置 %1 定义 #%2%3 = %4（Undo 可恢复）")
+                      .arg(kind.toUpperCase()).arg(kind.toUpperCase()).arg(id).arg(value))
+        }
+    }
+    /// 删除一个 BPM/STOP 定义（sample.delete(kind)；引用保留 id，写回自动派生）。
+    function timingDefDelete(kind, id) {
+        var r = sessionCmd("sample.delete", { id: id, kind: kind })
+        if (r) {
+            refreshTiming()
+            setStatus(qsTr("已删除 %1 定义 #%2%3（Undo 可恢复）")
+                      .arg(kind.toUpperCase()).arg(kind.toUpperCase()).arg(id))
+        }
     }
     /// 添加/改值时间轴事件（timing.put；一个 undo 步；成功后重取列表）。
     function editTiming(kind, measure, num, den, value, ref) {

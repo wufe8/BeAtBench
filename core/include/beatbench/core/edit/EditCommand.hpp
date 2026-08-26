@@ -269,6 +269,28 @@ private:
     bool m_changed = false;
 };
 
+/// 设置「定义表」条目的数值原文本（BPM/STOP 定义表手工编辑：右 Dock 时间轴「#BPM/#STOP 定义」，
+/// sample.setValue）。语义：samples[(kind, id)].value = value；键不存在则创建。
+/// 逆操作：恢复 apply 前（存在→还回旧值；不存在→移除新键）。单个 undo 步。
+/// ⚠️ 这是定义表层面的「id → 值」绑定——与事件层面的 timing.put（在 (measure,pos) 放事件，
+/// 值可自动派生 #BPMxx）正交；两者共同把「创建 id+绑定值」与「在时间轴使用 id」分离。
+class SetSampleValueCommand : public EditCommand {
+public:
+    SetSampleValueCommand(SampleKind kind, std::uint32_t id, std::string value);
+    std::string name() const override { return "sample.setValue"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    SampleKind m_kind;
+    std::uint32_t m_id;
+    std::string m_value;
+    bool m_existed = false;
+    std::string m_old_value;
+    bool m_changed = false;
+};
+
 /// 修改某个 note 引用的采样 id（编辑区双击 note 改 #WAV id，note.setSample）。
 /// 语义：按 (measure, pos, lane, sample, bgm_line) 定位 note，把其 sample 引用改为 to。
 /// 仅改这一条 note 的引用（不重命名定义表；音频文件不变）。找不到 → 无操作。

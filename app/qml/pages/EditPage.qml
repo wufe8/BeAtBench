@@ -40,6 +40,8 @@ Item {
     /// 时间轴事件（timing.list 结果；Main 在打开谱面/编辑后重取回填，供右 Dock 时间轴面板）
     property var timingBpm: []
     property var timingStop: []
+    property var timingBpmDefs: []
+    property var timingStopDefs: []
     /// 吸附粒度（放置用：snapNum/snapDen 槽/小节；Main snap 分子分母）
     property int snapNum: 1
     property int snapDen: 16
@@ -76,6 +78,8 @@ Item {
     signal timingEditRequested(string kind, int measure, int num, int den, double value, string ref)
     /// 时间轴事件删除 → Main 走 timing.delete
     signal timingDeleteRequested(string kind, int measure, int num, int den)
+    signal timingDefAddRequested(string kind, string id, string value)
+    signal timingDefDeleteRequested(string kind, string id)
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
     /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
@@ -378,12 +382,18 @@ Item {
                         id: timelinePanel
                         bpmEvents: root.timingBpm
                         stopEvents: root.timingStop
+                        bpmDefs: root.timingBpmDefs
+                        stopDefs: root.timingStopDefs
                         stopUnit: root.stopUnit
                         stopBpm: root.stopBpm
                         onTimingEditRequested: (kind, measure, num, den, value, ref) =>
                             root.timingEditRequested(kind, measure, num, den, value, ref)
                         onTimingDeleteRequested: (kind, measure, num, den) =>
                             root.timingDeleteRequested(kind, measure, num, den)
+                        onTimingDefAddRequested: (kind, id, value) =>
+                            root.timingDefAddRequested(kind, id, value)
+                        onTimingDefDeleteRequested: (kind, id) =>
+                            root.timingDefDeleteRequested(kind, id)
                     }
                 }
             }
