@@ -408,12 +408,14 @@ ColumnLayout {
                     id: measureSpin
                     from: 0; to: 999; editable: true
                     Layout.preferredWidth: 64
-                    Layout.minimumWidth: 48
+                    Layout.minimumWidth: 52   // 覆写 implicitWidth 72 → 窄 dock 不越界
                 }
                 Label { text: ":"; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
-                BbSpinBox { id: numSpin; from: 0; to: 999; editable: true; Layout.preferredWidth: 48 }
+                BbSpinBox { id: numSpin; from: 0; to: 999; editable: true
+                            Layout.preferredWidth: 48; Layout.minimumWidth: 36 }
                 Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
-                BbSpinBox { id: denSpin; from: 1; to: 999; editable: true; Layout.preferredWidth: 48 }
+                BbSpinBox { id: denSpin; from: 1; to: 999; editable: true
+                            Layout.preferredWidth: 48; Layout.minimumWidth: 36 }
                 Item { Layout.fillWidth: true }
             }
             RowLayout {
@@ -426,6 +428,7 @@ ColumnLayout {
                 BbTextField {
                     id: valueField
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 70   // 覆写隐式宽 → 值输入框不越界
                     placeholderText: dialog.kind === "bpm" ? qsTr("130") : qsTr("96")
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: dialog.accept()

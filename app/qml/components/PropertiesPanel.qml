@@ -70,6 +70,7 @@ ColumnLayout {
     Label {
         visible: _count === 0
         Layout.fillWidth: true
+        Layout.minimumWidth: 0
         text: qsTr("选择工具下点击 note，或 Shift+拖拽框选，查看其属性。")
         color: Theme.textMuted
         font.pixelSize: Theme.fsTiny
@@ -86,12 +87,16 @@ ColumnLayout {
             color: Theme.text
             font.pixelSize: Theme.fsSmall
             wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0   // 隐式宽=单行文本宽 → 会撑宽 dock；限制为可收缩
         }
         Label {
             text: qsTr("Del 删除 · 拖拽平移 · 量化/镜像/旋转见工具条")
             color: Theme.textFaint
             font.pixelSize: Theme.fsTiny
             wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
         }
     }
 
@@ -110,6 +115,7 @@ ColumnLayout {
             font.family: Theme.fontSans
             font.pixelSize: Theme.fsBase
             elide: Text.ElideRight
+            Layout.minimumWidth: 0
         }
         // LN 配对激活提示（lnSelectMode 下 noteAt 返回配对段）
         Label {
@@ -134,6 +140,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         // 位置（小节 · m/n）
@@ -148,6 +155,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         // 采样（#WAVid；注意：noteAt 返回数值 id → chartSession.idTextOf 按 id_base 转文本）
@@ -162,6 +170,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         // 类型（轨道家族语义）
@@ -175,6 +184,7 @@ ColumnLayout {
                 color: Theme.text
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
 
@@ -203,6 +213,7 @@ ColumnLayout {
             font.family: Theme.fontSans
             font.pixelSize: Theme.fsBase
             elide: Text.ElideRight
+            Layout.minimumWidth: 0
         }
         // 位置（所有 kind 共有）
         RowLayout {
@@ -216,6 +227,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         // BGA：图层 + 图像 #BMPxx
@@ -231,6 +243,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         RowLayout {
@@ -245,6 +258,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         // BPM：数值 + 引用 id
@@ -260,6 +274,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         RowLayout {
@@ -274,6 +289,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         // STOP：数值（按单位换算）+ 引用 id
@@ -289,6 +305,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
         RowLayout {
@@ -303,6 +320,7 @@ ColumnLayout {
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
+                Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
 
