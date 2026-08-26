@@ -565,8 +565,23 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         std::map<Lane, std::optional<std::uint32_t>> pending_head;  // LNTYPE 1：交替状态
         std::map<Lane, std::vector<std::uint32_t>> head_stack;      // LNTYPE 2：候选头栈
         for (const auto& info : note_infos) {
+            // 51-69 LN 通道件：**无论 LNTYPE 1/2 都按 LNTYPE 1 交替头尾**（用户确认两机制
+            // 不冲突可同时运行——谱面可同时含 51-69 LN 件与普通通道 #LNOBJ 件）。
+            if (info.ln_channel) {
+                auto& pending = pending_head[info.lane];
+                if (pending) {
+                    const auto h = *pending;
+                    pending.reset();
+                    chart.notes[h].value.ln_pair = info.idx;
+                    chart.notes[info.idx].value.ln_pair = h;
+                } else {
+                    pending = info.idx;
+                }
+                continue;
+            }
+            // LNTYPE 2（#LNOBJ）：普通通道（11-29）内值 == #LNOBJ 的物件 = 尾，
+            // 头 = 同 lane 最近未配对的先前物件。
             if (lntype2) {
-                if (info.ln_channel) continue;  // 51-69 在 LNTYPE 2 下按普通物件保留
                 if (info.lnobj_tail) {
                     auto& stk = head_stack[info.lane];
                     if (stk.empty()) {
@@ -584,17 +599,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 }
                 continue;
             }
-            // LNTYPE 1（含未声明，默认 1）
-            if (!info.ln_channel) continue;
-            auto& pending = pending_head[info.lane];
-            if (pending) {
-                const auto h = *pending;
-                pending.reset();
-                chart.notes[h].value.ln_pair = info.idx;
-                chart.notes[info.idx].value.ln_pair = h;
-            } else {
-                pending = info.idx;
-            }
+            // LNTYPE 1：普通通道件不做 LN 配对（只有 51-69 参与，已在上方处理）
         }
         // 未闭合 LN 头（LNTYPE 1 残留 / LNTYPE 2 无关；仅 LNTYPE 1 路径有 pending）
         for (const auto& [lane, pending] : pending_head) {

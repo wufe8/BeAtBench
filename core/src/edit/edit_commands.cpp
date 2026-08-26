@@ -108,10 +108,38 @@ std::optional<std::size_t> find_partner(const std::vector<Event<Note>>& notes,
 void rebuild_ln_pairs(Chart& chart) {
     for (auto& n : chart.notes) n.value.ln_pair.reset();
 
+    // LNTYPE 1（含未声明，默认）：只处理 ln_channel==true（来自 51-69/61-69 LN 通道），
+    // 按 (lane, sample) 分组，组内按 (measure,pos) 时间序严格交替头尾。
+    // ⚠️ 无论 LNTYPE 1/2 都运行：LNTYPE 2 下 51-69 通道物件仍按 LNTYPE 1 规则交替配对
+    //（用户确认两机制不冲突、可同时运行——轨道数据可同时含 51-69 LN 通道件与
+    // 普通通道 #LNOBJ 件）。若不想双机制，此组可回归「仅 LNTYPE 1」时运行。
+    {
+        std::map<std::pair<Lane, std::uint32_t>, std::vector<std::size_t>> groups;
+        for (std::size_t i = 0; i < chart.notes.size(); ++i) {
+            const auto& n = chart.notes[i].value;
+            if (!n.ln_channel) continue;
+            groups[{n.lane, n.sample.id}].push_back(i);
+        }
+        for (auto& [key, idxs] : groups) {
+            (void)key;
+            std::sort(idxs.begin(), idxs.end(), [&](std::size_t a, std::size_t b) {
+                const auto& ea = chart.notes[a];
+                const auto& eb = chart.notes[b];
+                if (ea.measure != eb.measure) return ea.measure < eb.measure;
+                return ea.pos < eb.pos;
+            });
+            for (std::size_t k = 0; k + 1 < idxs.size(); k += 2) {
+                const auto a = idxs[k], b = idxs[k + 1];
+                chart.notes[a].value.ln_pair = static_cast<std::uint32_t>(b);
+                chart.notes[b].value.ln_pair = static_cast<std::uint32_t>(a);
+            }
+        }
+    }
+
     // LNTYPE 2（#LNOBJ）：头尾同在普通通道（11-29）。值 == #LNOBJ 的物件 = 尾，
     // 头 = 同 lane 最近未配对的先前物件（head_stacks 式）。与 parser（bms_parser.cpp
     // LN 配对块）语义保持一致——编辑后重新推导应复现「重新解析」得到的配对。
-    // ⚠️ 缺 #LNTYPE 2 时走 LNTYPE 1 路径；此分支只在 chart.meta["LNTYPE"]=="2" 时进入。
+    // ⚠️ 缺 #LNTYPE 2 时走上方 LNTYPE 1；此分支只在 chart.meta["LNTYPE"]=="2" 时进入。
     std::uint32_t lnojb_id = 0;
     if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end() && it->second == "2") {
         if (const auto lj = chart.meta.find("LNOBJ"); lj != chart.meta.end() && !lj->second.empty()) {
@@ -133,7 +161,7 @@ void rebuild_ln_pairs(Chart& chart) {
         std::map<Lane, std::vector<std::size_t>> head_stack;
         for (const std::size_t i : order) {
             const auto& n = chart.notes[i].value;
-            if (n.ln_channel) continue;  // 51-69 在 LNTYPE 2 下按普通物件保留（与 parser 一致）
+            if (n.ln_channel) continue;  // 51-69 已由上方 LNTYPE 1 组配对；此分支不再处理
             if (n.sample.id == lnojb_id) {
                 auto& stk = head_stack[n.lane];
                 if (stk.empty()) continue;  // 未配对尾（缺少头；lint 提示）
@@ -144,30 +172,6 @@ void rebuild_ln_pairs(Chart& chart) {
             } else {
                 head_stack[n.lane].push_back(i);
             }
-        }
-        return;
-    }
-
-    // LNTYPE 1（含未声明，默认）：只处理 ln_channel==true（来自 51-69/61-69 LN 通道），
-    // 按 (lane, sample) 分组，组内按 (measure,pos) 时间序严格交替头尾。
-    std::map<std::pair<Lane, std::uint32_t>, std::vector<std::size_t>> groups;
-    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
-        const auto& n = chart.notes[i].value;
-        if (!n.ln_channel) continue;
-        groups[{n.lane, n.sample.id}].push_back(i);
-    }
-    for (auto& [key, idxs] : groups) {
-        (void)key;
-        std::sort(idxs.begin(), idxs.end(), [&](std::size_t a, std::size_t b) {
-            const auto& ea = chart.notes[a];
-            const auto& eb = chart.notes[b];
-            if (ea.measure != eb.measure) return ea.measure < eb.measure;
-            return ea.pos < eb.pos;
-        });
-        for (std::size_t k = 0; k + 1 < idxs.size(); k += 2) {
-            const auto a = idxs[k], b = idxs[k + 1];
-            chart.notes[a].value.ln_pair = static_cast<std::uint32_t>(b);
-            chart.notes[b].value.ln_pair = static_cast<std::uint32_t>(a);
         }
     }
 }

@@ -657,6 +657,26 @@ TEST(BmsRead, LnPairType2) {
     EXPECT_FALSE(res.chart.notes[2].value.ln_pair.has_value());  // 非 LNOBJ → 普通
 }
 
+TEST(BmsRead, LnDualType1And2) {
+    // LNTYPE 2 下两机制并存：51-59 LN 通道件（#00151/#00251）仍按 LNTYPE 1 交替配对；
+    // 普通通道内 头(11)+#LNOBJ 尾(ZZ) 按 LNTYPE 2 配对。二者互不干扰。
+    const auto res = read_bms(
+        "#LNTYPE 2\n#LNOBJ ZZ\n"
+        "#00151:01\n#00251:02\n"   // 51 通道 LN 头尾（LNTYPE 1 交替）
+        "#00311:03\n#00411:ZZ\n"); // 普通通道 头 + LNOBJ 尾（LNTYPE 2）
+    const auto pair_of = [&](const Event<Note>& n) {
+        if (n.value.ln_pair && *n.value.ln_pair < res.chart.notes.size())
+            return static_cast<int>(*n.value.ln_pair);
+        return -1;
+    };
+    // 51 通道：notes[0]<->notes[1]
+    EXPECT_EQ(pair_of(res.chart.notes[0]), 1);
+    EXPECT_EQ(pair_of(res.chart.notes[1]), 0);
+    // 普通通道：notes[2]<->notes[3]
+    EXPECT_EQ(pair_of(res.chart.notes[2]), 3);
+    EXPECT_EQ(pair_of(res.chart.notes[3]), 2);
+}
+
 TEST(BmsRead, LnUnclosedWarns) {
     const auto res = read_bms("#00151:01\n");
     ASSERT_EQ(res.chart.notes.size(), 1u);

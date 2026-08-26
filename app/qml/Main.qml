@@ -547,52 +547,17 @@ ApplicationWindow {
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
                 spacing: 8
-                // 主消息：悬停信息（临时，优先）> 状态消息（瞬态）。占满剩余空间，右对齐截断，
-                // 绝不与右侧固定区重叠（minimumWidth 放低允许窄窗收缩 + Elide）。
+                // 主消息（可变长，占满剩余空间，右截断）：悬停信息 > 状态消息。
                 Label {
                     text: editPage.hoverText !== "" ? editPage.hoverText : window.statusText
                     color: editPage.hoverText !== "" ? Theme.accent : Theme.textMuted
                     elide: Text.ElideRight
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 80
-                    Layout.maximumWidth: Infinity
+                    Layout.minimumWidth: 60
                     font.family: Theme.fontMono
                     font.pixelSize: Theme.fsSmall
                 }
-                // —— 右侧固定信息区（窄窗时收缩并截断，固定区永不挤压到主消息） ——
-                // 谱面键数 + PLAYER
-                Label {
-                    text: chartMeta ? "SP7K · " + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
-                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
-                    Layout.preferredWidth: 90
-                    Layout.minimumWidth: 60
-                    elide: Text.ElideRight
-                }
-                // 分隔点
-                Label {
-                    text: "·"
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.fsSmall
-                    Layout.alignment: Qt.AlignVCenter
-                }
-                // 文件格式/编码
-                Label {
-                    text: window.chartFormat !== "" ? window.chartFormat.toUpperCase() +
-                             (window.chartEncoding !== "" ? " " + window.chartEncoding : "") : ""
-                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
-                    visible: window.chartFormat !== ""
-                    Layout.preferredWidth: 150
-                    Layout.minimumWidth: 70
-                    elide: Text.ElideRight
-                }
-                // 分隔点
-                Label {
-                    text: "·"
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.fsSmall
-                    Layout.alignment: Qt.AlignVCenter
-                }
-                // 当前采样（M3 放置落点；在工具条移到状态栏 2026-09）
+                // —— 可变长内容（右区左段，窄窗收缩+截断）：采样名、文件路径 ——
                 Label {
                     text: sampleModel.currentSampleText
                     color: Theme.accent
@@ -601,18 +566,33 @@ ApplicationWindow {
                     elide: Text.ElideMiddle
                     visible: sampleModel.currentSampleText !== ""
                     Layout.preferredWidth: 170
-                    Layout.minimumWidth: 90
+                    Layout.minimumWidth: 60
                     Layout.maximumWidth: 220
                 }
-                // 文件路径
                 Label {
                     text: chartPath ? chartPath : qsTr("未打开谱面")
                     color: Theme.textFaint
                     elide: Text.ElideMiddle
                     font.pixelSize: Theme.fsSmall
                     Layout.preferredWidth: 200
-                    Layout.minimumWidth: 100
+                    Layout.minimumWidth: 90
                     Layout.maximumWidth: 320
+                }
+                // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
+                Label {
+                    text: chartMeta ? "SP7K·" + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
+                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
+                    Layout.rightMargin: 2
+                }
+                Label {
+                    text: window.chartFormat !== "" ? window.chartFormat.toUpperCase() : ""
+                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
+                    visible: window.chartFormat !== ""
+                }
+                Label {
+                    text: window.chartEncoding !== "" ? window.chartEncoding : ""
+                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
+                    visible: window.chartEncoding !== ""
                 }
             }
         }
@@ -734,14 +714,14 @@ ApplicationWindow {
             }
             window.chartPath = r.result.path
             window.chartFormat = r.result.format !== undefined ? r.result.format : ""
-            // 编码：从 info/check 的 diagnostics（"encoding: UTF-8 (path)"）提取
+            // 编码：从 info/check 的 diagnostics（"encoding: UTF-8 (path)"）干净提取令牌
             var enc = ""
             if (r.result.diagnostics) {
                 for (var di = 0; di < r.result.diagnostics.length; di++) {
                     var dm = r.result.diagnostics[di].message
                     if (dm && dm.indexOf("encoding:") === 0) {
-                        var colon = dm.indexOf(":", 9)
-                        enc = dm.substring(9, colon > 9 ? colon : dm.length).trim()
+                        var m = dm.match(/^encoding:\s*(\S+)/)
+                        if (m) enc = m[1]
                         break
                     }
                 }
