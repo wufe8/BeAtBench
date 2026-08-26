@@ -24,6 +24,24 @@ ColumnLayout {
         }
     }
 
+    /// 读/恢复列表滚动位置（编辑文件后 reload 模型会重置 contentY → 保持视口不变）。
+    function listScrollY() { return listView.contentY }
+    function restoreScrollY(y) { listView.contentY = y }
+
+    /// 内联编辑状态（2026-09）：跟踪正在编辑的行 id + 新值；点击其它行/空白时不丢焦点
+    /// （非焦点项点击不触发 onActiveFocusChanged → 不保存，用户反馈）→ 由此统一提交。
+    property string editingId: ""
+    property string pendingFile: ""
+    property string pendingOrig: ""
+    function commitPending() {
+        if (root.editingId === "") return
+        const id = root.editingId
+        const file = root.pendingFile
+        const orig = root.pendingOrig
+        root.editingId = ""; root.pendingFile = ""; root.pendingOrig = ""
+        if (file !== orig) root.sampleFileRequested(id, file)
+    }
+
     spacing: 6
 
     // ---- 搜索确认框 + 排序切换（文件名 / ID；ID 大小写敏感，base62 区分 1a/1A） ----
@@ -104,6 +122,13 @@ ColumnLayout {
     Item {
         Layout.fillWidth: true
         Layout.fillHeight: true
+        // 空白区点击 → 提交内联编辑（文件管理器改名字义：点面板空白也保存）。
+        // 置于 ListView 之下（z:-1），行/索引条点击不被拦截；仅空白区命中。
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            onPressed: root.commitPending()
+        }
 
         ListView {
             id: listView
@@ -122,15 +147,18 @@ ColumnLayout {
                 /// 双击编辑文件名模式（切音工作区手工版）：显示内联 TextField 改文件名，Enter/失焦提交。
                 property bool editing: false
                 property bool committing: false
-                onEditingChanged: if (editing) fileEdit.forceActiveFocus()
-                /// 保存（Enter/失焦/Tab）：改了就请求 sample.setFile；只有一次（committing 防重入，
-                /// 且 `editing` 在 blur（由本函数置 false 引起）时为 false → 不再提交）。
+                onEditingChanged: if (editing) {
+                    fileEdit.forceActiveFocus()
+                    root.editingId = row.id
+                    root.pendingFile = row.file
+                    root.pendingOrig = row.file
+                }
+                /// 保存（Enter/失焦/Tab）：走根级 commitPending（统一处理「点击其它行/空白」提交）。
                 function commitEdit() {
                     if (!row.editing || row.committing) return
                     row.committing = true
                     row.editing = false
-                    const newFile = fileEdit.text.trim()
-                    if (newFile !== row.file) root.sampleFileRequested(row.id, newFile)
+                    root.commitPending()
                     row.committing = false
                 }
 
@@ -176,9 +204,10 @@ ColumnLayout {
                             color: Theme.surface2
                         }
                         // 文件管理器改名语义：Enter/失焦 = 保存；Esc = 取消（还原旧值）。
+                        onTextChanged: { if (root.editingId === row.id) root.pendingFile = text }
                         onAccepted: row.commitEdit()
                         onActiveFocusChanged: if (!activeFocus && row.editing) row.commitEdit()
-                        Keys.onEscapePressed: { row.editing = false }
+                        Keys.onEscapePressed: { row.editing = false; root.editingId = "" }
                         Keys.onReleased: (event) => {
                             if (event.key === Qt.Key_Tab) row.commitEdit()
                         }
@@ -205,6 +234,7 @@ ColumnLayout {
                     hoverEnabled: true
                     enabled: !row.editing
                     onClicked: {
+                        root.commitPending()   // 先提交其它行的内联编辑（点击非焦点项不丢焦点）
                         sampleModel.selectId(row.id)
                         root.samplePicked(row.id, row.file)
                     }

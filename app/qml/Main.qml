@@ -26,10 +26,34 @@ ApplicationWindow {
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     property string statusText: qsTr("就绪")
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
+    property string currentBmpId: ""     // 当前 #BMP（视口 BGA 列放置用；BGA 面板行点击设置）
     // 当前 BPM/STOP 值（路线 A：工具栏值放置用；选中逻辑方案2 = 独立于左 Dock 采样选中——
     // 在什么时序轨放置就用哪种值，互不冲突）。打开谱面时用元信息 BPM 兜底。
     property real currentBpmValue: 130
-    property real currentStopValue: 5000
+    // STOP 值存原始计数 n（1/192 全音符单位；BMS #STOPxx n）。默认 96 = 半个全音符（任意 BPM 下固定 n）。
+    property real currentStopValue: 96
+    // STOP 值显示/填入单位：0 = BMS 单位（1/192 全音符 n，默认）；1 = 毫秒。
+    // 毫秒换算依赖触发时 BPM：STOP 秒 = n×240/(192×bpm) = n×1.25/bpm → ms = n×1250/bpm。
+    property int stopUnit: 0
+    /// currentStopValue（计数 n）→ 选中单位的显示文本。
+    function stopToDisplay(v) {
+        if (window.stopUnit === 0) return String(Math.round(v))
+        const bpm = (window.currentBpmValue > 0) ? window.currentBpmValue : 130
+        return String(Math.round(v * 1250 / bpm))
+    }
+    /// 选中单位的填入文本 → 计数 n。
+    function stopFromDisplay(t) {
+        const v = parseFloat(t)
+        if (!isFinite(v)) return NaN
+        return window.stopUnit === 0 ? v : v * bpmFromMs() / 1250
+    }
+    function bpmFromMs() {
+        return (window.currentBpmValue > 0) ? window.currentBpmValue : 130
+    }
+    /// STOP 单位显示名（对话框 label 用）。
+    function stopUnitLabel() {
+        return window.stopUnit === 0 ? qsTr("unit") : qsTr("ms")
+    }
     // 文件格式/编码（底部状态栏右下角显示；info/check 返回）
     property string chartFormat: ""
     property string chartEncoding: ""
@@ -72,10 +96,22 @@ ApplicationWindow {
     // 当前编辑工具（互斥单选，会话状态；M3 接输入/放置，note 类型（普通/LN/地雷）届时
     // 作为正交维度另设「放置类型」组，不并入本组——doc/05 §5 交互）
     property string editorTool: "select"
+    // 工具切换：进入 LN 放置 → 显示状态栏说明（持久）；离开 → 取消未完成 LN 头 + 恢复就绪
+    onEditorToolChanged: {
+        if (window.editorTool === "ln") {
+            activateLnHint()
+        } else {
+            if (window.pendingLnHead) cancelPendingLn()
+            statusClearTimer.stop()
+            window.statusText = qsTr("就绪")
+        }
+    }
     // 剪贴板（BMS 原始行；clipboard.copy 输出 → paste 输入；会话状态）
     property var clipboardLines: []
     // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
     property var selectionRefs: []
+    // 选中 BGA/BPM/STOP 对象集合（{kind, measure, pos, ...}；视口点选/拖拽/删除/编辑用）
+    property var metaSelection: []
     // 时间轴事件（timing.list 结果；打开谱面/编辑后 refreshTiming 重取，供右 Dock 时间轴面板）
     property var timingBpm: []
     property var timingStop: []
@@ -91,6 +127,9 @@ ApplicationWindow {
     property bool lnSelectMode: false
     // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
     property bool showGrid: true
+    /// LNTYPE 2（#LNOBJ）LN 放置的「待定头」（NoteRef 形状：measure/pos/lane/sample）。
+    /// 会话状态不入 undo；同轨点尾 / 异轨重放头 / Esc 取消（2026-09 用户）。
+    property var pendingLnHead: null
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）。
     /// ⚠️ 不能用「有 text 属性」判定：Label/Button 都有 text → activeFocusItem 落在
     /// 那些 item 上时恒 true，工具快捷键全部禁用（用户反馈 2026-09 快捷键失效根因）。
@@ -113,7 +152,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+C"; onActivated: copySelection() }
     Shortcut { sequence: "Ctrl+V"; onActivated: pasteClipboard() }
     Shortcut { sequence: "Del"; enabled: chartMeta !== null && currentPage === 0
-                onActivated: deleteSelection() }
+                onActivated: (window.metaSelection.length > 0) ? deleteMetaSelection() : deleteSelection() }
     // 编辑工具快捷键（数字 1-5：1=拖拽 2=选择 3=放置 4=LN 5=地雷；文本输入焦点时让行）
     Shortcut { sequence: "1"; enabled: currentPage === 0 && !window.textInputFocused
                 onActivated: window.editorTool = "pan" }
@@ -125,6 +164,10 @@ ApplicationWindow {
                 onActivated: window.editorTool = "ln" }
     Shortcut { sequence: "5"; enabled: currentPage === 0 && !window.textInputFocused
                 onActivated: window.editorTool = "mine" }
+    // Esc：取消未完成的 LN 头（LNTYPE 2 放置；文本输入焦点时让行）
+    Shortcut { sequence: "Esc"; enabled: currentPage === 0 && editorTool === "ln" &&
+                !window.textInputFocused && chartMeta !== null
+                onActivated: cancelPendingLn() }
     Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
 
     // ---------- 菜单栏（固定全局） ----------
@@ -385,29 +428,33 @@ ApplicationWindow {
                 }
                 BbTextField {
                     id: stopValueField
-                    Layout.preferredWidth: 58
-                    text: String(window.currentStopValue)
-                    validator: IntValidator { bottom: 0; top: 99999999 }
+                    Layout.preferredWidth: 64
+                    text: window.stopToDisplay(window.currentStopValue)
+                    validator: DoubleValidator { bottom: 0; top: 99999999; locale: "C" }
                     onEditingFinished: {
-                        const v = parseInt(text, 10)
-                        if (isFinite(v) && v >= 0) window.currentStopValue = v
-                        else text = String(window.currentStopValue)
+                        const us = window.stopFromDisplay(text)
+                        if (isFinite(us) && us >= 0) {
+                            window.currentStopValue = us
+                            text = window.stopToDisplay(window.currentStopValue)
+                        } else text = window.stopToDisplay(window.currentStopValue)
                     }
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("当前 STOP 值（微秒；点击时间轴 STOP 列放置；Enter/失焦生效）")
+                    ToolTip.text: window.stopUnit === 0
+                                  ? qsTr("当前 STOP 值（单位 = 1/192 全音符，随该拍位 BPM 换算；点击时间轴 STOP 列放置）")
+                                  : qsTr("当前 STOP 值（毫秒，按当前 BPM 换算；点击时间轴 STOP 列放置）")
                 }
-                // 当前采样（M3 放置落点；检索/选择在左 Dock 采样面板）
-                Label {
-                    text: sampleModel.currentSampleText
-                    color: Theme.accent
-                    font.family: Theme.fontMono
-                    font.pixelSize: Theme.fsSmall
-                    elide: Text.ElideMiddle
-                    visible: sampleModel.currentSampleText !== ""
-                    Layout.maximumWidth: 220
+                BbToolButton {
+                    text: window.stopUnit === 0 ? qsTr("unit") : qsTr("ms")
+                    Layout.preferredHeight: stopValueField.implicitHeight + 6
+                    onClicked: {
+                        window.stopUnit = window.stopUnit === 0 ? 1 : 0
+                        stopValueField.text = window.stopToDisplay(window.currentStopValue)
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("STOP 值单位切换：unit = 1/192 全音符（BMS 原生，随当前 BPM）/ ms = 毫秒（按当前 BPM）")
                 }
-                Label { text: chartPath ? chartPath : qsTr("未打开谱面"); color: Theme.textFaint
-                        elide: Text.ElideMiddle; font.pixelSize: Theme.fsSmall }
+                // 当前采样（M3 放置落点；检索/选择在左 Dock 采样面板）+ 文件路径 → 底部状态栏右侧，
+                // 不在工具条（2026-09：避免工具条长度随文件路径/采样名变化，1280 宽下占满抖区）
             }
         }
 
@@ -430,10 +477,13 @@ ApplicationWindow {
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs
+                metaSelection: window.metaSelection
                 timingBpm: window.timingBpm
                 timingStop: window.timingStop
                 snapNum: window.snapNum
                 snapDen: window.snapDen
+                stopUnit: window.stopUnit
+                stopBpm: (chartMeta && chartMeta.BPM !== undefined) ? parseFloat(chartMeta.BPM) : 130
                 zoomToCursor: window.zoomToCursor
                 perfLog: window.debugPerfLog
                 onSamplePicked: (id, file) => {
@@ -449,13 +499,26 @@ ApplicationWindow {
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onNoteEditRequested: (ref) => editNoteSample(ref)
                 onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => moveSelection(deltaF, targetLane, sourceLane)
+                onMetaObjectClicked: (obj, ctrl) => onMetaClicked(obj, ctrl)
+                onMetaMoveRequested: (kind, obj, deltaF, targetLane) => moveMetaObject(kind, obj, deltaF, targetLane)
+                onMetaRightDeleted: (obj) => deleteMetaObject(obj)
+                onMetaEditRequested: (obj) => editMetaObject(obj)
                 onMetaMessage: (msg) => setStatus(msg)
                 onMetaSaveRequested: saveMetaEdits()
                 onEditAreaPressed: clearTextFocus()
-                onTimingEditRequested: (kind, measure, num, den, value) =>
-                    editTiming(kind, measure, num, den, value)
+                onTimingEditRequested: (kind, measure, num, den, value, ref) =>
+                    editTiming(kind, measure, num, den, value, ref)
                 onTimingDeleteRequested: (kind, measure, num, den) =>
                     deleteTiming(kind, measure, num, den)
+                onBgaEditRequested: (layer, measure, num, den, bmpId) =>
+                    editBga(layer, measure, num, den, bmpId)
+                onBgaDeleteRequested: (layer, measure, num, den) =>
+                    deleteBga(layer, measure, num, den)
+                onBmpAddRequested: (id, file) => bmpAdd(id, file)
+                onBmpSetFileRequested: (id, file) => bmpSetFile(id, file)
+                onBmpRenameRequested: (fromId, toId) => bmpRename(fromId, toId)
+                onBmpDeleteRequested: (id) => bmpDelete(id)
+                onBmpSelected: (id) => setCurrentBmp(id)
                 onToolNotReady: (tool) => {
                     setStatus(tool === "ln"
                               ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
@@ -503,19 +566,51 @@ ApplicationWindow {
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
                     visible: window.chartFormat !== ""
                 }
+                // 当前采样 + 文件路径（从工具条移到状态栏右侧 2026-09：工具条长度不随内容变化）
+                Label {
+                    text: sampleModel.currentSampleText
+                    color: Theme.accent
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    elide: Text.ElideMiddle
+                    visible: sampleModel.currentSampleText !== ""
+                    Layout.preferredWidth: 180
+                    Layout.maximumWidth: 220
+                }
+                Label {
+                    text: chartPath ? chartPath : qsTr("未打开谱面")
+                    color: Theme.textFaint
+                    elide: Text.ElideMiddle
+                    font.pixelSize: Theme.fsSmall
+                    Layout.preferredWidth: 220
+                    Layout.maximumWidth: 320
+                }
             }
         }
     }
 
-    // ---------- 状态消息（瞬态：setStatus 后 ~8s 自动回「就绪」，避免常驻噪声） ----------
+    // ---------- 状态消息（瞬态：setStatus 后 ~8s 自动回「就绪/工具提示」，避免常驻噪声） ----------
     Timer {
         id: statusClearTimer
         interval: 8000
-        onTriggered: window.statusText = qsTr("就绪")
+        onTriggered: window.statusText = window.lnHintActive() ? window.lnHint() : qsTr("就绪")
     }
     function setStatus(msg) {
         window.statusText = msg
         statusClearTimer.restart()
+    }
+    /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
+    function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
+    /// LN 放置提示文本（LNTYPE 2 = 头尾状态机；其余 = 连点两次自动配对）。
+    function lnHint() {
+        return (typeof chartSession !== "undefined" && chartSession && chartSession.lnType() === 2)
+               ? qsTr("同轨道左键放置Ln尾，不同轨道左键重新放置Ln头，按esc键取消")
+               : qsTr("同一轨道连点两次：先头后尾（自动配对）")
+    }
+    /// 进入 LN 工具：停掉自动清空，直接显示放置说明（持久直到切工具）。
+    function activateLnHint() {
+        statusClearTimer.stop()
+        window.statusText = window.lnHint()
     }
 
     // ---------- 第一条真链路：打开谱面 → dispatch(info) → 元信息 ----------
@@ -625,9 +720,22 @@ ApplicationWindow {
             window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
+            window.pendingLnHead = null  // 换谱面：清除可能的未完成 LN 头
+            window.selectionRefs = []
+            window.metaSelection = []
             refreshTiming()  // 时间轴面板（BPM/STOP）数据源
             // 元信息可编辑表单载入（meta.list；session 已 load，此后编辑保存走 meta.edit）
             if (typeof editPage !== "undefined" && editPage) editPage.reloadMeta()
+            // BGA 面板载入（#BMP 定义 + 当前层事件；bga.list/session.samples）
+            if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()
+            // 当前 #BMP 默认 = 首个定义（视口 BGA 列放置用）；若无 #BMP 保持空（放置时提示）
+            const sb = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} })))
+            if (sb.ok && sb.result.samples && sb.result.samples.bmp && sb.result.samples.bmp.length > 0
+                    && (window.currentBmpId === "" ||
+                        !sb.result.samples.bmp.some(function (d) { return d.id === window.currentBmpId }))) {
+                window.currentBmpId = sb.result.samples.bmp[0].id
+                if (typeof editPage !== "undefined" && editPage) editPage.currentBmpId = window.currentBmpId
+            }
             // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
             // 预计算 + 链式单参 .arg（经典稳妥形式）
             var wavCount = r.result.samples && r.result.samples.wav
@@ -655,445 +763,69 @@ ApplicationWindow {
         return decodeURIComponent(s)
     }
 
-    // ---------- 编辑命令封装（M3 协议：note.put/move/delete、session.*、clipboard.*） ----------
-    // 统一 dispatch + 成功即 chartSession.refresh()（指纹判定文档/内容变化，视图自动刷新）。
-    function sessionCmd(name, args) {
-        var req = JSON.stringify({ command: name, args: args || {} })
-        var resp = JSON.parse(beatbench.dispatch(req))
-        if (!resp.ok) {
-            setStatus(resp.error.code + ": " + resp.error.message)
-            return null
-        }
-        chartSession.refresh()
-        refreshLint()  // 编辑后刷新 lint 面板（内存 lint：LN 未配对等）
-        return resp.result
-    }
-    /// 只 dispatch 不 refresh（批删除循环里用；调用方完成后统一 refresh 一次）。
-    function dispatchCmd(name, args) {
-        var req = JSON.stringify({ command: name, args: args || {} })
-        var resp = JSON.parse(beatbench.dispatch(req))
-        if (!resp.ok) {
-            setStatus(resp.error.code + ": " + resp.error.message)
-            return null
-        }
-        return resp.result
-    }
-    /// 内存 lint（session.lint）→ lintModel（编辑后「LN 通道 note 未组成完整 LN」等提示）。
-    function refreshLint() {
-        var req = JSON.stringify({ command: "session.lint", args: {} })
-        var resp = beatbench.dispatch(req)
-        lintModel.loadFromIssues(resp)
-    }
-    function deleteNoteAt(ref) {
-        var args = {
-            measure: ref.measure, pos: ref.pos, lane: ref.lane, sample: ref.sample
-        }
-        if (ref.bgm_line !== undefined) args.bgm_line = ref.bgm_line
-        var r = sessionCmd("note.delete", args)
-        if (r) setStatus(qsTr("已删除（可撤销）"))
-    }
-    function deleteSelection() {
-        if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("没有选中（点击 note 选中 / Shift+框选）"))
-            return
-        }
-        var refs = window.selectionRefs.slice()
-        var done = 0
-        for (var i = 0; i < refs.length; i++) {
-            var args = {
-                measure: refs[i].measure, pos: refs[i].pos,
-                lane: refs[i].lane, sample: refs[i].sample
-            }
-            if (refs[i].bgm_line !== undefined) args.bgm_line = refs[i].bgm_line
-            var r = dispatchCmd("note.delete", args)
-            if (r) done++
-        }
-        if (done > 0) {
-            chartSession.refresh()
-            refreshLint()  // 2026-09 用户：删除后 lint 也要刷新（之前只刷新视图没刷新 lint）
-            window.selectionRefs = []
-            setStatus(qsTr("已删除 %1 个 note（Undo 可恢复）").arg(done))
-        }
-    }
-    function placeNote(hit) {
-        // 元事件轨（BPM/STOP，路线 A：工具栏值 + 点击列放置）→ timing.put；值取当前 BPM/STOP 值。
-        if (hit.metaKind === "bpm" || hit.metaKind === "stop") {
-            const tKind = hit.metaKind
-            const value = tKind === "bpm" ? window.currentBpmValue : window.currentStopValue
-            const tArgs = { kind: tKind, measure: hit.measure,
-                            pos: { num: hit.num, den: hit.den }, value: value }
-            const tr = sessionCmd("timing.put", tArgs)
-            if (tr) {
-                refreshTiming()
-                setStatus(qsTr("放置 %1：小节 %2 · %3/%4 = %5")
-                          .arg(tKind.toUpperCase()).arg(hit.measure).arg(hit.num).arg(hit.den).arg(value))
-            }
-            return
-        }
-        // kind 语义（M3 note.put 已支持）：note→normal / ln→LN 自动配对 / mine→地雷。
-        var kind = "normal"
-        if (window.editorTool === "ln") kind = "ln"
-        else if (window.editorTool === "mine") kind = "mine"
-        // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」——BMS 中 BGM（ch01）无 LN 通道表示
-        //（映射层 bms_channel_for(Bgm,ln) 为空，写出会丢/降级）。前端先行阻止。
-        if (kind === "ln" && hit.laneKind === "bgm") {
-            setStatus(qsTr("BGM 轨不能放置 LN（格式无 LN 通道表示）；请用「3 放置」放普通背景音"))
-            return
-        }
-        // BGM 展开列带 sampleHint（该列固定 #WAV id）→ 直接用；否则取当前采样
-        if (hit.sampleHint !== undefined && hit.sampleHint >= 0) {
-            var putArgs = {
-                measure: hit.measure,
-                pos: { num: hit.num, den: hit.den },
-                lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
-                sample: hit.sampleHint,
-                kind: kind
-            }
-            if (hit.bgm_line !== undefined && hit.bgm_line >= 0)
-                putArgs.bgm_line = hit.bgm_line
-            var r0 = sessionCmd("note.put", putArgs)
-            if (r0)
-                setStatus(kind === "ln"
-                          ? qsTr("放置 LN #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure)
-                          : kind === "mine"
-                                ? qsTr("放置地雷 #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure)
-                                : qsTr("放置 #WAV%1（BGM 列）· 小节 %2").arg(hit.sampleHint).arg(hit.measure))
-            return
-        }
-        if (window.currentSampleId === "") {
-            setStatus(qsTr("先选择采样：左 Dock「采样」面板点击 #WAVxx"))
-            return
-        }
-        var v = chartSession.sampleValueOf(window.currentSampleId)
-        if (v < 0) {
-            setStatus(qsTr("当前采样 #WAV%1 不在定义表中").arg(window.currentSampleId))
-            return
-        }
-        // ⚠️ 问题1（2026-09）：BGM 展开列（bgmLine>=0，无固定 sampleHint）放置必须传
-        // bgm_line——否则 note.put 默认 bgm_line=0 落到 bgm1（虚拟子通道行号丢失）。
-        var putArgs2 = {
-            measure: hit.measure,
-            pos: { num: hit.num, den: hit.den },
-            lane: { player: hit.lanePlayer, kind: hit.laneKind, index: hit.laneIndex },
-            sample: v,
-            kind: kind
-        }
-        if (hit.bgm_line !== undefined && hit.bgm_line >= 0)
-            putArgs2.bgm_line = hit.bgm_line
-        var r = sessionCmd("note.put", putArgs2)
-        if (r) {
-            var st = kind === "ln"
-                     ? qsTr("放置 LN #WAV%1 · 小节 %2 · %3/%4")
-                     : kind === "mine"
-                           ? qsTr("放置地雷 #WAV%1 · 小节 %2 · %3/%4")
-                           : qsTr("放置 #WAV%1 · 小节 %2 · %3/%4")
-            setStatus(st.arg(window.currentSampleId).arg(hit.measure).arg(hit.num).arg(hit.den))
-        }
-    }
-    function onSelectionMade(refs) {
-        window.selectionRefs = refs
-        setStatus(qsTr("已选中 %1 个 note（Ctrl+C 复制）").arg(refs.length))
-    }
-    function refEquals(a, b) {
-        return a && b && a.measure === b.measure && a.sample === b.sample &&
-               a.lane.kind === b.lane.kind && a.lane.index === b.lane.index &&
-               a.lane.player === b.lane.player &&
-               a.pos.num === b.pos.num && a.pos.den === b.pos.den &&
-               (a.bgm_line === undefined || b.bgm_line === undefined || a.bgm_line === b.bgm_line)
-    }
-    function onNoteClicked(ref, ctrl) {
-        // LN 选取模式（默认关）：点 LN 任一段 → 自动纳入配对段。ref 由 noteAt 返回，
-        // 命中 LN 时带 lnPartner（配对段的 NoteRef）。选中集可整体移动/删除。
-        if (window.lnSelectMode && ref.lnPartner) {
-            var picked = [ref.lnPartner, ref]
-            if (!ctrl) { window.selectionRefs = picked }
-            else {
-                // Ctrl+点击：把两端整体加入（若已含则移除）——简单化：追加未含的段
-                var arr = window.selectionRefs.slice()
-                for (var i = 0; i < picked.length; i++) {
-                    var exists = false
-                    for (var j = 0; j < arr.length; j++)
-                        if (refEquals(arr[j], picked[i])) { exists = true; break }
-                    if (!exists) arr.push(picked[i])
-                }
-                window.selectionRefs = arr
-            }
-            setStatus(qsTr("已选中 LN（%1 段）").arg(window.selectionRefs.length))
-            return
-        }
-        if (ctrl) {
-            // 多选切换（Ctrl+点击，文件管理器逻辑）：已选中 → 移除；否则追加
-            var arr = window.selectionRefs.slice()
-            var idx = -1
-            for (var i = 0; i < arr.length; i++)
-                if (refEquals(arr[i], ref)) { idx = i; break }
-            if (idx >= 0) arr.splice(idx, 1)
-            else arr.push(ref)
-            window.selectionRefs = arr
-            setStatus(qsTr("已选中 %1 个 note").arg(arr.length))
-            return
-        }
-        window.selectionRefs = [ref]
-        setStatus(qsTr("选中 #WAV%1（Del 删除 / 右键删除 / 拖拽平移）").arg(ref.sample))
-    }
-    function onCanvasClicked() {
-        if (window.selectionRefs.length > 0) window.selectionRefs = []
-    }
-    /// 平移选中 note（统一位移：拖拽/框选整段/多选）。
-    /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）。
-    /// 2026-09 跨命名空间：targetLane 带 metaKind（bpm/stop）→ note.convert（id 不变）；
-    /// BGA 图层列（bgaLayer >= 0）→ note.convert（bga_*）；其余 = note.moveRegion。
-    /// 移动选中 note（统一位移：拖拽/框选整段/多选）。
-    /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）；
-    /// sourceLane = 拖起 note 所在轨（{player,kind,index}）。跨命名空间（BPM/STOP/BGA）→ note.convert；
-    /// 普通轨 → note.move（moves 数组，**跨通道只把「拖起轨 sourceLane 的 note」改到目标轨**，
-    /// 其余 note 仅时间移动、保持原轨道——修复 2026-09 多选跨通道全部挤到松开通道的 bug）。
-    /// ⚠️ note.move = CompositeCommand 一个 undo 步。移动后**保持选中**（selectionRefs 更新到新位置）。
-    function moveSelection(deltaF, targetLane, sourceLane) {
-        if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("先选中 note（选择工具点击/框选）再移动"))
-            return
-        }
-        const refs = window.selectionRefs.slice()
-        // delta snap：把连续拍位位移吸附到当前槽（snapNum/snapDen 小节），再拆成
-        // {measure(int 小节分量), pos(节内分数分量)}。BMS 槽位为离散步长，吸附后对齐网格。
-        const num = window.snapNum, den = window.snapDen
-        const slots = Math.max(1, Math.floor(den / num))
-        const snappedF = Math.round(deltaF * slots) / slots
-        const m = Math.floor(snappedF)
-        const frac = snappedF - m
-        const delta = { measure: m, pos: { num: Math.round(frac * den), den: den } }
-        if (targetLane && targetLane.valid) {
-            // 跨命名空间：BPM/STOP 列（metaKind）→ note.convert；BGA 图层列 → note.convert（bga_*）
-            if (targetLane.metaKind === "bpm" || targetLane.metaKind === "stop") {
-                const r0 = sessionCmd("note.convert", { selection: refs, target: targetLane.metaKind, delta: delta })
-                if (r0) {
-                    window.selectionRefs = []
-                    setStatus(qsTr("已转换 %1 个 note → %2（id 不变）").arg(r0.notes).arg(targetLane.metaKind.toUpperCase()))
-                }
-                return
-            }
-            if (targetLane.bgaLayer !== undefined && targetLane.bgaLayer >= 0) {
-                const bgaTarget = targetLane.bgaLayer === 1 ? "bga_poor"
-                                  : targetLane.bgaLayer === 2 ? "bga_layer"
-                                  : targetLane.bgaLayer === 3 ? "bga_layer2" : "bga_base"
-                const r1 = sessionCmd("note.convert", { selection: refs, target: bgaTarget, delta: delta })
-                if (r1) {
-                    window.selectionRefs = []
-                    setStatus(qsTr("已转换 %1 个 note → BGA（id 不变）").arg(r1.notes))
-                }
-                return
-            }
-        }
-        // 普通轨道移动：逐 note 计算 to（绝对位置 = 源 + delta，带进位）。
-        // **通道「同距离偏移」**（2026-09 用户：拖动时每个选中 note 都移动相同距离）：
-        // 拖起轨 key i → 目标轨 key j，偏移 = j-i；所有选中 key note 左/右移相同量（保相对位置），
-        // 不再「全部挤到目标轨」或「只动拖起轨」。非 key note（皿/踏板/BGM）不变；
-        // 跨 kind（如 key→皿）走 sourceLane 兜底（拖起轨 note 改到目标 kind）。
-        let channelOffset = 0
-        const keyToKey = sourceLane && sourceLane.kind === "key" &&
-                         targetLane && targetLane.valid && targetLane.laneKind === "key"
-        if (keyToKey) channelOffset = targetLane.laneIndex - sourceLane.index
-        const moves = []
-        const newRefs = []
-        for (let i = 0; i < refs.length; i++) {
-            const ref = refs[i]
-            const to = addPosDelta(ref, delta)
-            let changedLane = false
-            if (channelOffset !== 0 && ref.lane.kind === "key") {
-                // 同距离偏移（key 轨；钳到合法 key 范围 1..7）
-                const ni = Math.max(1, Math.min(7, ref.lane.index + channelOffset))
-                if (ni !== ref.lane.index) {
-                    to.lane = { player: ref.lane.player, kind: "key", index: ni }
-                    changedLane = true
-                }
-            } else if (targetLane && targetLane.valid && sourceLane &&
-                    laneEquals(ref.lane, sourceLane.kind, sourceLane.index, sourceLane.player) &&
-                    !laneEquals(ref.lane, targetLane.laneKind, targetLane.laneIndex, targetLane.lanePlayer)) {
-                // 跨 kind 兜底：拖起轨 note 改到目标 kind（其余 keep）
-                to.lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
-                            index: targetLane.laneIndex }
-                if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
-                    to.bgm_line = targetLane.bgm_line
-                changedLane = true
-            }
-            moves.push({ from: ref, to: to })
-            // 移动后保持选中：selectionRefs 更新到新位置（measure/pos/lane/bgm_line）
-            const nr = { measure: to.measure, pos: to.pos,
-                         lane: changedLane ? to.lane : ref.lane,
-                         sample: ref.sample }
-            if (to.bgm_line !== undefined) nr.bgm_line = to.bgm_line
-            else if (ref.bgm_line !== undefined) nr.bgm_line = ref.bgm_line
-            newRefs.push(nr)
-        }
-        const r = sessionCmd("note.move", { moves: moves })
-        if (r) {
-            window.selectionRefs = newRefs   // 保持选中（新位置）
-            const chan = targetLane && targetLane.valid && Math.abs(deltaF) < 0.0001
-            setStatus(chan ? qsTr("已移动 %1 个 note（改通道）").arg(r.moved)
-                           : qsTr("已移动 %1 个 note（+%2 拍）").arg(r.moved).arg(deltaF.toFixed(3)))
-        }
-    }
-    /// 源位置 + 位移增量 → 绝对目标位置（带小节进位；分数约分，保证与 core Rational 一致）。
-    function addPosDelta(ref, delta) {
-        const rn = ref.pos.num, rd = ref.pos.den
-        const dn = delta.pos.num, dd = delta.pos.den
-        const newNum = rn * dd + dn * rd
-        const newDen = rd * dd
-        const carry = Math.floor(newNum / newDen)
-        const g = gcd(newNum - carry * newDen, newDen)
-        return { measure: ref.measure + delta.measure + carry,
-                 pos: { num: (newNum - carry * newDen) / g, den: newDen / g } }
-    }
-    function gcd(a, b) {
-        a = Math.abs(a); b = Math.abs(b)
-        while (b) { const t = b; b = a % b; a = t }
-        return a || 1
-    }
-    function laneEquals(lane, kind, index, player) {
-        return lane && lane.kind === kind && lane.index === index && lane.player === player
-    }
-    /// 单点 ↔ LN 转换（工具栏「单点/LN」按钮；selection 批量一个 undo 步）。
-    /// LNTYPE 翻转选中 note 的 LN 通道（LNTYPE 1：ln_channel ←→ 普通；配对由 rebuild 自动）。
-    function toggleLnSelection() {
-        if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("先选中 note（点击/框选）再转换单点/LN"))
-            return
-        }
-        // 2026-09：BGM 轨无 LN 通道表示，过滤掉这类 note（其余继续转换）
-        var playable = window.selectionRefs.filter(function (r) {
-            return r.lane && r.lane.kind !== "bgm"
-        })
-        if (playable.length === 0) {
-            setStatus(qsTr("选中的都是 BGM 轨 note（无 LN 通道表示），无法转换"))
-            return
-        }
-        var r = sessionCmd("note.toggleLn", { selection: playable.slice() })
-        if (r) {
-            window.selectionRefs = []
-            setStatus(qsTr("已转换 %1 个 note（单点↔LN）").arg(r.notes))
-        }
-    }
-    /// 量化：把选中 note 的 pos 吸附到当前 snap 网格（note.quantize；一个 undo 步）。
-    /// 量化后**保持选中**（selectionRefs 的 pos 更新到吸附值）。
-    function quantizeSelection() {
-        if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("先选中 note（点击/框选）再量化"))
-            return
-        }
-        const sn = window.snapNum, sd = window.snapDen
-        var r = sessionCmd("note.quantize", {
-            selection: window.selectionRefs.slice(),
-            snap: { num: sn, den: sd }
-        })
-        if (r) {
-            // 保持选中：pos 更新到吸附值（k*snapNum/snapDen，约分）
-            window.selectionRefs = window.selectionRefs.map(function(ref) {
-                const p = ref.pos.num / ref.pos.den
-                const k = Math.round(p * sd / sn)
-                const nnum = k * sn, nden = sd
-                const g = gcd(nnum, nden)
-                return { measure: ref.measure, pos: { num: nnum / g, den: nden / g },
-                         lane: ref.lane, sample: ref.sample,
-                         bgm_line: ref.bgm_line }
-            })
-            setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(sn).arg(sd))
-        }
-    }
-    /// 变换：镜像（mirror=true）/ 旋转（rotate=±1）；note.transform；一个 undo 步。
-    /// 变换后**保持选中**（selectionRefs 的 key 轨道更新为镜像/旋转后的下标；相对位置不变）。
-    /// ⚠️ 只处理 key 轨（镜像/旋转不影响皿/踏板/BGM）；按 7key 映射（key i ↔ key 8-i）。
-    function transformSelection(mirror, rotate) {
-        if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("先选中 note（点击/框选）再变换"))
-            return
-        }
-        var args = { selection: window.selectionRefs.slice() }
-        if (mirror) args.mirror = true
-        if (rotate !== 0) args.rotate = rotate
-        var r = sessionCmd("note.transform", args)
-        if (r) {
-            window.selectionRefs = window.selectionRefs.map(function(ref) {
-                if (ref.lane.kind !== "key") return ref   // 非 key 轨不变
-                const idx = ref.lane.index
-                const nidx = mirror ? (8 - idx) : (((idx - 1 + rotate) % 7 + 7) % 7 + 1)
-                return { measure: ref.measure, pos: ref.pos,
-                         lane: { player: ref.lane.player, kind: "key", index: nidx },
-                         sample: ref.sample, bgm_line: ref.bgm_line }
-            })
-            setStatus(mirror ? qsTr("已镜像 %1 个 note").arg(r.notes)
-                             : qsTr("已旋转 %1 个 note").arg(r.notes))
-        }
-    }
-    /// 网格开关：折叠/展开槽位弱线显示（不影响吸附）。
-    function toggleGrid() {
-        window.showGrid = !window.showGrid
-        setStatus(window.showGrid ? qsTr("网格显示：开") : qsTr("网格显示：关"))
-    }
-    function copySelection() {
-        if (!window.selectionRefs || window.selectionRefs.length === 0) {
-            setStatus(qsTr("没有选中（选择工具下 Shift+拖拽框选）"))
-            return
-        }
-        var r = sessionCmd("clipboard.copy", { selection: window.selectionRefs })
-        if (r) {
-            window.clipboardLines = r.lines
-            setStatus(qsTr("已复制 %1 个 note（%2 行）").arg(r.count).arg(r.lines.length))
-        }
-    }
-    function pasteClipboard() {
-        if (!window.clipboardLines || window.clipboardLines.length === 0) {
-            setStatus(qsTr("剪贴板为空（先框选 Ctrl+C）"))
-            return
-        }
-        var target = 0
-        if (typeof editPage !== "undefined" && editPage)
-            target = Math.floor(editPage.centerMeasure() || 0)
-        var r = sessionCmd("clipboard.paste", {
-            lines: window.clipboardLines,
-            target_measure: Math.max(0, target)
-        })
-        if (r)
-            setStatus(qsTr("已粘贴 %1 个 note 到小节 %2").arg(r.notes).arg(r.target_measure))
-    }
-    function undoEdit() {
-        var r = sessionCmd("session.undo")
-        if (r) {
-            refreshTiming()  // 撤销可能恢复/移除 BPM/STOP 事件 → 时间轴面板列表须重取
-            if (r.ok)
-                setStatus(qsTr("已撤销（可重做 %1 步）").arg(r.redo_depth))
-            else
-                setStatus(qsTr("无可撤销"))
-        }
-    }
-    function redoEdit() {
-        var r = sessionCmd("session.redo")
-        if (r) {
-            refreshTiming()  // 同上：重做改变时间轴事件 → 重取列表
-            if (r.ok)
-                setStatus(qsTr("已重做（可撤销 %1 步）").arg(r.undo_depth))
-            else
-                setStatus(qsTr("无可重做"))
-        }
-    }
-    /// 设置采样槽位绑定的文件名（双击采样行编辑；sample.setFile 一个 undo 步）。成功后
-    /// 从内存会话刷新采样面板（id/file/引用数；session.samples 与 info 同构，枚举全部槽位）。
-    function setSampleFile(id, file) {
-        if (id === undefined || id === null || id === "") return
-        const r = sessionCmd("sample.setFile", { id: id, file: file })
-        if (!r) return
-        const sresp = beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} }))
-        if (sresp) {
-            const r2 = JSON.parse(sresp)
-            if (r2.ok) sampleModel.loadFromInfo(JSON.stringify({ ok: true, result: r2.result }))
-        }
-        // 保持视图停在编辑的那一行（避免 reload 后回到顶部 id 00）
-        if (typeof editPage !== "undefined" && editPage && editPage.samplePanelObj)
-            editPage.samplePanelObj.requireId(id)
-        setStatus(qsTr("#WAV%1 → %2（Undo 可恢复）").arg(id, file))
+    // ---------- 会话控制器委托（业务逻辑抽离到 SessionController，2026-09） ----------
+    // 每个逻辑函数在此一行委托给 session.*；chrome（菜单/工具条/快捷键/对话框）调用不变。
+    // ⚠️ 委托保留原签名（QML 不支持 `...args` 转发），逐参透传。
+    SessionController {
+        id: session
+        window: window
+        editPage: editPage
     }
 
-    /// 编辑区双击 note → 改其引用采样 id（切音手工版）。弹出对话框，收新 #WAV id → note.setSample。
+    function addPosDelta(ref, delta) { return session.addPosDelta(ref, delta) }
+    function bgaLayerName(l) { return session.bgaLayerName(l) }
+    function bmpAdd(id, file) { return session.bmpAdd(id, file) }
+    function bmpDelete(id) { return session.bmpDelete(id) }
+    function bmpRename(fromId, toId) { return session.bmpRename(fromId, toId) }
+    function bmpSetFile(id, file) { return session.bmpSetFile(id, file) }
+    function cancelPendingLn() { return session.cancelPendingLn() }
+    function copySelection() { return session.copySelection() }
+    function deleteBga(layer, measure, num, den) { return session.deleteBga(layer, measure, num, den) }
+    function deleteMetaObject(obj) { return session.deleteMetaObject(obj) }
+    function deleteMetaSelection() { return session.deleteMetaSelection() }
+    function deleteNoteAt(ref) { return session.deleteNoteAt(ref) }
+    function deleteSelection() { return session.deleteSelection() }
+    function deleteTiming(kind, measure, num, den) { return session.deleteTiming(kind, measure, num, den) }
+    function dispatchCmd(name, args) { return session.dispatchCmd(name, args) }
+    function editBga(layer, measure, num, den, bmpId) { return session.editBga(layer, measure, num, den, bmpId) }
+    function editTiming(kind, measure, num, den, value, ref) { return session.editTiming(kind, measure, num, den, value, ref) }
+    function gcd(a, b) { return session.gcd(a, b) }
+    function laneEquals(lane, kind, index, player) { return session.laneEquals(lane, kind, index, player) }
+    function metaKey(o) { return session.metaKey(o) }
+    function metaTargetPos(measure, p, delta) { return session.metaTargetPos(measure, p, delta) }
+    function moveMetaObject(kind, obj, deltaF, targetLane) { return session.moveMetaObject(kind, obj, deltaF, targetLane) }
+    function moveSelection(deltaF, targetLane, sourceLane) { return session.moveSelection(deltaF, targetLane, sourceLane) }
+    function onCanvasClicked() { return session.onCanvasClicked() }
+    function onMetaClicked(obj, ctrl) { return session.onMetaClicked(obj, ctrl) }
+    function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }
+    function onSelectionMade(refs) { return session.onSelectionMade(refs) }
+    function pasteClipboard() { return session.pasteClipboard() }
+    function placeBgaAt(hit) { return session.placeBgaAt(hit) }
+    function placeLnType2(hit) { return session.placeLnType2(hit) }
+    function placeNote(hit) { return session.placeNote(hit) }
+    function quantizeSelection() { return session.quantizeSelection() }
+    function redoEdit() { return session.redoEdit() }
+    function refEquals(a, b) { return session.refEquals(a, b) }
+    function refreshLint() { return session.refreshLint() }
+    function refreshSamples() { return session.refreshSamples() }
+    function refreshTiming() { return session.refreshTiming() }
+    function saveChart() { return session.saveChart() }
+    function saveChartAs(path) { return session.saveChartAs(path) }
+    function saveMetaEdits() { return session.saveMetaEdits() }
+    function sessionCmd(name, args) { return session.sessionCmd(name, args) }
+    function setCurrentBmp(id) { return session.setCurrentBmp(id) }
+    function setSampleFile(id, file) { return session.setSampleFile(id, file) }
+    function toggleGrid() { return session.toggleGrid() }
+    function toggleLnSelection() { return session.toggleLnSelection() }
+    function transformSelection(mirror, rotate) { return session.transformSelection(mirror, rotate) }
+    function undoEdit() { return session.undoEdit() }
+
+    // ---------- 对话框耦合函数（委托需 window 作用域的对话框，故保留在 Main） ----------
+    function editMetaObject(obj) {
+        if (obj.kind === "bga") metaEditDialog.openBga(obj)
+        else metaEditDialog.openTiming(obj.kind, obj)
+    }
+
     function editNoteSample(ref) {
         if (!ref) return
         noteSampleDialog.ref = ref
@@ -1101,90 +833,6 @@ ApplicationWindow {
         noteSampleDialog.open()
     }
 
-    /// 时间轴事件（BPM/STOP）列表重取（timing.list）→ 回填右 Dock 时间轴面板。
-    function refreshTiming() {
-        var bpm = [], stop = []
-        var rb = beatbench.dispatch(JSON.stringify({ command: "timing.list", args: { kind: "bpm" } }))
-        if (rb) {
-            var rbp = JSON.parse(rb)
-            if (rbp.ok) bpm = rbp.result.events || []
-        }
-        var rs = beatbench.dispatch(JSON.stringify({ command: "timing.list", args: { kind: "stop" } }))
-        if (rs) {
-            var rsp = JSON.parse(rs)
-            if (rsp.ok) stop = rsp.result.events || []
-        }
-        window.timingBpm = bpm
-        window.timingStop = stop
-    }
-    /// 添加/改值时间轴事件（timing.put；一个 undo 步；成功后重取列表）。
-    function editTiming(kind, measure, num, den, value) {
-        var args = { kind: kind, measure: measure, pos: { num: num, den: den }, value: value }
-        var r = sessionCmd("timing.put", args)
-        if (r) {
-            refreshTiming()
-            setStatus(qsTr("已设置 %1 事件：小节 %2 · %3/%4 = %5")
-                      .arg(kind.toUpperCase()).arg(measure).arg(num).arg(den).arg(value))
-        }
-    }
-    /// 删除时间轴事件（timing.delete；一个 undo 步；成功后重取列表）。
-    function deleteTiming(kind, measure, num, den) {
-        var args = { kind: kind, measure: measure, pos: { num: num, den: den } }
-        var r = sessionCmd("timing.delete", args)
-        if (r) {
-            refreshTiming()
-            setStatus(qsTr("已删除 %1 事件：小节 %2 · %3/%4")
-                      .arg(kind.toUpperCase()).arg(measure).arg(num).arg(den))
-        }
-    }
-
-    function saveChart() {
-        // 2026-09：元信息修改交整个文件保存——先应用元信息编辑 + 扩展代码，再 session.save。
-        if (typeof editPage !== "undefined" && editPage) {
-            const edits = editPage.collectMetaEdits()
-            if (edits && edits.length > 0) {
-                const em = sessionCmd("meta.edit", { edits: edits })
-                if (em) setStatus(qsTr("元信息已保存 %1 处").arg(edits.length))
-            }
-            editPage.applyRawEdits()
-            refreshLint()
-        }
-        var r = sessionCmd("session.save", { overwrite: true })
-        if (r) {
-            window.chartPath = r.output
-            setStatus(qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes))
-        }
-    }
-    /// 元信息面板「保存」按钮：只应用元信息编辑 + 扩展代码到内存会话（不写文件）。
-    /// 之后 Ctrl+S / 另存为会随整个文件一并落盘。成功后提交基线（orig=value）清脏。
-    function saveMetaEdits() {
-        if (typeof editPage === "undefined" || !editPage) return
-        const edits = editPage.collectMetaEdits()
-        let n = 0
-        if (edits && edits.length > 0) {
-            const em = sessionCmd("meta.edit", { edits: edits })
-            if (!em) return   // 失败：sessionCmd 已置状态栏
-            n = edits.length
-        }
-        if (editPage.applyRawEdits()) n++
-        editPage.commitMeta()
-        refreshLint()
-        setStatus(n > 0
-                  ? qsTr("元信息已保存 %1 处（写文件时随整体保存落盘）").arg(n)
-                  : qsTr("元信息无改动"))
-    }
-    function saveChartAs(path) {
-        if (typeof editPage !== "undefined" && editPage) {
-            const edits = editPage.collectMetaEdits()
-            if (edits && edits.length > 0) sessionCmd("meta.edit", { edits: edits })
-            editPage.applyRawEdits()
-        }
-        var r = sessionCmd("session.save", { path: path, overwrite: true })
-        if (r) {
-            window.chartPath = r.output
-            setStatus(qsTr("已另存为：%1").arg(r.output))
-        }
-    }
 
     // ---------- 关于对话框 ----------
     Dialog {
@@ -1206,31 +854,36 @@ ApplicationWindow {
     // 编辑区双击 note → 改引用采样 id（切音手工版；note.setSample）
     Dialog {
         id: noteSampleDialog
-        title: qsTr("修改 note 引用采样 #WAV id")
+        title: qsTr("编辑对象")
         modal: true
         anchors.centerIn: parent
         width: 320
         property var ref: null
         standardButtons: Dialog.Ok | Dialog.Cancel
+        readonly property string posText: ref ? qsTr("小节 %1 · %2/%3")
+                                                 .arg(ref.measure).arg(ref.pos.num).arg(ref.pos.den) : ""
+        readonly property string curText: ref ? qsTr("#WAV%1").arg(chartSession.idTextOf(ref.sample)) : ""
         onOpened: noteIdInput.forceActiveFocus()
         ColumnLayout {
             anchors.fill: parent
             spacing: 6
-            Label {
-                text: noteSampleDialog.ref
-                      ? qsTr("当前引用：#WAV%1").arg(chartSession.idTextOf(noteSampleDialog.ref.sample))
-                      : ""
-                color: Theme.textMuted
-                font.family: Theme.fontMono
-                font.pixelSize: Theme.fsSmall
-            }
-            BbTextField {
-                id: noteIdInput
-                Layout.preferredWidth: 150
-                font.family: Theme.fontMono
-                placeholderText: qsTr("#WAV id（如 1A）")
-                // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
-                escapeHandler: function() { noteSampleDialog.reject() }
+            // 与 metaEditDialog 同结构：对象类型标题 + 位置 + 内容 label+field
+            Label { text: qsTr("note 引用采样"); color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
+            Label { text: noteSampleDialog.posText + qsTr("　当前 %1").arg(noteSampleDialog.curText);
+                    color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsTiny }
+            RowLayout {
+                spacing: 6
+                Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny;
+                        Layout.preferredWidth: 56 }
+                BbTextField {
+                    id: noteIdInput
+                    Layout.fillWidth: true
+                    font.family: Theme.fontMono
+                    placeholderText: qsTr("如 1A")
+                    onAccepted: noteSampleDialog.accept()
+                    // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
+                    escapeHandler: function() { noteSampleDialog.reject() }
+                }
             }
             Label { text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
                     font.pixelSize: Theme.fsTiny }
@@ -1252,4 +905,82 @@ ApplicationWindow {
             if (res) setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
         }
     }
+
+    // ---- 视口双击编辑 BGA/BPM/STOP 对象（2026-09）：编辑内容（BMP id / 值）；位置用拖拽移动） ----
+    Dialog {
+        id: metaEditDialog
+        title: qsTr("编辑对象")
+        modal: true
+        anchors.centerIn: parent
+        width: 300
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        property string kind: ""   // bga / bpm / stop
+        property var base: null    // 原对象（measure/pos/layer/sample/value）
+        readonly property string layerText: base ? ["base","poor","layer","layer2"][base.layer] : ""
+
+        function openBga(obj) { kind = "bga"; base = obj; applyFields(); open() }
+        function openTiming(k, obj) { kind = k; base = obj; applyFields(); open() }
+        function applyFields() {
+            meLabel.text = kind === "bga" ? qsTr("BGA 对象")
+                          : kind === "bpm" ? qsTr("BPM 对象") : qsTr("STOP 对象")
+            mePosLabel.text = qsTr("小节 %1 · %2/%3").arg(base.measure).arg(base.pos.num).arg(base.pos.den)
+            meLayerRow.visible = kind === "bga"
+            if (kind === "bga") {
+                meLayerLabel.text = qsTr("图层：%1").arg(metaEditDialog.layerText)
+                meContentLabel.text = qsTr("#BMP id")
+                meContentField.text = "#BMP" + chartSession.idTextOf(base.sample)
+                meContentField.placeholderText = qsTr("01/ZZ")
+            } else {
+                meContentLabel.text = kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
+                meContentField.text = kind === "bpm" ? String(base.value) : window.stopToDisplay(base.value)
+                meContentField.placeholderText = kind === "bpm" ? qsTr("如 180") : (window.stopUnit === 0 ? qsTr("如 96") : qsTr("如 800"))
+            }
+        }
+        onOpened: meContentField.forceActiveFocus()
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 6
+            Label { id: meLabel; color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
+            Label { id: mePosLabel; color: Theme.textFaint; font.family: Theme.fontMono;
+                    font.pixelSize: Theme.fsTiny }
+            RowLayout { id: meLayerRow; spacing: 6
+                Label { id: meLayerLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
+            }
+            RowLayout {
+                spacing: 6
+                Label { id: meContentLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 56 }
+                BbTextField {
+                    id: meContentField
+                    Layout.fillWidth: true
+                    font.family: Theme.fontMono
+                    onAccepted: metaEditDialog.accept()
+                    escapeHandler: function() { metaEditDialog.reject() }
+                }
+            }
+        }
+        onAccepted: {
+            const s = metaEditDialog.base
+            if (!s) return
+            if (metaEditDialog.kind === "bga") {
+                const id = meContentField.text.trim().indexOf("#BMP") === 0
+                           ? meContentField.text.trim().substring(4) : meContentField.text.trim()
+                const sample = chartSession.decodeId(id)
+                if (sample < 0) { setStatus(qsTr("#BMP id 非法：%1").arg(id)); return }
+                const r = sessionCmd("bga.put", { layer: s.layer, measure: s.measure, pos: s.pos, sample: sample })
+                if (r) {
+                    if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()
+                    setStatus(qsTr("BGA → #BMP%1").arg(id))
+                }
+            } else {
+                const raw = parseFloat(meContentField.text)
+                const value = metaEditDialog.kind === "bpm" ? raw : window.stopFromDisplay(meContentField.text)
+                if (!isFinite(value)) { setStatus(qsTr("值非法")); return }
+                const r = sessionCmd("timing.put", { kind: metaEditDialog.kind,
+                                                     measure: s.measure, pos: s.pos, value: value })
+                if (r) { refreshTiming(); setStatus(qsTr("已改 %1 值").arg(metaEditDialog.kind.toUpperCase())) }
+            }
+        }
+    }
 }
+

@@ -38,6 +38,7 @@ Item {
     property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
     property string sampleText: ""       // 当前采样展示（无放置采样时提示）
     property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
+    property var metaSelection: []       // 选中 BGA/BPM/STOP 对象集合（回填 view.metaSelection 高亮）
     property bool perfLog: false         // paint 帧耗时采样（--perf-log）
     property bool _ctrlHeld: false       // 本次按下是否 Ctrl（多选切换）
 
@@ -53,6 +54,14 @@ Item {
     // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）；
     // sourceLane = 拖起的 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note，2026-09）
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
+    // BGA/BPM/STOP 对象（2026-09）：点选（选中 + 可移动）
+    signal metaObjectClicked(var obj, bool ctrl)
+    // BGA/BPM/STOP 移动：kind + 对象 + 时间位移 + 横向目标列（bga 跨图层）
+    signal metaMoveRequested(string kind, var obj, real deltaF, var targetLane)
+    // BGA/BPM/STOP 右键删除
+    signal metaRightDeleted(var obj)
+    // BGA/BPM/STOP 双击编辑
+    signal metaEditRequested(var obj)
 
     onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
 
@@ -72,6 +81,7 @@ Item {
         showExtras: root.showExtras
         showGrid: root.showGrid
         selection: root.selection
+        metaSelection: root.metaSelection
         perfLog: root.perfLog
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）
         showChannelIds: root.showChannelIds !== keyMonitor.ctrlHeld
@@ -174,6 +184,8 @@ Item {
     property bool _dragged: false
     property bool _panning: false   // 中键拖动 = 滚动（任何工具下）
     property bool _moving: false    // 拖拽选中 note = 移动（选中 note 上按下即进入，无门控）
+    property string _moveKind: ""   // 移动的对象类型：""(note) / bga / bpm / stop
+    property var _moveObj: null     // 移动的 bga/bpm/stop 对象（objectAt 返回；note 时为 null）
     property real _moveStartF: 0    // 按下的拍位（measure + pos 小数）
     property real _moveDeltaF: 0    // 当前时间位移（拍位小数）
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
@@ -212,19 +224,34 @@ Item {
         const isEditTool = root.editorTool === "select" || root.editorTool === "note" ||
                            root.editorTool === "ln" || root.editorTool === "mine"
         if (isEditTool) {
-            const hit = view.noteAt(x, y)
-            if (hit.valid) {
+            const obj = view.objectAt(x, y)
+            if (obj.valid) {
+                if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop") {
+                    // BGA/BPM/STOP 对象：选中 + 进入移动准备（与 note 平行；值/id 由命令层保持）
+                    root.metaObjectClicked(obj, ctrl)
+                    _moving = true
+                    _moveKind = obj.kind
+                    _moveObj = obj
+                    _moveDeltaF = 0
+                    _moveTargetLane = null
+                    _moveSourceLane = null
+                    _moveStartF = view.measureAtY(y)
+                    return
+                }
+                // —— note 路径（原逻辑） ——
                 if (ctrl) {
                     // Ctrl+点击：多选切换（toggle），不进入移动——保持交互清晰（选中态预览）。
                     // ⚠️ 旧代码硬编码 noteClicked(hit, false) 丢失 Ctrl → 多选失效（问题1根因）。
-                    root.noteClicked(hit, true)
+                    root.noteClicked(obj, true)
                     return
                 }
-                if (!isSelectedNote(hit)) root.noteClicked(hit, false)
+                if (!isSelectedNote(obj)) root.noteClicked(obj, false)
                 _moving = true
+                _moveKind = ""
+                _moveObj = null
                 _moveDeltaF = 0
                 _moveTargetLane = null
-                _moveSourceLane = hit.lane   // 拖起 note 的轨（跨通道多选移动只动此轨，2026-09）
+                _moveSourceLane = obj.lane   // 拖起 note 的轨（跨通道多选移动只动此轨，2026-09）
                 _moveStartF = view.measureAtY(y)
                 return
             }
@@ -303,8 +330,14 @@ Item {
             }
             if (Math.abs(deltaF) > 0.001 || targetLane) {
                 // 应用前 snap 时间（拍位吸附到 snapNum/snapDen；在 Main 侧再做）
-                root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane)
+                if (root._moveKind !== "") {
+                    root.metaMoveRequested(root._moveKind, root._moveObj, deltaF, targetLane)
+                } else {
+                    root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane)
+                }
             }
+            root._moveKind = ""
+            root._moveObj = null
             _dragged = false
             return
         }
@@ -318,11 +351,14 @@ Item {
                                                         selRect.y + selRect.height))
                 return
             }
-            // 点击（未拖动）：点选 note（Ctrl = 多选切换）/ 空白清空
+            // 点击（未拖动）：点选 note / BGA/BPM/STOP 对象（Ctrl = 多选切换）/ 空白清空
             if (y > 18) {
-                const hit = view.noteAt(x, y)
-                if (hit.valid) root.noteClicked(hit, _ctrlHeld)
-                else root.canvasClicked()
+                const obj = view.objectAt(x, y)
+                if (obj.valid) {
+                    if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
+                        root.metaObjectClicked(obj, _ctrlHeld)
+                    else root.noteClicked(obj, _ctrlHeld)
+                } else root.canvasClicked()
             }
             return
         }
@@ -367,11 +403,15 @@ Item {
             // 2026-09：编辑区任意按下 → Main 释放文本框焦点（否则快捷键被文本框吞掉）
             root.editAreaPressed()
             if (mouse.button === Qt.RightButton) {
-                // 右键命中 note → 直接删除（BMS 编辑器惯例；select/pan/note 工具下可用）
+                // 右键命中 note / BGA / BPM / STOP → 直接删除（BMS 编辑器惯例；select/pan/note 工具下可用）
                 if (root.editorTool === "select" || root.editorTool === "pan" ||
                         root.editorTool === "note") {
-                    const hit = view.noteAt(mouse.x, mouse.y)
-                    if (hit.valid) root.noteRightDeleted(hit)
+                    const obj = view.objectAt(mouse.x, mouse.y)
+                    if (obj.valid) {
+                        if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
+                            root.metaRightDeleted(obj)
+                        else root.noteRightDeleted(obj)
+                    }
                 }
                 return  // 右键不进入拖拽/框选/放置
             }
@@ -411,10 +451,15 @@ Item {
             root.handleRelease(mouse.x, mouse.y)
         }
         onDoubleClicked: (mouse) => {
-            // 切音手工版：双击命中 note（select 工具）→ 改引用采样 id（Main 弹对话框）
+            // 双击命中 note / BGA / BPM / STOP（select 工具）→ 编辑（note 改采样；bga 改 BMP/图层；
+            // bpm/stop 改值；Main 弹对话框）
             if (mouse.button === Qt.LeftButton && root.editorTool === "select" && mouse.y > 18) {
-                const hit = view.noteAt(mouse.x, mouse.y)
-                if (hit.valid) root.noteEditRequested(hit)
+                const obj = view.objectAt(mouse.x, mouse.y)
+                if (obj.valid) {
+                    if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
+                        root.metaEditRequested(obj)
+                    else root.noteEditRequested(obj)
+                }
             }
         }
     }

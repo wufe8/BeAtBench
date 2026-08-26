@@ -16,12 +16,30 @@ ColumnLayout {
     property var bpmEvents: []
     property var stopEvents: []
     /// 编辑（添加/改值）→ Main 走 timing.put。pos 以 num/den 分开传（避免对象绑定歧义）。
-    signal timingEditRequested(string kind, int measure, int num, int den, double value)
+    /// ref = 手动绑定的 #BPMxx/#STOPxx id 文本（空 = codec 自动派生）。
+    signal timingEditRequested(string kind, int measure, int num, int den, double value, string ref)
     /// 删除 → Main 走 timing.delete。
     signal timingDeleteRequested(string kind, int measure, int num, int den)
 
     property string kind: "bpm"   // bpm / stop
     readonly property var events: kind === "bpm" ? bpmEvents : stopEvents
+    /// STOP 值显示/填入单位：0 = 1/192 全音符（BMS 默认）；1 = 毫秒。值与 Main.window.stopUnit 同步。
+    property int stopUnit: 0
+    /// 毫秒换算参考 BPM（时间轴事件所属小节生效的 BPM；Main 由 TimingEngine 提供）。
+    /// STOP 秒 = n×1.25/bpm，毫秒 = n×1250/bpm。缺省 130。
+    property real stopBpm: 130
+    /// STOP 计数 n → 选中单位文本。毫秒需换算 BPM（秒 = n×1.25/bpm → ms = n×1250/bpm）。
+    function stopToDisplay(v) {
+        if (stopUnit === 0) return String(Math.round(v))
+        const bpm = (stopBpm > 0) ? stopBpm : 130
+        return String(Math.round(v * 1250 / bpm))
+    }
+    /// 选中单位文本 → 计数 n。
+    function stopFromDisplay(t) {
+        const val = parseFloat(t)
+        if (!isFinite(val)) return NaN
+        return stopUnit === 0 ? val : val * (stopBpm > 0 ? stopBpm : 130) / 1250
+    }
 
     spacing: 6
 
@@ -96,10 +114,20 @@ ColumnLayout {
                     Label {
                         text: root.kind === "bpm"
                               ? qsTr("%1").arg(row.modelData.value)
-                              : valueText(row.modelData.value)
+                              : root.stopToDisplay(row.modelData.value)
                         color: root.kind === "bpm" ? Theme.accent : Theme.warning
                         font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall
+                    }
+                    Label {
+                        // 绑定 id：#BPMxx/#STOPxx（空 = codec 自动派生 id）
+                        text: row.modelData.ref && row.modelData.ref !== ""
+                              ? (root.kind === "bpm" ? "#BPM" : "#STOP") + row.modelData.ref
+                              : qsTr("(auto)")
+                        color: row.modelData.ref && row.modelData.ref !== "" ? Theme.textMuted : Theme.textFaint
+                        font.family: Theme.fontMono
+                        font.pixelSize: Theme.fsTiny
+                        visible: root.kind !== "measure"
                     }
                     BbToolButton {
                         text: "×"
@@ -126,7 +154,7 @@ ColumnLayout {
                     onDoubleClicked: dialog.openForEdit(
                                          root.kind, row.modelData.measure,
                                          row.modelData.pos.num, row.modelData.pos.den,
-                                         row.modelData.value)
+                                         row.modelData.value, row.modelData.ref || "")
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: (mouse) => {
                         if (mouse.button === Qt.RightButton)
@@ -157,6 +185,7 @@ ColumnLayout {
         property int baseNum: 0
         property int baseDen: 1
         property double baseValue: 0
+        property string baseRef: ""   // 手动绑定 #BPMxx/#STOPxx id（空 = auto 派生）
 
         function openForAdd(k) {
             kind = k
@@ -164,17 +193,19 @@ ColumnLayout {
             baseMeasure = 0
             baseNum = 0
             baseDen = 1
-            baseValue = (k === "bpm") ? 130 : 5000
+            baseValue = (k === "bpm") ? 130 : stopFromDisplay("96")  // STOP 默认 96（1/192 全音符 ×96 = 半全音符）
+            baseRef = ""
             applyFields()
             open()
         }
-        function openForEdit(k, measure, num, den, value) {
+        function openForEdit(k, measure, num, den, value, ref) {
             kind = k
             editing = true
             baseMeasure = measure
             baseNum = num
             baseDen = den
             baseValue = value
+            baseRef = (ref && ref !== "") ? ref : ""
             applyFields()
             open()
         }
@@ -182,7 +213,10 @@ ColumnLayout {
             measureSpin.value = baseMeasure
             numSpin.value = baseNum
             denSpin.value = Math.max(1, baseDen)
-            valueField.text = String(baseValue)
+            valueField.text = dialog.kind === "bpm" ? String(baseValue)
+                                                    : stopToDisplay(baseValue)
+            refField.text = baseRef
+            refRow.visible = dialog.kind !== "measure"
         }
 
         onOpened: valueField.forceActiveFocus()
@@ -209,13 +243,13 @@ ColumnLayout {
             RowLayout {
                 spacing: 6
                 Label {
-                    text: dialog.kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(μs)")
+                    text: dialog.kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny
                 }
                 BbTextField {
                     id: valueField
                     Layout.fillWidth: true
-                    placeholderText: dialog.kind === "bpm" ? qsTr("如 130") : qsTr("如 5000")
+                    placeholderText: dialog.kind === "bpm" ? qsTr("如 130") : qsTr("如 96")
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: dialog.accept()
                     // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
@@ -225,22 +259,46 @@ ColumnLayout {
             Label {
                 text: dialog.kind === "bpm"
                       ? qsTr("· BPM 数值")
-                      : qsTr("· 微秒（1000 μs = 1 ms）")
+                      : (stopUnit === 0 ? qsTr("· 单位 = 1/192 全音符（随该拍位 BPM 换算）") : qsTr("· 毫秒（按当前 BPM 换算）"))
+                color: Theme.textFaint
+                font.pixelSize: Theme.fsTiny
+            }
+            RowLayout {
+                id: refRow
+                spacing: 6
+                Label {
+                    text: dialog.kind === "bpm" ? qsTr("id") : qsTr("id")
+                    color: Theme.textMuted; font.pixelSize: Theme.fsTiny
+                }
+                BbTextField {
+                    id: refField
+                    Layout.fillWidth: true
+                    placeholderText: dialog.kind === "bpm" ? qsTr("#BPMxx（空=auto）") : qsTr("#STOPxx（空=auto）")
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsTiny
+                    onAccepted: dialog.accept()
+                    escapeHandler: function() { dialog.reject() }
+                }
+            }
+            Label {
+                text: qsTr("· 绑定 id（#BPMxx/#STOPxx 引用；留空 = 写回时自动分配 id）")
                 color: Theme.textFaint
                 font.pixelSize: Theme.fsTiny
             }
         }
         onAccepted: {
-            const value = parseFloat(valueField.text)
-            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0); return }
+            const value = dialog.kind === "bpm"
+                          ? parseFloat(valueField.text)
+                          : stopFromDisplay(valueField.text)
+            const ref = refField.text.trim()
+            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0, ref); return }
             root.timingEditRequested(dialog.kind, measureSpin.value,
-                                     numSpin.value, denSpin.value, value)
+                                     numSpin.value, denSpin.value, value, ref)
         }
     }
 
-    // STOP 微秒 → 可读文本（≥1000μs → ms；≥1000000μs → s）
-    function valueText(v) {
-        if (v >= 1000000) return (v / 1e6).toFixed(3) + "s"
-        return (v / 1000).toFixed(1) + "ms"
+    // STOP 单位显示名（对话框 label 用）
+    function stopUnitLabel() {
+        return stopUnit === 0 ? qsTr("unit") : qsTr("ms")
     }
 }

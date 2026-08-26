@@ -32,7 +32,7 @@ ColumnLayout {
     property int dirtyTick: 0
     /// 字段排序（歌曲信息 → 谱面信息；其余次要字段收进折叠组，按名字母序）。
     readonly property var primaryKeys: ["TITLE", "SUBTITLE", "ARTIST", "GENRE",
-        "BPM", "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
+        "BPM", "LNTYPE", "LNOBJ", "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
     property bool expandSecondary: false
     property bool expandRaw: false
     readonly property var primaryFields: root.fields.filter(f => root.isPrimary(f.key))
@@ -63,6 +63,14 @@ ColumnLayout {
             for (let i = 0; i <= 4; i++)
                 arr.push({ label: i + " - " + names[i], value: String(i) })
             return arr
+        }
+        if (key === "LNTYPE") {
+            // #LNTYPE：长音描述格式。0=关闭、1=RDM 通道（默认）、2=#LNOBJ 截止符（2026-09 用户）。
+            return [
+                { label: "1 - RDM 通道（默认）", value: "1" },
+                { label: "2 - #LNOBJ 截止符", value: "2" },
+                { label: "0 - 关闭", value: "0" }
+            ]
         }
         return null
     }
@@ -113,6 +121,10 @@ ColumnLayout {
         const arr = []
         for (const k in r.result.meta)
             arr.push({ key: k, value: r.result.meta[k] || "", orig: r.result.meta[k] || "" })
+        // LNTYPE / LNOBJ 恒显示（谱面缺省时注入默认值，便于用户定义 LNTYPE=2 + LNOBJ）。
+        // 注入项 orig=value（不是脏），仅当用户改动时才写入（meta.edit 空串=删除字段）。
+        if (!arr.some(f => f.key === "LNTYPE")) arr.push({ key: "LNTYPE", value: "1", orig: "1" })
+        if (!arr.some(f => f.key === "LNOBJ")) arr.push({ key: "LNOBJ", value: "", orig: "" })
         arr.sort(root.sortMeta)
         root.fields = arr
         const rr = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "meta.raw", args: {} })))

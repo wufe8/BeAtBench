@@ -35,6 +35,8 @@ Item {
     property string sampleText: ""
     /// 选中 note 集合（NoteRef；框选后回填 → 高亮）
     property var selection: []
+    /// 选中 BGA/BPM/STOP 对象集合（{kind, measure, pos, ...}；视口回填 → 高亮）
+    property var metaSelection: []
     /// 时间轴事件（timing.list 结果；Main 在打开谱面/编辑后重取回填，供右 Dock 时间轴面板）
     property var timingBpm: []
     property var timingStop: []
@@ -49,6 +51,8 @@ Item {
     readonly property string hoverText: chartView ? chartView.hoverText : ""
     /// 暴露采样面板（Main 在文件编辑后 scrollTo 定位，避免列表回到顶部）
     readonly property var samplePanelObj: samplePanel
+    /// 暴露 BGA 面板（Main 打开谱面/编辑后调 reloadBga）
+    readonly property var bgaPanelObj: bgaPanel
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)
@@ -68,22 +72,50 @@ Item {
     signal noteRightDeleted(var ref)
     /// 双击命中 note（切音手工版：改引用采样 id）
     signal noteEditRequested(var ref)
-    /// 时间轴事件编辑（添加/改值）→ Main 走 timing.put
-    signal timingEditRequested(string kind, int measure, int num, int den, double value)
+    /// 时间轴事件编辑（添加/改值）→ Main 走 timing.put。ref = 手动绑定 id（空=auto）。
+    signal timingEditRequested(string kind, int measure, int num, int den, double value, string ref)
     /// 时间轴事件删除 → Main 走 timing.delete
     signal timingDeleteRequested(string kind, int measure, int num, int den)
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
     /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
     signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
+    /// BGA/BPM/STOP 点选（选中 + 可移动）
+    signal metaObjectClicked(var obj, bool ctrl)
+    /// BGA/BPM/STOP 移动（kind + 对象 + 时间位移 + 横向目标列）
+    signal metaMoveRequested(string kind, var obj, real deltaF, var targetLane)
+    /// BGA/BPM/STOP 右键删除
+    signal metaRightDeleted(var obj)
+    /// BGA/BPM/STOP 双击编辑
+    signal metaEditRequested(var obj)
     /// 元信息操作状态提示 → Main 置状态栏
     signal metaMessage(string msg)
     /// 元信息面板「保存」→ Main 只保存元信息（应用 meta.edit + meta.rawEdit，不写文件）
     signal metaSaveRequested()
     /// 元信息面板修改（保存前须先应用：CollectMetaEdits / applyRawEdits）
     signal metaDirty()
+    /// 当前 #BMP（视口放置用；Main 回填 → BgaPanel 高亮）。
+    property string currentBmpId: ""
+    /// 选择当前 #BMP（视口 BGA 列放置用）→ Main 设 currentBmpId
+    signal bmpSelected(string id)
     /// 编辑区任意按下 → Main 释放文本框焦点
     signal editAreaPressed()
+    /// BGA 事件编辑（添加/改值）→ Main 走 bga.put（bmpId 为文本 id）
+    signal bgaEditRequested(int layer, int measure, int num, int den, string bmpId)
+    /// BGA 事件删除 → Main 走 bga.delete
+    signal bgaDeleteRequested(int layer, int measure, int num, int den)
+    /// 添加 #BMP 定义 → Main 走 sample.setFile(kind=bmp)
+    signal bmpAddRequested(string id, string file)
+    /// 设置 #BMP 文件 → Main 走 sample.setFile(kind=bmp)
+    signal bmpSetFileRequested(string id, string file)
+    /// 重命名 #BMP id → Main 走 sample.rename(kind=bmp)
+    signal bmpRenameRequested(string fromId, string toId)
+    /// 删除 #BMP 定义 → Main 走 sample.delete(kind=bmp)
+    signal bmpDeleteRequested(string id)
 
+    /// STOP 值显示/填入单位（0=1/192全音符 1=ms；Main 会话状态 → 时间轴面板）
+    property int stopUnit: 0
+    /// STOP 毫秒换算参考 BPM（时间轴事件小节生效 BPM；Main 由 chartMeta.BPM 提供）
+    property real stopBpm: 130
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
         return chartView ? chartView.centerMeasure() : 0
@@ -92,6 +124,10 @@ Item {
     /// 元信息载入（Main 打开谱面后调用 → metaPanel.reload()）。
     function reloadMeta() {
         if (metaPanel) metaPanel.reload()
+    }
+    /// BGA 面板载入（Main 打开谱面 / BGA 编辑后调用 → 重读 #BMP 定义 + 当前层事件）。
+    function reloadBga() {
+        if (bgaPanel) bgaPanel.reload()
     }
     /// 元信息重置（放弃改动）→ Main 调用。
     function resetMeta() {
@@ -202,13 +238,23 @@ Item {
                             samplePanel.requireId(id)
                         }
                     }
-                    Label { text: qsTr("BGA 预览（后置）"); color: Theme.textFaint;
-                            font.pixelSize: Theme.fsSmall }
+                    BgaPanel {
+                        id: bgaPanel
+                        objectName: "bgaPanel"  // Main 打开谱面/编辑后调 reload()
+                        currentBmpId: root.currentBmpId
+                        onBgaEditRequested: (layer, measure, num, den, bmpId) =>
+                            root.bgaEditRequested(layer, measure, num, den, bmpId)
+                        onBgaDeleteRequested: (layer, measure, num, den) =>
+                            root.bgaDeleteRequested(layer, measure, num, den)
+                        onBmpAddRequested: (id, file) => root.bmpAddRequested(id, file)
+                        onBmpSetFileRequested: (id, file) => root.bmpSetFileRequested(id, file)
+                        onBmpRenameRequested: (fromId, toId) => root.bmpRenameRequested(fromId, toId)
+                        onBmpDeleteRequested: (id) => root.bmpDeleteRequested(id)
+                        onBmpSelected: (id) => root.bmpSelected(id)
+                    }
                 }
             }
         }
-
-        // ---------- 中央视口（时间轴占位，M2 第 5 步用 QQuickPaintedItem 实现） ----------
         Rectangle {
             SplitView.fillWidth: true
             SplitView.minimumWidth: 320
@@ -272,6 +318,7 @@ Item {
                     sampleId: root.sampleId
                     sampleText: root.sampleText
                     selection: root.selection
+                    metaSelection: root.metaSelection
                     snapNum: root.snapNum
                     snapDen: root.snapDen
                     zoomToCursor: root.zoomToCursor
@@ -284,6 +331,11 @@ Item {
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
                     onNoteEditRequested: (ref) => root.noteEditRequested(ref)
                     onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => root.moveSelectionRequested(deltaF, targetLane, sourceLane)
+                    onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
+                    onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
+                        root.metaMoveRequested(kind, obj, deltaF, targetLane)
+                    onMetaRightDeleted: (obj) => root.metaRightDeleted(obj)
+                    onMetaEditRequested: (obj) => root.metaEditRequested(obj)
                     onEditAreaPressed: root.editAreaPressed()
                 }
             }
@@ -322,8 +374,10 @@ Item {
                         id: timelinePanel
                         bpmEvents: root.timingBpm
                         stopEvents: root.timingStop
-                        onTimingEditRequested: (kind, measure, num, den, value) =>
-                            root.timingEditRequested(kind, measure, num, den, value)
+                        stopUnit: root.stopUnit
+                        stopBpm: root.stopBpm
+                        onTimingEditRequested: (kind, measure, num, den, value, ref) =>
+                            root.timingEditRequested(kind, measure, num, den, value, ref)
                         onTimingDeleteRequested: (kind, measure, num, den) =>
                             root.timingDeleteRequested(kind, measure, num, den)
                     }

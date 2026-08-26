@@ -24,6 +24,7 @@ qt_add_qml_module(beatbench
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/SessionController.qml
         qml/pages/EditPage.qml
         qml/pages/SlicePage.qml
         qml/pages/TestPage.qml
@@ -41,6 +42,7 @@ qt_add_qml_module(beatbench
         qml/components/ChartView.qml
         qml/components/PropertiesPanel.qml
         qml/components/TimelinePanel.qml
+        qml/components/BgaPanel.qml
     # C++ 注册类型（QML_ELEMENT，经 qmltyperegistrar 注册为 BeatBench 组件）：
     # ChartViewItem = 竖向时间轴自绘视口（皮肤 L3 按组件覆写的落点，doc/05 §8）
     SOURCES

@@ -12,6 +12,10 @@ SpinBox {
     /// 2026-09 用户：snap 上下按钮 ×2/÷2（音乐常用拍子）；manual 输入不受影响（1/3、1/5 可手填）。
     /// 0 = 默认 ±1；>0 = 点击上下箭头时 value ×/÷ stepFactor（整数除，下限 from / 上限 to）。
     property int stepFactor: 0
+    /// 2026-09：Esc 行为钩子（同 BbTextField）。对话框内 SpinBox 需一次 Esc 即关整个 Dialog——
+    /// 默认内部 TextInput 的 Esc=释放焦点会让第二次 Esc 才到 Dialog（用户报告「要按两次才关」）。
+    /// 设置后先调用该钩子（对话框自己 reject），再释放焦点。非对话框场景保持 null → 原行为不变。
+    property var escapeHandler: null
 
     font.pixelSize: Theme.fsSmall
     font.family: Theme.fontSans
@@ -33,8 +37,9 @@ SpinBox {
         inputMethodHints: Qt.ImhFormattedNumbersOnly
         onAccepted: root.value = root.textFromValue(text, root.locale)
         selectByMouse: true
-        // 2026-09：Esc 释放焦点（否则焦点粘住 → 快捷键被文本框吞掉）
+        // 2026-09：Esc 释放焦点（否则焦点粘住 → 快捷键被文本框吞掉）；有 escapeHandler 则先调用（关对话框）
         Keys.onEscapePressed: {
+            if (root.escapeHandler) root.escapeHandler()
             root.focus = false
             deselect()
         }
