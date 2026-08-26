@@ -399,7 +399,7 @@ ColumnLayout {
         ColumnLayout {
             anchors.fill: parent
             spacing: 4
-            // 小节 + 位置 同一行（紧凑：对话框高度不超视口）
+            // 小节 2 : 0 / 1（冒号分隔；紧凑一行，默认 dock 宽可容纳）
             RowLayout {
                 spacing: 4
                 Layout.fillWidth: true
@@ -407,12 +407,14 @@ ColumnLayout {
                 BbSpinBox {
                     id: measureSpin
                     from: 0; to: 999; editable: true
-                    Layout.fillWidth: true
+                    Layout.preferredWidth: 64
+                    Layout.minimumWidth: 48
                 }
-                Label { text: qsTr("位置"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
-                BbSpinBox { id: numSpin; from: 0; to: 999; editable: true; Layout.preferredWidth: 52 }
+                Label { text: ":"; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
+                BbSpinBox { id: numSpin; from: 0; to: 999; editable: true; Layout.preferredWidth: 48 }
                 Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
-                BbSpinBox { id: denSpin; from: 1; to: 999; editable: true; Layout.preferredWidth: 52 }
+                BbSpinBox { id: denSpin; from: 1; to: 999; editable: true; Layout.preferredWidth: 48 }
+                Item { Layout.fillWidth: true }
             }
             RowLayout {
                 spacing: 4

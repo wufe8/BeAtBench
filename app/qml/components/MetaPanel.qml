@@ -23,6 +23,9 @@ ColumnLayout {
     signal metaMessage(string msg)
     /// 「保存」按钮 → Main 只保存元信息（应用 meta.edit + meta.rawEdit，不写文件）
     signal saveRequested()
+    /// **实时模式字段**（LNTYPE/LNOBJ，2026-09 用户）：修改即生效——Main 立即 meta.edit
+    /// 写入会话（LN 放置模式/LNOBJ 尾采样不必等「保存」按钮）。
+    signal modeEditRequested(string key, string value)
 
     /// 编辑字段状态（orig = 载入原始值；value = 当前编辑值；脏 = value!==orig）
     property var fields: []
@@ -238,7 +241,8 @@ ColumnLayout {
                         visible: !root.comboOptions(modelData.key, modelData.value)
                         Layout.fillWidth: true
                         text: modelData.value
-                        onTextChanged: { modelData.value = text; root.dirtyTick++ }
+                        onTextChanged: { modelData.value = text; root.dirtyTick++
+                                         if (modelData.key === "LNOBJ") { modelData.orig = text; root.modeEditRequested("LNOBJ", text) } }
                     }
                     ComboBox {
                         id: combo
@@ -273,7 +277,13 @@ ColumnLayout {
                             const idx = currentIndex
                             if (idx >= 0) {
                                 const v = root.comboOptions(source.key, source.value)[idx].value
-                                if (source.value !== v) { source.value = v; root.dirtyTick++ }
+                                if (source.value !== v) {
+                                    source.value = v; root.dirtyTick++
+                                    if (source.key === "LNTYPE") {
+                                        source.orig = v
+                                        root.modeEditRequested("LNTYPE", v)
+                                    }
+                                }
                             }
                         }
                         indicator: Item {

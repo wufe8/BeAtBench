@@ -510,6 +510,7 @@ ApplicationWindow {
                 onMetaEditRequested: (obj) => editMetaObject(obj)
                 onMetaMessage: (msg) => setStatus(msg)
                 onMetaSaveRequested: saveMetaEdits()
+                onModeEditRequested: (key, value) => setModeMeta(key, value)
                 onEditAreaPressed: clearTextFocus()
                 onTimingEditRequested: (kind, measure, num, den, value, ref) =>
                     editTiming(kind, measure, num, den, value, ref)
@@ -838,6 +839,7 @@ ApplicationWindow {
     function saveChart() { return session.saveChart() }
     function saveChartAs(path) { return session.saveChartAs(path) }
     function saveMetaEdits() { return session.saveMetaEdits() }
+    function setModeMeta(key, value) { return session.setModeMeta(key, value) }
     function sessionCmd(name, args) { return session.sessionCmd(name, args) }
     function setCurrentBmp(id) { return session.setCurrentBmp(id) }
     function setSampleFile(id, file) { return session.setSampleFile(id, file) }

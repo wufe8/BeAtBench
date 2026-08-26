@@ -94,7 +94,10 @@ Item {
     /// 元信息操作状态提示 → Main 置状态栏
     signal metaMessage(string msg)
     /// 元信息面板「保存」→ Main 只保存元信息（应用 meta.edit + meta.rawEdit，不写文件）
+    /// 元信息「保存」按钮 → Main：应用元信息编辑 + 扩展代码到会话（不写文件）。
     signal metaSaveRequested()
+    /// 实时模式字段（LNTYPE/LNOBJ）变更 → Main 立即 meta.edit（LN 放置模式实时生效）。
+    signal modeEditRequested(string key, string value)
     /// 元信息面板修改（保存前须先应用：CollectMetaEdits / applyRawEdits）
     signal metaDirty()
     /// 当前 #BMP（视口放置用；Main 回填 → BgaPanel 高亮）。
@@ -232,6 +235,7 @@ Item {
                         chartPath: root.chartPath
                         onMetaMessage: (msg) => root.metaMessage(msg)
                         onSaveRequested: root.metaSaveRequested()
+                        onModeEditRequested: (key, value) => root.modeEditRequested(key, value)
                     }
                     SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file);
                                   onSampleFileRequested: (id, file) => root.sampleFileRequested(id, file) }

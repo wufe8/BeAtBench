@@ -172,6 +172,33 @@ TEST(MetaLint, LintExtMismatchIsInfo) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(MetaLint, LintUnboundReferencedWav) {
+    // 引用但未定义/未绑定文件的 #WAVxx → missing_wav 警告；#LNOBJ 空音尾豁免。
+    Chart c;
+    c.meta["TITLE"] = "unbound";
+    c.meta["RANK"] = "3";
+    c.meta["TOTAL"] = "100";
+    c.meta["LNTYPE"] = "2";
+    c.meta["LNOBJ"] = "ZZ";  // base36 ZZ = 1295
+    Event<Note> n1{1, Rational(0, 1), {}};
+    n1.value.lane = {0, LaneKind::Key, 1};
+    n1.value.sample.id = 5;    // #WAV05 未定义 → 应警告
+    Event<Note> n2{1, Rational(1, 2), {}};
+    n2.value.lane = {0, LaneKind::Key, 1};
+    n2.value.sample.id = 1295; // #WAVZZ = LNOBJ → 豁免
+    c.notes.push_back(n1);
+    c.notes.push_back(n2);
+    const auto issues = bms::lint_chart(c, std::filesystem::path());
+    bool wav5_warned = false, wavzz_warned = false;
+    for (const auto& issue : issues) {
+        if (issue.code != "missing_wav") continue;
+        if (issue.id == "05") wav5_warned = true;
+        if (issue.id == "ZZ") wavzz_warned = true;
+    }
+    EXPECT_TRUE(wav5_warned);   // 未定义引用 → 警告
+    EXPECT_FALSE(wavzz_warned); // LNOBJ 空音尾 → 豁免
+}
+
 // —— 协议 dispatch ——
 
 TEST(MetaLint, ProtocolMetaEdit) {

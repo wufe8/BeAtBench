@@ -205,10 +205,19 @@ QtObject {
                          h.lane.index === lane.index
         // —— 待定头在当前轨 → 放尾（#LNOBJ 采样 note）——
         if (sameLane) {
-            const lnojb = chartSession.lnobjSample()
+            let lnojb = chartSession.lnobjSample()
+            let fallback = false
             if (lnojb < 0) {
-                setStatus(qsTr("未定义 #LNOBJ（元信息面板设 #LNTYPE=2 并填 #LNOBJ，缺省 ZZ）"))
-                return
+                // LNOBJ 未定义（用户预期 2026-09）：回退用**当前采样**作尾（空音化由用户
+                // 自行选择 ZZ 等空槽位），状态栏提示——不再阻断放置。
+                const cv = (window.currentSampleId !== "")
+                           ? chartSession.sampleValueOf(window.currentSampleId) : -1
+                if (cv < 0) {
+                    setStatus(qsTr("未定义 #LNOBJ 且未选当前采样，无法放 LN 尾"))
+                    return
+                }
+                lnojb = cv
+                fallback = true
             }
             const headF = h.measure + h.pos.num / h.pos.den
             const tailF = hit.measure + hit.num / hit.den
@@ -217,8 +226,12 @@ QtObject {
                                                sample: lnojb, kind: "normal" })
             if (r) {
                 window.pendingLnHead = null
-                setStatus(qsTr("LN 完成（#LNOBJ 尾 · 小节 %1 · %2/%3）")
-                          .arg(hit.measure).arg(hit.num).arg(hit.den))
+                if (fallback)
+                    setStatus(qsTr("LN 完成（#LNOBJ 未定义，尾用当前采样 #WAV%1；建议元信息设 #LNOBJ=ZZ 作空音尾）")
+                              .arg(window.currentSampleId))
+                else
+                    setStatus(qsTr("LN 完成（#LNOBJ 尾 · 小节 %1 · %2/%3）")
+                              .arg(hit.measure).arg(hit.num).arg(hit.den))
             }
             return
         }
@@ -847,6 +860,12 @@ QtObject {
         setStatus(qsTr("当前 #BMP：%1（视口 BGA 列放置用）").arg(id))
     }
 
+    /// 实时模式字段（LNTYPE/LNOBJ）：元信息面板改动即 meta.edit 写入会话 → LN 放置模式
+    /// 立即生效（无需等「保存」按钮；一个 undo 步）。
+    function setModeMeta(key, value) {
+        const r = sessionCmd("meta.edit", { edits: [{ key: key, value: value }] })
+        if (r) setStatus(qsTr("%1 = %2（实时生效）").arg(key).arg(value === "" ? qsTr("（删除）") : value))
+    }
     function saveChart() {
         // 2026-09：元信息修改交整个文件保存——先应用元信息编辑 + 扩展代码，再 session.save。
         if (typeof editPage !== "undefined" && editPage) {
@@ -856,6 +875,7 @@ QtObject {
                 if (em) setStatus(qsTr("元信息已保存 %1 处").arg(edits.length))
             }
             editPage.applyRawEdits()
+            editPage.commitMeta()  // 提交基线 → 面板「保存/重置」按钮随脏清零禁用（2026-09 用户）
             refreshLint()
         }
         var r = sessionCmd("session.save", { overwrite: true })
@@ -887,6 +907,7 @@ QtObject {
             const edits = editPage.collectMetaEdits()
             if (edits && edits.length > 0) sessionCmd("meta.edit", { edits: edits })
             editPage.applyRawEdits()
+            editPage.commitMeta()  // 同 saveChart：另存为成功后面板脏清零（按钮禁用）
         }
         var r = sessionCmd("session.save", { path: path, overwrite: true })
         if (r) {

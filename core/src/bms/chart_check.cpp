@@ -145,6 +145,35 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         issue.file = def.file;
         issues.push_back(std::move(issue));
     }
+    // 1b) 引用但**未定义/未绑定文件**的 WAV（note 引用了不存在于定义表的 #WAVxx）——
+    // NBM 2026-09：LNOBJ 空音尾豁免（#LNOBJ 通常不绑文件）；其余照常警告。
+    {
+        const auto usage = collect_sample_usage(chart);
+        std::uint32_t lnobj_id = 0;
+        if (const auto lt = chart.meta.find("LNTYPE"); lt != chart.meta.end() && lt->second == "2") {
+            if (const auto lj = chart.meta.find("LNOBJ"); lj != chart.meta.end() && !lj->second.empty()) {
+                lnobj_id = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(lj->second, 2)
+                                                           : bms::c36_to_u32(lj->second, 2);
+            } else {
+                lnobj_id = chart.id_base == IdBase::Base62 ? 3843u : 1295u;  // 默认 ZZ
+            }
+        }
+        for (const auto& [key, u] : usage) {
+            (void)u;
+            if (key.first != SampleKind::Wav) continue;
+            if (key.second == lnobj_id) continue;  // LNOBJ 空音尾豁免
+            const auto it = chart.samples.find(key);
+            if (it != chart.samples.end() && !it->second.file.empty()) continue;  // 1) 已检查
+            LintIssue issue;
+            issue.code = "missing_wav";
+            issue.severity = Severity::Warning;
+            issue.message = "缺失采样文件 #WAV" + id_text(chart, key.second) +
+                            "（引用未定义/未绑定文件）";
+            issue.id = id_text(chart, key.second);
+            issue.file = "";
+            issues.push_back(std::move(issue));
+        }
+    }
     // 2) 缺失 #RANK / #TOTAL（播放器判定/回血依赖）
     if (!chart.meta.count("RANK")) {
         issues.push_back(
