@@ -209,6 +209,21 @@ TEST(SampleRename, SetValueCrossSyncsRefEvents) {
     EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 280.0);
 }
 
+TEST(SampleRename, PutTimingSyncsDefAndReferencers) {
+    // 共享 id 语义：编辑 ref 绑定事件的值 = 改该 #BPMxx 定义值（引用者全同步）；undo 恢复。
+    EditorSession s;
+    s.load(make_chart());
+    // make_chart：bpm_events[0] = m1 pos0 value 280 ref_id 4（#BPM4 = "280"）
+    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
+        TimingKind::Bpm, 1, Rational(0, 1), 300.0)));
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "300");
+    EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 300.0);
+    // undo：定义回 "280"，事件回 280
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "280");
+    EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 280.0);
+}
+
 // —— note.setSample：改单条 note 引用、invert 恢复、找不到无操作 ——
 
 TEST(SampleRename, SetNoteSampleChangesOne) {

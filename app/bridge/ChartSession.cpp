@@ -77,9 +77,10 @@ int ChartSession::sampleValueOf(const QString& idText) const {
     const bool b62 = m_chart->id_base == beatbench::IdBase::Base62;
     const std::uint32_t id =
         b62 ? beatbench::bms::c62_to_u32(t, 2) : beatbench::bms::c36_to_u32(t, 2);
-    // 未在定义表中（或解析异常产生 0）→ 无效
-    if (m_chart->samples.find({beatbench::SampleKind::Wav, id}) == m_chart->samples.end())
-        return -1;
+    // 2026-09 用户：**未绑定文件的槽位也允许放置**（LNOBJ 尾通常空音、不绑文件）。
+    // BMS 中 note 可引用未定义/无文件的 #WAVxx（播放器按静音处理；lint 提示「缺失」）。
+    // 之前要求定义表存在才可放置 → 无法放 LNOBJ 尾/空音 note。
+    if (id == 0) return -1;  // id 0 无效（00 槽位保留）
     return static_cast<int>(id);
 }
 

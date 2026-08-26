@@ -261,8 +261,11 @@ ColumnLayout {
                         if (!defRow.editing) return
                         defRow.editing = false
                         const v = defValueEdit.text.trim()
-                        if (v !== "" && v !== defRow.modelData.value)
+                        if (v !== "" && v !== defRow.modelData.value) {
+                            // 乐观更新（行内立即显示新值；随后 refreshTiming 从会话重取）
+                            defRow.modelData.value = v
                             root.timingDefAddRequested(root.kind, defRow.modelData.id, v)
+                        }
                     }
                     width: ListView.view.width
                     height: 24
@@ -430,11 +433,10 @@ ColumnLayout {
             }
             Label {
                 text: dialog.kind === "bpm"
-                      ? qsTr("值自动派生 #BPMxx（id 绑定在「#BPM 定义」区）")
-                      : (stopUnit === 0 ? qsTr("单位 = 1/192 全音符（随该拍位 BPM 换算）") : qsTr("毫秒（按当前 BPM 换算）"))
+                      ? qsTr("值自动派生 #BPMxx")
+                      : (stopUnit === 0 ? qsTr("单位 = 1/192 全音符") : qsTr("毫秒（按当前 BPM）"))
                 color: Theme.textFaint
                 font.pixelSize: Theme.fsTiny
-                wrapMode: Text.WordWrap
             }
         }
         onAccepted: {

@@ -117,6 +117,14 @@ private:
     std::optional<std::uint32_t> m_old_ref;
     /// apply 实际插入位置（invert 移除时定位；nullopt = 未执行/替换）
     std::optional<std::size_t> m_applied_index;
+    /// 交叉同步（共享 id 语义 2026-09：ref 绑定事件改值 = 改该 #BPMxx/#STOPxx **定义值**，
+    /// 所有引用者同步；与 SetSampleValueCommand 一致）。仅定义实际变化时记录，invert 恢复。
+    std::optional<std::uint32_t> m_sync_ref;   ///< 实际同步的定义 id
+    bool m_def_existed = false;                ///< 定义 apply 前存在
+    std::string m_old_def_text;                ///< 定义旧文本
+    std::vector<std::pair<std::size_t, double>> m_sync_bpm;        ///< 引用者旧值（Bpm）
+    std::vector<std::pair<std::size_t, std::int64_t>> m_sync_stop; ///< 引用者旧值（Stop）
+    std::size_t m_edited_index = 0;            ///< 被替换事件下标（传播时跳过——do_invert 恢复其值）
 };
 
 /// 删除时间轴事件（BPM/STOP/节拍 → timing.delete）。

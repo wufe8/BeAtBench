@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -910,16 +912,35 @@ void set_ref_if_supported(Event<T>& ev, std::optional<std::uint32_t> ref) {
     else if constexpr (std::is_same_v<T, Stop>) ev.value.ref_id = ref;
 }
 
+/// 数值 → 紧凑文本（与 bms_writer::format_num 同规：整数无小数点，小数 17 位有效数字）。
+inline std::string format_number(double v) {
+    if (std::isfinite(v) && v == std::floor(v) && std::fabs(v) < 1e15)
+        return std::to_string(static_cast<long long>(v));
+    std::ostringstream os;
+    os << std::setprecision(17) << v;
+    std::string s = os.str();
+    if (s.find('e') == std::string::npos && s.find('.') != std::string::npos) {
+        while (!s.empty() && s.back() == '0') s.pop_back();
+        if (!s.empty() && s.back() == '.') s.pop_back();
+    }
+    return s;
+}
+
 void PutTimingCommand::apply(Chart& chart) {
     m_existed = false;
     m_applied_index.reset();
     m_old_ref.reset();
+    m_sync_ref.reset();
+    m_sync_bpm.clear();
+    m_sync_stop.clear();
+    m_edited_index = 0;
     const auto do_apply = [&](auto& evs) {
         using Ev = typename std::remove_reference_t<decltype(evs)>::value_type;
         using V = decltype(std::declval<Ev>().value);  // Bpm / Stop / MeasureLen
         const auto [lo, hi] = find_event_range(evs, m_measure, m_pos);
         if (lo != hi) {  // 同位替换（同 pos 多值：改最后一个 = 引擎「后者覆盖」语义）
             m_existed = true;
+            m_edited_index = hi - 1;
             m_old_value = timing_value(evs[hi - 1]);
             if constexpr (std::is_same_v<V, Bpm> || std::is_same_v<V, Stop>)
                 m_old_ref = evs[hi - 1].value.ref_id;
@@ -939,6 +960,59 @@ void PutTimingCommand::apply(Chart& chart) {
         case TimingKind::Bpm: do_apply(chart.bpm_events); break;
         case TimingKind::Stop: do_apply(chart.stop_events); break;
         case TimingKind::Measure: do_apply(chart.measure_events); break;
+    }
+    // 交叉同步（共享 id 语义，2026-09 用户）：替换的是 ref 绑定事件（含显式新 ref）→
+    // **该 #BPMxx/#STOPxx 的定义值 = 新事件值**，所有引用该 id 的事件同步刷新。
+    // （BMS 语义：ch08/ch09 行引用一个定义，行本身无独立数值——编辑一个对象 = 编辑定义。）
+    const std::optional<std::uint32_t> sync_ref = m_ref ? m_ref : m_old_ref;
+    if (m_kind != TimingKind::Bpm && m_kind != TimingKind::Stop) return;
+    if (!(sync_ref && *sync_ref != 0)) return;
+    if (!m_existed) return;  // 新增事件：值即事件值（写回自动派生），不动已有定义
+    // 取替换后的事件值（Bpm=数值 / Stop=计数）
+    double val = 0;
+    if (m_kind == TimingKind::Bpm) {
+        const auto [lo, hi] = find_event_range(chart.bpm_events, m_measure, m_pos);
+        if (lo == hi) return;
+        val = chart.bpm_events[hi - 1].value.value;
+    } else {
+        const auto [lo, hi] = find_event_range(chart.stop_events, m_measure, m_pos);
+        if (lo == hi) return;
+        val = static_cast<double>(chart.stop_events[hi - 1].value.count);
+    }
+    const std::string text = (m_kind == TimingKind::Stop)
+                                 ? format_number(std::llround(val))
+                                 : format_number(val);
+    const SampleKind sk = (m_kind == TimingKind::Bpm) ? SampleKind::Bpm : SampleKind::Stop;
+    const auto key = std::make_pair(sk, *sync_ref);
+    const auto it = chart.samples.find(key);
+    m_def_existed = it != chart.samples.end();
+    if (m_def_existed) m_old_def_text = it->second.value;
+    if (m_def_existed && m_old_def_text == text) return;  // 定义值未变 → 无需同步
+    m_sync_ref = sync_ref;
+    chart.samples[key].value = text;
+    // 传播：所有引用该 id 的事件值 = 定义值
+    double dv = 0;
+    char* end = nullptr;
+    const double parsed = std::strtod(text.c_str(), &end);
+    if (end != text.c_str() && *end == '\0' && std::isfinite(parsed)) dv = parsed;
+    if (sk == SampleKind::Bpm) {
+        for (std::size_t i = 0; i < chart.bpm_events.size(); ++i) {
+            if (i == m_edited_index) continue;  // 被替换事件由 do_invert 恢复（m_old_value）
+            auto& ev = chart.bpm_events[i].value;
+            if (ev.ref_id && *ev.ref_id == *sync_ref) {
+                m_sync_bpm.emplace_back(i, ev.value);
+                ev.value = dv;
+            }
+        }
+    } else {
+        for (std::size_t i = 0; i < chart.stop_events.size(); ++i) {
+            if (i == m_edited_index) continue;
+            auto& ev = chart.stop_events[i].value;
+            if (ev.ref_id && *ev.ref_id == *sync_ref) {
+                m_sync_stop.emplace_back(i, ev.count);
+                ev.count = static_cast<std::int64_t>(std::llround(dv));
+            }
+        }
     }
 }
 
@@ -965,6 +1039,23 @@ void PutTimingCommand::invert(Chart& chart) {
         case TimingKind::Bpm: do_invert(chart.bpm_events); break;
         case TimingKind::Stop: do_invert(chart.stop_events); break;
         case TimingKind::Measure: do_invert(chart.measure_events); break;
+    }
+    // 交叉同步 invert：恢复定义 + 各引用者旧值
+    if (m_sync_ref) {
+        const SampleKind sk = (m_kind == TimingKind::Bpm) ? SampleKind::Bpm : SampleKind::Stop;
+        const auto key = std::make_pair(sk, *m_sync_ref);
+        if (m_def_existed) {
+            chart.samples[key].value = m_old_def_text;
+        } else {
+            chart.samples.erase(key);
+        }
+        for (const auto& [idx, old] : m_sync_bpm)
+            if (idx < chart.bpm_events.size()) chart.bpm_events[idx].value.value = old;
+        for (const auto& [idx, old] : m_sync_stop)
+            if (idx < chart.stop_events.size()) chart.stop_events[idx].value.count = old;
+        m_sync_ref.reset();
+        m_sync_bpm.clear();
+        m_sync_stop.clear();
     }
 }
 
