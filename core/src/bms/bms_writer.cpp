@@ -164,8 +164,18 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             const auto count = ev.value.count;
             if (stop_id_by_count.count(count)) continue;
             // ⚠️ 有 ref_id 的事件（原始 #STOPxx 槽位引用）：写回直接输出 ref_id 文本，
-            // **不派生定义**——派生 id 可能与 ref_id 文本冲突（同 BPM 注，2026-09）。
-            if (ev.value.ref_id && *ev.value.ref_id != 0) continue;
+            // **不派生新 id**——派生 id 可能与 ref_id 文本冲突（同 BPM 注，2026-09）。
+            // 但若该 ref 槽位**无定义**（编辑对话框补的 id+值），须补一条 #STOPxx 定义，
+            // 否则悬空引用无法解析。值优先采用事件值。
+            if (ev.value.ref_id && *ev.value.ref_id != 0) {
+                const std::uint32_t rid = *ev.value.ref_id;
+                if (!stop_defs.count(rid)) {
+                    const auto text = format_num(static_cast<double>(count));
+                    stop_defs[rid] = text;
+                    derived_stops[rid] = text;
+                }
+                continue;
+            }
             // id 空间上限（36 = 1295；62 = 3843）；全满时复用最后一个（退化，理论不可达）
             const std::uint32_t max_id =
                 chart.id_base == IdBase::Base62 ? 3843 : 1295;
@@ -202,9 +212,18 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             const auto v = ev.value.value;
             if (bpm_id_by_value.count(v)) continue;
             // ⚠️ 有 ref_id 的事件（原始 #BPMxx 槽位引用）：写回直接输出 ref_id 文本，
-            // **不派生定义**——派生 id 可能与 ref_id 文本冲突（2026-09 roundtrip 回归）。
-            // 原始文件该引用无定义时靠 LR2 十六进制兼容；保持原样。
-            if (ev.value.ref_id && *ev.value.ref_id != 0) continue;
+            // **不派生新 id**——派生 id 可能与 ref_id 文本冲突（2026-09 roundtrip 回归）。
+            // 但若该 ref 槽位**无定义**（如编辑对话框补的 id+值），必须补一条 #BPMxx 定义，
+            // 否则输出悬空引用（数据行引用一个不存在的 #BPMxx → 无法解析）。值优先采用事件值。
+            if (ev.value.ref_id && *ev.value.ref_id != 0) {
+                const std::uint32_t rid = *ev.value.ref_id;
+                if (!bpm_defs.count(rid)) {
+                    const auto text = format_num(v);
+                    bpm_defs[rid] = text;
+                    derived_bpms[rid] = text;
+                }
+                continue;
+            }
             const std::uint32_t max_id =
                 chart.id_base == IdBase::Base62 ? 3843 : 1295;
             while (next_id < max_id && (bpm_defs.count(next_id) || ref_used.count(next_id)))

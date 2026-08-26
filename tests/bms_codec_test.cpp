@@ -848,6 +848,38 @@ TEST(BmsRoundTrip, DerivedStopDef) {
     EXPECT_EQ(r2.chart.stop_events[0].value.count, 192);
 }
 
+TEST(BmsRoundTrip, RefSlotGetsDefinitionWhenMissing) {
+    // 编辑对话框补「id + 值」但 ref 槽位无定义 → 写回须补一条 #BPMxx/#STOPxx 定义，
+    // 否则数据行引用一个不存在的定义（悬空引用）→ 往返丢值。
+    // BPM：值 >255 强制 ch08 引用（hex_ok=false），ref_id 必被采用。
+    Chart c;
+    Bpm b;
+    b.value = 280.0;
+    b.ref_id = 1;   // #BPM01
+    c.bpm_events.push_back({0, Rational(0, 1), b});
+    const auto out = write_bms(c);
+    EXPECT_NE(out.find("#BPM01 280"), std::string::npos);  // 补定义
+    EXPECT_NE(out.find(":01"), std::string::npos);         // 数据行引用 #BPM01
+    const auto r2 = read_bms(out);
+    ASSERT_EQ(r2.chart.bpm_events.size(), 1u);
+    EXPECT_DOUBLE_EQ(r2.chart.bpm_events[0].value.value, 280.0);
+    EXPECT_TRUE(r2.chart.bpm_events[0].value.ch08);
+}
+
+TEST(BmsRoundTrip, StopRefSlotGetsDefinitionWhenMissing) {
+    Chart c;
+    Stop s;
+    s.count = 96;
+    s.ref_id = 1;   // #STOP01
+    c.stop_events.push_back({0, Rational(0, 1), s});
+    const auto out = write_bms(c);
+    EXPECT_NE(out.find("#STOP01 96"), std::string::npos);  // 补定义
+    EXPECT_NE(out.find(":01"), std::string::npos);         // 数据行引用 #STOP01
+    const auto r2 = read_bms(out);
+    ASSERT_EQ(r2.chart.stop_events.size(), 1u);
+    EXPECT_EQ(r2.chart.stop_events[0].value.count, 96);
+}
+
 // ---------- 真实谱面（local/chart，未提交样本；缺失时跳过） ----------
 
 TEST(BmsRealCharts, RoundTripAllLocalCharts) {

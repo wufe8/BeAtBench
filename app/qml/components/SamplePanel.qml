@@ -33,12 +33,17 @@ ColumnLayout {
     property string editingId: ""
     property string pendingFile: ""
     property string pendingOrig: ""
+    /// 正在编辑的行（delegate 引用）：commitPending 负责把该行退出编辑态。
+    /// （仅清空 editingId 不够——行 delegate 的 editing 仍是 true，TextField 仍显示。）
+    property var _editingRow: null
     function commitPending() {
         if (root.editingId === "") return
         const id = root.editingId
         const file = root.pendingFile
         const orig = root.pendingOrig
         root.editingId = ""; root.pendingFile = ""; root.pendingOrig = ""
+        // 退出编辑态（点击其它行/空白/Enter 三路皆经此；必须真正置回行 editing=false）
+        if (root._editingRow) root._editingRow.editing = false
         if (file !== orig) root.sampleFileRequested(id, file)
     }
 
@@ -152,6 +157,9 @@ ColumnLayout {
                     root.editingId = row.id
                     root.pendingFile = row.file
                     root.pendingOrig = row.file
+                    root._editingRow = row
+                } else if (root._editingRow === row) {
+                    root._editingRow = null
                 }
                 /// 保存（Enter/失焦/Tab）：走根级 commitPending（统一处理「点击其它行/空白」提交）。
                 function commitEdit() {

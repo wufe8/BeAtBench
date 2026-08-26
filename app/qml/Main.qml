@@ -546,27 +546,53 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                // 单条消息：悬停信息（临时，优先）> 状态消息（瞬态：更新后 ~8s 自动回「就绪」）
+                spacing: 8
+                // 主消息：悬停信息（临时，优先）> 状态消息（瞬态）。占满剩余空间，右对齐截断，
+                // 绝不与右侧固定区重叠（minimumWidth 放低允许窄窗收缩 + Elide）。
                 Label {
                     text: editPage.hoverText !== "" ? editPage.hoverText : window.statusText
                     color: editPage.hoverText !== "" ? Theme.accent : Theme.textMuted
-                    elide: Text.ElideMiddle
+                    elide: Text.ElideRight
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 80
+                    Layout.maximumWidth: Infinity
                     font.family: Theme.fontMono
                     font.pixelSize: Theme.fsSmall
                 }
+                // —— 右侧固定信息区（窄窗时收缩并截断，固定区永不挤压到主消息） ——
+                // 谱面键数 + PLAYER
                 Label {
                     text: chartMeta ? "SP7K · " + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
+                    Layout.preferredWidth: 90
+                    Layout.minimumWidth: 60
+                    elide: Text.ElideRight
                 }
-                // 文件格式/编码（问题2：底部右下角，类似文本编辑器；info/check 返回）
+                // 分隔点
+                Label {
+                    text: "·"
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.fsSmall
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                // 文件格式/编码
                 Label {
                     text: window.chartFormat !== "" ? window.chartFormat.toUpperCase() +
-                             (window.chartEncoding !== "" ? " · " + window.chartEncoding : "") : ""
+                             (window.chartEncoding !== "" ? " " + window.chartEncoding : "") : ""
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
                     visible: window.chartFormat !== ""
+                    Layout.preferredWidth: 150
+                    Layout.minimumWidth: 70
+                    elide: Text.ElideRight
                 }
-                // 当前采样 + 文件路径（从工具条移到状态栏右侧 2026-09：工具条长度不随内容变化）
+                // 分隔点
+                Label {
+                    text: "·"
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.fsSmall
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                // 当前采样（M3 放置落点；在工具条移到状态栏 2026-09）
                 Label {
                     text: sampleModel.currentSampleText
                     color: Theme.accent
@@ -574,15 +600,18 @@ ApplicationWindow {
                     font.pixelSize: Theme.fsSmall
                     elide: Text.ElideMiddle
                     visible: sampleModel.currentSampleText !== ""
-                    Layout.preferredWidth: 180
+                    Layout.preferredWidth: 170
+                    Layout.minimumWidth: 90
                     Layout.maximumWidth: 220
                 }
+                // 文件路径
                 Label {
                     text: chartPath ? chartPath : qsTr("未打开谱面")
                     color: Theme.textFaint
                     elide: Text.ElideMiddle
                     font.pixelSize: Theme.fsSmall
-                    Layout.preferredWidth: 220
+                    Layout.preferredWidth: 200
+                    Layout.minimumWidth: 100
                     Layout.maximumWidth: 320
                 }
             }

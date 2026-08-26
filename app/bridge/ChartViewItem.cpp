@@ -500,6 +500,9 @@ QVariantMap ChartViewItem::objectAt(qreal x, qreal y) const {
             pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
             res.insert(QStringLiteral("pos"), pos);
             res.insert(QStringLiteral("value"), ev.value.value);
+            if (ev.value.ref_id)
+                res.insert(QStringLiteral("ref_id"),
+                           static_cast<qlonglong>(*ev.value.ref_id));
             return res;
         }
     }
@@ -523,6 +526,9 @@ QVariantMap ChartViewItem::objectAt(qreal x, qreal y) const {
             pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
             res.insert(QStringLiteral("pos"), pos);
             res.insert(QStringLiteral("value"), static_cast<double>(ev.value.count));
+            if (ev.value.ref_id)
+                res.insert(QStringLiteral("ref_id"),
+                           static_cast<qlonglong>(*ev.value.ref_id));
             return res;
         }
     }

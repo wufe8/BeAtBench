@@ -174,7 +174,7 @@ ColumnLayout {
         // 以本面板（右 Dock 内容区）为视口中心。宽度收窄到面板内（避免超出 dock→「出界」，
         // 用户报告原 260 宽在 230 dock 内溢出）；anchors.centerIn 让其在面板内居中并随
         // dock 缩放重算。
-        width: Math.min(root.width - 4, 260)
+        width: Math.min(root.width - 8, 300)
         anchors.centerIn: parent
         title: qsTr("时间轴事件")
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -226,6 +226,7 @@ ColumnLayout {
             spacing: 6
             RowLayout {
                 spacing: 6
+                Layout.fillWidth: true
                 Label { text: qsTr("小节"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
                 BbSpinBox {
                     id: measureSpin
@@ -235,6 +236,7 @@ ColumnLayout {
             }
             RowLayout {
                 spacing: 6
+                Layout.fillWidth: true
                 Label { text: qsTr("位置"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
                 BbSpinBox { id: numSpin; from: 0; to: 999; editable: true; Layout.fillWidth: true }
                 Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
@@ -242,6 +244,7 @@ ColumnLayout {
             }
             RowLayout {
                 spacing: 6
+                Layout.fillWidth: true
                 Label {
                     text: dialog.kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny
@@ -266,6 +269,7 @@ ColumnLayout {
             RowLayout {
                 id: refRow
                 spacing: 6
+                Layout.fillWidth: true
                 Label {
                     text: dialog.kind === "bpm" ? qsTr("id") : qsTr("id")
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny

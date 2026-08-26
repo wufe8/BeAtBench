@@ -14,11 +14,20 @@ ColumnLayout {
 
     /// 选中 note 集合（NoteRef 语义，与 ChartView.selection 同源）。
     property var selection: []
-    /// 编辑入口信号（单选用）：→ EditPage.noteEditRequested → Main 弹 note.setSample 对话框。
+    /// 选中 BGA/BPM/STOP 对象集合（meta 语义；与 selection 互斥，点击后另一侧清空）。
+    property var metaSelection: []
+    /// STOP 值显示单位（0=1/192 全音符，1=毫秒；与窗口/时间轴面板一致，供 meta 详情展示）。
+    property int stopUnit: 0
+    /// 毫秒换算参考 BPM（秒 = n×1.25/bpm）。
+    property real stopBpm: 130
+    /// 编辑入口信号（单选用 note）：→ EditPage.noteEditRequested → Main 弹 note.setSample 对话框。
     signal noteEditRequested(var ref)
+    /// 编辑入口信号（单选用 meta 对象）：→ EditPage.metaEditRequested → Main 弹 meta 编辑对话框。
+    signal metaEditRequested(var obj)
 
     readonly property int _count: selection ? selection.length : 0
     readonly property var _single: _count === 1 ? selection[0] : null
+    readonly property var _singleMeta: metaSelection && metaSelection.length === 1 ? metaSelection[0] : null
 
     spacing: 8
 
@@ -179,6 +188,134 @@ ColumnLayout {
         }
     }
 
+    // ---- 单选 meta 对象（BGA/BPM/STOP）详情：统一查询 objectAt 提供的 kind 相关字段 ----
+    ColumnLayout {
+        visible: _count === 0 && !!root._singleMeta
+        Layout.fillWidth: true
+        spacing: 6
+
+        // 表头：对象类别
+        Label {
+            Layout.fillWidth: true
+            text: root.metaKindName(root._singleMeta)
+            color: Theme.primary
+            font.bold: true
+            font.family: Theme.fontSans
+            font.pixelSize: Theme.fsBase
+            elide: Text.ElideRight
+        }
+        // 位置（所有 kind 共有）
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("位置"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root.metaPosText(root._singleMeta)
+                color: Theme.text
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+        // BGA：图层 + 图像 #BMPxx
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "bga"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("图层"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? root.bgaLayerName(root._singleMeta.layer) : ""
+                color: Theme.text
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "bga"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("图像"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? "#BMP" + chartSession.idTextOf(root._singleMeta.sample) : ""
+                color: Theme.accent
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+        // BPM：数值 + 引用 id
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "bpm"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("值"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? qsTr("%1 BPM").arg(root._singleMeta.value) : ""
+                color: Theme.accent
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "bpm"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? root.metaRefText(root._singleMeta, "BPM") : ""
+                color: root._singleMeta && root._singleMeta.ref_id !== undefined ? Theme.textMuted : Theme.textFaint
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+        // STOP：数值（按单位换算）+ 引用 id
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "stop"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("值"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? qsTr("%1 %2").arg(root.stopToDisplay(root._singleMeta.value)).arg(root._stopUnitLabel) : ""
+                color: Theme.warning
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "stop"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? root.metaRefText(root._singleMeta, "STOP") : ""
+                color: root._singleMeta && root._singleMeta.ref_id !== undefined ? Theme.textMuted : Theme.textFaint
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+            }
+        }
+
+        // 编辑入口：双击/按钮直达 meta 编辑对话框（与视口双击 meta 对象同路径）
+        BbToolButton {
+            text: qsTr("编辑事件…")
+            Layout.fillWidth: true
+            onClicked: if (root._singleMeta) root.metaEditRequested(root._singleMeta)
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("编辑该 BGA/BPM/STOP 事件（meta 编辑对话框）")
+        }
+    }
+
     // ---- 展示辅助（双语言纪律：只读语义，无命令） ----
     function laneName(ref) {
         const l = ref.lane
@@ -205,5 +342,38 @@ ColumnLayout {
     function posText(ref) {
         return qsTr("小节 %1").arg(ref.measure) +
                qsTr(" · %1/%2").arg(ref.pos.num).arg(ref.pos.den)
+    }
+    // ---- meta 对象（BGA/BPM/STOP）展示辅助，与 ChartView.objectAt 的 kind 相关字段对应 ----
+    function metaKindName(o) {
+        if (!o) return ""
+        if (o.kind === "bga") return qsTr("BGA 对象")
+        if (o.kind === "bpm") return qsTr("BPM 事件")
+        if (o.kind === "stop") return qsTr("STOP 事件")
+        return o.kind
+    }
+    function metaPosText(o) {
+        if (!o) return ""
+        return qsTr("小节 %1").arg(o.measure) +
+               qsTr(" · %1/%2").arg(o.pos.num).arg(o.pos.den)
+    }
+    /// 引用 id 文本（#BPMxx/#STOPxx；ref_id 未定义 = codec 自动派生 → "(auto)"）。
+    function metaRefText(o, prefix) {
+        if (!o) return ""
+        return o.ref_id !== undefined && o.ref_id !== 0
+              ? "#" + prefix + chartSession.idTextOf(o.ref_id)
+              : qsTr("(auto)")
+    }
+    function bgaLayerName(l) {
+        if (l === 1) return qsTr("poor")
+        if (l === 2) return qsTr("layer")
+        if (l === 3) return qsTr("layer2")
+        return qsTr("base")
+    }
+    readonly property string _stopUnitLabel: stopUnit === 0 ? qsTr("unit") : qsTr("ms")
+    /// STOP 计数 → 单位显示文本。
+    function stopToDisplay(v) {
+        if (stopUnit === 0) return String(Math.round(v))
+        const bpm = (stopBpm > 0) ? stopBpm : 130
+        return String(Math.round(v * 1250 / bpm))
     }
 }

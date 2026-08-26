@@ -368,7 +368,11 @@ Item {
                     PropertiesPanel {
                         id: propPanel
                         selection: root.selection
+                        metaSelection: root.metaSelection
+                        stopUnit: root.stopUnit
+                        stopBpm: root.stopBpm
                         onNoteEditRequested: (ref) => root.noteEditRequested(ref)
+                        onMetaEditRequested: (obj) => root.metaEditRequested(obj)
                     }
                     TimelinePanel {
                         id: timelinePanel

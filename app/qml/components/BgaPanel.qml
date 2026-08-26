@@ -46,12 +46,15 @@ ColumnLayout {
     property string editingBmpId: ""
     property string pendingBmpFile: ""
     property string pendingBmpOrig: ""
+    /// 正在编辑的行（delegate 引用）：commitBmpPending 把该行退出编辑态。
+    property var _editingBmpRow: null
     function commitBmpPending() {
         if (root.editingBmpId === "") return
         const id = root.editingBmpId
         const file = root.pendingBmpFile
         const orig = root.pendingBmpOrig
         root.editingBmpId = ""; root.pendingBmpFile = ""; root.pendingBmpOrig = ""
+        if (root._editingBmpRow) root._editingBmpRow.editing = false
         if (file !== orig) root.bmpSetFileRequested(id, file)
     }
     /// 设置 #BMP 文件 → Main 走 sample.setFile(kind=bmp)。
@@ -260,6 +263,9 @@ ColumnLayout {
                     root.editingBmpId = bmpRow.modelData.id
                     root.pendingBmpFile = bmpRow.modelData.file
                     root.pendingBmpOrig = bmpRow.modelData.file
+                    root._editingBmpRow = bmpRow
+                } else if (root._editingBmpRow === bmpRow) {
+                    root._editingBmpRow = null
                 }
                 /// 保存（Enter/失焦/Tab）：走根级 commitBmpPending（点其它行/空白统一提交）。
                 function commitEdit() {
