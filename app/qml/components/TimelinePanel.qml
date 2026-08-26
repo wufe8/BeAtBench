@@ -203,6 +203,7 @@ ColumnLayout {
             BbTextField {
                 id: addDefId
                 Layout.fillWidth: true
+                Layout.minimumWidth: 40   // 隐式宽撑宽 dock → 允许收缩
                 placeholderText: qsTr("id（如 01/ZZ）")
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
@@ -210,6 +211,7 @@ ColumnLayout {
             BbTextField {
                 id: addDefValue
                 Layout.fillWidth: true
+                Layout.minimumWidth: 40
                 placeholderText: root.kind === "stop" ? qsTr("计数") : qsTr("BPM 值")
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall

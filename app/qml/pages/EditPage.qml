@@ -13,6 +13,8 @@ Item {
     id: root
     property var chartMeta: null
     property string chartPath: ""
+    /// 游玩模式显示名（Main 提供：SP7K/DP/PMS/…，随谱面实际模式）。
+    property string modeLabel: "SP7K"
     /// 轨道列头显示实际 BMS 通道 id（Main 工具条勾选；Alt 临时在 ChartView 内处理）
     property bool showChannelIds: false
     /// BGM 轨展开（列头点击；--bgm-expand 调试参数）
@@ -284,8 +286,7 @@ Item {
                         anchors.rightMargin: 12
                         spacing: 12
                         Label {
-                            text: qsTr("编辑工作区 · <b>SP7K</b> · %1/%2 snap")
-                                    .arg(root.snapNum).arg(root.snapDen)
+                            text: qsTr("编辑工作区 · <b>%1</b> · %2/%3 snap").arg(root.modeLabel).arg(root.snapNum).arg(root.snapDen)
                             color: Theme.textMuted
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fsSmall

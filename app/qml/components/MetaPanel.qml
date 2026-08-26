@@ -53,10 +53,12 @@ ColumnLayout {
             { label: "4 - Battle", value: "4" }
         ]
         if (key === "DIFFICULTY") {
+            // 2026-09 用户：只留 1-5（Beginner..Insane）；6-12 等非标准值仍可显示/保留
+            // （comboOptions 会追补为选项，写回不覆盖）。
             const names = ["", "Beginner", "Normal", "Hyper", "Another", "Insane"]
             const arr = []
-            for (let i = 1; i <= 12; i++)
-                arr.push({ label: i <= 5 ? (i + " - " + names[i]) : String(i), value: String(i) })
+            for (let i = 1; i <= 5; i++)
+                arr.push({ label: i + " - " + names[i], value: String(i) })
             return arr
         }
         if (key === "RANK") {

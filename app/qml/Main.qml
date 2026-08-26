@@ -57,6 +57,16 @@ ApplicationWindow {
     // 文件格式/编码（底部状态栏右下角显示；info/check 返回）
     property string chartFormat: ""
     property string chartEncoding: ""
+    /// 游玩模式（info 的 mode；"" = 未打开/未知，显示 SP 7K 缺省）。
+    property string chartMode: ""
+    function modeLabel() {
+        const m = window.chartMode
+        if (m === "sp7k" || m === "") return "SP7K"
+        if (m === "dp") return "DP"
+        if (m === "pms") return "PMS"
+        if (m === "bms14") return "BMS14"
+        return m.toUpperCase()
+    }
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换在 ChartView 内处理）
     property bool showChannelIds: false
     // note 上显示所用采样：0 隐藏 / 1 id / 2 文件名
@@ -330,7 +340,7 @@ ApplicationWindow {
                                        + "未勾=固定往视口中心放大") }
                 Item { Layout.fillWidth: true }
                 BbToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
-                Label { text: "SP7K"; color: Theme.accent; font.family: Theme.fontMono
+                Label { text: window.modeLabel(); color: Theme.accent; font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall; padding: 4 }
             }
         }
@@ -470,6 +480,7 @@ ApplicationWindow {
                 id: editPage
                 chartMeta: window.chartMeta
                 chartPath: window.chartPath
+                modeLabel: window.modeLabel()
                 showChannelIds: window.showChannelIds
                 noteSampleMode: window.noteSampleMode
                 lnSelectMode: window.lnSelectMode
@@ -590,7 +601,7 @@ ApplicationWindow {
                 }
                 // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
                 Label {
-                    text: chartMeta ? "SP7K·" + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
+                    text: chartMeta ? window.modeLabel() + "·" + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
                     Layout.rightMargin: 2
                 }
@@ -730,6 +741,7 @@ ApplicationWindow {
             }
             window.chartPath = r.result.path
             window.chartFormat = r.result.format !== undefined ? r.result.format : ""
+            window.chartMode = r.result.mode !== undefined ? r.result.mode : ""
             // 编码：从 info/check 的 diagnostics（"encoding: UTF-8 (path)"）干净提取令牌
             var enc = ""
             if (r.result.diagnostics) {

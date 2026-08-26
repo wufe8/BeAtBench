@@ -608,8 +608,10 @@ SampleKind sample_kind_arg(const Json& args) {
     if (const Json* k = args.find("kind")) {
         const auto& s = k->as_str();
         if (s == "bmp") return SampleKind::Bmp;
+        if (s == "bpm") return SampleKind::Bpm;
+        if (s == "stop") return SampleKind::Stop;
         if (s != "wav")
-            throw CommandError("bad_args", "kind 应 wav/bmp（默认 wav）");
+            throw CommandError("bad_args", "kind 应 wav/bmp/bpm/stop（默认 wav）");
     }
     return SampleKind::Wav;
 }
