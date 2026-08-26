@@ -61,20 +61,23 @@ struct Bpm {
     friend bool operator<(const Bpm& a, const Bpm& b) { return a.value < b.value; }
 };
 
-/// STOP 事件。模型存微秒；BMS 的 #STOPxx n → n/192 秒由 codec 换算（固定秒，不随 BPM 变化）。
-/// 注：hitkey 通道表把 STOP 记为「音符单位、随当下 BPM 变化」（1/192 拍）；本实现按
-/// LR2/常见固定秒口径。两者在时间轴 STOP 栏的视觉长度可能不同，如后续谱面不符再校准。
+/// STOP 事件。模型存原始计数 n（BMS #STOPxx n = n/192 个「当前 BPM 的全音符」）。
+/// 全音符 = 4 拍 = 240/BPM 秒（**不受拍子设置影响**，只看触发时的 BPM），
+/// 故 STOP 秒数 = n × 240/(192×BPM) = n × 1.25/BPM。⚠️ 不能把 n 烘焙成固定秒——
+/// 同一 #STOPxx 在不同 BPM 下时长不同；秒数换算交给 TimingEngine（按该拍位生效 BPM）。
+/// 注：hitkey 通道表把 STOP 记为「音符单位、随当下 BPM 变化」（1/192 拍）；
+/// 早期实现误存 n/192 秒（固定秒），2026-09 修正为存原始计数。
 struct Stop {
-    std::int64_t duration_us = 0;
+    std::int64_t count = 0;  ///< 原始计数 n（1/192 全音符单位；与 BMS #STOPxx 文本一致）
     /// 原始 #STOPxx 引用 id（可选）：解析自 ch09 槽位；写回优先用它（与 Bpm.ref_id 同理）。
     /// ⚠️ 辅助字段：不参与语义相等。
     std::optional<std::uint32_t> ref_id;
 
     friend bool operator==(const Stop& a, const Stop& b) {
-        return a.duration_us == b.duration_us;  // 排除 ref_id
+        return a.count == b.count;  // 排除 ref_id
     }
     friend bool operator<(const Stop& a, const Stop& b) {
-        return a.duration_us < b.duration_us;
+        return a.count < b.count;
     }
 };
 

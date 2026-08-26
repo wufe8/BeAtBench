@@ -139,19 +139,20 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     // BPM/STOP 事件写回采用 #BPMxx/#STOPxx 定宽引用（2 字符槽位）：直接数值是变长的，
     // 多事件无法放入同一行定宽槽位（Doppelganger 等谱面即此惯例）。
     // 复用现有定义（值相等），找不到则派生新定义；id 0（"00"=空槽）不可用作引用。
-    std::map<std::int64_t, std::uint32_t> stop_id_by_us;
-    std::map<std::uint32_t, std::string> derived_stops;  // 派生 #STOPxx（id → 原值文本）
+    // STOP 语义：值 = 原始计数 n（1/192 全音符单位，模型存 count；不做秒↔n 换算）。
+    std::map<std::int64_t, std::uint32_t> stop_id_by_count;
+    std::map<std::uint32_t, std::string> derived_stops;  // 派生 #STOPxx（id → 计数文本）
     {
         std::map<std::uint32_t, std::string> stop_defs;  // 现有定义 id → 原文本
         for (const auto& [key, def] : chart.samples) {
             if (key.first == SampleKind::Stop) stop_defs[key.second] = def.value;
         }
         for (const auto& [id, text] : stop_defs) {
-            double sec = 0;
             char* end = nullptr;
             const double d = std::strtod(text.c_str(), &end);
-            if (end != text.c_str() && *end == '\0') sec = d;
-            stop_id_by_us[static_cast<std::int64_t>(sec * 1000000.0 / 192.0 + 0.5)] = id;
+            if (end != text.c_str() && *end == '\0') {
+                stop_id_by_count[static_cast<std::int64_t>(std::llround(d))] = id;
+            }
         }
         std::uint32_t next_id = 1;
         // ref_id 占用的 id（写回保持原槽位文本；派生定义不得占用）
@@ -160,8 +161,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             if (ev.value.ref_id && *ev.value.ref_id != 0) ref_used.insert(*ev.value.ref_id);
         }
         for (const auto& ev : chart.stop_events) {
-            const auto us = ev.value.duration_us;
-            if (stop_id_by_us.count(us)) continue;
+            const auto count = ev.value.count;
+            if (stop_id_by_count.count(count)) continue;
             // ⚠️ 有 ref_id 的事件（原始 #STOPxx 槽位引用）：写回直接输出 ref_id 文本，
             // **不派生定义**——派生 id 可能与 ref_id 文本冲突（同 BPM 注，2026-09）。
             if (ev.value.ref_id && *ev.value.ref_id != 0) continue;
@@ -170,8 +171,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 chart.id_base == IdBase::Base62 ? 3843 : 1295;
             while (next_id < max_id && (stop_defs.count(next_id) || ref_used.count(next_id)))
                 ++next_id;
-            const auto text = format_num(us / 1000000.0 * 192.0);
-            stop_id_by_us[us] = next_id;
+            const auto text = format_num(static_cast<double>(count));
+            stop_id_by_count[count] = next_id;
             stop_defs[next_id] = text;
             derived_stops[next_id] = text;
             ++next_id;
@@ -342,15 +343,15 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         }
         add_cell(ev.measure, "08", ev.pos, fmt_id(chart, slot_id));
     }
-    // 3d. STOP（ch09 引用恢复：us → id）
+    // 3d. STOP（ch09 引用恢复：count → id）
     for (const auto& ev : chart.stop_events) {
-        // 优先原始引用 id（同 BPM）；无引用 → 按时长派生/复用
+        // 优先原始引用 id（同 BPM）；无引用 → 按计数派生/复用
         std::uint32_t slot_id = 0;
         if (ev.value.ref_id && *ev.value.ref_id != 0) {
             slot_id = *ev.value.ref_id;
         } else {
-            const auto it = stop_id_by_us.find(ev.value.duration_us);
-            if (it == stop_id_by_us.end()) continue;  // 理论上不会发生（上面已派生）
+            const auto it = stop_id_by_count.find(ev.value.count);
+            if (it == stop_id_by_count.end()) continue;  // 理论上不会发生（上面已派生）
             slot_id = it->second;
         }
         add_cell(ev.measure, "09", ev.pos, fmt_id(chart, slot_id));

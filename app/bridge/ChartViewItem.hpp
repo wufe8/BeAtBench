@@ -61,6 +61,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(QString hoverText READ hoverText NOTIFY hoverChanged)
     /// 选中 note 集合（NoteRef 语义：measure/pos/lane/sample；框选/粘贴后回填，绘制高亮）
     Q_PROPERTY(QVariantList selection READ selection WRITE setSelection NOTIFY selectionChanged)
+    /// 选中 BGA/BPM/STOP 对象集合（{kind, measure, pos, layer?, sample?, value?}；绘制高亮）
+    Q_PROPERTY(QVariantList metaSelection READ metaSelection WRITE setMetaSelection NOTIFY metaSelectionChanged)
     /// 性能检测：paint 帧耗时采样落日志（--perf-log；每 20 帧一条）
     Q_PROPERTY(bool perfLog READ perfLog WRITE setPerfLog NOTIFY perfLogChanged)
 
@@ -82,6 +84,8 @@ public:
     void setLaneWidth(qreal v);
     QVariantList selection() const { return m_selection; }
     void setSelection(const QVariantList& v);
+    QVariantList metaSelection() const { return m_metaSelection; }
+    void setMetaSelection(const QVariantList& v);
     bool perfLog() const { return m_perfLog; }
     void setPerfLog(bool v);
     qreal scrollY() const { return m_scrollY; }
@@ -133,6 +137,11 @@ public:
     /// valid=false = 空白）。选择/右键删除用；只查相邻小节（与 hover 同开销上限）。
     Q_INVOKABLE QVariantMap noteAt(qreal x, qreal y) const;
 
+    /// 屏幕坐标 → 命中的「位置对象」（note / BGA / BPM / STOP 任一，kind 区分）。
+    /// BGA/BPM/STOP 返回：{kind, measure, pos:{num,den}, layer?(bga), sample?(bga),
+    /// value?(bpm/stop)}；note 复用 noteAt + kind="note"。valid=false = 空白。
+    Q_INVOKABLE QVariantMap objectAt(qreal x, qreal y) const;
+
     /// 屏幕 y → 拍位（measure + pos 小数；时间轴工具（平移等）距离换算用）。
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
@@ -170,6 +179,7 @@ signals:
     void contentWidthChanged();
     void hoverChanged();
     void selectionChanged();
+    void metaSelectionChanged();
     void perfLogChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
@@ -201,6 +211,10 @@ private:
     /// NoteRef 语义键（measure|num|den|player|kind|index|sample）：选中判定用。
     static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
                               const beatbench::Lane& lane, std::uint32_t sample = 0);
+
+    /// BGA/BPM/STOP 对象选中判定（按 kind/measure/pos/layer/sample 键；layer/sample -1 = n/a）。
+    bool metaSelected(std::uint32_t measure, const beatbench::Rational& pos,
+                      int layer, int sample) const;
 
     /// 轨道列重算（谱面切换/尺寸/展开状态变化时；按谱面实际出现的 Lane 数据驱动）。
     void rebuildColumns();
@@ -261,6 +275,7 @@ private:
     int m_hoverMeasure = -1;
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
     QVariantList m_selection;  // 选中 note 集合（NoteRef 语义；绘制高亮用）
+    QVariantList m_metaSelection;  // 选中 BGA/BPM/STOP 对象集合（绘制高亮用）
     int m_lastVisibleNotes = 0;  // 最近一次 paint 的可见 note 数（--perf-log）
 };
 

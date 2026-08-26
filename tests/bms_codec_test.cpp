@@ -614,7 +614,7 @@ TEST(BmsRead, EventizesStop) {
     const auto res = read_bms("#STOP01 96\n#00109:01\n");
     ASSERT_EQ(res.chart.stop_events.size(), 1u);
     EXPECT_EQ(res.chart.stop_events[0].measure, 1u);
-    EXPECT_EQ(res.chart.stop_events[0].value.duration_us, 500000);  // 96/192 s
+    EXPECT_EQ(res.chart.stop_events[0].value.count, 96);  // 原始计数（1/192 全音符单位）
 }
 
 TEST(BmsRead, EventizesBga) {
@@ -836,16 +836,16 @@ TEST(BmsRoundTrip, StopRefRestored) {
 }
 
 TEST(BmsRoundTrip, DerivedStopDef) {
-    // 事件 us 与现有定义不匹配（手建模型）→ 写回派生新定义
+    // 事件 count 与现有定义不匹配（手建模型）→ 写回派生新定义
     Chart c;
     c.samples[{SampleKind::Stop, 1}] = SampleDef{.value = "96"};
-    c.stop_events.push_back({0, Rational(0, 1), Stop{1000000}});  // 1 秒（≠ 96/192）
+    c.stop_events.push_back({0, Rational(0, 1), Stop{192}});  // 192（≠ 96）
     const auto out = write_bms(c);
     EXPECT_NE(out.find("#STOP01 96"), std::string::npos);  // 现有定义保留
-    EXPECT_NE(out.find("#STOP02"), std::string::npos);     // 派生定义（192/192 s → 值 192）
+    EXPECT_NE(out.find("#STOP02"), std::string::npos);     // 派生定义（count=192）
     const auto r2 = read_bms(out);
     ASSERT_EQ(r2.chart.stop_events.size(), 1u);
-    EXPECT_EQ(r2.chart.stop_events[0].value.duration_us, 1000000);
+    EXPECT_EQ(r2.chart.stop_events[0].value.count, 192);
 }
 
 // ---------- 真实谱面（local/chart，未提交样本；缺失时跳过） ----------

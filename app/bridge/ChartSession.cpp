@@ -103,6 +103,32 @@ QString ChartSession::laneChannel(int player, const QString& kindStr, int index)
     return ch.empty() ? QString() : QString::fromStdString(ch);
 }
 
+int ChartSession::lnType() const {
+    if (!m_chart) return 1;
+    const auto it = m_chart->meta.find("LNTYPE");
+    if (it == m_chart->meta.end()) return 1;
+    if (it->second == "2") return 2;
+    if (it->second == "0") return 0;
+    return 1;
+}
+
+int ChartSession::lnobjSample() const {
+    if (!m_chart) return -1;
+    const auto it = m_chart->meta.find("LNOBJ");
+    if (it == m_chart->meta.end() || it->second.empty()) return -1;
+    return static_cast<int>(m_chart->id_base == beatbench::IdBase::Base62
+                                ? beatbench::bms::c62_to_u32(it->second, 2)
+                                : beatbench::bms::c36_to_u32(it->second, 2));
+}
+
+int ChartSession::decodeId(const QString& idText) const {
+    if (!m_chart || idText.isEmpty()) return -1;
+    const std::string t = idText.toStdString();
+    return static_cast<int>(m_chart->id_base == beatbench::IdBase::Base62
+                                ? beatbench::bms::c62_to_u32(t, 2)
+                                : beatbench::bms::c36_to_u32(t, 2));
+}
+
 void ChartSession::attachActive(bool rebuildTiming) {
     auto& reg = beatbench::edit::session_registry();
     auto& s = reg.active();
@@ -181,7 +207,7 @@ std::uint64_t ChartSession::timingHash() const {
         h = fnv1a(h, e.measure);
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.num));
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.den));
-        h = fnv1a(h, static_cast<std::uint64_t>(e.value.duration_us));
+        h = fnv1a(h, static_cast<std::uint64_t>(e.value.count));
     }
     for (const auto& e : m_chart->measure_events) {
         h = fnv1a(h, e.measure);

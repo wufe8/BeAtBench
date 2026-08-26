@@ -93,7 +93,7 @@ TEST(ConvertNote, ToBpmRefIdKept) {
     EXPECT_TRUE(s.chart().bpm_events.empty());
 }
 
-// —— note → STOP（#STOP01 引用；96/192 s = 500000us） ——
+// —— note → STOP（#STOP01 引用；原始计数 96） ——
 
 TEST(ConvertNote, ToStopRefIdKept) {
     EditorSession s;
@@ -103,7 +103,7 @@ TEST(ConvertNote, ToStopRefIdKept) {
         1, Rational(0, 1))));
     ASSERT_EQ(s.chart().notes.size(), 1u);
     ASSERT_EQ(s.chart().stop_events.size(), 1u);
-    EXPECT_EQ(s.chart().stop_events[0].value.duration_us, 500000);
+    EXPECT_EQ(s.chart().stop_events[0].value.count, 96);
     ASSERT_TRUE(s.chart().stop_events[0].value.ref_id.has_value());
     EXPECT_EQ(*s.chart().stop_events[0].value.ref_id, 1u);
     ASSERT_TRUE(s.undo());

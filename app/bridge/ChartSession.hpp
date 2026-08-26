@@ -44,6 +44,17 @@ public:
     /// 无法表示 / 无文档 → 空串）。kind：key/scratch/pedal/bgm。
     Q_INVOKABLE QString laneChannel(int player, const QString& kind, int index) const;
 
+    /// 当前谱面 #LNTYPE（chart.meta["LNTYPE"]）：0=关闭 / 1=RDM(默认) / 2=#LNOBJ。
+    /// 无文档 → 1。前端 LN 放置工具分支（LNTYPE 1 vs 2 交互不同）。
+    Q_INVOKABLE int lnType() const;
+    /// 当前谱面 #LNOBJ 的数值 id（未定义 → -1）。LNTYPE 2 的 LN 尾采样值。
+    Q_INVOKABLE int lnobjSample() const;
+
+    /// id 文本 → 数值（按活动文档 id_base 解码；**不做存在性校验**）。
+    /// 用于 #BMP/BGA 事件（Bmp 与 Wav 共用 id 文本空间，但 sampleValueOf 只查 Wav 表，
+    /// 故 BMP id 解码走这里）。空文本/无文档 → -1。
+    Q_INVOKABLE int decodeId(const QString& idText) const;
+
     /// 活动会话视图（core 所有；不可 delete；documentChanged 后须 refresh 或重取）。
     const beatbench::Chart* chart() const { return m_chart; }
     const beatbench::TimingEngine* timing() const { return m_timing.get(); }

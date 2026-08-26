@@ -31,7 +31,7 @@ Chart make_chart() {
     // 一个 BPM 事件 + 一个 STOP 事件 + 一个小节定义
     c.bpm_events = {{1, Rational(0, 1), Bpm{130.0}},
                     {1, Rational(1, 2), Bpm{170.0}}};
-    c.stop_events = {{1, Rational(1, 2), Stop{250000}}};
+    c.stop_events = {{1, Rational(1, 2), Stop{96}}};
     c.measure_events = {{1, Rational(0, 1), MeasureLen{4.0}}};
     return c;
 }
@@ -44,7 +44,7 @@ std::vector<std::tuple<std::uint32_t, Rational, double>> norm_evs(
     for (const auto& e : evs) {
         double v = 0;
         if constexpr (std::is_same_v<T, Bpm>) v = e.value.value;
-        else if constexpr (std::is_same_v<T, Stop>) v = static_cast<double>(e.value.duration_us);
+        else if constexpr (std::is_same_v<T, Stop>) v = static_cast<double>(e.value.count);
         else v = e.value.beats;
         out.emplace_back(e.measure, e.pos, v);
     }
@@ -89,7 +89,7 @@ TEST(TimingCommands, PutStopAndMeasure) {
     s.load(make_chart());
     // STOP：新增（m2）
     ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Stop, 2, Rational(1, 4), 500000.0)));
+        TimingKind::Stop, 2, Rational(1, 4), 96.0)));
     ASSERT_EQ(s.chart().stop_events.size(), 2u);
     // 节拍：pos 传非 0 → 归 0；同位替换 m1
     ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
@@ -213,6 +213,47 @@ TEST(TimingCommands, ProtocolBadKind) {
     const Json resp = global_registry().dispatch(req);
     EXPECT_FALSE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
+}
+
+// —— 手动绑定 id（ref）：timing.put 带 ref → 事件保持 #BPMxx 引用；list 输出 ref ——
+
+TEST(TimingCommands, ProtocolPutWithRefBindsId) {
+    using beatbench::cmd::global_registry;
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+    // 一个 BPM 事件，手动绑定 #BPM01（ref="01" → id 1）
+    Json req = Json::object();
+    req.set("command", "timing.put");
+    Json args = Json::object();
+    args.set("kind", "bpm");
+    args.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    args.set("value", 180.0);
+    args.set("ref", "01");
+    req.set("args", std::move(args));
+    ASSERT_TRUE(global_registry().dispatch(req).at("ok").as_bool());
+    ASSERT_EQ(session.chart().bpm_events.size(), 2u);
+    ASSERT_TRUE(session.chart().bpm_events[0].value.ref_id.has_value());
+    EXPECT_EQ(*session.chart().bpm_events[0].value.ref_id, 1u);
+    // timing.list 应输出 ref="01"
+    req = Json::object();
+    req.set("command", "timing.list");
+    args = Json::object();
+    args.set("kind", "bpm");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    const auto& evs = resp.at("result").at("events").as_array();
+    ASSERT_EQ(evs.size(), 2u);
+    EXPECT_EQ(evs[0].at("ref").as_str(), "01");
+    // undo → ref 清除，值恢复 130
+    ASSERT_TRUE(session.undo());
+    EXPECT_DOUBLE_EQ(session.chart().bpm_events[0].value.value, 130.0);
+    ASSERT_FALSE(session.chart().bpm_events[0].value.ref_id.has_value());
+    EXPECT_EQ(session.chart().bpm_events.size(), 2u);
 }
 
 // —— 排序保持：插入后容器仍按 (measure,pos) 升序 ——

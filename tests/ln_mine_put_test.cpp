@@ -410,4 +410,73 @@ TEST(LnMinePut, AlreadyPairedStopsRescan) {
             EXPECT_FALSE(e.value.ln_pair.has_value());
 }
 
+// —— LNTYPE 2（#LNOBJ）编辑层配对（rebuild_ln_pairs，2026-09） ——
+// 头尾同在普通通道；值 == #LNOBJ 的 note = 尾，头 = 同 lane 最近未配对的先前物件。
+// 此前 rebuild_ln_pairs 只处理 LNTYPE 1（ln_channel==true）；此组验证 LNTYPE 2 编辑后配对仍成立。
+
+Chart make_chart_lntype2() {
+    Chart c;
+    c.meta["TITLE"] = "测试";
+    c.meta["PLAYER"] = "1";
+    c.meta["BPM"] = "130";
+    c.meta["LNTYPE"] = "2";
+    c.meta["LNOBJ"] = "01";   // c36 id = 1（#LNOBJ 尾采样）
+    return c;
+}
+
+TEST(LnMinePut, LnType2HeadThenTailPairs) {
+    EditorSession s;
+    s.load(make_chart_lntype2());
+    // 头（普通 note，sample5 非 LNOBJ）
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
+    EXPECT_FALSE(s.chart().notes[0].value.ln_pair.has_value());
+    EXPECT_FALSE(s.chart().notes[0].value.ln_channel);  // LNTYPE 2 头在普通通道（非 5x）
+    // 尾（sample1 == #LNOBJ id）→ 自动配对
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, false)));
+    ASSERT_EQ(s.chart().notes.size(), 2u);
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+    EXPECT_EQ(s.chart().notes[0].value.ln_pair.value_or(999), 1u);
+    EXPECT_EQ(s.chart().notes[1].value.ln_pair.value_or(999), 0u);
+}
+
+TEST(LnMinePut, LnType2UndoTailUnpairs) {
+    EditorSession s;
+    s.load(make_chart_lntype2());
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, false)));
+    ASSERT_TRUE(ln_consistent(s.chart().notes));
+    ASSERT_TRUE(s.undo());
+    ASSERT_EQ(s.chart().notes.size(), 1u);
+    EXPECT_FALSE(s.chart().notes[0].value.ln_pair.has_value());
+}
+
+TEST(LnMinePut, LnType2TailBeforeHeadNoPair) {
+    EditorSession s;
+    s.load(make_chart_lntype2());
+    // 尾（sample1）在前 → 无可配对的头
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, false)));
+    // 头在后 → 尾仍未配对（头在时间上晚于尾，不进尾的头栈命中窗）
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 5, false)));
+    for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.ln_pair.has_value());
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+}
+
+TEST(LnMinePut, LnType2CrossChannelNoPair) {
+    EditorSession s;
+    s.load(make_chart_lntype2());
+    // 头 key1，尾 key2（不同 lane）→ 不配对（头尾须同 lane）
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, false)));
+    for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.ln_pair.has_value());
+    EXPECT_TRUE(ln_consistent(s.chart().notes));
+}
+
 

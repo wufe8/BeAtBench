@@ -304,4 +304,77 @@ private:
     bool m_changed = false;
 };
 
+/// 放置/改值 BGA 事件（doc/05 §9「BGA 面板/视口」→ bga.put）。
+/// 语义：在 (measure, pos) 的 layer（0=base 1=poor 2=layer 3=layer2）放 sample 引用的
+/// #BMPxx 事件。同 (measure,pos,layer) 已存在 → 改值（同位替换）；否则插入。
+/// 逆操作：恢复旧值 / 删除插入（精确快照）。
+class BgaPutCommand : public EditCommand {
+public:
+    BgaPutCommand(std::uint32_t measure, Rational pos, int layer, std::uint32_t sample);
+    std::string name() const override { return "bga.put"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::uint32_t m_measure;
+    Rational m_pos;
+    int m_layer;              ///< 0=base 1=poor 2=layer 3=layer2
+    std::uint32_t m_sample;   ///< #BMPxx id
+    bool m_existed = false;   ///< 同位替换
+    std::uint32_t m_old_sample = 0;
+    std::optional<std::size_t> m_applied_index;  ///< 插入下标（invert 用）
+};
+
+/// 删除 BGA 事件（doc/05 §9「BGA 列表删除」→ bga.delete）。
+/// 语义：删除 (measure, pos, layer) 的 BGA 事件；不存在 → 无操作。
+/// 逆操作：精确恢复（快照 + 原位）。
+class BgaDeleteCommand : public EditCommand {
+public:
+    BgaDeleteCommand(std::uint32_t measure, Rational pos, int layer);
+    std::string name() const override { return "bga.delete"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::uint32_t m_measure;
+    Rational m_pos;
+    int m_layer;
+    std::optional<Event<Bga>> m_removed;  ///< apply 删除的事件（invert 恢复）
+    std::size_t m_removed_index = 0;
+};
+
+/// BGA/BPM/STOP 事件 → note 的反转换（2026-09，note.convert 的逆：把元事件拖回游玩轨）。
+/// apply：删除 (measure,pos[,layer]) 的 bga/bpm/stop 事件，在 to_lane 放一个 sample=原 id 的 note
+/// （id 保持不变：note 的 #WAVxx ↔ BGA #BMPxx / BPM #BPMxx / STOP #STOPxx 同文本 id）。
+/// 无可用 id（bpm/stop 内联无 ref_id）→ 无操作。逆操作：删 note、恢复原元事件。
+class ConvertMetaToNoteCommand : public EditCommand {
+public:
+    ConvertMetaToNoteCommand(std::string kind, std::uint32_t measure, Rational pos,
+                             int layer, Lane to_lane,
+                             std::uint32_t to_measure, Rational to_pos);
+    std::string name() const override { return "note.convertBack"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    std::string m_kind;   ///< "bga"/"bpm"/"stop"
+    std::uint32_t m_measure;
+    Rational m_pos;
+    int m_layer;          ///< bga 层；bpm/stop = -1
+    Lane m_to_lane;
+    std::uint32_t m_to_measure;  ///< note 落点（拖动终点）
+    Rational m_to_pos;
+    /// apply 快照（invert 恢复）：删除的元事件 + 插入的 note + 容器位置。
+    std::uint32_t m_sample = 0;
+    bool m_did = false;
+    std::optional<Event<Bga>> m_bga;
+    std::optional<Event<Bpm>> m_bpm;
+    std::optional<Event<Stop>> m_stop;
+    std::size_t m_meta_index = 0;
+    std::optional<std::size_t> m_note_index;
+};
+
 }  // namespace beatbench::edit

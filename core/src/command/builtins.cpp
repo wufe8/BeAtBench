@@ -579,6 +579,39 @@ edit::TimingKind timing_kind_arg(const Json& args) {
     return *k;
 }
 
+// BGA 图层参数：layer 可为整数 0-3 或字符串 base/poor/layer/layer2（大小写不敏感）。
+int bga_layer_arg(const Json& args) {
+    const Json* layer = args.find("layer");
+    if (!layer) throw CommandError("bad_args", "缺少参数: layer");
+    if (layer->is_int()) {
+        const auto v = layer->as_i64();
+        if (v < 0 || v > 3)
+            throw CommandError("bad_args", "layer 应为 0-3（base/poor/layer/layer2）");
+        return static_cast<int>(v);
+    }
+    if (layer->is_string()) {
+        std::string s = layer->as_str();
+        for (auto& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (s == "BASE") return 0;
+        if (s == "POOR") return 1;
+        if (s == "LAYER") return 2;
+        if (s == "LAYER2") return 3;
+        throw CommandError("bad_args", "layer 无法识别: " + s);
+    }
+    throw CommandError("bad_args", "layer 应为整数或 base/poor/layer/layer2");
+}
+
+// 采样定义表 kind 参数（sample.setFile/rename）：wav 默认 / bmp（BGA 图像）。
+SampleKind sample_kind_arg(const Json& args) {
+    if (const Json* k = args.find("kind")) {
+        const auto& s = k->as_str();
+        if (s == "bmp") return SampleKind::Bmp;
+        if (s != "wav")
+            throw CommandError("bad_args", "kind 应 wav/bmp（默认 wav）");
+    }
+    return SampleKind::Wav;
+}
+
 // 数值参数（timing.put 的 value：BPM 值 / STOP 微秒 / 每小节拍数；允许小数）
 double number_arg(const Json& args, const char* key) {
     const Json* v = args.find(key);
@@ -593,7 +626,8 @@ double number_arg(const Json& args, const char* key) {
 // kind 未知 → bad_args（协议层兜底，命令层不产生该情况）
 Json timing_events_json(const Chart& chart, std::string_view kind) {
     Json arr = Json::array();
-    const auto push = [&](std::uint32_t measure, const Rational& pos, double value) {
+    const auto push = [&](std::uint32_t measure, const Rational& pos, double value,
+                          std::optional<std::uint32_t> ref = std::nullopt) {
         Json e = Json::object();
         e.set("measure", static_cast<std::int64_t>(measure));
         Json p = Json::object();
@@ -601,13 +635,16 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
         p.set("den", pos.den);
         e.set("pos", std::move(p));
         e.set("value", value);
+        // ref：手/自动绑定 id（#BPMxx/#STOPxx 文本；空 = codec 自动派生）
+        e.set("ref", ref ? Json(id_text(chart, *ref)) : Json(""));
         arr.push_back(std::move(e));
     };
     if (kind == "bpm") {
-        for (const auto& ev : chart.bpm_events) push(ev.measure, ev.pos, ev.value.value);
+        for (const auto& ev : chart.bpm_events) push(ev.measure, ev.pos, ev.value.value,
+                                                     ev.value.ref_id);
     } else if (kind == "stop") {
         for (const auto& ev : chart.stop_events) {
-            push(ev.measure, ev.pos, static_cast<double>(ev.value.duration_us));
+            push(ev.measure, ev.pos, static_cast<double>(ev.value.count), ev.value.ref_id);
         }
     } else if (kind == "measure") {
         for (const auto& ev : chart.measure_events) push(ev.measure, ev.pos, ev.value.beats);
@@ -672,8 +709,17 @@ public:
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
         const double value = number_arg(args, "value");
+        // 手动绑定 id（可选）：ref:"1A" → #BPMxx/#STOPxx 引用 id（缺省 = 由 codec 自动派生）。
+        std::optional<std::uint32_t> ref;
+        if (const Json* r = args.find("ref")) {
+            if (!r->is_string()) throw CommandError("bad_args", "ref 应为字符串 id");
+            const auto& chart = session.chart();
+            const std::string s = r->as_str();
+            ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2)
+                                                  : bms::c36_to_u32(s, 2);
+        }
         const bool ok = session.exec(
-            std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value));
+            std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
@@ -696,6 +742,168 @@ public:
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// —— BGA 事件命令（M3：base/poor/layer/layer2；doc/05 §9 「BGA 面板/视口」） ——
+// 定位 = (measure, pos, layer)；sample = #BMPxx id。bga.list 数据源 + put/delete 增删改。
+
+class BgaListCommand : public Command {
+public:
+    std::string_view name() const override { return "bga.list"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto& chart = session.chart();
+        int layer = -1;  // -1 = 全部图层
+        if (args.find("layer")) layer = bga_layer_arg(args);
+        std::vector<const Event<Bga>*> evs;
+        for (const auto& e : chart.bga_events)
+            if (layer < 0 || e.value.layer == layer) evs.push_back(&e);
+        std::sort(evs.begin(), evs.end(), [](const Event<Bga>* a, const Event<Bga>* b) {
+            if (a->measure != b->measure) return a->measure < b->measure;
+            return a->pos < b->pos;
+        });
+        Json arr = Json::array();
+        for (const auto* e : evs) {
+            Json o = Json::object();
+            o.set("measure", static_cast<std::int64_t>(e->measure));
+            Json p = Json::object();
+            p.set("num", static_cast<std::int64_t>(e->pos.num));
+            p.set("den", static_cast<std::int64_t>(e->pos.den));
+            o.set("pos", std::move(p));
+            o.set("layer", static_cast<std::int64_t>(e->value.layer));
+            o.set("sample", static_cast<std::int64_t>(e->value.image.id));
+            arr.push_back(std::move(o));
+        }
+        Json out = Json::object();
+        out.set("layer", layer < 0 ? Json() : Json(layer));
+        out.set("events", std::move(arr));
+        return out;
+    }
+};
+
+class BgaPutCommandCmd : public Command {
+public:
+    std::string_view name() const override { return "bga.put"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const int layer = bga_layer_arg(args);
+        const std::uint32_t measure = u32_arg(args, "measure");
+        const Rational pos = pos_from_json(args);
+        const std::uint32_t sample = u32_arg(args, "sample");
+        const bool ok =
+            session.exec(std::make_unique<edit::BgaPutCommand>(measure, pos, layer, sample));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("layer", static_cast<std::int64_t>(layer));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+class BgaDeleteCommandCmd : public Command {
+public:
+    std::string_view name() const override { return "bga.delete"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const int layer = bga_layer_arg(args);
+        const std::uint32_t measure = u32_arg(args, "measure");
+        const Rational pos = pos_from_json(args);
+        const bool ok = session.exec(std::make_unique<edit::BgaDeleteCommand>(measure, pos, layer));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("layer", static_cast<std::int64_t>(layer));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// bga.move：单 undo 步移动 BGA 事件（时间 + 图层；id 保持不变）。
+// from = {layer, measure, pos}（当前事件）；to = {layer?, measure?, pos?}（缺省沿用 from）。
+
+class BgaMoveCommandCmd : public Command {
+public:
+    std::string_view name() const override { return "bga.move"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto& chart = session.chart();
+        const Json* fj = args.find("from");
+        if (!fj || !fj->is_object()) throw CommandError("bad_args", "缺少 from 对象");
+        const int fl = bga_layer_arg(*fj);
+        const std::uint32_t fm = u32_arg(*fj, "measure");
+        const Rational fp = pos_from_json(*fj);
+        const Json* tj = args.find("to");
+        if (!tj || !tj->is_object()) throw CommandError("bad_args", "缺少 to 对象");
+        const int tl = tj->find("layer") ? bga_layer_arg(*tj) : fl;
+        const std::uint32_t tm = tj->find("measure") ? u32_arg(*tj, "measure") : fm;
+        const Rational tp = tj->find("pos") ? pos_from_json(*tj) : fp;
+        // 读当前事件 sample（#BMP id），id 保持不变
+        std::uint32_t sample = 0;
+        bool found = false;
+        for (const auto& e : chart.bga_events)
+            if (e.measure == fm && e.pos == fp && e.value.layer == fl) {
+                sample = e.value.image.id;
+                found = true;
+                break;
+            }
+        if (!found) throw CommandError("not_found", "未找到 BGA 事件");
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        comp->add(std::make_unique<edit::BgaDeleteCommand>(fm, fp, fl));
+        comp->add(std::make_unique<edit::BgaPutCommand>(tm, tp, tl, sample));
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// timing.move：单 undo 步移动 BPM/STOP 事件（时间；值保持不变）。不支持 measure 事件。
+class TimingMoveCommandCmd : public Command {
+public:
+    std::string_view name() const override { return "timing.move"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto kind = timing_kind_arg(args);
+        if (kind == edit::TimingKind::Measure)
+            throw CommandError("bad_args", "timing.move 仅支持 bpm/stop");
+        const auto& chart = session.chart();
+        const Json* fj = args.find("from");
+        if (!fj || !fj->is_object()) throw CommandError("bad_args", "缺少 from 对象");
+        const std::uint32_t fm = u32_arg(*fj, "measure");
+        const Rational fp = pos_from_json(*fj);
+        const Json* tj = args.find("to");
+        if (!tj || !tj->is_object()) throw CommandError("bad_args", "缺少 to 对象");
+        const std::uint32_t tm = tj->find("measure") ? u32_arg(*tj, "measure") : fm;
+        const Rational tp = tj->find("pos") ? pos_from_json(*tj) : fp;
+        // 读当前值
+        double value = 0;
+        bool found = false;
+        if (kind == edit::TimingKind::Bpm) {
+            for (const auto& e : chart.bpm_events)
+                if (e.measure == fm && e.pos == fp) { value = e.value.value; found = true; break; }
+        } else {
+            for (const auto& e : chart.stop_events)
+                if (e.measure == fm && e.pos == fp) {
+                    value = static_cast<double>(e.value.count);
+                    found = true;
+                    break;
+                }
+        }
+        if (!found) throw CommandError("not_found", "未找到事件");
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        comp->add(std::make_unique<edit::DeleteTimingCommand>(kind, fm, fp));
+        comp->add(std::make_unique<edit::PutTimingCommand>(kind, tm, tp, value));
+        const bool ok = session.exec(std::move(comp));
+        Json out = Json::object();
+        out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }
@@ -1445,6 +1653,45 @@ public:
     }
 };
 
+// note.convertBack：BGA/BPM/STOP 事件 → note（note.convert 的逆；拖回游玩轨）。
+// args: {kind, source:{layer?,measure,pos}, target:{lane:{player,kind,index}}}。
+
+class NoteConvertBackCommand : public Command {
+public:
+    std::string_view name() const override { return "note.convertBack"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::string& kind = arg_str(args, "kind");
+        if (kind != "bga" && kind != "bpm" && kind != "stop")
+            throw CommandError("bad_args", "kind 应 bga/bpm/stop");
+        const Json* s = args.find("source");
+        if (!s || !s->is_object()) throw CommandError("bad_args", "缺少 source 对象");
+        const std::uint32_t measure = u32_arg(*s, "measure");
+        const Rational pos = pos_from_json(*s);
+        const int layer = s->find("layer") ? bga_layer_arg(*s) : -1;
+        const Json* t = args.find("target");
+        if (!t || !t->is_object()) throw CommandError("bad_args", "缺少 target 对象");
+        const Json* lj = t->find("lane");
+        if (!lj || !lj->is_object()) throw CommandError("bad_args", "target 应含 lane 对象");
+        const Lane lane = lane_from_json(*lj);
+        // 拖动终点位置（缺省 = 源位置）
+        std::uint32_t to_m = measure;
+        Rational to_p = pos;
+        if (const Json* top = args.find("to")) {
+            if (!top->is_object()) throw CommandError("bad_args", "to 应为对象 {measure,pos}");
+            if (top->find("measure")) to_m = u32_arg(*top, "measure");
+            if (top->find("pos")) to_p = pos_from_json(*top);
+        }
+        const bool ok = session.exec(std::make_unique<edit::ConvertMetaToNoteCommand>(
+            kind, measure, pos, layer, lane, to_m, to_p));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 // —— 区域平移（框选整段 / 多选统一位移 → note.moveRegion，2026-09） ——
 // 语义：对 selection 内所有 note 施加**统一**时间位移 delta（+ 可选统一换轨 to_lane），
 // 各 note 相对位置不变。用户「框选整个副歌段游玩轨整体拖」属此类——不是逐 note 精调
@@ -1725,7 +1972,8 @@ public:
         const std::uint32_t from_id = decode(from);
         const std::uint32_t to_id = decode(to);
         if (from_id == to_id) throw CommandError("same_id", "from 与 to 相同");
-        session.exec(std::make_unique<edit::RenameSampleCommand>(SampleKind::Wav, from_id, to_id));
+        const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp
+        session.exec(std::make_unique<edit::RenameSampleCommand>(kind, from_id, to_id));
         Json out = Json::object();
         out.set("ok", true);
         out.set("from", static_cast<std::int64_t>(from_id));
@@ -1767,7 +2015,32 @@ public:
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t id_num = decode(id);
-        session.exec(std::make_unique<edit::SetSampleFileCommand>(SampleKind::Wav, id_num, file));
+        const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp（BGA 图像）
+        session.exec(std::make_unique<edit::SetSampleFileCommand>(kind, id_num, file));
+        Json out = Json::object();
+        out.set("ok", true);
+        out.set("id", static_cast<std::int64_t>(id_num));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
+// sample.delete：{id:"XX", kind?:"bmp"|"wav"|"bpm"|"stop"} → 从定义表移除 (kind,id) 条目。
+// 引用仍保留 id（只删定义，不删引用——文件管理器「解绑文件」语义）；写回时缺定义会派生。
+class SampleDeleteCommand : public Command {
+public:
+    std::string_view name() const override { return "sample.delete"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::string& id = arg_str(args, "id");
+        const auto& chart = session.chart();
+        const auto decode = [&chart](const std::string& s) {
+            return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+        };
+        const std::uint32_t id_num = decode(id);
+        const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp
+        session.exec(std::make_unique<edit::DeleteSampleCommand>(kind, id_num));
         Json out = Json::object();
         out.set("ok", true);
         out.set("id", static_cast<std::int64_t>(id_num));
@@ -1838,12 +2111,19 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<TimingListCommand>());
     registry.add(std::make_unique<TimingPutCommand>());
     registry.add(std::make_unique<TimingDeleteCommand>());
+    registry.add(std::make_unique<BgaListCommand>());
+    registry.add(std::make_unique<BgaPutCommandCmd>());
+    registry.add(std::make_unique<BgaDeleteCommandCmd>());
+    registry.add(std::make_unique<BgaMoveCommandCmd>());
+    registry.add(std::make_unique<TimingMoveCommandCmd>());
     // M3 变换/量化（selection 批量，一个 undo 步）
     registry.add(std::make_unique<NoteQuantizeCommand>());
     registry.add(std::make_unique<NoteTransformCommand>());
     registry.add(std::make_unique<NoteMoveRegionCommand>());
     // M3 跨命名空间转换（note → BGA/BPM/STOP 事件；id 不变，同 undo 步）
     registry.add(std::make_unique<NoteConvertCommand>());
+    // 反转换（BGA/BPM/STOP → note；拖回游玩轨）
+    registry.add(std::make_unique<NoteConvertBackCommand>());
     // M3 单点 ↔ LN 转换（工具栏按钮；selection 批量一个 undo 步）
     registry.add(std::make_unique<NoteToggleLnCommand>());
     // M3 崩溃备份 / 自动保存开关（默认关自动保存）
@@ -1858,6 +2138,7 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<SessionSamplesCommand>());
     registry.add(std::make_unique<SampleRenameCommand>());
     registry.add(std::make_unique<SampleSetFileCommand>());
+    registry.add(std::make_unique<SampleDeleteCommand>());
     registry.add(std::make_unique<NoteSetSampleCommand>());
 }
 

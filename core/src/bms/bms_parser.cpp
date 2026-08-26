@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -139,16 +140,16 @@ inline std::string_view trim_view(std::string_view s) {
     return s.substr(b, e - b);
 }
 
-// 槽位值 → STOP 时长（us）：查 #STOPxx 引用（n/192 秒）；失败 → 告警 + 0
-std::int64_t resolve_stop_us(const Chart& chart, std::string_view slot, int number,
-                             std::vector<Diagnostic>& diags) {
+// 槽位值 → STOP 计数 n：查 #STOPxx 引用（n = 原始计数，1/192 全音符单位）；失败 → 告警 + 0
+std::int64_t resolve_stop_count(const Chart& chart, std::string_view slot, int number,
+                                std::vector<Diagnostic>& diags) {
     if (slot.size() == 2) {
         const auto id = decode_id(chart, slot);
         if (const auto it = chart.samples.find({SampleKind::Stop, id});
             it != chart.samples.end()) {
             double d = 0;
             if (parse_double(it->second.value, d)) {
-                return static_cast<std::int64_t>(d * 1000000.0 / 192.0 + 0.5);
+                return static_cast<std::int64_t>(std::llround(d));
             }
         }
     }
@@ -484,11 +485,11 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 break;
                             }
                             case ChannelSemantics::StopRef: {
-                                const auto us = resolve_stop_us(chart, slot, number,
-                                                                result.diagnostics);
-                                if (us != 0) {
+                                const auto count = resolve_stop_count(chart, slot, number,
+                                                                      result.diagnostics);
+                                if (count != 0) {
                                     Stop stop;
-                                    stop.duration_us = us;
+                                    stop.count = count;
                                     stop.ref_id = decode_id(chart, slot);
                                     chart.stop_events.push_back({measure, pos, stop});
                                 }

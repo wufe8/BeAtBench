@@ -107,6 +107,32 @@ void ChartViewItem::setSelection(const QVariantList& v) {
     update();
 }
 
+void ChartViewItem::setMetaSelection(const QVariantList& v) {
+    if (m_metaSelection == v) return;
+    m_metaSelection = v;
+    emit metaSelectionChanged();
+    update();
+}
+
+bool ChartViewItem::metaSelected(std::uint32_t measure, const beatbench::Rational& pos,
+                                 int layer, int sample) const {
+    if (m_metaSelection.isEmpty()) return false;
+    const QString key = QString::number(measure) + "|" + QString::number(pos.num) + "/" +
+                        QString::number(pos.den) + "|" + QString::number(layer) + "|" +
+                        QString::number(sample);
+    for (const auto& v : m_metaSelection) {
+        const QVariantMap m = v.toMap();
+        const QVariantMap p = m.value(QStringLiteral("pos")).toMap();
+        const QString k = QString::number(m.value(QStringLiteral("measure")).toInt()) + "|" +
+                          QString::number(p.value(QStringLiteral("num")).toLongLong()) + "/" +
+                          QString::number(p.value(QStringLiteral("den")).toLongLong()) + "|" +
+                          QString::number(m.value(QStringLiteral("layer"), -1).toInt()) + "|" +
+                          QString::number(m.value(QStringLiteral("sample"), -1).toInt());
+        if (k == key) return true;
+    }
+    return false;
+}
+
 void ChartViewItem::setMeasureHeight(qreal v) {
     if (qFuzzyCompare(m_measureHeight, v)) return;
     // 缩放锚点：保持视口中心对应的拍位不动（修复滚动位置跳变）。
@@ -421,6 +447,89 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         return res;
     }
     return res;
+}
+
+QVariantMap ChartViewItem::objectAt(qreal x, qreal y) const {
+    QVariantMap res;
+    res.insert(QStringLiteral("valid"), false);
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->chart() || m_measureHeight <= 0.0 || y < 18.0) return res;
+    const beatbench::Chart& chart = *cs->chart();
+    const qreal noteH = noteHeight();
+    const int measure = static_cast<int>(std::floor(measureAt(y)));
+    if (measure < 0 || measure >= cs->measureCount()) return res;
+
+    // BGA 图层列（更多轨道）；命中盒 = 与渲染一致（r.x()+3, y-noteH, r.width()-6, noteH）
+    for (const auto& ev : chart.bga_events) {
+        if (static_cast<int>(ev.measure) < measure - 1 ||
+            static_cast<int>(ev.measure) > measure + 1)
+            continue;
+        const int col = columnForBga(ev.value.layer);
+        if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
+        const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
+        const qreal ny = yOf(ev.measure + posDouble(ev.pos));
+        const QRectF nr(r.x() + 3.0, ny - noteH, r.width() - 6.0, noteH);
+        if (!nr.contains(QPointF(x, y))) continue;
+        res.insert(QStringLiteral("valid"), true);
+        res.insert(QStringLiteral("kind"), QStringLiteral("bga"));
+        res.insert(QStringLiteral("measure"), static_cast<int>(ev.measure));
+        QVariantMap pos;
+        pos.insert(QStringLiteral("num"), static_cast<qlonglong>(ev.pos.num));
+        pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
+        res.insert(QStringLiteral("pos"), pos);
+        res.insert(QStringLiteral("layer"), QVariant::fromValue(ev.value.layer));
+        res.insert(QStringLiteral("sample"), static_cast<int>(ev.value.image.id));
+        return res;
+    }
+    // BPM 元事件轨（窄列；marker 为 2px 细条 → 用 noteH 高的命中盒便于选中）
+    for (std::size_t i = 0; i < m_columns.size(); ++i) {
+        if (!m_columns[i].bpm || static_cast<std::size_t>(i) >= m_colRects.size()) continue;
+        const QRectF& r = m_colRects[i];
+        for (const auto& ev : chart.bpm_events) {
+            if (static_cast<int>(ev.measure) < measure - 1 ||
+                static_cast<int>(ev.measure) > measure + 1)
+                continue;
+            const qreal ny = yOf(ev.measure + posDouble(ev.pos));
+            const QRectF nr(r.x() + 1.0, ny - noteH / 2.0, r.width() - 2.0, noteH);
+            if (!nr.contains(QPointF(x, y))) continue;
+            res.insert(QStringLiteral("valid"), true);
+            res.insert(QStringLiteral("kind"), QStringLiteral("bpm"));
+            res.insert(QStringLiteral("measure"), static_cast<int>(ev.measure));
+            QVariantMap pos;
+            pos.insert(QStringLiteral("num"), static_cast<qlonglong>(ev.pos.num));
+            pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
+            res.insert(QStringLiteral("pos"), pos);
+            res.insert(QStringLiteral("value"), ev.value.value);
+            return res;
+        }
+    }
+    // STOP 元事件轨（note 高块）
+    for (std::size_t i = 0; i < m_columns.size(); ++i) {
+        if (!m_columns[i].stop || static_cast<std::size_t>(i) >= m_colRects.size()) continue;
+        const QRectF& r = m_colRects[i];
+        for (const auto& ev : chart.stop_events) {
+            if (static_cast<int>(ev.measure) < measure - 1 ||
+                static_cast<int>(ev.measure) > measure + 1)
+                continue;
+            const qreal ny = yOf(ev.measure + posDouble(ev.pos));
+            const QRectF nr(r.x() + kNoteHMargin, ny - noteH,
+                            r.width() - 2.0 * kNoteHMargin, noteH);
+            if (!nr.contains(QPointF(x, y))) continue;
+            res.insert(QStringLiteral("valid"), true);
+            res.insert(QStringLiteral("kind"), QStringLiteral("stop"));
+            res.insert(QStringLiteral("measure"), static_cast<int>(ev.measure));
+            QVariantMap pos;
+            pos.insert(QStringLiteral("num"), static_cast<qlonglong>(ev.pos.num));
+            pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
+            res.insert(QStringLiteral("pos"), pos);
+            res.insert(QStringLiteral("value"), static_cast<double>(ev.value.count));
+            return res;
+        }
+    }
+    // 回退：note
+    QVariantMap n = noteAt(x, y);
+    if (n.value(QStringLiteral("valid")).toBool()) n.insert(QStringLiteral("kind"), QStringLiteral("note"));
+    return n;
 }
 
 QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) const {
@@ -1068,10 +1177,15 @@ void ChartViewItem::paint(QPainter* p) {
     if (bpmColI >= 0 && static_cast<std::size_t>(bpmColI) < m_colRects.size()) {
         const QRectF r = m_colRects[bpmColI];
         p->setFont(m_rulerFont);
-        const auto drawBpm = [&](double value, qreal y) {
+        const auto drawBpm = [&](double value, qreal y, bool selected) {
             if (y < -14 || y > h + 14) return;
             QColor tick = th->accent();
             tick.setAlpha(200);
+            if (selected) {  // 选中：加粗 + 亮色描边盒
+                p->setPen(QPen(th->onAccent(), 1.4));
+                p->setBrush(Qt::NoBrush);
+                p->drawRect(QRectF(r.x(), y - 5, r.width(), 10));
+            }
             p->fillRect(QRectF(r.x() + 1, y - 1, r.width() - 2, 2), tick);
             p->setPen(th->accent2());
             p->drawText(QRectF(r.x() + 2, y + 2, r.width() - 3, 12),
@@ -1081,7 +1195,8 @@ void ChartViewItem::paint(QPainter* p) {
             if (static_cast<int>(ev.measure) < first - 1 ||
                 static_cast<int>(ev.measure) > last + 1)
                 continue;
-            drawBpm(ev.value.value, yOf(ev.measure + posDouble(ev.pos)));
+            drawBpm(ev.value.value, yOf(ev.measure + posDouble(ev.pos)),
+                    metaSelected(ev.measure, ev.pos, -1, -1));
         }
         // 无 (0,0) BPM 事件 → 头 #BPM 基准值画在 0 小节起点
         bool hasStart = false;
@@ -1091,7 +1206,7 @@ void ChartViewItem::paint(QPainter* p) {
             double bpm = 130.0;
             if (const auto it = chart.meta.find("BPM"); it != chart.meta.end())
                 bpm = std::atof(it->second.c_str());
-            drawBpm(bpm, yOf(0));
+            drawBpm(bpm, yOf(0), false);
         }
     }
     if (stopColI >= 0 && static_cast<std::size_t>(stopColI) < m_colRects.size()) {
@@ -1110,10 +1225,15 @@ void ChartViewItem::paint(QPainter* p) {
             p->setPen(Qt::NoPen);
             p->fillRect(QRectF(r.x() + kNoteHMargin, y - noteH,
                                r.width() - 2.0 * kNoteHMargin, noteH), th->warning());
+            if (metaSelected(ev.measure, ev.pos, -1, -1)) {  // STOP：layer/sample 无意义 → -1
+                p->setPen(QPen(th->onAccent(), 1.4));
+                p->setBrush(Qt::NoBrush);
+                p->drawRect(QRectF(r.x() + kNoteHMargin - 1, y - noteH - 1,
+                                   r.width() - 2.0 * kNoteHMargin + 2, noteH + 2));
+            }
             p->setPen(th->bg());
-            QString t = QString::number(ev.value.duration_us / 1e6, 'f', 2);
-            while (t.endsWith(QLatin1Char('0')) && t.contains(QLatin1Char('.'))) t.chop(1);
-            if (t.endsWith(QLatin1Char('.'))) t.chop(1);
+            // STOP 标签显示原始计数 n（1/192 全音符单位；秒数依赖该拍位 BPM，由 TimingEngine 换算）
+            QString t = QString::number(ev.value.count);
             p->drawText(QRectF(r.x() + 1, y - noteH, r.width() - 2, noteH),
                         Qt::AlignCenter, t);
         }
@@ -1308,11 +1428,20 @@ void ChartViewItem::paint(QPainter* p) {
             }
             c.setAlpha(200);
             p->fillRect(QRectF(r.x() + 3, y - noteH, r.width() - 6, noteH), c);
+            // 选中高亮（BGA 对象；accent 描边）
+            if (metaSelected(ev.measure, ev.pos, ev.value.layer,
+                             static_cast<int>(ev.value.image.id))) {
+                p->setPen(QPen(th->onAccent(), 1.4));
+                p->setBrush(Qt::NoBrush);
+                p->drawRect(QRectF(r.x() + 2, y - noteH - 1, r.width() - 4, noteH + 2));
+            }
             // 控制轨单元格同样显示 id/数值（用户反馈 2026-09）：id = #BGAxx 十进制数值
             if (m_noteSampleMode != 0) {
                 QString label;
                 if (m_noteSampleMode == 1) {
-                    label = QString::number(ev.value.image.id).rightJustified(2, QLatin1Char('0'));
+                    // id 文本：按 36 进制大写补零（与 note 采样标签一致；别显示十进制）
+                    label = QString::number(ev.value.image.id, 36).toUpper().rightJustified(
+                        2, QLatin1Char('0'));
                 } else {
                     const auto it =
                         chart.samples.find({beatbench::SampleKind::Bmp, ev.value.image.id});

@@ -104,13 +104,14 @@ TEST(Timing, BpmChangeInsideMeasure) {
 }
 
 TEST(Timing, StopGap) {
-    // STOP 96/192 = 0.5s，位于 pos 1/2；其后拍位整体平移 0.5s
+    // STOP 96 = 96/192 个「当前 BPM(150) 的全音符」= 96×240/(192×150) = 0.8s，位于 pos 1/2；
+    // 其后拍位整体平移 0.8s（BMS 语义：STOP 单位是 1/192 全音符，随该拍位 BPM 换算）。
     auto chart = chart_from_text("#BPM 150\n#STOP01 96\n#00009:0001\n#00111:01\n");
     TimingEngine te;
     te.rebuild(chart);
     EXPECT_EQ(te.time_us({0, Rational(1, 2)}), 800000);   // STOP 起点：不受自身影响
-    EXPECT_EQ(te.time_us({0, Rational(3, 4)}), 1700000);  // 1.2 + 0.5
-    EXPECT_EQ(te.time_us({1, Rational(0, 1)}), 2100000);  // 1.6 + 0.5
+    EXPECT_EQ(te.time_us({0, Rational(3, 4)}), 2000000);  // 1.2 + 0.8
+    EXPECT_EQ(te.time_us({1, Rational(0, 1)}), 2400000);  // 1.6 + 0.8
 }
 
 TEST(Timing, StopGapMapsBack) {
@@ -118,15 +119,15 @@ TEST(Timing, StopGapMapsBack) {
     auto chart = chart_from_text("#BPM 150\n#STOP01 96\n#00009:0001\n#00111:01\n");
     TimingEngine te;
     te.rebuild(chart);
-    // 间隙 [800000, 1300000)us → 800000us（pos 1/2）
-    for (std::int64_t t = 800000; t <= 1300000; t += 50000) {
+    // 间隙 [800000, 1600000)us → 800000us（pos 1/2）
+    for (std::int64_t t = 800000; t <= 1600000; t += 50000) {
         const auto back = te.position_at(t);
         ASSERT_TRUE(back.has_value());
         EXPECT_EQ(back->measure, 0u);
         EXPECT_NEAR(pos_double(back->pos), 0.5, 1e-9) << "t=" << t;
     }
     // 间隙之后恢复正常逆算
-    const auto after = te.position_at(1700000);
+    const auto after = te.position_at(2000000);
     ASSERT_TRUE(after.has_value());
     EXPECT_NEAR(pos_double(after->pos), 0.75, 1e-9);
 }

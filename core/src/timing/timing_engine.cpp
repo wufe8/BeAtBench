@@ -106,8 +106,7 @@ void TimingEngine::rebuild(const Chart& chart) {
     std::map<std::uint32_t, double> beats_map;
     std::map<std::uint32_t, std::vector<std::pair<Rational, double>>> bpm_map;
     std::map<std::uint32_t, std::vector<std::pair<Rational, std::int64_t>>> stop_map;
-    std::uint32_t max_measure = 0;
-    const auto touch = [&](std::uint32_t m) { max_measure = std::max(max_measure, m); };
+    std::uint32_t max_measure = 0;    const auto touch = [&](std::uint32_t m) { max_measure = std::max(max_measure, m); };
     for (const auto& ev : chart.measure_events) {
         beats_map[ev.measure] = ev.value.beats;
         touch(ev.measure);
@@ -117,7 +116,7 @@ void TimingEngine::rebuild(const Chart& chart) {
         touch(ev.measure);
     }
     for (const auto& ev : chart.stop_events) {
-        stop_map[ev.measure].push_back({ev.pos, ev.value.duration_us});
+        stop_map[ev.measure].push_back({ev.pos, ev.value.count});
         touch(ev.measure);
     }
     for (const auto& ev : chart.notes) touch(ev.measure);
@@ -166,10 +165,17 @@ void TimingEngine::rebuild(const Chart& chart) {
             mm.segs.push_back(s);
         }
 
-        // STOP
+        // STOP：count/192 个「当前 BPM 的全音符」。全音符 = 4 拍 = 240/BPM 秒（不受拍子设置影响），
+        // 故 sec = count × 240/(192×bpm) = count × 1.25/bpm。bpm 取 STOP 所在拍位生效的段。
         if (const auto it = stop_map.find(m); it != stop_map.end()) {
-            for (const auto& [pos, us] : it->second) {
-                mm.stops.push_back({rational_to_double(pos), static_cast<double>(us) / 1e6});
+            for (const auto& [pos, count] : it->second) {
+                const double p = rational_to_double(pos);
+                double bpm = mm.segs.back().bpm;  // 兜底
+                for (const auto& s : mm.segs) {
+                    if (p >= s.start && p < s.end) { bpm = s.bpm; break; }
+                }
+                const double sec = static_cast<double>(count) * 240.0 / (192.0 * bpm);
+                mm.stops.push_back({p, sec});
             }
             std::sort(mm.stops.begin(), mm.stops.end(),
                       [](const auto& a, const auto& b) { return a.pos < b.pos; });

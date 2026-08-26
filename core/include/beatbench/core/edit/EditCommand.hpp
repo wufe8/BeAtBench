@@ -96,7 +96,8 @@ private:
 /// 传入非 0 pos 时归一为 0（命令自身保证，调用方无需处理）。
 class PutTimingCommand : public EditCommand {
 public:
-    PutTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos, double value);
+    PutTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos, double value,
+                     std::optional<std::uint32_t> ref = std::nullopt);
     std::string name() const override { return "timing.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -107,10 +108,13 @@ private:
     std::uint32_t m_measure;
     Rational m_pos;
     double m_value;
+    std::optional<std::uint32_t> m_ref;  ///< 手动绑定 #BPMxx/#STOPxx id（缺省=由 codec 派生）
     /// apply 前是否存在同位事件（invert 分支：恢复旧值 / 移除）
     bool m_existed = false;
-    /// m_existed 时的旧值（invert 恢复；按类型取 value/duration_us/beats）
+    /// m_existed 时的旧值（invert 恢复；按类型取 value/count/beats）
     double m_old_value = 0;
+    /// apply 前存在的旧 ref_id（invert 恢复；event 无 ref_id 时 = nullopt）
+    std::optional<std::uint32_t> m_old_ref;
     /// apply 实际插入位置（invert 移除时定位；nullopt = 未执行/替换）
     std::optional<std::size_t> m_applied_index;
 };
@@ -287,6 +291,26 @@ private:
     std::uint32_t m_to;
     std::optional<std::size_t> m_applied_index;  ///< 命中的 note 下标（invert 定位）
     bool m_did_change = false;
+};
+
+/// 删除「定义表」条目（#WAV/#BMP/#BPM/#STOP 的 id 定义，sample.delete）。
+/// 语义：从 samples 移除 (kind, id)。若仍有对象引用该 id，则**只删定义、引用保持原 id**——
+/// 与文件管理器「解绑文件」语义一致（引用保留 id，但无文件/值定义 → 之后写回派生）。
+/// 逆操作：恢复被移除的定义（存在时还回）。单个 undo 步。
+class DeleteSampleCommand : public EditCommand {
+public:
+    DeleteSampleCommand(SampleKind kind, std::uint32_t id);
+    std::string name() const override { return "sample.delete"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    SampleKind m_kind;
+    std::uint32_t m_id;
+    bool m_existed = false;      ///< apply 前存在（invert 还回）
+    SampleDef m_old_def;         ///< apply 前的定义
+    bool m_changed = false;      ///< apply 实际删除了定义
 };
 
 }  // namespace beatbench::edit
