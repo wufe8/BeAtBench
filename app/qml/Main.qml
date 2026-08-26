@@ -620,10 +620,16 @@ ApplicationWindow {
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
     /// LN 放置提示文本（LNTYPE 2 = 头尾状态机；其余 = 连点两次自动配对）。
+    /// 附当前 LNTYPE/LNOBJ 解析值——用户可据此确认会话里 #LNTYPE 是否真的为 2
+    ///（元信息改了须点「保存」才写入会话；否则仍走 LNTYPE 1）。
     function lnHint() {
-        return (typeof chartSession !== "undefined" && chartSession && chartSession.lnType() === 2)
-               ? qsTr("同轨道左键放置Ln尾，不同轨道左键重新放置Ln头，按esc键取消")
-               : qsTr("同一轨道连点两次：先头后尾（自动配对）")
+        const t = (typeof chartSession !== "undefined" && chartSession) ? chartSession.lnType() : 1
+        const lj = (typeof chartSession !== "undefined" && chartSession) ? chartSession.lnobjSample() : -1
+        const mode = t === 2 ? "LNTYPE2" : (t === 0 ? "LNTYPE0" : "LNTYPE1")
+        const ljText = t === 2 ? (lj >= 0 ? " · LNOBJ #WAV" + chartSession.idTextOf(lj) : " · LNOBJ 未定义") : ""
+        return (t === 2 ? qsTr("同轨道左键放置Ln尾，不同轨道左键重新放置Ln头，按esc键取消")
+                        : qsTr("同一轨道连点两次：先头后尾（自动配对）"))
+               + qsTr("〔%1%2〕").arg(mode).arg(ljText)
     }
     /// 进入 LN 工具：停掉自动清空，直接显示放置说明（持久直到切工具）。
     function activateLnHint() {
