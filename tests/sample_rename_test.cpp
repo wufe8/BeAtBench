@@ -191,6 +191,24 @@ TEST(SampleRename, SetValueExistingAndCreate) {
     EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "280");
 }
 
+TEST(SampleRename, SetValueCrossSyncsRefEvents) {
+    // 交叉同步：改定义值 → 引用该 #BPMxx 的事件值同步；undo 恢复旧值。
+    // make_chart 已有 bpm_events[0]：value 280、ref_id 4（#BPM4 = "280"）。
+    EditorSession s;
+    s.load(make_chart());
+    EXPECT_EQ(s.chart().bpm_events.size(), 1u);
+    EXPECT_EQ(*s.chart().bpm_events[0].value.ref_id, 4u);
+    // 改定义值 280 → 300：引用事件同步
+    ASSERT_TRUE(s.exec(std::make_unique<SetSampleValueCommand>(SampleKind::Bpm, 4, "300")));
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "300");
+    ASSERT_EQ(s.chart().bpm_events.size(), 1u);
+    EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 300.0);
+    // undo：定义回 "280"，事件回 280
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "280");
+    EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 280.0);
+}
+
 // —— note.setSample：改单条 note 引用、invert 恢复、找不到无操作 ——
 
 TEST(SampleRename, SetNoteSampleChangesOne) {

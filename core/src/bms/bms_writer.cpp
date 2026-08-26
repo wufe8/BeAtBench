@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <iomanip>
 #include <map>
 #include <numeric>
@@ -163,18 +164,27 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         for (const auto& ev : chart.stop_events) {
             const auto count = ev.value.count;
             if (stop_id_by_count.count(count)) continue;
-            // ⚠️ 有 ref_id 的事件（原始 #STOPxx 槽位引用）：写回直接输出 ref_id 文本，
-            // **不派生新 id**——派生 id 可能与 ref_id 文本冲突（同 BPM 注，2026-09）。
-            // 但若该 ref 槽位**无定义**（编辑对话框补的 id+值），须补一条 #STOPxx 定义，
-            // 否则悬空引用无法解析。值优先采用事件值。
+            // ⚠️ 有 ref_id 的事件：ref 槽位无定义 → 归该槽位并补定义（消除悬空引用）；
+            // 定义存在且与事件计数一致 → 归该槽位；**不一致 → 解耦**（方案 B）。
             if (ev.value.ref_id && *ev.value.ref_id != 0) {
                 const std::uint32_t rid = *ev.value.ref_id;
-                if (!stop_defs.count(rid)) {
+                const auto defit = stop_defs.find(rid);
+                if (defit == stop_defs.end()) {
                     const auto text = format_num(static_cast<double>(count));
                     stop_defs[rid] = text;
                     derived_stops[rid] = text;
+                    stop_id_by_count[count] = rid;
+                    continue;
                 }
-                continue;
+                double d = 0;
+                char* end = nullptr;
+                const double dd = std::strtod(defit->second.c_str(), &end);
+                if (end != defit->second.c_str() && *end == '\0') d = dd;
+                if (static_cast<std::int64_t>(std::llround(d)) == count) {
+                    stop_id_by_count[count] = rid;
+                    continue;
+                }
+                // 不一致 → 落入下方派生（新 id）
             }
             // id 空间上限（36 = 1295；62 = 3843）；全满时复用最后一个（退化，理论不可达）
             const std::uint32_t max_id =
@@ -211,18 +221,28 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         for (const auto& ev : chart.bpm_events) {
             const auto v = ev.value.value;
             if (bpm_id_by_value.count(v)) continue;
-            // ⚠️ 有 ref_id 的事件（原始 #BPMxx 槽位引用）：写回直接输出 ref_id 文本，
-            // **不派生新 id**——派生 id 可能与 ref_id 文本冲突（2026-09 roundtrip 回归）。
-            // 但若该 ref 槽位**无定义**（如编辑对话框补的 id+值），必须补一条 #BPMxx 定义，
-            // 否则输出悬空引用（数据行引用一个不存在的 #BPMxx → 无法解析）。值优先采用事件值。
+            // ⚠️ 有 ref_id 的事件：ref 槽位无定义 → 归该槽位并补一条定义（否则悬空引用）；
+            // 定义存在且与事件值一致 → 归该槽位；**不一致 → 解耦**（方案 B：值才是唯一
+            // 编辑维度，事件值变了就另派生新 id，不污染共享引用者的旧定义）。
             if (ev.value.ref_id && *ev.value.ref_id != 0) {
                 const std::uint32_t rid = *ev.value.ref_id;
-                if (!bpm_defs.count(rid)) {
+                const auto defit = bpm_defs.find(rid);
+                if (defit == bpm_defs.end()) {
                     const auto text = format_num(v);
                     bpm_defs[rid] = text;
                     derived_bpms[rid] = text;
+                    bpm_id_by_value[v] = rid;
+                    continue;
                 }
-                continue;
+                double d = 0;
+                char* end = nullptr;
+                const double dd = std::strtod(defit->second.c_str(), &end);
+                if (end != defit->second.c_str() && *end == '\0') d = dd;
+                if (d == v) {
+                    bpm_id_by_value[v] = rid;
+                    continue;
+                }
+                // 不一致 → 落入下方派生（新 id）
             }
             const std::uint32_t max_id =
                 chart.id_base == IdBase::Base62 ? 3843 : 1295;
@@ -354,7 +374,18 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         // 无引用（新值/内联超范围）→ 按值派生/复用定义（见上方 bpm_id_by_value）。
         std::uint32_t slot_id = 0;
         if (b.ref_id && *b.ref_id != 0) {
-            slot_id = *b.ref_id;
+            // 保持 ref 槽位当且仅当：槽位无定义，或定义与事件值一致（不一致已在上方解耦）。
+            const auto defit = chart.samples.find({SampleKind::Bpm, *b.ref_id});
+            bool keep_ref = defit == chart.samples.end();
+            if (defit != chart.samples.end()) {
+                double d = 0;
+                char* end = nullptr;
+                const double dd = std::strtod(defit->second.value.c_str(), &end);
+                if (end != defit->second.value.c_str() && *end == '\0') d = dd;
+                keep_ref = (d == v);
+            }
+            slot_id = keep_ref ? *b.ref_id
+                               : bpm_id_by_value.find(v)->second;
         } else {
             const auto it = bpm_id_by_value.find(v);
             if (it == bpm_id_by_value.end()) continue;  // 理论上不会发生（上面已派生）
@@ -364,10 +395,21 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     }
     // 3d. STOP（ch09 引用恢复：count → id）
     for (const auto& ev : chart.stop_events) {
-        // 优先原始引用 id（同 BPM）；无引用 → 按计数派生/复用
+        // 优先原始引用 id（同 BPM：无定义/一致 → 保持；不一致 → 上方已解耦派生）；
+        // 无引用 → 按计数派生/复用
         std::uint32_t slot_id = 0;
         if (ev.value.ref_id && *ev.value.ref_id != 0) {
-            slot_id = *ev.value.ref_id;
+            const auto defit = chart.samples.find({SampleKind::Stop, *ev.value.ref_id});
+            bool keep_ref = defit == chart.samples.end();
+            if (defit != chart.samples.end()) {
+                double d = 0;
+                char* end = nullptr;
+                const double dd = std::strtod(defit->second.value.c_str(), &end);
+                if (end != defit->second.value.c_str() && *end == '\0') d = dd;
+                keep_ref = (static_cast<std::int64_t>(std::llround(d)) == ev.value.count);
+            }
+            slot_id = keep_ref ? *ev.value.ref_id
+                               : stop_id_by_count.find(ev.value.count)->second;
         } else {
             const auto it = stop_id_by_count.find(ev.value.count);
             if (it == stop_id_by_count.end()) continue;  // 理论上不会发生（上面已派生）

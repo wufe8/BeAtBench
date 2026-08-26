@@ -900,6 +900,24 @@ TEST(BmsRoundTrip, StopRefSlotGetsDefinitionWhenMissing) {
     EXPECT_EQ(r2.chart.stop_events[0].value.count, 96);
 }
 
+TEST(BmsRoundTrip, RefMismatchDecouples) {
+    // 方案 B 解耦：ref 事件的值与定义不一致（如编辑对话框改值但保留 ref）→ 写回另派生新
+    // #BPMxx，#BPM01 原定义与其它引用者不受污染；往返后事件值 = 新派生 id 的定义值。
+    Chart c;
+    c.samples[{SampleKind::Bpm, 1}] = SampleDef{.value = "150"};
+    Bpm b;
+    b.value = 280.0;
+    b.ref_id = 1;   // #BPM01 但值不一致（定义 150 ≠ 280）
+    c.bpm_events.push_back({0, Rational(0, 1), b});
+    const auto out = write_bms(c);
+    EXPECT_NE(out.find("#BPM01 150"), std::string::npos);  // 原定义保留
+    EXPECT_NE(out.find("#BPM02 280"), std::string::npos);  // 派生新定义（解耦）
+    const auto r2 = read_bms(out);
+    ASSERT_EQ(r2.chart.bpm_events.size(), 1u);
+    EXPECT_DOUBLE_EQ(r2.chart.bpm_events[0].value.value, 280.0);
+    EXPECT_TRUE(r2.chart.bpm_events[0].value.ch08);
+}
+
 // ---------- 真实谱面（local/chart，未提交样本；缺失时跳过） ----------
 
 TEST(BmsRealCharts, RoundTripAllLocalCharts) {

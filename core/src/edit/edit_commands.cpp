@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1480,6 +1481,8 @@ SetSampleValueCommand::SetSampleValueCommand(SampleKind kind, std::uint32_t id, 
     : m_kind(kind), m_id(id), m_value(std::move(value)) {}
 
 void SetSampleValueCommand::apply(Chart& chart) {
+    m_bpm_evs.clear();
+    m_stop_evs.clear();
     const auto key = std::make_pair(m_kind, m_id);
     const auto it = chart.samples.find(key);
     m_existed = it != chart.samples.end();
@@ -1487,6 +1490,34 @@ void SetSampleValueCommand::apply(Chart& chart) {
     m_changed = !m_existed || m_old_value != m_value;
     if (!m_changed) return;
     chart.samples[key].value = m_value;  // 不存在则创建
+    // 交叉同步（定义 id → 引用者）：所有 ref_id == m_id 的事件同步到新定义值
+    //（BMS 语义：一个 #BPMxx/#STOPxx 定义 = 一个值，全部引用者共享）。值 = 定义文本解析。
+    double v = 0;
+    char* end = nullptr;
+    const double parsed = std::strtod(m_value.c_str(), &end);
+    const bool parse_ok = end != m_value.c_str() && *end == '\0' && std::isfinite(parsed);
+    if (parse_ok) v = parsed;
+    if (m_kind == SampleKind::Bpm) {
+        for (std::size_t i = 0; i < chart.bpm_events.size(); ++i) {
+            auto& ev = chart.bpm_events[i].value;
+            if (ev.ref_id && *ev.ref_id == m_id) {
+                if (parse_ok) {
+                    m_bpm_evs.emplace_back(i, ev.value);
+                    ev.value = v;
+                }
+            }
+        }
+    } else if (m_kind == SampleKind::Stop) {
+        for (std::size_t i = 0; i < chart.stop_events.size(); ++i) {
+            auto& ev = chart.stop_events[i].value;
+            if (ev.ref_id && *ev.ref_id == m_id) {
+                if (parse_ok) {
+                    m_stop_evs.emplace_back(i, ev.count);
+                    ev.count = static_cast<std::int64_t>(std::llround(v));
+                }
+            }
+        }
+    }
 }
 
 void SetSampleValueCommand::invert(Chart& chart) {
@@ -1497,6 +1528,13 @@ void SetSampleValueCommand::invert(Chart& chart) {
     } else {
         chart.samples.erase(key);
     }
+    // 交叉同步 invert：引用者恢复旧值
+    for (const auto& [idx, old] : m_bpm_evs)
+        if (idx < chart.bpm_events.size()) chart.bpm_events[idx].value.value = old;
+    for (const auto& [idx, old] : m_stop_evs)
+        if (idx < chart.stop_events.size()) chart.stop_events[idx].value.count = old;
+    m_bpm_evs.clear();
+    m_stop_evs.clear();
     m_changed = false;
 }
 

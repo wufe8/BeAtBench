@@ -289,6 +289,10 @@ private:
     bool m_existed = false;
     std::string m_old_value;
     bool m_changed = false;
+    /// 交叉同步（def 值 → 引用该 id 的事件）：apply 时把引用者的事件值同步为新定义值，
+    /// invert 恢复旧值。下标 + 旧值快照。
+    std::vector<std::pair<std::size_t, double>> m_bpm_evs;
+    std::vector<std::pair<std::size_t, std::int64_t>> m_stop_evs;
 };
 
 /// 修改某个 note 引用的采样 id（编辑区双击 note 改 #WAV id，note.setSample）。

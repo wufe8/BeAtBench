@@ -7,6 +7,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cmath>
+#include <cstdlib>
 
 #include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
@@ -640,11 +642,33 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
         arr.push_back(std::move(e));
     };
     if (kind == "bpm") {
-        for (const auto& ev : chart.bpm_events) push(ev.measure, ev.pos, ev.value.value,
-                                                     ev.value.ref_id);
+        for (const auto& ev : chart.bpm_events) {
+            // 交叉同步（读侧）：ref 绑定 id 的事件，其值与定义表一致（定义 = 值真相源）。
+            // 定义缺失时回退事件自身值（写回会派生新定义）。
+            double v = ev.value.value;
+            if (ev.value.ref_id && *ev.value.ref_id != 0) {
+                if (const auto it = chart.samples.find({SampleKind::Bpm, *ev.value.ref_id});
+                    it != chart.samples.end()) {
+                    char* end = nullptr;
+                    const double d = std::strtod(it->second.value.c_str(), &end);
+                    if (end != it->second.value.c_str() && *end == '\0') v = d;
+                }
+            }
+            push(ev.measure, ev.pos, v, ev.value.ref_id);
+        }
     } else if (kind == "stop") {
         for (const auto& ev : chart.stop_events) {
-            push(ev.measure, ev.pos, static_cast<double>(ev.value.count), ev.value.ref_id);
+            double v = static_cast<double>(ev.value.count);
+            if (ev.value.ref_id && *ev.value.ref_id != 0) {
+                if (const auto it = chart.samples.find({SampleKind::Stop, *ev.value.ref_id});
+                    it != chart.samples.end()) {
+                    char* end = nullptr;
+                    const double d = std::strtod(it->second.value.c_str(), &end);
+                    if (end != it->second.value.c_str() && *end == '\0')
+                        v = std::llround(d) * 1.0;
+                }
+            }
+            push(ev.measure, ev.pos, v, ev.value.ref_id);
         }
     } else if (kind == "measure") {
         for (const auto& ev : chart.measure_events) push(ev.measure, ev.pos, ev.value.beats);

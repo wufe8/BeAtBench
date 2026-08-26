@@ -131,8 +131,13 @@ ColumnLayout {
         root.rawText = rr.ok ? rr.result.lines.join("\n") : ""
         root.dirtyTick = 0
     }
-    /// 放弃修改：重新载入
-    function reset() { root.reload() }
+    /// 放弃修改：清空后重新载入（先 fields=[] 强制 Repeater 销毁重建，否则旧 delegate
+    /// 的 TextField/ComboBox 文本残留导致「重置无效果」——2026-09 复测）。
+    function reset() {
+        root.rawText = ""
+        root.fields = []
+        root.reload()
+    }
     /// 保存后提交当前值为基线（orig=value；raw 基线由 applyRawEdits 更新）；脏清零。
     function commit() {
         for (let i = 0; i < root.fields.length; i++)

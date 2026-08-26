@@ -164,7 +164,7 @@ ColumnLayout {
                     onDoubleClicked: dialog.openForEdit(
                                          root.kind, row.modelData.measure,
                                          row.modelData.pos.num, row.modelData.pos.den,
-                                         row.modelData.value, row.modelData.ref || "")
+                                         row.modelData.value)
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: (mouse) => {
                         if (mouse.button === Qt.RightButton)
@@ -255,6 +255,15 @@ ColumnLayout {
                 delegate: Rectangle {
                     id: defRow
                     required property var modelData
+                    /// 双击 → 内联编辑定义值（Enter/失焦保存，Esc 取消；与 WAV/BMP 文件名编辑同语义）。
+                    property bool editing: false
+                    function commitEdit() {
+                        if (!defRow.editing) return
+                        defRow.editing = false
+                        const v = defValueEdit.text.trim()
+                        if (v !== "" && v !== defRow.modelData.value)
+                            root.timingDefAddRequested(root.kind, defRow.modelData.id, v)
+                    }
                     width: ListView.view.width
                     height: 24
                     radius: Theme.radiusSm
@@ -272,11 +281,31 @@ ColumnLayout {
                         }
                         Label {
                             text: defRow.modelData.value
+                            visible: !defRow.editing
                             color: root.kind === "stop" ? Theme.warning : Theme.accent
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fsSmall
                             elide: Text.ElideRight
                             Layout.fillWidth: true
+                        }
+                        TextField {
+                            id: defValueEdit
+                            visible: defRow.editing
+                            Layout.fillWidth: true
+                            text: defRow.modelData.value
+                            selectByMouse: true
+                            color: Theme.text
+                            font.family: Theme.fontMono
+                            font.pixelSize: Theme.fsSmall
+                            background: Rectangle {
+                                radius: Theme.radiusSm
+                                border.width: 1
+                                border.color: defValueEdit.activeFocus ? Theme.primary : Theme.borderStrong
+                                color: Theme.surface2
+                            }
+                            onAccepted: defRow.commitEdit()
+                            onActiveFocusChanged: if (!activeFocus && defRow.editing) defRow.commitEdit()
+                            Keys.onEscapePressed: defRow.editing = false
                         }
                         Label {
                             text: defRow.modelData.refs > 0 ? "×" + defRow.modelData.refs : ""
@@ -300,20 +329,12 @@ ColumnLayout {
                         z: -1
                         anchors.fill: parent
                         hoverEnabled: true
-                        // 双击定义行 → 打开事件对话框，预填该 id 绑定（改该定义值并引用）
+                        // 双击定义行 → 内联编辑该定义的值（改定义值 = 所有引用者交叉同步）
                         onDoubleClicked: {
-                            const evs = root.events
-                            for (let i = 0; i < evs.length; ++i) {
-                                if (evs[i].ref === defRow.modelData.id) {
-                                    dialog.openForEdit(root.kind, evs[i].measure, evs[i].pos.num,
-                                                       evs[i].pos.den, evs[i].value, defRow.modelData.id)
-                                    return
-                                }
+                            if (!defRow.editing) {
+                                defRow.editing = true
+                                defValueEdit.forceActiveFocus()
                             }
-                            // 无引用该 id 的事件 → 用该 id 添加一个事件（值 = 定义值）
-                            dialog.openForAdd(root.kind)
-                            dialog.baseRef = defRow.modelData.id
-                            dialog.refField.text = defRow.modelData.id
                         }
                     }
                 }
@@ -339,7 +360,6 @@ ColumnLayout {
         property int baseNum: 0
         property int baseDen: 1
         property double baseValue: 0
-        property string baseRef: ""   // 手动绑定 #BPMxx/#STOPxx id（空 = auto 派生）
 
         function openForAdd(k) {
             kind = k
@@ -347,19 +367,19 @@ ColumnLayout {
             baseMeasure = 0
             baseNum = 0
             baseDen = 1
-            baseValue = (k === "bpm") ? 130 : stopFromDisplay("96")  // STOP 默认 96（1/192 全音符 ×96 = 半全音符）
-            baseRef = ""
+            baseValue = (k === "bpm") ? 130 : stopFromDisplay("96")  // STOP 默认 96
             applyFields()
             open()
         }
-        function openForEdit(k, measure, num, den, value, ref) {
+        /// 事件编辑：只改「小节的这个位置放多少值」——值自动派生/复用 #BPMxx（方案 B），
+        /// id 绑定在下方「#BPM/#STOP 定义」区管理（创建 id + 绑定值 与 时间轴使用 分离）。
+        function openForEdit(k, measure, num, den, value) {
             kind = k
             editing = true
             baseMeasure = measure
             baseNum = num
             baseDen = den
             baseValue = value
-            baseRef = (ref && ref !== "") ? ref : ""
             applyFields()
             open()
         }
@@ -369,17 +389,16 @@ ColumnLayout {
             denSpin.value = Math.max(1, baseDen)
             valueField.text = dialog.kind === "bpm" ? String(baseValue)
                                                     : stopToDisplay(baseValue)
-            refField.text = baseRef
-            refRow.visible = dialog.kind !== "measure"
         }
 
         onOpened: valueField.forceActiveFocus()
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 6
+            spacing: 4
+            // 小节 + 位置 同一行（紧凑：对话框高度不超视口）
             RowLayout {
-                spacing: 6
+                spacing: 4
                 Layout.fillWidth: true
                 Label { text: qsTr("小节"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
                 BbSpinBox {
@@ -387,17 +406,13 @@ ColumnLayout {
                     from: 0; to: 999; editable: true
                     Layout.fillWidth: true
                 }
-            }
-            RowLayout {
-                spacing: 6
-                Layout.fillWidth: true
                 Label { text: qsTr("位置"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
-                BbSpinBox { id: numSpin; from: 0; to: 999; editable: true; Layout.fillWidth: true }
+                BbSpinBox { id: numSpin; from: 0; to: 999; editable: true; Layout.preferredWidth: 52 }
                 Label { text: "/"; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
-                BbSpinBox { id: denSpin; from: 1; to: 999; editable: true; Layout.fillWidth: true }
+                BbSpinBox { id: denSpin; from: 1; to: 999; editable: true; Layout.preferredWidth: 52 }
             }
             RowLayout {
-                spacing: 6
+                spacing: 4
                 Layout.fillWidth: true
                 Label {
                     text: dialog.kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
@@ -406,7 +421,7 @@ ColumnLayout {
                 BbTextField {
                     id: valueField
                     Layout.fillWidth: true
-                    placeholderText: dialog.kind === "bpm" ? qsTr("如 130") : qsTr("如 96")
+                    placeholderText: dialog.kind === "bpm" ? qsTr("130") : qsTr("96")
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: dialog.accept()
                     // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
@@ -415,43 +430,20 @@ ColumnLayout {
             }
             Label {
                 text: dialog.kind === "bpm"
-                      ? qsTr("· BPM 数值")
-                      : (stopUnit === 0 ? qsTr("· 单位 = 1/192 全音符（随该拍位 BPM 换算）") : qsTr("· 毫秒（按当前 BPM 换算）"))
+                      ? qsTr("值自动派生 #BPMxx（id 绑定在「#BPM 定义」区）")
+                      : (stopUnit === 0 ? qsTr("单位 = 1/192 全音符（随该拍位 BPM 换算）") : qsTr("毫秒（按当前 BPM 换算）"))
                 color: Theme.textFaint
                 font.pixelSize: Theme.fsTiny
-            }
-            RowLayout {
-                id: refRow
-                spacing: 6
-                Layout.fillWidth: true
-                Label {
-                    text: dialog.kind === "bpm" ? qsTr("id") : qsTr("id")
-                    color: Theme.textMuted; font.pixelSize: Theme.fsTiny
-                }
-                BbTextField {
-                    id: refField
-                    Layout.fillWidth: true
-                    placeholderText: dialog.kind === "bpm" ? qsTr("#BPMxx（空=auto）") : qsTr("#STOPxx（空=auto）")
-                    font.family: Theme.fontMono
-                    font.pixelSize: Theme.fsTiny
-                    onAccepted: dialog.accept()
-                    escapeHandler: function() { dialog.reject() }
-                }
-            }
-            Label {
-                text: qsTr("· 绑定 id（#BPMxx/#STOPxx 引用；留空 = 写回时自动分配 id）")
-                color: Theme.textFaint
-                font.pixelSize: Theme.fsTiny
+                wrapMode: Text.WordWrap
             }
         }
         onAccepted: {
             const value = dialog.kind === "bpm"
                           ? parseFloat(valueField.text)
                           : stopFromDisplay(valueField.text)
-            const ref = refField.text.trim()
-            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0, ref); return }
+            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0, ""); return }
             root.timingEditRequested(dialog.kind, measureSpin.value,
-                                     numSpin.value, denSpin.value, value, ref)
+                                     numSpin.value, denSpin.value, value, "")
         }
     }
 
