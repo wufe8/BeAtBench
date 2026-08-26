@@ -129,20 +129,24 @@ Widgets 胜出理由不变：高密度编辑器控件成熟、QPainter 自绘自
 ## 6. 架构（C++ workspace，按阶段生长）
 
 ```
-BeAtBench (GPL-3.0, C++20, CMake + vcpkg)
-├─ core/                    # 纯逻辑库，无 Qt 依赖（v1 即存在）
-│   ├─ chart/               # §4 的格式无关模型：事件流/Lane/ChartMode/SampleRef/extension
-│   ├─ bms/                 # BMS 文本 codec：解析/写出/编码/注释保留/RANDOM·IF·SWITCH
-│   ├─ bmson/               # 预留：接口与 schema 文档先立，实现待定（时点见 §10）
-│   ├─ timing/              # 小节↔秒双向换算（有理数 + 事件索引 + 脏区缓存）
-│   ├─ commands/            # 命令对象（§6.1）：唯一操作面，JSON 可序列化
-│   └─ lint/                # v1 最小集（未闭合 LN、缺字段告警），规则引擎留扩展位
-├─ app/                     # Qt Widgets 应用：工作区(Workspace)/视口(IChartView)/面板/键位系统
-├─ cli/                     # beatbench-cli：无 Qt 可执行文件，核心命令全量暴露（§6.1）
-├─ tests/                   # GoogleTest：解析往返、时序黄金测试、命令可逆性
+BeAtBench (GPL-3.0, C++20, CMake)
+├─ core/                         # 纯逻辑库，零 Qt 音频依赖
+│   ├─ include/beatbench/core/   # 公开头文件
+│   │   ├─ Chart.hpp             # 格式无关模型：事件流/Lane/ChartMode/SampleRef
+│   │   ├─ bms/                  # BMS codec 接口
+│   │   ├─ codec/                # 格式注册表（CodecRegistry/Codec）
+│   │   ├─ timing/               # 小节↔秒双向换算（有理数 + 事件索引）
+│   │   ├─ command/              # 协议命令接口（Command/Registry）
+│   │   ├─ edit/                 # 编辑命令（EditCommand/EditorSession/Selection）
+│   │   └─ json/                 # 最小 JSON（零依赖）
+│   └─ src/                      # 实现（bms/codec/timing/command/edit/json）
+├─ app/                          # Qt Quick/QML GUI（C++ bridge + QML 界面）
+├─ cli/                          # beatbench-cli：无 Qt，核心命令全量暴露（§6.1）
+├─ tests/                        # GoogleTest：codec/JSON/命令/时序/编辑/lint
 │
-│   ── Phase B 新增 ──
-├─ audio/                   # AudioBackend 抽象 + PortAudio + 解码缓存 + 波形金字塔 + 混音器
+│   ── Phase B+ 规划（未实现）──
+├─ audio/                        # 音频引擎（解码缓存、波形、试听）
+└─ midi/                         # MIDI 导入（录键）
 ```
 
 要点：
@@ -176,10 +180,10 @@ BeAtBench (GPL-3.0, C++20, CMake + vcpkg)
 
 | 阶段 | 里程碑 | 内容 |
 |---|---|---|
-| **Phase A（v1）** | M0 骨架 | CMake/vcpkg/Qt 6.8/CI(Windows)/LICENSE/SPDX；core 模型、codec 接口、命令框架（§6.1）、Workspace 外壳定稿 |
-| | M1 格式 | BMS 文本 codec + chart 模型 + timing 引擎 + CLI 骨架（`check`/`convert`）+ 黄金测试 |
-| | M2 面板 | 元信息表单 + 文件绑定管理 + 时间轴（BPM/STOP/节拍可视）+ 工作区切换外壳 |
-| | M3 摆放 | 键盘/鼠标输入、剪贴板/变换/量化、LN/地雷、undo/自动保存、多模式视图 → **v1 验收（§3.3）** |
+| **Phase A（v1）** | M0 骨架 | ✅ CMake/Qt 6.11/SPDX；core 模型、CLI、测试、文档 |
+| | M1 格式 | ✅ BMS codec + timing + CLI check/convert + JSON 命令框架 + 黄金测试 |
+| | M2 面板 | ✅ 元信息表单 + 文件绑定管理 + lint + 多会话 + QML 外壳；⏳ 时间轴视图 |
+| | M3 编辑 | ✅ CodecRegistry + 编辑命令（put/move/delete/undo）+ 时间轴事件 + 变换/量化 + 自动保存 + BGA + 剪贴板 + 多文档；⏳ 输入接线 + 多模式视图 |
 | **Phase B** | M4 音频基座 | 解码缓存、波形显示、采样试听（单发）、offset 校准、测 BPM |
 | | M5 随时播放 | **编辑期间随时播放**：任意起播/暂停/循环区间、播放头跟随、scrub 试听 keysound（无判定） |
 | **Phase C** | M6 切音 | 切音工作台（§7.1，工作区/模式切换）+ lint 全量 + 采样管理 |
@@ -215,13 +219,13 @@ stem 导入 → offset 对齐 → 网格/瞬态检测切分 → 36 进制 ID 分
 
 ## 10. 待对齐问题（v0.4）
 
-1. **CMake + vcpkg** 确认？（默认建议）
+1. ~~**CMake + vcpkg** 确认？~~ → ✅ 已定 CMake（无 vcpkg，GoogleTest FetchContent）
 2. v1 是否加**采样单发试听**（建议 v1.1：文件绑定工作流「听一下确认」是高频动作，解码层已就绪，成本低）？
 3. 多差分/同文件夹多 .bms 的**项目组织** v1 做不做（文件树/切换）？
-4. BGA 通道 v1 策略：解析保真透传即可，还是最小可视编辑？
+4. ~~BGA 通道 v1 策略：解析保真透传即可，还是最小可视编辑？~~ → ✅ 已实现 BGA 编辑（bga.put/delete/move + #BMP 定义管理）
 5. **随时播放的范围**：M5 是否含循环区间、scrub 试听、播放头跟随？（建议全含，否则「编辑期间随时播放」体验不完整）
-6. **工作区框架预留**：v1（M2）就搭 Workspace 切换外壳（编辑/切音两个入口，切音占位）？建议是，避免 Phase C 重构 UI。
-7. **CLI 命令集 v1 范围**：`check`（lint 最小集）+ `convert`（编码/往返）起步，`slice`/`package` 随 Phase C 补，是否 OK？
+6. ~~**工作区框架预留**：v1（M2）就搭 Workspace 切换外壳？~~ → ✅ 已搭 QML 页面式外壳（编辑/切音/测试三页）
+7. ~~**CLI 命令集 v1 范围**~~ → ✅ 已超预期：40+ 命令（含编辑/会话/剪贴板/BGA/元数据/采样管理）
 8. bmson 读写**实现时点**（模型已预留；建议随 Phase B/C 按需）。
 9. i18n：三语骨架 M0 就位、全文翻译 Phase D，是否接受？
 10. 生态观察：Rhytica、imbms 等新项目列入每里程碑观察清单？
