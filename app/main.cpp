@@ -27,6 +27,7 @@
 #include "bridge/LintListModel.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/ThemeManager.hpp"
+#include "bridge/UiActionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
 
 // QML 加载/运行期错误落盘（GUI 应用无控制台；调试期保留，发布前可去）
@@ -119,6 +120,7 @@ int main(int argc, char** argv) {
     loadNativeTranslations(app);
 
     beatbench::app::CommandDispatcher dispatcher;
+    beatbench::app::UiActionRegistry uiActions;
     beatbench::app::SampleListModel sampleModel;
     beatbench::app::LintListModel lintModel;
     // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
@@ -131,11 +133,43 @@ int main(int argc, char** argv) {
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
     engine.rootContext()->setContextProperty(QStringLiteral("beatbench"), &dispatcher);
+    engine.rootContext()->setContextProperty(QStringLiteral("uiActions"), &uiActions);
     engine.rootContext()->setContextProperty(QStringLiteral("Theme"), &theme);
     engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
     engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
+
+    // ---- 试点动作注册（doc/09 §7：file/edit/view/tool 四类高频动作） ----
+    // 处理器暂时包装 QML 函数调用（迁移期兼容）；验证后逐步内联。
+    // 注意：enabled 谓词在 QML 加载后才有效（需要 window.* 状态），此处先注册无谓词版本；
+    // QML 侧可在注册后通过 setEnabled 覆写，或在 handler 内自行判断。
+    {
+        using namespace beatbench::app;
+        auto noop = [](const QVariantMap&) -> bool { return true; };
+        // 文件动作（label 用 QCoreApplication::tr，因为 main 函数不是 QObject）
+        uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file", nullptr, noop});
+        uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, noop});
+        uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, noop});
+        uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file", nullptr, noop});
+        // 编辑动作
+        uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit", nullptr, noop});
+        uiActions.add(UiActionDef{"edit.redo", QCoreApplication::tr("重做"), "Ctrl+Y", "edit", nullptr, noop});
+        uiActions.add(UiActionDef{"edit.copy", QCoreApplication::tr("复制"), "Ctrl+C", "edit", nullptr, noop});
+        uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit", nullptr, noop});
+        uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit", nullptr, noop});
+        // 视图动作
+        uiActions.add(UiActionDef{"view.toggleGrid", QCoreApplication::tr("网格"), "", "view", nullptr, noop, true});
+        uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "", "view", nullptr, noop, true});
+        uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view", nullptr, noop, true});
+        // 工具动作
+        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, noop});
+    }
+
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
 
     const QStringList args = app.arguments();

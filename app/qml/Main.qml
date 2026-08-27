@@ -156,65 +156,99 @@ ApplicationWindow {
             window.contentItem.forceActiveFocus()
     }
 
-    // ---------- 全局快捷键（QML MenuItem 无 shortcut 属性，用 Shortcut 类型） ----------
-    Shortcut { sequence: "Ctrl+O"; onActivated: fileDialog.open() }
-    Shortcut { sequence: "Ctrl+S"; onActivated: saveChart() }
-    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: saveAsDialog.open() }
-    Shortcut { sequence: "Ctrl+Z"; onActivated: undoEdit() }
-    Shortcut { sequence: "Ctrl+Y"; onActivated: redoEdit() }
-    Shortcut { sequence: "Ctrl+C"; onActivated: copySelection() }
-    Shortcut { sequence: "Ctrl+V"; onActivated: pasteClipboard() }
-    Shortcut { sequence: "Del"; enabled: chartMeta !== null && currentPage === 0
-                onActivated: (window.metaSelection.length > 0) ? deleteMetaSelection() : deleteSelection() }
-    // 编辑工具快捷键（数字 1-5：1=拖拽 2=选择 3=放置 4=LN 5=地雷；文本输入焦点时让行）
-    Shortcut { sequence: "1"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "pan" }
-    Shortcut { sequence: "2"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "select" }
-    Shortcut { sequence: "3"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "note" }
-    Shortcut { sequence: "4"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "ln" }
-    Shortcut { sequence: "5"; enabled: currentPage === 0 && !window.textInputFocused
-                onActivated: window.editorTool = "mine" }
+    // ---------- 全局快捷键（从 uiActions 注册表查表生成，doc/09） ----------
+    // 迁移期：保留 QML enabled 条件 + handler 内联实际逻辑（invoke 返回 false 时走兜底）。
+    // 后续：handler 迁入 C++ 注册表，QML 只生成 Shortcut。
+
+    // 文件动作
+    Shortcut { sequence: uiActions.shortcut("file.open")
+               onActivated: { uiActions.invoke("file.open"); fileDialog.open() } }
+    Shortcut { sequence: uiActions.shortcut("file.save")
+               enabled: chartMeta !== null
+               onActivated: { uiActions.invoke("file.save"); saveChart() } }
+    Shortcut { sequence: uiActions.shortcut("file.saveAs")
+               enabled: chartMeta !== null
+               onActivated: { uiActions.invoke("file.saveAs"); saveAsDialog.open() } }
+    Shortcut { sequence: uiActions.shortcut("file.exit")
+               onActivated: { uiActions.invoke("file.exit"); window.close() } }
+
+    // 编辑动作
+    Shortcut { sequence: uiActions.shortcut("edit.undo")
+               enabled: chartMeta !== null
+               onActivated: { uiActions.invoke("edit.undo"); undoEdit() } }
+    Shortcut { sequence: uiActions.shortcut("edit.redo")
+               enabled: chartMeta !== null
+               onActivated: { uiActions.invoke("edit.redo"); redoEdit() } }
+    Shortcut { sequence: uiActions.shortcut("edit.copy")
+               enabled: chartMeta !== null && window.selectionRefs.length > 0
+               onActivated: { uiActions.invoke("edit.copy"); copySelection() } }
+    Shortcut { sequence: uiActions.shortcut("edit.paste")
+               enabled: chartMeta !== null && window.clipboardLines.length > 0
+               onActivated: { uiActions.invoke("edit.paste"); pasteClipboard() } }
+    Shortcut { sequence: uiActions.shortcut("edit.delete")
+               enabled: chartMeta !== null && currentPage === 0
+               onActivated: { uiActions.invoke("edit.delete");
+                   (window.metaSelection.length > 0) ? deleteMetaSelection() : deleteSelection() } }
+
+    // 工具动作（数字 1-5：文本输入焦点时让行）
+    Shortcut { sequence: uiActions.shortcut("tool.pan")
+               enabled: currentPage === 0 && !window.textInputFocused
+               onActivated: { uiActions.invoke("tool.pan"); window.editorTool = "pan" } }
+    Shortcut { sequence: uiActions.shortcut("tool.select")
+               enabled: currentPage === 0 && !window.textInputFocused
+               onActivated: { uiActions.invoke("tool.select"); window.editorTool = "select" } }
+    Shortcut { sequence: uiActions.shortcut("tool.note")
+               enabled: currentPage === 0 && !window.textInputFocused
+               onActivated: { uiActions.invoke("tool.note"); window.editorTool = "note" } }
+    Shortcut { sequence: uiActions.shortcut("tool.ln")
+               enabled: currentPage === 0 && !window.textInputFocused
+               onActivated: { uiActions.invoke("tool.ln"); window.editorTool = "ln" } }
+    Shortcut { sequence: uiActions.shortcut("tool.mine")
+               enabled: currentPage === 0 && !window.textInputFocused
+               onActivated: { uiActions.invoke("tool.mine"); window.editorTool = "mine" } }
+
     // Esc：取消未完成的 LN 头（LNTYPE 2 放置；文本输入焦点时让行）
+    // 注意：Esc 不在注册表中（非全局动作），保留硬编码
     Shortcut { sequence: "Esc"; enabled: currentPage === 0 && editorTool === "ln" &&
                 !window.textInputFocused && chartMeta !== null
                 onActivated: cancelPendingLn() }
-    Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
 
-    // ---------- 菜单栏（固定全局） ----------
+    // ---------- 菜单栏（固定全局；doc/09：从 uiActions 注册表查表） ----------
     menuBar: MenuBar {
         Menu {
             title: qsTr("文件")
             MenuItem {
-                text: qsTr("打开谱面…")
-                onTriggered: fileDialog.open()
+                text: uiActions.label("file.open")
+                onTriggered: uiActions.invoke("file.open")
             }
             MenuItem {
-                text: qsTr("保存")
+                text: uiActions.label("file.save")
                 enabled: chartMeta !== null
-                onTriggered: saveChart()
+                onTriggered: uiActions.invoke("file.save")
             }
             MenuItem {
-                text: qsTr("另存为…")
+                text: uiActions.label("file.saveAs")
                 enabled: chartMeta !== null
-                onTriggered: saveAsDialog.open()
+                onTriggered: uiActions.invoke("file.saveAs")
             }
             MenuSeparator {}
             MenuItem {
-                text: qsTr("退出")
-                onTriggered: window.close()
+                text: uiActions.label("file.exit")
+                onTriggered: uiActions.invoke("file.exit")
             }
         }
         Menu {
             title: qsTr("编辑")
             enabled: chartMeta !== null
-            MenuItem { text: qsTr("撤销"); onTriggered: undoEdit() }
-            MenuItem { text: qsTr("重做"); onTriggered: redoEdit() }
+            MenuItem { text: uiActions.label("edit.undo")
+                       onTriggered: uiActions.invoke("edit.undo") }
+            MenuItem { text: uiActions.label("edit.redo")
+                       onTriggered: uiActions.invoke("edit.redo") }
             MenuSeparator {}
-            MenuItem { text: qsTr("复制"); onTriggered: copySelection() }
-            MenuItem { text: qsTr("粘贴"); onTriggered: pasteClipboard() }
+            MenuItem { text: uiActions.label("edit.copy")
+                       onTriggered: uiActions.invoke("edit.copy") }
+            MenuItem { text: uiActions.label("edit.paste")
+                       onTriggered: uiActions.invoke("edit.paste") }
             MenuSeparator {}
             MenuItem { text: qsTr("元信息编辑（M3）"); enabled: false }
         }

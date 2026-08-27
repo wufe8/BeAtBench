@@ -10,11 +10,13 @@ add_executable(beatbench
     bridge/LintListModel.cpp
     bridge/ChartSession.cpp
     bridge/KeyMonitor.cpp
+    bridge/UiActionRegistry.cpp
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
     bridge/SampleListModel.hpp
     bridge/LintListModel.hpp
     bridge/ChartSession.hpp
     bridge/KeyMonitor.hpp
+    bridge/UiActionRegistry.hpp
 )
 target_link_libraries(beatbench PRIVATE beatbench_core Qt6::Quick Qt6::QuickControls2)
 beatbench_set_warnings(beatbench)

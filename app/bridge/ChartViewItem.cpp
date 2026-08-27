@@ -1134,10 +1134,10 @@ void ChartViewItem::paint(QPainter* p) {
     }
 
     // ---- 网格（小节强线 + 槽位弱线） ----
-    QPen strong(th->border());
+    QPen strong(th->borderStrong());
     strong.setWidthF(1.0);
     QColor weakC = th->border();
-    weakC.setAlpha(90);
+    weakC.setAlpha(140);  // 2026-09：增强可见性（原 90 太浅）
     QPen weak(weakC);
     weak.setWidthF(1.0);
     for (int m = first; m <= last; ++m) {
