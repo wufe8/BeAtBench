@@ -87,17 +87,23 @@ ColumnLayout {
         return null
     }
     /// 有下拉选项的字段（PLAYER/DIFFICULTY/RANK/BASE/LNTYPE）。返回 [{label,value}]；
-    /// 首项为空白选项（value=原值），表示不修改/保持现状；
-    /// 若当前值不在基础选项里，追加为一项（保证 reload 后非标准值也能显示原始值）。
+    /// - 字段未定义（空值）：首项显示「（未定义）」，value=""
+    /// - 字段有值但不在选项中：首项显示「（保持现状：当前值）」，value=原值
+    /// - 字段有值且匹配选项：不插入特殊项，直接定位
     function comboOptions(key, val) {
         let arr = root._comboBase(key)
         if (!arr) return null
-        // 首项：空白选项（保持现状，value = 原值）
         const v = String(val || "")
-        arr = [{ label: qsTr("（保持现状）"), value: v }].concat(arr)
-        if (v !== "") {
-            const has = arr.some(function (it) { return it.value === v && it !== arr[0] })
-            if (!has) arr = arr.concat([{ label: v, value: v }])
+        if (v === "") {
+            // 未定义：首项「（未定义）」，value="" → 保存时删除字段
+            arr = [{ label: qsTr("（未定义）"), value: "" }].concat(arr)
+        } else {
+            // 有值：检查是否匹配选项
+            const has = arr.some(function (it) { return it.value === v })
+            if (!has) {
+                // 不匹配：首项「（保持现状：xxx）」，value=原值 → 不修改
+                arr = [{ label: qsTr("（保持现状：%1）").arg(v), value: v }].concat(arr)
+            }
         }
         return arr
     }
