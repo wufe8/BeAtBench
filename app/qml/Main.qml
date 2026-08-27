@@ -218,37 +218,37 @@ ApplicationWindow {
         Menu {
             title: qsTr("文件")
             MenuItem {
-                text: uiActions.label("file.open")
-                onTriggered: uiActions.invoke("file.open")
+                text: uiActions.label("file.open") + "    " + uiActions.shortcut("file.open")
+                onTriggered: { uiActions.invoke("file.open"); fileDialog.open() }
             }
             MenuItem {
-                text: uiActions.label("file.save")
+                text: uiActions.label("file.save") + "    " + uiActions.shortcut("file.save")
                 enabled: chartMeta !== null
-                onTriggered: uiActions.invoke("file.save")
+                onTriggered: { uiActions.invoke("file.save"); saveChart() }
             }
             MenuItem {
-                text: uiActions.label("file.saveAs")
+                text: uiActions.label("file.saveAs") + "    " + uiActions.shortcut("file.saveAs")
                 enabled: chartMeta !== null
-                onTriggered: uiActions.invoke("file.saveAs")
+                onTriggered: { uiActions.invoke("file.saveAs"); saveAsDialog.open() }
             }
             MenuSeparator {}
             MenuItem {
-                text: uiActions.label("file.exit")
-                onTriggered: uiActions.invoke("file.exit")
+                text: uiActions.label("file.exit") + "    " + uiActions.shortcut("file.exit")
+                onTriggered: { uiActions.invoke("file.exit"); window.close() }
             }
         }
         Menu {
             title: qsTr("编辑")
             enabled: chartMeta !== null
-            MenuItem { text: uiActions.label("edit.undo")
-                       onTriggered: uiActions.invoke("edit.undo") }
-            MenuItem { text: uiActions.label("edit.redo")
-                       onTriggered: uiActions.invoke("edit.redo") }
+            MenuItem { text: uiActions.label("edit.undo") + "    " + uiActions.shortcut("edit.undo")
+                       onTriggered: { uiActions.invoke("edit.undo"); undoEdit() } }
+            MenuItem { text: uiActions.label("edit.redo") + "    " + uiActions.shortcut("edit.redo")
+                       onTriggered: { uiActions.invoke("edit.redo"); redoEdit() } }
             MenuSeparator {}
-            MenuItem { text: uiActions.label("edit.copy")
-                       onTriggered: uiActions.invoke("edit.copy") }
-            MenuItem { text: uiActions.label("edit.paste")
-                       onTriggered: uiActions.invoke("edit.paste") }
+            MenuItem { text: uiActions.label("edit.copy") + "    " + uiActions.shortcut("edit.copy")
+                       onTriggered: { uiActions.invoke("edit.copy"); copySelection() } }
+            MenuItem { text: uiActions.label("edit.paste") + "    " + uiActions.shortcut("edit.paste")
+                       onTriggered: { uiActions.invoke("edit.paste"); pasteClipboard() } }
             MenuSeparator {}
             MenuItem { text: qsTr("元信息编辑（M3）"); enabled: false }
         }
@@ -258,12 +258,12 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("工作区")
-            MenuItem { text: qsTr("编辑页"); checkable: true; checked: currentPage === 0
-                       onTriggered: currentPage = 0 }
-            MenuItem { text: qsTr("切音页"); checkable: true; checked: currentPage === 1
-                       onTriggered: currentPage = 1 }
-            MenuItem { text: qsTr("测试页"); checkable: true; checked: currentPage === 2
-                       onTriggered: currentPage = 2 }
+            MenuItem { text: uiActions.label("view.page.edit"); checkable: true; checked: currentPage === 0
+                       onTriggered: { uiActions.invoke("view.page.edit"); currentPage = 0 } }
+            MenuItem { text: uiActions.label("view.page.slice"); checkable: true; checked: currentPage === 1
+                       onTriggered: { uiActions.invoke("view.page.slice"); currentPage = 1 } }
+            MenuItem { text: uiActions.label("view.page.test"); checkable: true; checked: currentPage === 2
+                       onTriggered: { uiActions.invoke("view.page.test"); currentPage = 2 } }
         }
         Menu {
             title: qsTr("帮助")

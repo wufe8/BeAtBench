@@ -151,17 +151,15 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 
 ## 6. 待办 / 待拍板
 
-- [ ] `app/CMakeLists.txt`：`find_package(Qt6 COMPONENTS Quick QuickControls2)` + `QQmlApplicationEngine` 入口（M2 开工做）；
+- [x] `app/CMakeLists.txt`：`find_package(Qt6 COMPONENTS Quick QuickControls2)` + `QQmlApplicationEngine` 入口（M2 完成）；
 - [ ] `theme.json` / `layout.json` schema 正式定稿（含 version 字段与缺省兜底规则；候选 surface 插槽清单见 §3.6）；
-- [ ] **UI 动作注册表（皮肤换壳前置，2026-08 布局探索提出）**：打开/保存/切页/选工具等 UI 动作目前硬编码
-     在 `Main.qml`，L3 整壳皮肤（重写 chrome）将无法复用 → 抽「动作 id → 处理器」注册表（与 core
-     「命令即接口」同思路，但这是 UI 侧动作，不是数据命令），皮肤壳按 id 触发（doc/05 §14.2）；
+- [x] **UI 动作注册表（皮肤换壳前置）**：✅ 已完成（doc/09）——C++ UiActionRegistry + 24 个动作 + Main.qml 全迁移；
 - [ ] **theme.json token 与 ThemeManager 对齐（2026-08 布局探索发现）**：ThemeManager 现仅实现
      `keyNote`/`lnTail` 两点；doc/05 §7 完整表（`n1..n4`/`scratch`/`mine`/`ln`/`wave`/`accent2`/
      `note-radius` 等）未落地 → 换肤落地时按完整表补齐（doc/05 §14.3）；
 - [ ] L3 皮肤覆写的粒度约定（整壳替换 vs 按区域 `Replace:` 声明）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME）；
-- [ ] 时间轴视口技术路线确认：`QQuickPaintedItem`（QPainter 复用）起步，性能不够再迁 QSG；
+- [x] 时间轴视口技术路线确认：`QQuickPaintedItem`（QPainter 复用）起步（M2 已落地）；
 - [ ] `doc/05` 按 QML 重写（前端会话）；
 - [ ] 双语言纪律写进代码约定（doc/04 §5）：逻辑放 C++，QML 只管表现。
 

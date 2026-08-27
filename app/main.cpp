@@ -173,6 +173,10 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, noop});
         uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, noop});
         uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, noop});
+        // 页面切换动作
+        uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, noop, true});
+        uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, noop, true});
+        uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, noop, true});
     }
 
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
