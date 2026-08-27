@@ -321,42 +321,42 @@ ApplicationWindow {
                     ToolTip.text: qsTr("snap 分母（每小节槽数；吸附 + 槽位线，>64 不画弱线；上下按钮 ×2/÷2）")
                 }
                 BbToolButton {
-                    text: qsTr("网格")
+                    text: uiActions.label("view.toggleGrid")
                     // 外部态驱动高亮（外部激活而非 checkable 自翻，避免断绑定，doc/04 §5）
                     active: window.showGrid
                     enabled: chartMeta !== null
-                    onClicked: toggleGrid()
+                    onClicked: { uiActions.invoke("view.toggleGrid"); toggleGrid() }
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("开/关槽位弱线（网格显示开关；吸附不依赖此开关）")
                 }
                 BbToolButton {
-                    text: qsTr("量化")
+                    text: uiActions.label("tool.quantize")
                     // 2026-09：变换类按钮需先选中 note 才点亮（量化/镜像/旋转一致）
                     enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: quantizeSelection()
+                    onClicked: { uiActions.invoke("tool.quantize"); quantizeSelection() }
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
                 }
                 BbToolButton {
-                    text: qsTr("镜像")
+                    text: uiActions.label("tool.mirror")
                     enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: transformSelection(true, 0)
+                    onClicked: { uiActions.invoke("tool.mirror"); transformSelection(true, 0) }
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")
                 }
                 BbToolButton {
-                    text: qsTr("旋转")
+                    text: uiActions.label("tool.rotate")
                     enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: transformSelection(false, 1)
+                    onClicked: { uiActions.invoke("tool.rotate"); transformSelection(false, 1) }
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")
                 }
                 // 更多轨道：BGA 图层通道列（04/06/07/0A，游玩轨与背景轨之间，iBMSC 式）
                 BbCheckBox {
                     id: extrasCheck
-                    text: qsTr("更多轨道")
+                    text: uiActions.label("view.toggleExtras")
                     checked: window.showExtras
-                    onToggled: window.showExtras = checked
+                    onToggled: { uiActions.invoke("view.toggleExtras"); window.showExtras = checked }
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("在游玩轨与背景轨之间显示 BGA 图层通道（BGA/LAYER/POOR/LAYER2 = 04/06/07/0A）")
                 }
@@ -397,16 +397,16 @@ ApplicationWindow {
                         font.pixelSize: Theme.fsTiny; padding: 4 }
                 // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题。
                 // 顺序：1=拖拽（默认） 2=选择 3=放置 4=LN 5=地雷；快捷键同序。
-                BbToolButton { text: "1 拖拽"; active: window.editorTool === "pan"; flatStyle: true
-                               onClicked: window.editorTool = "pan" }
-                BbToolButton { text: "2 选择"; active: window.editorTool === "select"; flatStyle: true
-                               onClicked: window.editorTool = "select" }
-                BbToolButton { text: "3 放置"; active: window.editorTool === "note"; flatStyle: true
-                               onClicked: window.editorTool = "note" }
-                BbToolButton { text: "4 LN"; active: window.editorTool === "ln"; flatStyle: true
-                               onClicked: window.editorTool = "ln" }
-                BbToolButton { text: "5 地雷"; active: window.editorTool === "mine"; flatStyle: true
-                               onClicked: window.editorTool = "mine" }
+                BbToolButton { text: "1 " + uiActions.label("tool.pan"); active: window.editorTool === "pan"; flatStyle: true
+                               onClicked: { uiActions.invoke("tool.pan"); window.editorTool = "pan" } }
+                BbToolButton { text: "2 " + uiActions.label("tool.select"); active: window.editorTool === "select"; flatStyle: true
+                               onClicked: { uiActions.invoke("tool.select"); window.editorTool = "select" } }
+                BbToolButton { text: "3 " + uiActions.label("tool.note"); active: window.editorTool === "note"; flatStyle: true
+                               onClicked: { uiActions.invoke("tool.note"); window.editorTool = "note" } }
+                BbToolButton { text: "4 " + uiActions.label("tool.ln"); active: window.editorTool === "ln"; flatStyle: true
+                               onClicked: { uiActions.invoke("tool.ln"); window.editorTool = "ln" } }
+                BbToolButton { text: "5 " + uiActions.label("tool.mine"); active: window.editorTool === "mine"; flatStyle: true
+                               onClicked: { uiActions.invoke("tool.mine"); window.editorTool = "mine" } }
                 // 平移 = 轴锁定开关（不占工具位、非门控）：勾选后拖拽选中 note 按方向主轴
                 // 移动——纵向=时间（note.move，通道不变）；横向=通道（delete+put，时间不变）。
                 // 未勾选 = 自由 2D（时间+通道都动）。无论勾选与否，拖拽选中 note 都可移动。

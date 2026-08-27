@@ -168,6 +168,11 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, noop});
         uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, noop});
         uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, noop});
+        // 变换动作
+        uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, noop});
+        uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, noop});
     }
 
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
