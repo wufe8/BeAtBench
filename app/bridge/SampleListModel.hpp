@@ -27,6 +27,7 @@ class SampleListModel : public QAbstractListModel {
     Q_PROPERTY(QString currentSampleText READ currentSampleText NOTIFY currentSampleChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
+    Q_PROPERTY(bool isBase62 READ isBase62 NOTIFY isBase62Changed)
 
 public:
     explicit SampleListModel(QObject* parent = nullptr);
@@ -78,6 +79,10 @@ public:
     int count() const { return static_cast<int>(m_rows.size()); }
     QVariantList groups() const { return m_groups; }
 
+    /// 当前谱面是否为 base62 模式（大小写敏感）。
+    bool isBase62() const { return m_isBase62; }
+    void setIsBase62(bool v);
+
 signals:
     void currentSampleChanged(const QString& id);
     void countChanged(int count);
@@ -85,6 +90,7 @@ signals:
     void groupChanged();
     void sortModeChanged();
     void groupsChanged();
+    void isBase62Changed();
 
 private:
     struct Entry {
@@ -114,6 +120,7 @@ private:
     QString m_group = QStringLiteral("all");
     int m_sortMode = SortSmart;
     QVariantList m_groups;   // 动态分组 [{id,label,count}]（文本过滤后统计）
+    bool m_isBase62 = false; // 当前谱面是否为 base62 模式
 };
 
 }  // namespace beatbench::app

@@ -64,6 +64,13 @@ QString group_label(const QString& id) {
 
 SampleListModel::SampleListModel(QObject* parent) : QAbstractListModel(parent) {}
 
+void SampleListModel::setIsBase62(bool v) {
+    if (m_isBase62 != v) {
+        m_isBase62 = v;
+        emit isBase62Changed();
+    }
+}
+
 int SampleListModel::rowCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
 }
@@ -96,6 +103,13 @@ void SampleListModel::loadFromInfo(const QString& infoJson) {
     m_all.clear();
     try {
         const Json req = Json::parse(infoJson.toStdString());
+        // 读取 id_base（36 或 62）
+        if (const Json* result = req.find("result")) {
+            if (const Json* ib = result->find("id_base")) {
+                m_isBase62 = (ib->as_i64() == 62);
+                emit isBase62Changed();
+            }
+        }
         const Json* samples = req.find("result") ? req.find("result")->find("samples") : nullptr;
         const Json* wav = samples ? samples->find("wav") : nullptr;
         if (wav && wav->is_array()) {

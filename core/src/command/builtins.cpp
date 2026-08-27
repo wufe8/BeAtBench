@@ -262,6 +262,8 @@ public:
         for (const auto& [k, v] : chart.meta) meta.set(k, v);
         out.set("meta", std::move(meta));
         out.set("samples", samples_json(chart));
+        // id 进制（36=默认大小写不敏感；62=大小写敏感 base62）
+        out.set("id_base", static_cast<std::int64_t>(chart.id_base == IdBase::Base62 ? 62 : 36));
 
         const EventStats stats = collect_event_stats(chart);
         Json ev = Json::object();

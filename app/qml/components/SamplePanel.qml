@@ -59,7 +59,7 @@ ColumnLayout {
             id: addWavId
             Layout.fillWidth: true
             Layout.minimumWidth: 40
-            placeholderText: qsTr("id（如 01/ZZ/aa）")
+            placeholderText: sampleModel.isBase62 ? qsTr("id（如 01/ZZ/aa）") : qsTr("id（如 01/ZZ）")
             font.family: Theme.fontMono
             font.pixelSize: Theme.fsSmall
         }
