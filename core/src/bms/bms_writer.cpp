@@ -33,6 +33,12 @@ constexpr std::string_view kMetaOrder[] = {
     "BANNER",   "BACKBMP",    "LNTYPE",    "LNOBJ",
 };
 
+// 分割线注释（iBMSC 风格，增加可读性）
+constexpr std::string_view kSectionHeader = "*---------------------- HEADER FIELD\n";
+constexpr std::string_view kSectionDef = "*---------------------- DEFINITION FIELD\n";
+constexpr std::string_view kSectionData = "*---------------------- MAIN DATA FIELD\n";
+constexpr std::string_view kSectionRaw = "*---------------------- EXPANSION FIELD\n";
+
 inline std::string upper_ascii(std::string_view s) {
     std::string out(s);
     for (auto& c : out) {
@@ -99,6 +105,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     out.reserve(4096);
 
     // ---- 1. 头部字段 ----
+    out.append(kSectionHeader);
     {
         // #BASE（id 进制扩展，如 #BASE 62）：须在头部最前（LR2/beatoraja 惯例）
         if (chart.id_base == IdBase::Base62) {
@@ -136,7 +143,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         }
     }
 
-    // ---- 2. 定义表（id 升序，四类分组；BPM/STOP 组含事件派生出的补充定义） ----
+    // ---- 2. 定义表（iBMSC 顺序：WAV → BMP → BPM → STOP） ----
+    out.append(kSectionDef);
     // BPM/STOP 事件写回采用 #BPMxx/#STOPxx 定宽引用（2 字符槽位）：直接数值是变长的，
     // 多事件无法放入同一行定宽槽位（Doppelganger 等谱面即此惯例）。
     // 复用现有定义（值相等），找不到则派生新定义；id 0（"00"=空槽）不可用作引用。
@@ -291,9 +299,10 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             append_line(out, std::string(tag) + id36, value);
         }
     };
+    // iBMSC 顺序：WAV → BMP → BPM → STOP
     emit_group(SampleKind::Wav, "WAV");
-    emit_group(SampleKind::Bpm, "BPM");
     emit_group(SampleKind::Bmp, "BMP");
+    emit_group(SampleKind::Bpm, "BPM");
     emit_group(SampleKind::Stop, "STOP");
 
     // ---- 3. 事件 → 数据行（通道聚合 + 槽位最小化） ----
@@ -445,7 +454,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     // 普通 note 撞位）→ 分裂为多行输出（BMS 允许同通道多行，播放器按行序解析）。
     // 2026-09 用户反馈（iBMSC 惯例）：**不同小节之间插入空行**（数据区手动编辑友好）。
     if (!rows.empty()) {
-        ensure_block_sep(out);
+        out.append(kSectionData);
         bool have_last_measure = false;
         std::uint32_t last_measure = 0;
         for (const auto& [key, cells] : rows) {
@@ -528,7 +537,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         if (is_encoding_decl) {
             if (opts.encoding == BmsEncoding::Utf8) {
                 if (!raw_started) {
-                    ensure_block_sep(out);
+                    out.append(kSectionRaw);
                     raw_started = true;
                 }
                 out += "#ENCODING UTF-8\n";
@@ -536,7 +545,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             continue;  // SJIS 写回不输出编码声明（传统无声明）
         }
         if (!raw_started) {
-            ensure_block_sep(out);
+            out.append(kSectionRaw);
             raw_started = true;
         }
         out += line;

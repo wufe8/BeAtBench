@@ -142,10 +142,15 @@ ColumnLayout {
         const arr = []
         for (const k in r.result.meta)
             arr.push({ key: k, value: r.result.meta[k] || "", orig: r.result.meta[k] || "" })
-        // LNTYPE / LNOBJ 恒显示（谱面缺省时注入默认值，便于用户定义 LNTYPE=2 + LNOBJ）。
-        // 注入项 orig=value（不是脏），仅当用户改动时才写入（meta.edit 空串=删除字段）。
-        if (!arr.some(f => f.key === "LNTYPE")) arr.push({ key: "LNTYPE", value: "1", orig: "1" })
-        if (!arr.some(f => f.key === "LNOBJ")) arr.push({ key: "LNOBJ", value: "", orig: "" })
+        // 确保所有主要字段都存在（未定义时注入空值，便于用户编辑新谱面）
+        const essentialKeys = ["TITLE", "SUBTITLE", "ARTIST", "GENRE", "BPM",
+            "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY", "LNTYPE", "LNOBJ"]
+        for (const k of essentialKeys) {
+            if (!arr.some(f => f.key === k)) {
+                const defVal = (k === "LNTYPE") ? "1" : ""  // LNTYPE 默认 1
+                arr.push({ key: k, value: defVal, orig: defVal })
+            }
+        }
         arr.sort(root.sortMeta)
         root.fields = arr
         const rr = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "meta.raw", args: {} })))

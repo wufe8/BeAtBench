@@ -1820,8 +1820,13 @@ public:
         Json out = Json::object();
         Json fields = Json::object();
         for (const auto& [k, v] : chart.meta) fields.set(k, v);
+        // 确保所有下拉字段都存在（即使 meta 中未定义），供 UI 显示
+        // 这样未定义的字段会显示"（未定义）"选项
+        static const char* comboFields[] = {"PLAYER", "DIFFICULTY", "RANK", "LNTYPE", nullptr};
+        for (const char** f = comboFields; *f; ++f) {
+            if (!fields.find(*f)) fields.set(*f, "");
+        }
         // BASE 字段特殊处理：parser 不入 meta，但 id_base 已结构化存储
-        // 确保 meta.list 返回当前 id_base 值（供 UI 显示/编辑）
         if (!fields.find("BASE")) {
             const std::string baseVal = (chart.id_base == IdBase::Base62) ? "62" : "36";
             fields.set("BASE", baseVal);
