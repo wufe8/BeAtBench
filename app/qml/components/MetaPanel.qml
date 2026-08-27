@@ -35,7 +35,7 @@ ColumnLayout {
     property int dirtyTick: 0
     /// 字段排序（歌曲信息 → 谱面信息；其余次要字段收进折叠组，按名字母序）。
     readonly property var primaryKeys: ["TITLE", "SUBTITLE", "ARTIST", "GENRE",
-        "BPM", "LNTYPE", "LNOBJ", "BASE", "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
+        "BPM", "LNTYPE", "LNOBJ", "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
     property bool expandSecondary: false
     property bool expandRaw: false
     readonly property var primaryFields: root.fields.filter(f => root.isPrimary(f.key))
@@ -86,14 +86,17 @@ ColumnLayout {
         }
         return null
     }
-    /// 有下拉选项的字段（PLAYER/DIFFICULTY/RANK）。返回 [{label,value}]；
+    /// 有下拉选项的字段（PLAYER/DIFFICULTY/RANK/BASE/LNTYPE）。返回 [{label,value}]；
+    /// 首项为空白选项（value=原值），表示不修改/保持现状；
     /// 若当前值不在基础选项里，追加为一项（保证 reload 后非标准值也能显示原始值）。
     function comboOptions(key, val) {
         let arr = root._comboBase(key)
         if (!arr) return null
+        // 首项：空白选项（保持现状，value = 原值）
         const v = String(val || "")
+        arr = [{ label: qsTr("（保持现状）"), value: v }].concat(arr)
         if (v !== "") {
-            const has = arr.some(function (it) { return it.value === v })
+            const has = arr.some(function (it) { return it.value === v && it !== arr[0] })
             if (!has) arr = arr.concat([{ label: v, value: v }])
         }
         return arr
