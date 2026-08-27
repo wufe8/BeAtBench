@@ -761,6 +761,43 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                     break;
                 }
             }
+            // 命中 BPM/STOP meta 事件 → 追加类型 + 值 + 通道信息
+            if (!text.contains("#")) {
+                // BPM 元事件轨
+                for (const auto& ev : chart.bpm_events) {
+                    if (static_cast<int>(ev.measure) < measure - 1 ||
+                        static_cast<int>(ev.measure) > measure + 1)
+                        continue;
+                    const qreal y = yOf(ev.measure + posDouble(ev.pos));
+                    const QRectF hit(0, y - noteH, m_metaTrackWidth, noteH * 2);
+                    if (hit.contains(pos)) {
+                        // ch08 = #BPMxx 引用通道；ch03 = 十六进制内联值
+                        const QString ch = ev.value.ch08 ? "ch08" : "ch03";
+                        const QString refText = ev.value.ref_id
+                            ? QStringLiteral(" #BPM%1").arg(
+                                  QString::number(*ev.value.ref_id, 36).toUpper().rightJustified(2, '0'))
+                            : "";
+                        text += QStringLiteral(" · BPM %1%2 [%3]").arg(ev.value.value).arg(refText).arg(ch);
+                        break;
+                    }
+                }
+                // STOP 元事件轨
+                for (const auto& ev : chart.stop_events) {
+                    if (static_cast<int>(ev.measure) < measure - 1 ||
+                        static_cast<int>(ev.measure) > measure + 1)
+                        continue;
+                    const qreal y = yOf(ev.measure + posDouble(ev.pos));
+                    const QRectF hit(0, y - noteH, m_metaTrackWidth, noteH * 2);
+                    if (hit.contains(pos)) {
+                        const QString refText = ev.value.ref_id
+                            ? QStringLiteral(" #STOP%1").arg(
+                                  QString::number(*ev.value.ref_id, 36).toUpper().rightJustified(2, '0'))
+                            : "";
+                        text += QStringLiteral(" · STOP %1%2 [ch09]").arg(ev.value.count).arg(refText);
+                        break;
+                    }
+                }
+            }
         }
     }
     if (text != m_hoverText || measure != m_hoverMeasure || m_hoverY != pos.y()) {
