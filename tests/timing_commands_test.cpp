@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
@@ -269,4 +270,69 @@ TEST(TimingCommands, InsertKeepsOrder) {
     EXPECT_EQ(evs[0].pos, Rational(0, 1));
     EXPECT_EQ(evs[1].pos, Rational(1, 4));
     EXPECT_EQ(evs[2].pos, Rational(1, 2));
+}
+
+// —— base62 小写字母 id 测试：验证 ab 和 AB 是不同的 id ——
+
+TEST(TimingCommands, Base62LowerCaseRef) {
+    EditorSession s;
+    auto c = make_chart();
+    c.id_base = IdBase::Base62;  // 启用 base62 模式
+    s.load(std::move(c));
+
+    // 用小写 id "ab" 绑定 BPM 事件（新增事件）
+    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
+        TimingKind::Bpm, 0, Rational(0, 1), 180.0,
+        bms::c62_to_u32("ab", 2))));
+    ASSERT_EQ(s.chart().bpm_events.size(), 3u);
+    ASSERT_TRUE(s.chart().bpm_events[0].value.ref_id.has_value());
+    const std::uint32_t ab_id = bms::c62_to_u32("ab", 2);
+    const std::uint32_t AB_id = bms::c62_to_u32("AB", 2);
+    EXPECT_EQ(*s.chart().bpm_events[0].value.ref_id, ab_id);
+    EXPECT_NE(ab_id, AB_id);  // ab 和 AB 是不同的 id
+
+    // 用大写 id "AB" 绑定另一个事件
+    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
+        TimingKind::Bpm, 0, Rational(1, 4), 200.0, AB_id)));
+    ASSERT_TRUE(s.chart().bpm_events[1].value.ref_id.has_value());
+    EXPECT_EQ(*s.chart().bpm_events[1].value.ref_id, AB_id);
+
+    // 两个事件的 ref 应该不同
+    EXPECT_NE(*s.chart().bpm_events[0].value.ref_id,
+              *s.chart().bpm_events[1].value.ref_id);
+
+    // 替换小写 id 事件的值（同位替换）
+    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
+        TimingKind::Bpm, 0, Rational(0, 1), 190.0, ab_id)));
+    // 替换后 ref 应保持，且定义表应更新
+    EXPECT_EQ(*s.chart().bpm_events[0].value.ref_id, ab_id);
+    const auto key_ab = std::make_pair(SampleKind::Bpm, ab_id);
+    ASSERT_TRUE(s.chart().samples.count(key_ab));
+    EXPECT_EQ(s.chart().samples.at(key_ab).value, "190");
+}
+
+// —— base62 小写 id sample.setFile 测试（直接操作 Chart）——
+
+TEST(TimingCommands, Base62SampleSetFile) {
+    EditorSession s;
+    auto c = make_chart();
+    c.id_base = IdBase::Base62;
+    s.load(std::move(c));
+
+    const std::uint32_t ab_id = bms::c62_to_u32("ab", 2);
+    const std::uint32_t AB_id = bms::c62_to_u32("AB", 2);
+
+    // 直接设置 samples（模拟 sample.setFile 命令的效果）
+    SampleDef def_ab;
+    def_ab.file = "test.flac";
+    s.chart_mut().samples[{SampleKind::Wav, ab_id}] = def_ab;
+
+    SampleDef def_AB;
+    def_AB.file = "OTHER.WAV";
+    s.chart_mut().samples[{SampleKind::Wav, AB_id}] = def_AB;
+
+    // 验证两个 id 是独立的
+    EXPECT_NE(ab_id, AB_id);
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Wav, ab_id}).file, "test.flac");
+    EXPECT_EQ(s.chart().samples.at({SampleKind::Wav, AB_id}).file, "OTHER.WAV");
 }

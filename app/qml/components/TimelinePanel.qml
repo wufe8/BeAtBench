@@ -479,13 +479,26 @@ ColumnLayout {
         onAccepted: {
             const valueText = valueField.text.trim()
             const ref = refField.text.trim()
-            // 值字段为空 = 维持原值（只改 id 绑定）
-            const value = valueText === ""
-                          ? baseValue
-                          : (dialog.kind === "bpm"
-                             ? parseFloat(valueText)
-                             : stopFromDisplay(valueText))
-            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, baseValue, ref); return }
+            let value = baseValue
+            // 值字段为空 = 根据新 id 决定值
+            if (valueText === "") {
+                if (ref !== "" && ref !== baseRef) {
+                    // 改绑到新 id：查找新 id 的原值，保持不变
+                    const newDef = root.defs.find(d => d.id === ref)
+                    if (newDef) {
+                        // 新 id 已有定义：保持其原值
+                        value = root.kind === "bpm" ? parseFloat(newDef.value)
+                                                    : root.stopFromDisplay(newDef.value)
+                    }
+                    // 新 id 无定义：保持原值（baseValue）
+                }
+                // ref 未变或为空：保持原值
+            } else {
+                // 用户填了值：用新值
+                value = root.kind === "bpm" ? parseFloat(valueText)
+                                            : root.stopFromDisplay(valueText)
+            }
+            if (!isFinite(value)) value = baseValue
             root.timingEditRequested(dialog.kind, measureSpin.value,
                                      numSpin.value, denSpin.value, value, ref)
         }
