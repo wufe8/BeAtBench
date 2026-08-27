@@ -1432,6 +1432,14 @@ void MetaEditCommand::apply(Chart& chart) {
     } else {
         chart.meta[m_key] = m_value;
     }
+    // 特殊处理 #BASE 字段：同步更新 chart.id_base
+    if (m_key == "BASE") {
+        if (m_value == "62") {
+            chart.id_base = IdBase::Base62;
+        } else {
+            chart.id_base = IdBase::Base36;  // 默认或其它值都回退到 Base36
+        }
+    }
 }
 
 void MetaEditCommand::invert(Chart& chart) {
@@ -1440,6 +1448,15 @@ void MetaEditCommand::invert(Chart& chart) {
         chart.meta[m_key] = m_old_value;  // 恢复旧值
     } else {
         chart.meta.erase(m_key);  // 原不存在 → 移除
+    }
+    // 特殊处理 #BASE 字段：恢复 chart.id_base
+    if (m_key == "BASE") {
+        const auto it = chart.meta.find("BASE");
+        if (it != chart.meta.end() && it->second == "62") {
+            chart.id_base = IdBase::Base62;
+        } else {
+            chart.id_base = IdBase::Base36;
+        }
     }
     m_changed = false;
 }
