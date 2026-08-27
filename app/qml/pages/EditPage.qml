@@ -62,6 +62,8 @@ Item {
     signal samplePicked(string id, string file)
     /// 采样槽位文件名编辑请求（双击采样行）→ Main 走 sample.setFile 并刷新面板
     signal sampleFileRequested(string id, string file)
+    /// 添加 #WAV 定义（id + 文件名）→ Main 走 sample.addWav
+    signal sampleAddRequested(string id, string file)
     /// note 工具点击（hitTest 结果）→ Main 走 note.put
     signal hitPlaceRequested(var hit)
     /// 框选完成 → Main 存 selection + 复制到剪贴板
@@ -240,7 +242,8 @@ Item {
                         onModeEditRequested: (key, value) => root.modeEditRequested(key, value)
                     }
                     SamplePanel { id: samplePanel; onSamplePicked: (id, file) => root.samplePicked(id, file);
-                                  onSampleFileRequested: (id, file) => root.sampleFileRequested(id, file) }
+                                  onSampleFileRequested: (id, file) => root.sampleFileRequested(id, file)
+                                  onSampleAddRequested: (id, file) => root.sampleAddRequested(id, file) }
                     LintPanel {
                         onIssuePicked: (id) => {
                             // lint → 采样 双向往返：切到采样标签并定位该行

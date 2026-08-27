@@ -164,7 +164,7 @@ ColumnLayout {
                     onDoubleClicked: dialog.openForEdit(
                                          root.kind, row.modelData.measure,
                                          row.modelData.pos.num, row.modelData.pos.den,
-                                         row.modelData.value)
+                                         row.modelData.value, row.modelData.ref || "")
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: (mouse) => {
                         if (mouse.button === Qt.RightButton)
@@ -366,6 +366,7 @@ ColumnLayout {
         property int baseNum: 0
         property int baseDen: 1
         property double baseValue: 0
+        property string baseRef: ""  // 当前绑定的 #BPMxx/#STOPxx id
 
         function openForAdd(k) {
             kind = k
@@ -374,18 +375,19 @@ ColumnLayout {
             baseNum = 0
             baseDen = 1
             baseValue = (k === "bpm") ? 130 : stopFromDisplay("96")  // STOP 默认 96
+            baseRef = ""
             applyFields()
             open()
         }
-        /// 事件编辑：只改「小节的这个位置放多少值」——值自动派生/复用 #BPMxx（方案 B），
-        /// id 绑定在下方「#BPM/#STOP 定义」区管理（创建 id + 绑定值 与 时间轴使用 分离）。
-        function openForEdit(k, measure, num, den, value) {
+        /// 事件编辑：改「小节的这个位置放多少值」+ 可选修改绑定的 id。
+        function openForEdit(k, measure, num, den, value, ref) {
             kind = k
             editing = true
             baseMeasure = measure
             baseNum = num
             baseDen = den
             baseValue = value
+            baseRef = ref || ""
             applyFields()
             open()
         }
@@ -395,6 +397,7 @@ ColumnLayout {
             denSpin.value = Math.max(1, baseDen)
             valueField.text = dialog.kind === "bpm" ? String(baseValue)
                                                     : stopToDisplay(baseValue)
+            refField.text = baseRef
         }
 
         onOpened: valueField.forceActiveFocus()
@@ -435,16 +438,37 @@ ColumnLayout {
                     Layout.maximumWidth: 150  // 限制「值(BPM)」列长度（2026-09 用户）
                     placeholderText: dialog.kind === "bpm" ? qsTr("130") : qsTr("96")
                     validator: DoubleValidator { bottom: 0; top: 999999 }
+                    onAccepted: refField.forceActiveFocus()
+                    escapeHandler: function() { dialog.reject() }
+                }
+                Item { Layout.fillWidth: true }
+            }
+            // 绑定的 #BPMxx/#STOPxx id（可手动修改）
+            RowLayout {
+                spacing: 4
+                Layout.fillWidth: true
+                Label {
+                    text: "#" + (dialog.kind === "bpm" ? "BPM" : "STOP") + " id"
+                    color: Theme.textMuted; font.pixelSize: Theme.fsTiny
+                }
+                BbTextField {
+                    id: refField
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 40
+                    placeholderText: qsTr("留空=自动")
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
                     onAccepted: dialog.accept()
-                    // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
                     escapeHandler: function() { dialog.reject() }
                 }
                 Item { Layout.fillWidth: true }
             }
             Label {
                 text: dialog.kind === "bpm"
-                      ? qsTr("值自动派生 #BPMxx")
-                      : (stopUnit === 0 ? qsTr("单位 = 1/192 全音符") : qsTr("毫秒（按当前 BPM）"))
+                      ? (refField.text.trim() === "" ? qsTr("值自动派生 #BPMxx") : qsTr("绑定 #%1xx").arg("BPM"))
+                      : (refField.text.trim() === ""
+                         ? (stopUnit === 0 ? qsTr("值自动派生 #STOPxx") : qsTr("值自动派生 #STOPxx"))
+                         : qsTr("绑定 #%1xx").arg("STOP"))
                 color: Theme.textFaint
                 font.pixelSize: Theme.fsTiny
             }
@@ -453,9 +477,10 @@ ColumnLayout {
             const value = dialog.kind === "bpm"
                           ? parseFloat(valueField.text)
                           : stopFromDisplay(valueField.text)
-            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0, ""); return }
+            const ref = refField.text.trim()
+            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0, ref); return }
             root.timingEditRequested(dialog.kind, measureSpin.value,
-                                     numSpin.value, denSpin.value, value, "")
+                                     numSpin.value, denSpin.value, value, ref)
         }
     }
 

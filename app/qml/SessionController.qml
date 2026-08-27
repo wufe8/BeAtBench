@@ -798,6 +798,15 @@ QtObject {
             setStatus(qsTr("#BMP%1 → %2").arg(id).arg(file || "(未设文件)"))
         }
     }
+    /// 添加 #WAV 定义（sample.setFile kind=wav；支持 base62 id）。
+    function addWavSample(id, file) {
+        if (id === "") { setStatus(qsTr("#WAV id 不能为空")); return }
+        const r = sessionCmd("sample.setFile", { id: id, file: file, kind: "wav" })
+        if (r) {
+            refreshSamples()
+            setStatus(qsTr("#WAV%1 → %2").arg(id).arg(file || "(未设文件)"))
+        }
+    }
     /// 设置 #BMP 文件（sample.setFile kind=bmp）。
     function bmpSetFile(id, file) {
         if (id === "") { setStatus(qsTr("#BMP id 不能为空")); return }

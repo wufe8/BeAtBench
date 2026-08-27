@@ -542,6 +542,7 @@ ApplicationWindow {
                     setStatus(qsTr("当前采样：#WAV%1 %2").arg(id, file))
                 }
                 onSampleFileRequested: (id, file) => setSampleFile(id, file)
+                onSampleAddRequested: (id, file) => addWavSample(id, file)
                 onHitPlaceRequested: (hit) => placeNote(hit)
                 onSelectionFinished: (refs) => onSelectionMade(refs)
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
@@ -849,6 +850,7 @@ ApplicationWindow {
     function bmpDelete(id) { return session.bmpDelete(id) }
     function bmpRename(fromId, toId) { return session.bmpRename(fromId, toId) }
     function bmpSetFile(id, file) { return session.bmpSetFile(id, file) }
+    function addWavSample(id, file) { return session.addWavSample(id, file) }
     function cancelPendingLn() { return session.cancelPendingLn() }
     function copySelection() { return session.copySelection() }
     function deleteBga(layer, measure, num, den) { return session.deleteBga(layer, measure, num, den) }
