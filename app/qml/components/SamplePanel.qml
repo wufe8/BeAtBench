@@ -51,7 +51,43 @@ ColumnLayout {
 
     spacing: 6
 
-    // ---- 搜索确认框 + 添加按钮 + 排序切换 ----
+    // ---- 添加 #WAV 定义（id + 文件名 + 添加按钮，类似 BPM/STOP 定义区） ----
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 4
+        BbTextField {
+            id: addWavId
+            Layout.fillWidth: true
+            Layout.minimumWidth: 40
+            placeholderText: qsTr("id（如 01/ZZ/aa）")
+            font.family: Theme.fontMono
+            font.pixelSize: Theme.fsSmall
+        }
+        BbTextField {
+            id: addWavFile
+            Layout.fillWidth: true
+            Layout.minimumWidth: 40
+            placeholderText: qsTr("文件名")
+            font.family: Theme.fontMono
+            font.pixelSize: Theme.fsSmall
+        }
+        BbToolButton {
+            text: qsTr("添加")
+            Layout.preferredWidth: 40
+            Layout.preferredHeight: 24
+            onClicked: {
+                const id = addWavId.text.trim()
+                const file = addWavFile.text.trim()
+                if (id === "") { addWavId.forceActiveFocus(); return }
+                root.sampleAddRequested(id, file)
+                addWavId.text = ""; addWavFile.text = ""
+            }
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("添加/覆盖一个 #WAV 定义（支持 base62：00-99, AA-ZZ, aa-zz）")
+        }
+    }
+
+    // ---- 搜索确认框 + 排序切换 ----
     RowLayout {
         Layout.fillWidth: true
         spacing: 6
@@ -82,15 +118,6 @@ ColumnLayout {
                     root.samplePicked(id, "")
                 }
             }
-        }
-        // 添加 #WAV 定义按钮（支持 base62 id）
-        BbToolButton {
-            text: "+"
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
-            onClicked: addWavDialog.open()
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("添加 #WAV 定义（支持 base62 id：00-ZZ + a-z）")
         }
         // 排序模式（智能 = 引用数→首现小节→id 稳定序，MRU 只归「最近」）
         RowLayout {
@@ -323,55 +350,5 @@ ColumnLayout {
         text: qsTr("放置的 note / 部件将使用当前采样（M3）")
         color: Theme.textFaint
         font.pixelSize: Theme.fsTiny
-    }
-
-    // ---- 添加 #WAV 定义对话框 ----
-    Dialog {
-        id: addWavDialog
-        title: qsTr("添加 #WAV 定义")
-        modal: true
-        anchors.centerIn: parent
-        width: 300
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        onOpened: { addWavId.text = ""; addWavFile.text = ""; addWavId.forceActiveFocus() }
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 8
-            Label { text: qsTr("添加新的采样槽位（支持 base62 id）")
-                    color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-            RowLayout {
-                spacing: 6
-                Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny
-                        Layout.preferredWidth: 50 }
-                BbTextField {
-                    id: addWavId
-                    Layout.fillWidth: true
-                    font.family: Theme.fontMono
-                    placeholderText: qsTr("如 01, ZZ, aa, zz")
-                    onAccepted: addWavFile.forceActiveFocus()
-                }
-            }
-            RowLayout {
-                spacing: 6
-                Label { text: qsTr("文件名"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny
-                        Layout.preferredWidth: 50 }
-                BbTextField {
-                    id: addWavFile
-                    Layout.fillWidth: true
-                    font.family: Theme.fontMono
-                    placeholderText: qsTr("如 kick.wav")
-                    onAccepted: addWavDialog.accept()
-                    escapeHandler: function() { addWavDialog.reject() }
-                }
-            }
-            Label { text: qsTr("id 范围：00-99, AA-ZZ, aa-zz（base62，区分大小写）")
-                    color: Theme.textFaint; font.pixelSize: Theme.fsTiny; wrapMode: Text.WordWrap }
-        }
-        onAccepted: {
-            const id = addWavId.text.trim()
-            const file = addWavFile.text.trim()
-            if (id === "") { addWavId.forceActiveFocus(); return }
-            root.sampleAddRequested(id, file)
-        }
     }
 }

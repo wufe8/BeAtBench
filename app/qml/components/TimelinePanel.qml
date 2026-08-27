@@ -395,8 +395,9 @@ ColumnLayout {
             measureSpin.value = baseMeasure
             numSpin.value = baseNum
             denSpin.value = Math.max(1, baseDen)
-            valueField.text = dialog.kind === "bpm" ? String(baseValue)
-                                                    : stopToDisplay(baseValue)
+            // 编辑模式：值字段留空（不填 = 维持原值）；添加模式：填默认值
+            valueField.text = editing ? "" : (dialog.kind === "bpm" ? String(baseValue)
+                                                                    : stopToDisplay(baseValue))
             refField.text = baseRef
         }
 
@@ -436,7 +437,9 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 70   // 覆写隐式宽 → 值输入框不越界
                     Layout.maximumWidth: 150  // 限制「值(BPM)」列长度（2026-09 用户）
-                    placeholderText: dialog.kind === "bpm" ? qsTr("130") : qsTr("96")
+                    placeholderText: dialog.editing
+                                     ? qsTr("不填=维持 %1").arg(dialog.baseValue)
+                                     : (dialog.kind === "bpm" ? qsTr("130") : qsTr("96"))
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: refField.forceActiveFocus()
                     escapeHandler: function() { dialog.reject() }
@@ -474,11 +477,15 @@ ColumnLayout {
             }
         }
         onAccepted: {
-            const value = dialog.kind === "bpm"
-                          ? parseFloat(valueField.text)
-                          : stopFromDisplay(valueField.text)
+            const valueText = valueField.text.trim()
             const ref = refField.text.trim()
-            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, 0, ref); return }
+            // 值字段为空 = 维持原值（只改 id 绑定）
+            const value = valueText === ""
+                          ? baseValue
+                          : (dialog.kind === "bpm"
+                             ? parseFloat(valueText)
+                             : stopFromDisplay(valueText))
+            if (!isFinite(value)) { root.timingEditRequested(dialog.kind, measureSpin.value, numSpin.value, denSpin.value, baseValue, ref); return }
             root.timingEditRequested(dialog.kind, measureSpin.value,
                                      numSpin.value, denSpin.value, value, ref)
         }
