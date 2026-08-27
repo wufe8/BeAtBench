@@ -351,11 +351,12 @@ ColumnLayout {
     Dialog {
         id: dialog
         modal: true
-        // 以本面板（右 Dock 内容区）为视口中心。宽度收窄到面板内（避免超出 dock→「出界」，
-        // 用户报告原 260 宽在 230 dock 内溢出）；anchors.centerIn 让其在面板内居中并随
-        // dock 缩放重算。
-        width: Math.min(root.width - 8, 300)
-        anchors.centerIn: parent
+        // 2026-09 用户：「无论 dock 什么宽度都可以显示」——右对齐到**窗口右缘**
+        //（模态 Popup 的 parent = Overlay = 窗口内容），不再受右 dock 宽度约束；
+        // 宽度封顶 260 避免占满窗口。纵向居中。
+        width: 260
+        x: (parent !== null ? parent.width - width - 12 : 0)
+        y: (parent !== null ? Math.max(8, (parent.height - height) / 2) : 0)
         title: qsTr("时间轴事件")
         standardButtons: Dialog.Ok | Dialog.Cancel
 
@@ -431,12 +432,14 @@ ColumnLayout {
                     id: valueField
                     Layout.fillWidth: true
                     Layout.minimumWidth: 70   // 覆写隐式宽 → 值输入框不越界
+                    Layout.maximumWidth: 150  // 限制「值(BPM)」列长度（2026-09 用户）
                     placeholderText: dialog.kind === "bpm" ? qsTr("130") : qsTr("96")
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: dialog.accept()
                     // 一次 Esc 即关对话框（否则 BbTextField 释放焦点 → 需再按一次才到 Dialog）
                     escapeHandler: function() { dialog.reject() }
                 }
+                Item { Layout.fillWidth: true }
             }
             Label {
                 text: dialog.kind === "bpm"

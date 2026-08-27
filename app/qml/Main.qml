@@ -62,7 +62,7 @@ ApplicationWindow {
     function modeLabel() {
         const m = window.chartMode
         if (m === "sp7k" || m === "") return "SP7K"
-        if (m === "dp") return "DP"
+        if (m === "dp") return "DP7K"
         if (m === "pms") return "PMS"
         if (m === "bms14") return "BMS14"
         return m.toUpperCase()
