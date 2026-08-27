@@ -1816,9 +1816,16 @@ public:
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto& chart = session.chart();
         Json out = Json::object();
         Json fields = Json::object();
-        for (const auto& [k, v] : session.chart().meta) fields.set(k, v);
+        for (const auto& [k, v] : chart.meta) fields.set(k, v);
+        // BASE 字段特殊处理：parser 不入 meta，但 id_base 已结构化存储
+        // 确保 meta.list 返回当前 id_base 值（供 UI 显示/编辑）
+        if (!fields.find("BASE")) {
+            const std::string baseVal = (chart.id_base == IdBase::Base62) ? "62" : "36";
+            fields.set("BASE", baseVal);
+        }
         out.set("meta", std::move(fields));
         return out;
     }

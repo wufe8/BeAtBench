@@ -35,7 +35,7 @@ ColumnLayout {
     property int dirtyTick: 0
     /// 字段排序（歌曲信息 → 谱面信息；其余次要字段收进折叠组，按名字母序）。
     readonly property var primaryKeys: ["TITLE", "SUBTITLE", "ARTIST", "GENRE",
-        "BPM", "LNTYPE", "LNOBJ", "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
+        "BPM", "LNTYPE", "LNOBJ", "BASE", "PLAYER", "PLAYLEVEL", "RANK", "TOTAL", "DIFFICULTY"]
     property bool expandSecondary: false
     property bool expandRaw: false
     readonly property var primaryFields: root.fields.filter(f => root.isPrimary(f.key))
@@ -75,6 +75,13 @@ ColumnLayout {
                 { label: "1 - RDM 通道（默认）", value: "1" },
                 { label: "2 - #LNOBJ 截止符", value: "2" },
                 { label: "0 - 关闭", value: "0" }
+            ]
+        }
+        if (key === "BASE") {
+            // #BASE：id 进制扩展。36=默认（大小写不敏感）；62=大小写敏感 base62。
+            return [
+                { label: "36 - 默认（大小写不敏感）", value: "36" },
+                { label: "62 - Base62（大小写敏感）", value: "62" }
             ]
         }
         return null
