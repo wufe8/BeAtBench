@@ -59,6 +59,23 @@ inline void ensure_block_sep(std::string& out) {
     if (!out.empty()) out.push_back('\n');
 }
 
+// iBMSC 风格分割线注释：**上下各恰好一个空行**（2026-09 用户；对照 _9RG.pms 源格式：
+// 空行 → "*--- FIELD" → 空行，再进内容）。HEADER 在文件首，其上方空行即文件头空行。
+void emit_section_comment(std::string& out, std::string_view line) {
+    // 上方空行：目标 = 输出以「一条空行」结尾（末两字符 \n\n），或文件首的前导空行。
+    if (!out.empty()) {
+        const bool ends_blank = out.size() >= 2 && out.back() == '\n' &&
+                                out[out.size() - 2] == '\n';
+        if (out.back() != '\n') out.push_back('\n');  // 结束当前内容行
+        if (!ends_blank) out.push_back('\n');         // 补一条空行
+    } else {
+        out.push_back('\n');  // 文件首前导空行
+    }
+    out.append(line);
+    out.push_back('\n');  // 分隔线自身行
+    out.push_back('\n');  // 分隔线下方空行
+}
+
 // 数值 → 紧凑文本（整数不带小数点；小数用 17 位有效数字保证 double 往返，
 // 修剪尾 0——真实谱面节拍/BPM 值常有长小数，如 1.30208333333333）
 inline std::string format_num(double v) {
@@ -102,8 +119,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     out.reserve(4096);
 
     // ---- 1. 头部字段 ----
-    out.append(detail::kSectionHeaderLine);
-    out.push_back('\n');
+    emit_section_comment(out, detail::kSectionHeaderLine);
     {
         // #BASE（id 进制扩展，如 #BASE 62）：须在头部最前（LR2/beatoraja 惯例）
         if (chart.id_base == IdBase::Base62) {
@@ -142,8 +158,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     }
 
     // ---- 2. 定义表（iBMSC 顺序：WAV → BMP → BPM → STOP） ----
-    out.append(detail::kSectionDefLine);
-    out.push_back('\n');
+    emit_section_comment(out, detail::kSectionDefLine);
     // BPM/STOP 事件写回采用 #BPMxx/#STOPxx 定宽引用（2 字符槽位）：直接数值是变长的，
     // 多事件无法放入同一行定宽槽位（Doppelganger 等谱面即此惯例）。
     // 复用现有定义（值相等），找不到则派生新定义；id 0（"00"=空槽）不可用作引用。
@@ -458,8 +473,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     // 普通 note 撞位）→ 分裂为多行输出（BMS 允许同通道多行，播放器按行序解析）。
     // 2026-09 用户反馈（iBMSC 惯例）：**不同小节之间插入空行**（数据区手动编辑友好）。
     if (!rows.empty()) {
-        out.append(detail::kSectionDataLine);
-        out.push_back('\n');
+        emit_section_comment(out, detail::kSectionDataLine);
         bool have_last_measure = false;
         std::uint32_t last_measure = 0;
         for (const auto& [key, cells] : rows) {
@@ -542,8 +556,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         if (is_encoding_decl) {
             if (opts.encoding == BmsEncoding::Utf8) {
                 if (!raw_started) {
-                    out.append(detail::kSectionRawLine);
-                    out.push_back('\n');
+                    emit_section_comment(out, detail::kSectionRawLine);
                     raw_started = true;
                 }
                 out += "#ENCODING UTF-8\n";
@@ -551,8 +564,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             continue;  // SJIS 写回不输出编码声明（传统无声明）
         }
         if (!raw_started) {
-            out.append(detail::kSectionRawLine);
-            out.push_back('\n');
+            emit_section_comment(out, detail::kSectionRawLine);
             raw_started = true;
         }
         out += line;

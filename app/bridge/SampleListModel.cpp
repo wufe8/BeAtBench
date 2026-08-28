@@ -12,6 +12,8 @@
 #include "beatbench/core/json/Json.hpp"
 
 #include <algorithm>
+#include <map>
+#include <utility>
 
 namespace beatbench::app {
 
@@ -100,6 +102,12 @@ QHash<int, QByteArray> SampleListModel::roleNames() const {
 // ---- 数据装载（全量条目进 m_all；此后只重建 m_rows 视图） ----
 
 void SampleListModel::loadFromInfo(const QString& infoJson) {
+    // 2026-09 用户反馈：sample.setFile（采样改名）后 lint 灯全消失——`refreshSamples` 走
+    // `loadFromInfo` 重建 m_all，把 `missing`/`extMismatch` 重置为 false（只有 loadFromCheck
+    // 会置真）。此处在重建前快照旧缺失/扩展名校验状态，按 id 回填回新数据（改名只改 file，
+    // 不改变该槽位「文件缺失/扩展名不符」事实；文件系统实况在保存后的 check 才刷新）。
+    std::map<QString, std::pair<bool, bool>> prev_flags;  // id → (missing, extMismatch)
+    for (const auto& e : m_all) prev_flags[e.id] = {e.missing, e.extMismatch};
     m_all.clear();
     try {
         const Json req = Json::parse(infoJson.toStdString());
@@ -125,6 +133,11 @@ void SampleListModel::loadFromInfo(const QString& infoJson) {
                 if (const Json* v = item.find("usage"))
                     e.usage = usage_text(*v, &e.key1, &e.scratch1, &e.pedal1,
                                          &e.key2, &e.scratch2, &e.pedal2, &e.bgm);
+                // 回填旧缺失/扩展名校验标志（改名/编辑后不丢 lint 灯；见上）
+                if (const auto it = prev_flags.find(e.id); it != prev_flags.end()) {
+                    e.missing = it->second.first;
+                    e.extMismatch = it->second.second;
+                }
                 if (!e.id.isEmpty()) m_all.push_back(std::move(e));
             }
         }

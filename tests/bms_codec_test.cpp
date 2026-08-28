@@ -710,12 +710,12 @@ TEST(BmsWrite, SjisOutput) {
     BmsWriteOptions opts;
     opts.encoding = BmsEncoding::ShiftJis;
     const auto out = write_bms(c, opts);
-    // 2026-09 分割线注释（iBMSC 风格）：HEADER + DEFINITION 两条
-    std::string expect = "*---------------------- HEADER FIELD\n#TITLE ";
+    // 2026-09 分割线注释（iBMSC 风格）：HEADER + DEFINITION，各上下一个空行
+    std::string expect = "\n*---------------------- HEADER FIELD\n\n#TITLE ";
     expect += static_cast<char>(0x82);
     expect += static_cast<char>(0xB0);
-    expect += '\n';
-    expect += "*---------------------- DEFINITION FIELD\n";
+    expect += "\n\n";
+    expect += "*---------------------- DEFINITION FIELD\n\n";
     EXPECT_EQ(out, expect);
 }
 
@@ -723,24 +723,24 @@ TEST(BmsWrite, EmptyValueOmitsSpace) {
     Chart c;
     c.meta["TITLE"] = "";
     EXPECT_EQ(write_bms(c),
-              "*---------------------- HEADER FIELD\n#TITLE\n"
-              "*---------------------- DEFINITION FIELD\n");
+              "\n*---------------------- HEADER FIELD\n\n#TITLE\n\n"
+              "*---------------------- DEFINITION FIELD\n\n");
 }
 
 TEST(BmsWrite, EncodingDeclNormalized) {
     Chart c;
     c.raw_lines = {"#ENCODING Shift_JIS", "#00111:01"};
     EXPECT_EQ(write_bms(c),
-              "*---------------------- HEADER FIELD\n"
-              "*---------------------- DEFINITION FIELD\n"
-              "*---------------------- EXPANSION FIELD\n"
+              "\n*---------------------- HEADER FIELD\n\n"
+              "*---------------------- DEFINITION FIELD\n\n"
+              "*---------------------- EXPANSION FIELD\n\n"
               "#ENCODING UTF-8\n#00111:01\n");  // 默认 UTF-8 → 声明更新
     BmsWriteOptions sjis;
     sjis.encoding = BmsEncoding::ShiftJis;
     EXPECT_EQ(write_bms(c, sjis),
-              "*---------------------- HEADER FIELD\n"
-              "*---------------------- DEFINITION FIELD\n"
-              "*---------------------- EXPANSION FIELD\n"
+              "\n*---------------------- HEADER FIELD\n\n"
+              "*---------------------- DEFINITION FIELD\n\n"
+              "*---------------------- EXPANSION FIELD\n\n"
               "#00111:01\n");  // SJIS → 声明移除
 }
 
