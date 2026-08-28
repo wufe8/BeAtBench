@@ -259,11 +259,14 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("工作区")
-            MenuItem { text: uiActions.label("view.page.edit"); checkable: true; checked: currentPage === 0
+            MenuItem { text: uiActions.label("view.page.edit"); checkable: true
+                       checked: window.uiStateTick >= 0 && uiActions.checked("view.page.edit")
                        onTriggered: uiActions.invoke("view.page.edit") }
-            MenuItem { text: uiActions.label("view.page.slice"); checkable: true; checked: currentPage === 1
+            MenuItem { text: uiActions.label("view.page.slice"); checkable: true
+                       checked: window.uiStateTick >= 0 && uiActions.checked("view.page.slice")
                        onTriggered: uiActions.invoke("view.page.slice") }
-            MenuItem { text: uiActions.label("view.page.test"); checkable: true; checked: currentPage === 2
+            MenuItem { text: uiActions.label("view.page.test"); checkable: true
+                       checked: window.uiStateTick >= 0 && uiActions.checked("view.page.test")
                        onTriggered: uiActions.invoke("view.page.test") }
         }
         Menu {
@@ -356,7 +359,7 @@ ApplicationWindow {
                 BbCheckBox {
                     id: extrasCheck
                     text: uiActions.label("view.toggleExtras")
-                    checked: window.showExtras
+                    checked: window.uiStateTick >= 0 && uiActions.checked("view.toggleExtras")
                     onToggled: uiActions.invoke("view.toggleExtras")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("在游玩轨与背景轨之间显示 BGA 图层通道（BGA/LAYER/POOR/LAYER2 = 04/06/07/0A）")
@@ -443,7 +446,7 @@ ApplicationWindow {
                 BbCheckBox {
                     id: channelIdCheck
                     text: uiActions.label("view.toggleChannelIds")
-                    checked: window.showChannelIds
+                    checked: window.uiStateTick >= 0 && uiActions.checked("view.toggleChannelIds")
                     onToggled: uiActions.invoke("view.toggleChannelIds")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("轨道列头显示 BMS 通道号（Ctrl 按住临时显示；Alt 会被菜单栏拦截）")
@@ -933,11 +936,28 @@ ApplicationWindow {
         setActionEnabled("tool.mine", currentPage === 0)
         setActionEnabled("view.toggleGrid", chartMeta !== null)
     }
-    onChartMetaChanged: updateActionStates()
-    onSelectionRefsChanged: updateActionStates()
-    onClipboardLinesChanged: updateActionStates()
-    onCurrentPageChanged: updateActionStates()
-    onMetaSelectionChanged: updateActionStates()
+    /// 勾选态同步（doc/09 §12 打通）：QML 会话状态 → 注册表 `setChecked`（checkable 动作）。
+    /// 这样 `uiActions.checked(id)` 成为查询/皮肤读取的单一数据源；菜单/工具条/复选框的
+    /// `checked:` 都改绑它（见上）。QML 状态是真相源（handler 翻转它），invoke 后经
+    /// on*Changed → 本函数回填注册表 → stateChanged → UI 刷新。皮肤如需 programmatic 置位，
+    /// 走 `setChecked(id,v)` + `invoke(id)`（invoke 会执行 QML handler 翻转实际状态）。
+    function updateCheckedStates() {
+        if (!uiActions.exists("view.toggleGrid")) return  // 注册未完成，跳过（load 期兜底由 main.cpp 补调）
+        uiActions.setChecked("view.toggleGrid", window.showGrid)
+        uiActions.setChecked("view.toggleChannelIds", window.showChannelIds)
+        uiActions.setChecked("view.toggleExtras", window.showExtras)
+        uiActions.setChecked("view.page.edit", currentPage === 0)
+        uiActions.setChecked("view.page.slice", currentPage === 1)
+        uiActions.setChecked("view.page.test", currentPage === 2)
+    }
+    onChartMetaChanged: { updateActionStates(); updateCheckedStates() }
+    onSelectionRefsChanged: { updateActionStates(); updateCheckedStates() }
+    onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
+    onCurrentPageChanged: { updateActionStates(); updateCheckedStates() }
+    onMetaSelectionChanged: { updateActionStates(); updateCheckedStates() }
+    onShowGridChanged: updateCheckedStates()
+    onShowChannelIdsChanged: updateCheckedStates()
+    onShowExtrasChanged: updateCheckedStates()
     // 注意：不挂 Component.onCompleted——onCompleted 在 loadFromModule 期间执行，
     // 此时 C++ 注册尚未完成（setEnabled 会 unknown）；注册后由 main.cpp 补调 updateActionStates。
     // 菜单/工具条 enabled 绑定依赖的「重算触发器」：QML 绑定不会因函数返回值自动重算，

@@ -209,10 +209,12 @@ int main(int argc, char** argv) {
 
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
 
-    // 注册已完成、QML 根已加载：补一次 enabled 状态同步（QML 的 Component.onCompleted 在
-    // loadFromModule 期间已执行，此时注册未完成 → 由这里兜底 Main.qml::updateActionStates）。
+    // 注册已完成、QML 根已加载：补一次 enabled/checked 状态同步（QML 的 Component.onCompleted
+    // 在 loadFromModule 期间已执行，此时注册未完成 → 由这里兜底 Main.qml 的 updateActionStates
+    // + updateCheckedStates）。
     if (QObject* root = engine.rootObjects().value(0)) {
         QMetaObject::invokeMethod(root, "updateActionStates", Qt::DirectConnection);
+        QMetaObject::invokeMethod(root, "updateCheckedStates", Qt::DirectConnection);
     }
 
     const QStringList args = app.arguments();
