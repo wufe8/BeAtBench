@@ -73,6 +73,33 @@ TEST(UiActionRegistry, DuplicateIdGuardOverwrites) {
     EXPECT_EQ(calls, 1);  // 生效的是新 handler
 }
 
+TEST(UiActionRegistry, SeparatorEnumeration) {
+    // 分隔线建模（doc/09 §7 验收 2 前置）：addSeparator + isSeparator + idsByCategory 含分隔线、
+    // 且分隔线不可触发/不可启用（菜单 Repeater 据此渲染 MenuSeparator）。
+    UiActionRegistry r;
+    r.add(make_def(QStringLiteral("file.open")));
+    r.add(make_def(QStringLiteral("file.save")));
+    r.add(make_def(QStringLiteral("file.saveAs")));
+    r.addSeparator(QStringLiteral("file"));      // 位于 saveAs 与 exit 之间
+    r.add(make_def(QStringLiteral("file.exit")));
+
+    // idsByCategory("file") 含分隔线 id，且顺序正确（open, save, saveAs, :sep, exit）
+    const auto ids = r.idsByCategory(QStringLiteral("file"));
+    ASSERT_EQ(ids.size(), 5u);
+    EXPECT_EQ(ids.at(0), QStringLiteral("file.open"));
+    EXPECT_EQ(ids.at(1), QStringLiteral("file.save"));
+    EXPECT_EQ(ids.at(2), QStringLiteral("file.saveAs"));
+    EXPECT_TRUE(r.isSeparator(ids.at(3)));
+    EXPECT_EQ(ids.at(4), QStringLiteral("file.exit"));
+
+    // 分隔线不可触发/不可启用/无 label
+    EXPECT_FALSE(r.invoke(ids.at(3)));
+    EXPECT_FALSE(r.enabled(ids.at(3)));
+    EXPECT_TRUE(r.label(ids.at(3)).isEmpty());
+    EXPECT_TRUE(r.shortcut(ids.at(3)).isEmpty());
+    EXPECT_FALSE(r.checkable(ids.at(3)));
+}
+
 TEST(UiActionRegistry, EnabledPrecedence) {
     UiActionRegistry r;
     // 无谓词 → 恒可

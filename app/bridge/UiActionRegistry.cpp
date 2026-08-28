@@ -44,6 +44,23 @@ void UiActionRegistry::addAll(std::vector<UiActionDef> defs) {
     }
 }
 
+void UiActionRegistry::addSeparator(const QString& category) {
+    int n = 0;
+    for (const auto& a : m_actions) {
+        if (a.separator && a.category == category) ++n;
+    }
+    UiActionDef sep;
+    sep.id = QStringLiteral(":sep:") + category + QLatin1Char(':') + QString::number(n);
+    sep.category = category;
+    sep.separator = true;
+    m_actions.push_back(std::move(sep));  // 直接入栈（add 会拒绝 null handler）
+}
+
+bool UiActionRegistry::isSeparator(const QString& id) const {
+    auto* def = findConst(id);
+    return def && def->separator;
+}
+
 // ---- 查询 ----
 
 UiActionDef* UiActionRegistry::findMutable(const QString& id) {
@@ -65,6 +82,7 @@ bool UiActionRegistry::exists(const QString& id) const {
 bool UiActionRegistry::enabled(const QString& id) const {
     auto* def = findConst(id);
     if (!def) return false;
+    if (def->separator) return false;  // 分隔线无可触发态
     // 优先级：setEnabled 运行时覆写 > 注册谓词 > 恒可
     const auto it = m_enabledOverride.find(id);
     if (it != m_enabledOverride.end()) return it->second;
@@ -142,6 +160,9 @@ bool UiActionRegistry::invoke(const QString& id, const QVariantMap& args) {
     }
     if (!enabled(id)) {
         return false;  // 静默失败（禁用状态）
+    }
+    if (def->separator || !def->handler) {
+        return false;  // 分隔线/空 handler 不可触发
     }
     return def->handler(args);
 }

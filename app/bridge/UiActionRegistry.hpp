@@ -30,6 +30,7 @@ struct UiActionDef {
     ActionHandler handler;   // 处理器（必须提供）
     bool checkable = false;  // 是否为 toggle 动作（网格/通道 id 等）
     bool checked = false;    // 当前勾选态（checkable 动作用）
+    bool separator = false;  // 是否为菜单分隔线（枚举渲染用；无 handler/label）
 };
 
 class UiActionRegistry : public QObject {
@@ -44,6 +45,13 @@ public:
 
     /// 批量注册（便利方法）。
     void addAll(std::vector<UiActionDef> defs);
+
+    /// 注册一条菜单分隔线（枚举渲染用；属于 category，介于相邻动作之间）。
+    /// id 自动生成 ":sep:<category>:<n>"；无 handler/label，不可触发。
+    void addSeparator(const QString& category);
+
+    /// 是否为菜单分隔线（QML 菜单 Repeater 据此渲染 MenuSeparator）。
+    Q_INVOKABLE bool isSeparator(const QString& id) const;
 
     /// 运行时启用态覆写（QML 状态变化驱动；优先级高于注册的 enabled 谓词）。
     /// 使能状态变化 → stateChanged/actionStateChanged。

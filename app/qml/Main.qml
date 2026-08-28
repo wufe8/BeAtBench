@@ -216,42 +216,49 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: qsTr("文件")
-            MenuItem {
-                text: uiActions.label("file.open") + "    " + uiActions.shortcut("file.open")
-                onTriggered: uiActions.invoke("file.open")
+            // 枚举渲染（doc/09 §7 验收 2）：文件菜单动作按注册表 idsByCategory("file") 生成，
+            // 分隔线由注册表 isSeparator(id) 判定（addSeparator 建模）。Loader 按 id 选择
+            // MenuItem / MenuSeparator 组件。
+            Component { id: fileMenuSep; MenuSeparator {} }
+            Component {
+                id: fileMenuItem
+                MenuItem {
+                    property string actId
+                    text: uiActions.label(actId) + "    " + uiActions.shortcut(actId)
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled(actId)
+                    onTriggered: uiActions.invoke(actId)
+                }
             }
-            MenuItem {
-                text: uiActions.label("file.save") + "    " + uiActions.shortcut("file.save")
-                enabled: window.uiStateTick >= 0 && uiActions.enabled("file.save")
-                onTriggered: uiActions.invoke("file.save")
-            }
-            MenuItem {
-                text: uiActions.label("file.saveAs") + "    " + uiActions.shortcut("file.saveAs")
-                enabled: window.uiStateTick >= 0 && uiActions.enabled("file.saveAs")
-                onTriggered: uiActions.invoke("file.saveAs")
-            }
-            MenuSeparator {}
-            MenuItem {
-                text: uiActions.label("file.exit") + "    " + uiActions.shortcut("file.exit")
-                onTriggered: uiActions.invoke("file.exit")
+            Repeater {
+                model: uiActions.idsByCategory("file")
+                delegate: Loader {
+                    property string actId: modelData
+                    sourceComponent: uiActions.isSeparator(actId) ? fileMenuSep : fileMenuItem
+                    onLoaded: if (item && ("actId" in item)) item.actId = actId
+                }
             }
         }
         Menu {
             title: qsTr("编辑")
             enabled: chartMeta !== null
-            MenuItem { text: uiActions.label("edit.undo") + "    " + uiActions.shortcut("edit.undo")
-                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.undo")
-                       onTriggered: uiActions.invoke("edit.undo") }
-            MenuItem { text: uiActions.label("edit.redo") + "    " + uiActions.shortcut("edit.redo")
-                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.redo")
-                       onTriggered: uiActions.invoke("edit.redo") }
-            MenuSeparator {}
-            MenuItem { text: uiActions.label("edit.copy") + "    " + uiActions.shortcut("edit.copy")
-                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.copy")
-                       onTriggered: uiActions.invoke("edit.copy") }
-            MenuItem { text: uiActions.label("edit.paste") + "    " + uiActions.shortcut("edit.paste")
-                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.paste")
-                       onTriggered: uiActions.invoke("edit.paste") }
+            Component { id: editMenuSep; MenuSeparator {} }
+            Component {
+                id: editMenuItem
+                MenuItem {
+                    property string actId
+                    text: uiActions.label(actId) + "    " + uiActions.shortcut(actId)
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled(actId)
+                    onTriggered: uiActions.invoke(actId)
+                }
+            }
+            Repeater {
+                model: uiActions.idsByCategory("edit")
+                delegate: Loader {
+                    property string actId: modelData
+                    sourceComponent: uiActions.isSeparator(actId) ? editMenuSep : editMenuItem
+                    onLoaded: if (item && ("actId" in item)) item.actId = actId
+                }
+            }
         }
         Menu {
             title: qsTr("视图")
