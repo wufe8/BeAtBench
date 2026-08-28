@@ -35,6 +35,9 @@ TEST(ThemeManager, Defaults) {
     EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
     EXPECT_DOUBLE_EQ(th.radius(), 10.0);
     EXPECT_DOUBLE_EQ(th.noteRadius(), 2.0);
+    EXPECT_DOUBLE_EQ(th.buttonRadius(), 6.0);
+    EXPECT_DOUBLE_EQ(th.boxRadius(), 6.0);
+    EXPECT_DOUBLE_EQ(th.keyLaneTintAlpha(), 18.0);  // 键轨轻着色默认开
     EXPECT_DOUBLE_EQ(th.fsBase(), 13.0);
     EXPECT_DOUBLE_EQ(th.fsSmall(), 12.0);
     EXPECT_DOUBLE_EQ(th.fsTiny(), 11.0);
@@ -160,6 +163,7 @@ TEST(ThemeManager, ResetDefaultRestoresAllTokens) {
     EXPECT_EQ(th.surface(), QColor(QStringLiteral("#12151a")));
     EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
     EXPECT_DOUBLE_EQ(th.noteRadius(), 2.0);
+    EXPECT_DOUBLE_EQ(th.keyLaneTintAlpha(), 18.0);
     EXPECT_DOUBLE_EQ(th.fsBase(), 13.0);
     EXPECT_EQ(th.fontSans(), QStringLiteral("Microsoft YaHei UI"));
     EXPECT_EQ(th.fontMono(), QStringLiteral("Consolas"));
@@ -173,19 +177,22 @@ TEST(ThemeManager, IndependentShapeTokens) {
     EXPECT_DOUBLE_EQ(th.boxRadius(), 6.0);
     EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
 
-    // 单独覆写 buttonRadius=0（方形按钮）、boxRadius=8（圆角复选框）；radiusSm 不变
+    // 单独覆写 buttonRadius=0（方形按钮）、boxRadius=8（圆角复选框）、keyLaneTintAlpha=0（关着色）；
+    // radiusSm 不变
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString path = write_theme(dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6})");
+    const QString path = write_theme(dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6, "keyLaneTintAlpha": 0})");
     ASSERT_FALSE(path.isEmpty());
     th.loadTheme(path);
     EXPECT_DOUBLE_EQ(th.buttonRadius(), 0.0);
     EXPECT_DOUBLE_EQ(th.boxRadius(), 8.0);
     EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
+    EXPECT_DOUBLE_EQ(th.keyLaneTintAlpha(), 0.0);  // 皮肤可关键轨着色
 
     // resetDefault 还原
     th.resetDefault();
     EXPECT_DOUBLE_EQ(th.buttonRadius(), 6.0);
     EXPECT_DOUBLE_EQ(th.boxRadius(), 6.0);
     EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
+    EXPECT_DOUBLE_EQ(th.keyLaneTintAlpha(), 18.0);
 }

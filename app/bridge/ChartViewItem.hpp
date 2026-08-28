@@ -212,6 +212,8 @@ private:
     void updateHover(const QPointF& pos);
     ChartSession* sessionObj() const;
     ThemeManager* themeObj() const;
+    /// paint 前按当前 theme 刷新标尺/note 标签字体族（皮肤可换；避免硬编码 Consolas）。
+    void applyThemeFonts(const ThemeManager* th);
     /// NoteRef 语义键（measure|num|den|player|kind|index|sample）：选中判定用。
     static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
                               const beatbench::Lane& lane, std::uint32_t sample = 0);

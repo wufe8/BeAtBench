@@ -43,10 +43,18 @@ constexpr qreal kNoteSelectExpand = 0.5;
 ChartViewItem::ChartViewItem(QQuickItem* parent) : QQuickPaintedItem(parent) {
     setAntialiasing(true);
     setAcceptHoverEvents(true);  // 状态栏鼠标位置 + note 信息（M2 跟进）
-    m_rulerFont.setFamily(QStringLiteral("Consolas"));
+    // 字体族在 paint 时从 theme.fontMono 读取（皮肤可换；此处只设字号，避免硬编码字体）。
     m_rulerFont.setPixelSize(11);
-    m_noteLabelFont.setFamily(QStringLiteral("Consolas"));
     m_noteLabelFont.setPixelSize(11);
+}
+
+// paint 前根据当前 theme 刷新字体族（默认无 theme 时用内置等宽兜底）。
+void ChartViewItem::applyThemeFonts(const ThemeManager* th) {
+    const QString fam = th ? th->fontMono() : QStringLiteral("Consolas");
+    if (m_rulerFont.family() != fam) {
+        m_rulerFont.setFamily(fam);
+        m_noteLabelFont.setFamily(fam);
+    }
 }
 
 ChartSession* ChartViewItem::sessionObj() const {
@@ -1105,6 +1113,7 @@ void ChartViewItem::paint(QPainter* p) {
     const qreal w = width();
     const qreal h = height();
     const ThemeManager* th = themeObj();
+    applyThemeFonts(th);  // 按当前 theme 刷新标尺/note 标签字体族（皮肤可换）
     if (w <= 0 || h <= 0) return;
     p->fillRect(QRectF(0, 0, w, h), th ? th->bg() : QColor(QStringLiteral("#0b0d10")));
 
@@ -1181,6 +1190,11 @@ void ChartViewItem::paint(QPainter* p) {
         } else if (col.lane.kind == beatbench::LaneKind::Scratch) {
             tint = th->accent();
             tint.setAlpha(26);  // ≈ preview .lane.scratch 7%
+        } else if (col.lane.kind == beatbench::LaneKind::Key && th->keyLaneTintAlpha() > 0) {
+            // 键轨底色（每轨轻着色，doc/10 §2）：按通道序循环 n1..n4，按 keyLaneTintAlpha 铺底；
+            // 0(alpha)= 关闭（= 原无 tint 行为）。给 key 轨「轨感」，深/浅皮肤下都不至于素/黑。
+            tint = noteColor(col.lane);
+            tint.setAlpha(static_cast<int>(th->keyLaneTintAlpha()));
         } else if (col.p2) {
             tint = th->primary();
             tint.setAlpha(13);

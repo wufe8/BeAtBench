@@ -68,6 +68,7 @@ public:
     Q_PROPERTY(qreal noteRadius READ noteRadius NOTIFY tokensChanged) // note 圆角（2，= styles.html）
     Q_PROPERTY(qreal buttonRadius READ buttonRadius NOTIFY tokensChanged) // 按钮/工具条按钮圆角（= radiusSm）
     Q_PROPERTY(qreal boxRadius READ boxRadius NOTIFY tokensChanged)   // 复选框/输入框/下拉圆角（= radiusSm）
+    Q_PROPERTY(qreal keyLaneTintAlpha READ keyLaneTintAlpha NOTIFY tokensChanged) // 键轨底色透明度（0=无，默认 20）
     Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)       // 正文/按钮（13，= preview.html 基准）
     Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)     // 次级/标签（12）
     Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)       // 提示/占位（11）
@@ -79,6 +80,7 @@ public:
     qreal noteRadius() const { return m_noteRadius; }
     qreal buttonRadius() const { return m_buttonRadius; }
     qreal boxRadius() const { return m_boxRadius; }
+    qreal keyLaneTintAlpha() const { return m_keyLaneTintAlpha; }
     qreal fsBase() const { return m_fsBase; }
     qreal fsSmall() const { return m_fsSmall; }
     qreal fsTiny() const { return m_fsTiny; }
@@ -160,6 +162,7 @@ public:
     BB_THEME_NUM_SETTER(noteRadius)
     BB_THEME_NUM_SETTER(buttonRadius)
     BB_THEME_NUM_SETTER(boxRadius)
+    BB_THEME_NUM_SETTER(keyLaneTintAlpha)
     BB_THEME_NUM_SETTER(fsBase)
     BB_THEME_NUM_SETTER(fsSmall)
     BB_THEME_NUM_SETTER(fsTiny)
@@ -213,6 +216,7 @@ private:
     qreal m_noteRadius = 2.0;
     qreal m_buttonRadius = 6.0;   // = radiusSm（按钮/工具条按钮）
     qreal m_boxRadius = 6.0;       // = radiusSm（复选框/输入框/下拉）
+    qreal m_keyLaneTintAlpha = 18.0; // 键轨底色透明度（0=无；>0 按 n1..n4 微透铺底，默认 18 轻着色）
     qreal m_fsBase = 13.0;
     qreal m_fsSmall = 12.0;
     qreal m_fsTiny = 11.0;

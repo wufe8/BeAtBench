@@ -70,13 +70,15 @@ bool set_color(ThemeManager& th, const QString& key, const QString& value) {
 // 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）。fs* 须 > 0；所有 radius/note/button/box 允许 0
 // （方形 = 直角风，doc 主题① 与 Win10 皮肤用）；字体须非空；非法值跳过。
 bool set_number(ThemeManager& th, const QString& key, const double v) {
-    // fs* 须 > 0；radiusSm/radius/noteRadius/buttonRadius/boxRadius 允许 0（直角风）
+    // fs* 须 > 0；radiusSm/radius/noteRadius/buttonRadius/boxRadius 允许 0（直角风）；
+    // keyLaneTintAlpha 允许 0（无键轨底色）
     const bool isRadius = (key == QLatin1String("radiusSm"))
                        || (key == QLatin1String("radius"))
                        || (key == QLatin1String("noteRadius"))
                        || (key == QLatin1String("buttonRadius"))
                        || (key == QLatin1String("boxRadius"));
-    if (!(v > 0.0) && !(isRadius && v == 0.0)) return false;
+    const bool isAlpha = (key == QLatin1String("keyLaneTintAlpha"));
+    if (!(v > 0.0) && !((isRadius || isAlpha) && v == 0.0)) return false;
 #define BB_THEME_NUM_SET(name) \
     if (key == QLatin1String(#name)) { th.set_##name(static_cast<qreal>(v)); return true; }
     BB_THEME_NUM_SET(radiusSm)
@@ -84,6 +86,7 @@ bool set_number(ThemeManager& th, const QString& key, const double v) {
     BB_THEME_NUM_SET(noteRadius)
     BB_THEME_NUM_SET(buttonRadius)
     BB_THEME_NUM_SET(boxRadius)
+    BB_THEME_NUM_SET(keyLaneTintAlpha)
     BB_THEME_NUM_SET(fsBase)
     BB_THEME_NUM_SET(fsSmall)
     BB_THEME_NUM_SET(fsTiny)
@@ -211,6 +214,7 @@ void ThemeManager::resetDefault() {
     set_noteRadius(2.0);
     set_buttonRadius(6.0);
     set_boxRadius(6.0);
+    set_keyLaneTintAlpha(18.0);
     set_fsBase(13.0);
     set_fsSmall(12.0);
     set_fsTiny(11.0);

@@ -39,6 +39,7 @@
   "noteRadius": 4,
   "buttonRadius": 8,
   "boxRadius": 6,
+  "keyLaneTintAlpha": 22,
   "fsBase": 12.5,
   "fsSmall": 11.5,
   "fsTiny": 10.5
