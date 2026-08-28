@@ -140,16 +140,22 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
 
-    engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
-
-    // ---- 动作注册（doc/09 §5/§7）：必须等 QML 根加载后——handler 经 QMetaObject 调用
-    // Main.qml 的窗口函数（迁移期机制：行为原点仍在 QML，但 invoke 已是唯一入口，
-    // 皮肤壳/快捷键都走 id；QML 侧 enabled 状态经 setEnabled 驱动，见 Main.qml）。 ----
-    if (QObject* root = engine.rootObjects().value(0)) {
+    // ---- 动作注册（doc/09 §5/§7）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
+    // 是函数式绑定，只在首帧求值一次（注册表为空则取到空串）。若在 loadFromModule 后注册，
+    // 菜单项文字/快捷键序列已成空 → 不可见、快捷键不触发（2026-09 用户实测 A1/A3）。
+    // handler 在此刻拿不到 QML 根（未加载），故**惰性解析**：invoke 时经 engine 取根再调
+    // QMetaObject（迁移期机制：行为原点仍在 QML，但 invoke 已是唯一入口，皮肤壳/快捷键
+    // 都走 id；QML 侧 enabled 状态经 setEnabled 驱动，见 Main.qml）。 ----
+    {
         using namespace beatbench::app;
         // QML 无参方法调用（返回 false = 方法不存在/调用失败 → qWarning）
-        const auto qml = [root](const char* method) {
-            return ActionHandler([root, method](const QVariantMap&) {
+        const auto qml = [&engine](const char* method) {
+            return ActionHandler([&engine, method](const QVariantMap&) {
+                QObject* root = engine.rootObjects().value(0);
+                if (!root) {
+                    qWarning() << "UiActionRegistry: QML 根不可用" << method;
+                    return false;
+                }
                 if (!QMetaObject::invokeMethod(root, method, Qt::DirectConnection)) {
                     qWarning() << "UiActionRegistry: QML 方法不存在" << method;
                     return false;
@@ -158,8 +164,13 @@ int main(int argc, char** argv) {
             });
         };
         // 设置窗口属性（工具/页面切换类动作）
-        const auto setProp = [root](const char* prop, const QVariant& v) {
-            return ActionHandler([root, prop, v](const QVariantMap&) {
+        const auto setProp = [&engine](const char* prop, const QVariant& v) {
+            return ActionHandler([&engine, prop, v](const QVariantMap&) {
+                QObject* root = engine.rootObjects().value(0);
+                if (!root) {
+                    qWarning() << "UiActionRegistry: QML 根不可用" << prop;
+                    return false;
+                }
                 return root->setProperty(prop, v);
             });
         };
@@ -193,10 +204,15 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, setProp("currentPage", 0), true});
         uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, setProp("currentPage", 1), true});
         uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, setProp("currentPage", 2), true});
-        // QML 的 Component.onCompleted 在 loadFromModule 期间已执行（此时注册未完成），
-        // 注册后补一次 enabled 状态同步（Main.qml::updateActionStates → setEnabled）。
-        QMetaObject::invokeMethod(root, "updateActionStates", Qt::DirectConnection);
         qInfo("UI 动作注册完成：%d 个", static_cast<int>(uiActions.ids().size()));
+    }
+
+    engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
+
+    // 注册已完成、QML 根已加载：补一次 enabled 状态同步（QML 的 Component.onCompleted 在
+    // loadFromModule 期间已执行，此时注册未完成 → 由这里兜底 Main.qml::updateActionStates）。
+    if (QObject* root = engine.rootObjects().value(0)) {
+        QMetaObject::invokeMethod(root, "updateActionStates", Qt::DirectConnection);
     }
 
     const QStringList args = app.arguments();

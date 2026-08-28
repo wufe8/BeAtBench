@@ -476,10 +476,14 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                             }
                             case ChannelSemantics::BpmInline:
                             case ChannelSemantics::BpmRef: {
-                                // 保留原始引用 id（定宽 2 字符槽位）；内联数值（奇数长）无引用
+                                // ch03（BpmInline）= **十六进制内联值**，不是 #BPMxx 引用——
+                                // 标准播放器把 ch03 当十六进制数值读，无需也不应带引用 id
+                                //（2026-09 用户实测：《#04003:008C》= 0x8C = 140 BPM）。
+                                // ch08（BpmRef）才携带 #BPMxx 引用 id（定宽 2 字符槽位）。
                                 Bpm bpm;
                                 bpm.value = resolve_bpm(chart, slot, number, result.diagnostics);
-                                if (slot.size() == 2) {
+                                if (rule->semantics == ChannelSemantics::BpmRef &&
+                                    slot.size() == 2) {
                                     bpm.ref_id = decode_id(chart, slot);
                                 }
                                 // ch08 = #BPMxx 引用通道（2026-09 修复：写回须区分 03/08）

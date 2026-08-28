@@ -253,7 +253,17 @@ ColumnLayout {
                         onTextChanged: { if (root.editingId === row.id) root.pendingFile = text }
                         onAccepted: row.commitEdit()
                         onActiveFocusChanged: if (!activeFocus && row.editing) row.commitEdit()
-                        Keys.onEscapePressed: { row.editing = false; root.editingId = "" }
+                        Keys.onEscapePressed: {
+                            // ⚠️ `text: row.file` 绑定已被用户输入破坏（QML 不恢复断绑），
+                            // 直接改 editing/editingId 只退出编辑态，下次双击仍显示上次输入值。
+                            // Esc 必须显式把 TextField 文本还原为原值（row.file），否则
+                            // 「取消」名存实亡（2026-09 用户实测）。
+                            fileEdit.text = row.file
+                            root.pendingFile = row.file
+                            root.pendingOrig = row.file
+                            row.editing = false
+                            root.editingId = ""
+                        }
                         Keys.onReleased: (event) => {
                             if (event.key === Qt.Key_Tab) row.commitEdit()
                         }

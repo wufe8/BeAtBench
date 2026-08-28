@@ -7,8 +7,10 @@
 //   11-15=键1-5  16=皿  17=踏板/保留  18=键6  19=键7（2P 21-29 同构）；
 //   51-59=1P LN 通道、61-69=2P LN 通道（LNTYPE 1 同一通道内按时间序交替头尾）；
 //   D1-D9=1P 地雷、E1-E9=2P 地雷（槽位与 11-19/21-29 同构）。
-// 9key（PMS，.pms 后缀）：11-19=键1-9（无皿/踏板，BMS 笔记「9key PMS 模式游玩轨」）；
-//   51-59/61-69=LN 通道、D/E=地雷 同构。
+// 9key（PMS，.pms 后缀）：读侧兼容 11-19=键1-9（BMS 笔记派）与 11-15+22-25=键1-9
+//   （标准 PMS，hitkey「9KEYS BMS-DP」）两约定；**写侧归一化到标准 PMS**：
+//   1P 键1-5→11-15、键6-9→22-25；2P 键1-5→21-25、键6-9→28/29/26/27（见
+//   bms_channel_for_mode）。51-59/61-69=LN 通道、D/E=地雷 同构。
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 #include <array>
@@ -79,10 +81,12 @@ struct Table {
         for (const auto& r : specials) rules[count++] = r;
         add_group('1', 0, false, NoteKind::Normal, key_index, kinds);   // 11-19（1P 游玩轨）
         if (nineKey) {
-            // 9key（PMS）2P 侧（21-29）：仅 22-25 = 键6-9（1P）——旧兼容约定（11-15+22-25），
-            // 与 group '1' 的 16-19=键6-9（BMS 笔记派）并存 → 宽松：两种 9key 约定都能读。
-            // 21/26-29 不用（KeepRaw，查找不到即 nullopt）。写回（lane_slot 走 group '1'）
-            // 归一化到 16-19（音序不变、通道号变，只读兼容可接受）。
+            // 9key（PMS）：group '1' 的 11-19 全为键1-9（BMS 笔记派），但「标准 PMS」的
+            // 键6-9 在 22-25（hitkey「9KEYS BMS-DP」）——此处补 22-25 → 键6-9（player 0）作
+            // **读取兼容**（与 16-19 并存，两种 9key 约定都能读，2026-09 用户实测）。
+            // 2P 侧 21-29 在 9key 单面谱不用（KeepRaw，查找不到即 nullopt）。
+            // ⚠️ 写回（bms_channel_for_mode）已**归一化到标准 PMS**：1P 键6-9 → 22-25，
+            //    2P 键6-9 → 28/29/26/27；不再经 lane_slot 落到 16-19（见下）。
             for (int i = 0; i < 9; ++i) {
                 if (i >= 1 && i <= 4) {
                     Rule r;
@@ -178,6 +182,27 @@ std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool l
     }
     const int slot = lane_slot(t, lane.kind, lane.index);
     if (slot < 0) return {};
+    // 9key（PMS）**普通 note** 写回标准通道（hitkey「9KEYS BMS-DP」）：
+    //   1P 键1-5 → 11-15；键6-9 → 22-25（不是 16-19 / 18-19！——2026-09 用户实测量出
+    //   _9RG/_EX9.roundtrip 后 22-25 被改写成 16-19 的根因）。
+    //   2P 键1-5 → 21-25；键6-9 → 28/29/26/27（BME-DP 记法）。
+    // 读侧（table9）已兼容 16-19 与 22-25 两约定，写侧**归一化到标准 PMS**（22-25），
+    // 保证 22-25 的谱面往返不变号。LN/地雷保持槽位序（5x/6x / D/E + 槽位，与读侧一致）。
+    if (mode == "pms9k" && !ln && kind == NoteKind::Normal) {
+        // 1P（BMS-DP 标准）：键1-5 → 11-15；键6-9 → 22-25（末位 = '1'+(键号-6+1)）。
+        if (lane.player == 0) {
+            if (lane.index <= 5) {
+                return std::string("1") + static_cast<char>('1' + (lane.index - 1));
+            }
+            return std::string("2") + static_cast<char>('1' + (lane.index - 5));
+        }
+        // 2P（BME-DP）：键1-5 → 21-25；键6-9 → 28/29/26/27（无公式，查表）
+        if (lane.index <= 5) {
+            return std::string("2") + static_cast<char>('1' + (lane.index - 1));
+        }
+        static constexpr const char* k2p69[4] = {"28", "29", "26", "27"};
+        return k2p69[lane.index - 6];
+    }
     const char digit = static_cast<char>('1' + slot);
     if (kind == NoteKind::Landmine) {
         return std::string(1, lane.player == 0 ? 'D' : 'E') + digit;

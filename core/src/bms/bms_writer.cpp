@@ -227,6 +227,11 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         }
         for (const auto& ev : chart.bpm_events) {
             const auto v = ev.value.value;
+            // ch03（BpmInline）= 十六进制内联值（0x00-FF = 0..255），**不需要** #BPMxx 定义；
+            // 标准播放器直接按十六进制读。仅 ch08（#BPMxx 引用）或超出 ch03 范围的
+            // 值才需要引用定义（2026-09 用户实测：#04003:008C 不必生成 #BPM8C）。
+            const bool hex_ok = !ev.value.ch08 && v >= 1.0 && v <= 255.0 && v == std::floor(v);
+            if (hex_ok) continue;
             if (bpm_id_by_value.count(v)) continue;
             // ⚠️ 有 ref_id 的事件：ref 槽位无定义 → 归该槽位并补一条定义（否则悬空引用）；
             // 定义存在且与事件值一致 → 归该槽位；**不一致 → 解耦**（方案 B：值才是唯一

@@ -875,6 +875,61 @@ TEST(BmsWrite, BpmCh08StaysCh08) {
     EXPECT_EQ(write_bms(r2.chart), out);
 }
 
+// ch03（BpmInline）是十六进制内联值，不是 #BPMxx 引用——2026-09 用户实测：
+// `#04003:008C`（=0x8C=140）应**原样保留**、且不得派生伪 `#BPM8C` 定义。
+TEST(BmsRoundTrip, Ch03HexInlineNoDerivedDef) {
+    const auto src = "#BPM 280\n#04003:008C\n#08003:8C\n";
+    const auto r1 = read_bms(src);
+    ASSERT_EQ(r1.chart.bpm_events.size(), 2u);
+    // 两事件都不应携带 ref_id（ch03=hex 内联，非引用）
+    EXPECT_FALSE(r1.chart.bpm_events[0].value.ref_id.has_value());
+    EXPECT_FALSE(r1.chart.bpm_events[1].value.ref_id.has_value());
+    EXPECT_FALSE(r1.chart.bpm_events[0].value.ch08);
+    const auto out = write_bms(r1.chart);
+    // ch03 十六进制原样
+    EXPECT_NE(out.find("#04003:008C"), std::string::npos);
+    EXPECT_NE(out.find("#08003:8C"), std::string::npos);
+    // 不派生 #BPM8C（无 `BPM8C` 定义行，也无 `BPM8C value` 数值定义）
+    EXPECT_EQ(out.find("BPM8C"), std::string::npos);
+    // 只保留原有 #BPM 280（无新增定义行号）
+    EXPECT_EQ(r1.chart.samples.size(), 0u);
+    const auto r2 = read_bms(out);
+    ASSERT_EQ(r2.chart.bpm_events.size(), 2u);
+    EXPECT_FALSE(r2.chart.bpm_events[0].value.ref_id.has_value());
+    EXPECT_EQ(write_bms(r2.chart), out);  // 幂等
+}
+
+// 9key（pms9k）普通 note 写回归一化到标准 PMS（hitkey「9KEYS BMS-DP」）：
+// 1P 键6-9 → 22-25（不是 16-19）——2026-09 用户实测 _9RG/_EX9 往返后 22-25 被误写 16-19。
+TEST(BmsRoundTrip, Pms9kNormalWritesStandardChannels) {
+    Chart c;
+    c.mode_id = "pms9k";
+    c.samples[{SampleKind::Wav, 1}] = SampleDef{.file = "a.wav"};
+    // 键6/7/8/9 各一个 note（player 0）
+    for (int k = 6; k <= 9; ++k) {
+        Note n;
+        n.lane = Lane{0, LaneKind::Key, static_cast<std::uint8_t>(k)};
+        n.sample.id = 1;
+        c.notes.push_back({1, Rational(0, 1), n});
+    }
+    const auto out = write_bms(c);
+    EXPECT_NE(out.find("#00122:01"), std::string::npos);  // 键6 → 22
+    EXPECT_NE(out.find("#00123:01"), std::string::npos);  // 键7 → 23
+    EXPECT_NE(out.find("#00124:01"), std::string::npos);  // 键8 → 24
+    EXPECT_NE(out.find("#00125:01"), std::string::npos);  // 键9 → 25
+    EXPECT_EQ(out.find("#00116:01"), std::string::npos);  // 不再 16
+    EXPECT_EQ(out.find("#00119:01"), std::string::npos);  // 不再 19
+    BmsReadOptions opts;
+    opts.mode = "pms9k";
+    const auto r3 = read_bms(out, opts);
+    ASSERT_EQ(r3.chart.notes.size(), 4u);
+    for (std::size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(r3.chart.notes[i].value.lane.player, 0u);
+        EXPECT_EQ(r3.chart.notes[i].value.lane.kind, LaneKind::Key);
+    }
+    EXPECT_EQ(write_bms(r3.chart), out);  // 幂等
+}
+
 TEST(BmsRoundTrip, StopRefRestored) {
     const auto src = "#STOP01 96\n#00109:01\n#00209:01\n";
     const auto r1 = read_bms(src);

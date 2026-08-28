@@ -108,11 +108,16 @@ TEST(BmsChannelMaps, ReverseByMode) {
               "16");
     EXPECT_EQ(bms::bms_channel_for_mode("sp7k", {0, LaneKind::Key, 2}, true, NoteKind::Normal),
               "52");
-    // 9key：键6/7 → 16/17（而非 18/19）
+    // 9key：键6/7 → 22/23（标准 PMS，而非 16/17——2026-09 用户实测 22-25 被误写 16-19）
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 6}, false, NoteKind::Normal),
-              "16");
+              "22");
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 9}, false, NoteKind::Normal),
-              "19");
+              "25");
+    // 9key 2P（BME-DP）：键6-9 → 28/29/26/27
+    EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 6}, false, NoteKind::Normal),
+              "28");
+    EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 9}, false, NoteKind::Normal),
+              "27");
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 7}, true, NoteKind::Normal),
               "57");
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 3}, false,
