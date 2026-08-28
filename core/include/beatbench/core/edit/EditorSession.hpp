@@ -285,6 +285,10 @@ private:
     std::string m_old_value;
     /// apply 实际是否改变（无变化 → invert 无操作）
     bool m_changed = false;
+    /// apply 前 id_base 快照（仅 #BASE 字段，2026-09 审查修复）：
+    /// parser 不入 chart.meta["BASE"]（id_base 是结构化状态），invert 不能靠 meta 推断——
+    /// 否则「原 #BASE 62 谱面改 36 后 undo」会错恢复成 Base36。
+    std::optional<IdBase> m_old_id_base;
 };
 
 /// 原始控制行整体替换（「扩展代码」格式兜底，2026-09）：把 chart.raw_lines 整组换成新值。

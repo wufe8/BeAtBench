@@ -710,26 +710,38 @@ TEST(BmsWrite, SjisOutput) {
     BmsWriteOptions opts;
     opts.encoding = BmsEncoding::ShiftJis;
     const auto out = write_bms(c, opts);
-    std::string expect = "#TITLE ";
+    // 2026-09 分割线注释（iBMSC 风格）：HEADER + DEFINITION 两条
+    std::string expect = "*---------------------- HEADER FIELD\n#TITLE ";
     expect += static_cast<char>(0x82);
     expect += static_cast<char>(0xB0);
     expect += '\n';
+    expect += "*---------------------- DEFINITION FIELD\n";
     EXPECT_EQ(out, expect);
 }
 
 TEST(BmsWrite, EmptyValueOmitsSpace) {
     Chart c;
     c.meta["TITLE"] = "";
-    EXPECT_EQ(write_bms(c), "#TITLE\n");
+    EXPECT_EQ(write_bms(c),
+              "*---------------------- HEADER FIELD\n#TITLE\n"
+              "*---------------------- DEFINITION FIELD\n");
 }
 
 TEST(BmsWrite, EncodingDeclNormalized) {
     Chart c;
     c.raw_lines = {"#ENCODING Shift_JIS", "#00111:01"};
-    EXPECT_EQ(write_bms(c), "#ENCODING UTF-8\n#00111:01\n");  // 默认 UTF-8 → 声明更新
+    EXPECT_EQ(write_bms(c),
+              "*---------------------- HEADER FIELD\n"
+              "*---------------------- DEFINITION FIELD\n"
+              "*---------------------- EXPANSION FIELD\n"
+              "#ENCODING UTF-8\n#00111:01\n");  // 默认 UTF-8 → 声明更新
     BmsWriteOptions sjis;
     sjis.encoding = BmsEncoding::ShiftJis;
-    EXPECT_EQ(write_bms(c, sjis), "#00111:01\n");  // SJIS → 声明移除
+    EXPECT_EQ(write_bms(c, sjis),
+              "*---------------------- HEADER FIELD\n"
+              "*---------------------- DEFINITION FIELD\n"
+              "*---------------------- EXPANSION FIELD\n"
+              "#00111:01\n");  // SJIS → 声明移除
 }
 
 // ---------- 往返 ----------
@@ -749,6 +761,28 @@ TEST(BmsRoundTrip, SyntheticStable) {
     EXPECT_EQ(r2.chart.raw_lines, r1.chart.raw_lines);
     // 幂等：再写一次完全一致
     EXPECT_EQ(write_bms(r2.chart), out);
+}
+
+TEST(BmsRoundTrip, SectionBannersNotPreservedAsRaw) {
+    // 2026-09 审查修复：writer 生成的分割线注释是「结构装饰」，parser 豁免不入 raw_lines
+    //（否则 写→读→写 每次在尾部累积一份 → 幂等性破坏，aa6e8a0 引入）。
+    const auto r1 = read_bms("#BPM 130\n#00111:01\n");
+    EXPECT_EQ(r1.chart.raw_lines.size(), 0u);
+    const auto out = write_bms(r1.chart);
+    EXPECT_NE(out.find("*---------------------- HEADER FIELD"), std::string::npos);
+    const auto r2 = read_bms(out);
+    EXPECT_EQ(r2.chart.raw_lines.size(), 0u);
+    EXPECT_EQ(write_bms(r2.chart), out);  // 幂等
+}
+
+TEST(BmsRoundTrip, UserCommentsStillPreserved) {
+    // 非结构注释（* 非分割线）仍按 preserve_comments 保留并写回
+    const auto r1 = read_bms("* 我的注释\n#00111:01\n");
+    ASSERT_EQ(r1.chart.raw_lines.size(), 1u);
+    const auto out = write_bms(r1.chart);
+    const auto r2 = read_bms(out);
+    EXPECT_EQ(r2.chart.raw_lines, r1.chart.raw_lines);
+    EXPECT_EQ(write_bms(r2.chart), out);  // 幂等
 }
 
 TEST(BmsRoundTrip, SamePosConflictSplitsRows) {
@@ -954,7 +988,16 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
             continue;
         }
         const auto out = write_bms(r1.chart);
-        const auto r2 = read_bms(out);
+        // 回读必须走与产品一致的**文件入口**（read_bms_file）：模式按扩展名推断
+        //（.pms → pms9k）。纯文本 read_bms 无法从内容恢复扩展名语义——#PLAYER 3 的
+        // 9key .pms 会误推成 dp，导致 13 个 .pms 被误判「往返不一致」（2026-09 实测）。
+        const fs::path tmp = fs::temp_directory_path() / ("bb_real_rt" + ext);
+        {
+            std::ofstream f(tmp, std::ios::binary);
+            f << out;
+        }
+        const auto r2 = read_bms_file(tmp.string());
+        fs::remove(tmp);
         const auto& a = r1.chart;
         const auto& b = r2.chart;
         const auto na = normalize_notes(a.notes);

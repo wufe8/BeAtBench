@@ -249,8 +249,6 @@ ApplicationWindow {
                        onTriggered: { uiActions.invoke("edit.copy"); copySelection() } }
             MenuItem { text: uiActions.label("edit.paste") + "    " + uiActions.shortcut("edit.paste")
                        onTriggered: { uiActions.invoke("edit.paste"); pasteClipboard() } }
-            MenuSeparator {}
-            MenuItem { text: qsTr("元信息编辑（M3）"); enabled: false }
         }
         Menu {
             title: qsTr("视图")
@@ -539,7 +537,7 @@ ApplicationWindow {
                 onSamplePicked: (id, file) => {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
                     window.currentSampleId = id
-                    setStatus(qsTr("当前采样：#WAV%1 %2").arg(id, file))
+                    setStatus(qsTr("当前采样：#WAV%1 %2").arg(id).arg(file))
                 }
                 onSampleFileRequested: (id, file) => setSampleFile(id, file)
                 onSampleAddRequested: (id, file) => addWavSample(id, file)
@@ -575,11 +573,6 @@ ApplicationWindow {
                 onBmpRenameRequested: (fromId, toId) => bmpRename(fromId, toId)
                 onBmpDeleteRequested: (id) => bmpDelete(id)
                 onBmpSelected: (id) => setCurrentBmp(id)
-                onToolNotReady: (tool) => {
-                    setStatus(tool === "ln"
-                              ? qsTr("LN 放置：M3 编辑命令尚未接 kind（当前仅普通 note）")
-                              : qsTr("地雷放置：M3 编辑命令尚未接 kind（当前仅普通 note）"))
-                }
             }
             SlicePage {}
             TestPage {}
@@ -821,7 +814,7 @@ ApplicationWindow {
             lintModel.loadFromCheck(checkResp)
         } else {
             window.chartMeta = null
-            window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code, r.error.message)
+            window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code).arg(r.error.message)
             statusClearTimer.restart()
         }
     }
@@ -921,7 +914,7 @@ ApplicationWindow {
         ColumnLayout {
             anchors.fill: parent
             spacing: 6
-            Label { text: "BeAtBench " + qsTr("0.1.0（M2）"); font.bold: true }
+            Label { text: "BeAtBench " + qsTr("0.1.0-alpha（M3）"); font.bold: true }
             Label { text: qsTr("BMS 谱面编辑器 · Qt Quick/QML · GPL-3.0") }
             Label { text: qsTr("协议：命令即接口（doc/06 §3）"); color: Theme.textMuted }
         }

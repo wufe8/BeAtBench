@@ -44,7 +44,6 @@ Item {
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
-    signal toolNotReady(string tool)        // ln/mine 工具点击（命令未接）
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
@@ -365,7 +364,7 @@ Item {
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (_dragged || moved > 4) return
         // 点击：放置工具（note / ln / mine）→ hitTest → hitPlaceRequested（Main 按工具定 kind）。
-        // M3 note.put 已接 kind（normal/ln/mine）→ 三种工具都真实放置，不再提示 toolNotReady。
+        // M3 note.put 已接 kind（normal/ln/mine）→ 三种工具都真实放置。
         if ((root.editorTool === "note" || root.editorTool === "ln" ||
                 root.editorTool === "mine") && y > 18) {
             const hit = view.hitTest(x, y)

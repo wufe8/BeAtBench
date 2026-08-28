@@ -1426,6 +1426,9 @@ void MetaEditCommand::apply(Chart& chart) {
     m_existed = it != chart.meta.end();
     if (m_existed) m_old_value = it->second;
     m_changed = m_existed ? (it->second != m_value) : !m_value.empty();
+    // #BASE：id_base 为结构化状态（parser 不入 meta），修改前先快照供 invert 恢复
+    //（2026-09 审查：曾靠 meta["BASE"] 推断 → #BASE 62 谱面改 36 后 undo 错回 Base36）。
+    if (m_key == "BASE") m_old_id_base = chart.id_base;
     if (!m_changed) return;
     if (m_value.empty()) {
         chart.meta.erase(m_key);  // 空值 = 删除
@@ -1449,13 +1452,19 @@ void MetaEditCommand::invert(Chart& chart) {
     } else {
         chart.meta.erase(m_key);  // 原不存在 → 移除
     }
-    // 特殊处理 #BASE 字段：恢复 chart.id_base
+    // 特殊处理 #BASE 字段：恢复 chart.id_base——**快照优先**（invert 时不可依赖 meta["BASE"]，
+    // parser 从不把它写入 meta；meta 推断仅作历史兼容兜底）。
     if (m_key == "BASE") {
-        const auto it = chart.meta.find("BASE");
-        if (it != chart.meta.end() && it->second == "62") {
-            chart.id_base = IdBase::Base62;
+        if (m_old_id_base) {
+            chart.id_base = *m_old_id_base;
+            m_old_id_base.reset();
         } else {
-            chart.id_base = IdBase::Base36;
+            const auto it = chart.meta.find("BASE");
+            if (it != chart.meta.end() && it->second == "62") {
+                chart.id_base = IdBase::Base62;
+            } else {
+                chart.id_base = IdBase::Base36;
+            }
         }
     }
     m_changed = false;

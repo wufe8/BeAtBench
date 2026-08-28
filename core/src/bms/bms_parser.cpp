@@ -19,6 +19,7 @@
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
 
+#include "bms_sections.hpp"
 #include "encoding.hpp"
 
 namespace beatbench::bms {
@@ -334,7 +335,9 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         }
         if (rest.starts_with("//") || rest.starts_with("*")) {
             // BMSE 风格：// 行注释、* 星号注释
-            if (opts.preserve_comments) raw.emplace_back(line);
+            // 结构分割线（bms_sections.hpp）是 writer 生成的装饰、不算用户注释：
+            // 豁免不入 raw_lines，否则 写→读→写 每次在尾部累积一份（幂等性破坏）。
+            if (opts.preserve_comments && !detail::is_section_banner(rest)) raw.emplace_back(line);
             continue;
         }
         if (rest.empty()) continue;  // 空行（不保留）
@@ -638,6 +641,9 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     //      9key，如 Doppelganger/_EX9.pms、_R9.pms——用户实测确认，非 DP）；
     //   3. #PLAYER 3 → dp、4 → battle（玩家数语义；DP 谱用 .bms 表示）；
     //   4. 其余 → sp7k（read_bms 内按 #PLAYER 1/2/缺失推断）。
+    // ⚠️ 纯文本 read_bms 无扩展名信息（第 2 步不可用）：.pms 内容（如 #PLAYER 3 + 16-19
+    //   通道）会误推成 dp/sp7k → 调用方需显式传 opts.mode="pms9k"；GUI/CLI 全走
+    //   read_bms_file（扩展名推断），roundtrip 测试亦须文件入口回读（2026-09 实测）。
     // #PLAYER 扫描需在编码解码前对原始字节做（ASCII 指令，编码无关）。
     BmsReadOptions effective = opts;
     if (effective.mode.empty() || effective.mode == "auto") {

@@ -16,6 +16,7 @@
 
 #include "bridge/ChartSession.hpp"
 #include "bridge/ThemeManager.hpp"
+#include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
 
@@ -707,6 +708,7 @@ void ChartViewItem::updateHover(const QPointF& pos) {
             // 命中 note → 追加 轨道 + 采样（只查相邻小节，控制开销）
             const beatbench::Chart& chart = *cs->chart();
             const qreal noteH = noteHeight();
+            bool noteHit = false;  // 命中 note → 不再追加 BPM/STOP 元事件信息
             for (std::size_t evIdx = 0; evIdx < chart.notes.size(); ++evIdx) {
                 const auto& ev = chart.notes[evIdx];
                 if (static_cast<int>(ev.measure) < measure - 1 ||
@@ -753,16 +755,18 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                     if (ev.value.kind == beatbench::NoteKind::Landmine) {
                         text += QStringLiteral(" · 地雷");
                     } else {
-                        const QString idText = QString::number(ev.value.sample.id, 36)
-                                                   .toUpper()
-                                                   .rightJustified(2, QLatin1Char('0'));
-                        text += QStringLiteral(" · #WAV") + idText;
+                        // id 文本按 chart.id_base 输出（36/62；2026-09 审查：曾硬编码
+                        // base36+toUpper → #BASE 62 谱面显示错误 id）
+                        text += QStringLiteral(" · #WAV%1").arg(QString::fromStdString(
+                            beatbench::bms::id_text(chart, ev.value.sample.id)));
                     }
+                    noteHit = true;
                     break;
                 }
             }
-            // 命中 BPM/STOP meta 事件 → 追加类型 + 值 + 通道信息
-            if (!text.contains("#")) {
+            // 命中 BPM/STOP meta 事件 → 追加类型 + 值 + 通道信息（仅在未命中 note 时）
+            if (!noteHit) {
+                bool bpmHit = false, stopHit = false;
                 // BPM 元事件轨
                 for (std::size_t i = 0; i < m_columns.size(); ++i) {
                     if (!m_columns[i].bpm) continue;
@@ -777,17 +781,18 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                         if (hit.contains(pos)) {
                             const QString ch = ev.value.ch08 ? "ch08" : "ch03";
                             const QString refText = ev.value.ref_id
-                                ? QStringLiteral(" #BPM%1").arg(
-                                      QString::number(*ev.value.ref_id, 36).toUpper().rightJustified(2, '0'))
+                                ? QStringLiteral(" #BPM%1").arg(QString::fromStdString(
+                                      beatbench::bms::id_text(chart, *ev.value.ref_id)))
                                 : "";
                             text += QStringLiteral(" · BPM %1%2 [%3]").arg(ev.value.value).arg(refText).arg(ch);
+                            bpmHit = true;
                             break;
                         }
                     }
-                    if (!text.isEmpty()) break;
+                    if (bpmHit) break;
                 }
                 // STOP 元事件轨
-                if (!text.contains("#")) {
+                if (!bpmHit) {
                     for (std::size_t i = 0; i < m_columns.size(); ++i) {
                         if (!m_columns[i].stop) continue;
                         if (i >= m_colRects.size()) continue;
@@ -800,14 +805,15 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                             const QRectF hit(colRect.x(), y - noteH, colRect.width(), noteH * 2);
                             if (hit.contains(pos)) {
                                 const QString refText = ev.value.ref_id
-                                    ? QStringLiteral(" #STOP%1").arg(
-                                          QString::number(*ev.value.ref_id, 36).toUpper().rightJustified(2, '0'))
+                                    ? QStringLiteral(" #STOP%1").arg(QString::fromStdString(
+                                          beatbench::bms::id_text(chart, *ev.value.ref_id)))
                                     : "";
                                 text += QStringLiteral(" · STOP %1%2 [ch09]").arg(ev.value.count).arg(refText);
+                                stopHit = true;
                                 break;
                             }
                         }
-                        if (text.contains("#")) break;
+                        if (stopHit) break;
                     }
                 }
             }

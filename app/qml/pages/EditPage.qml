@@ -68,8 +68,6 @@ Item {
     signal hitPlaceRequested(var hit)
     /// 框选完成 → Main 存 selection + 复制到剪贴板
     signal selectionFinished(var refs)
-    /// ln/mine 工具点击（命令未接）
-    signal toolNotReady(string tool)
     /// select 点击命中 note（选中；ctrl = 多选切换）
     signal noteClicked(var ref, bool ctrl)
     /// select 点击空白（清空选中）
@@ -337,7 +335,6 @@ Item {
                     perfLog: root.perfLog
                     onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
                     onSelectionFinished: (refs) => root.selectionFinished(refs)
-                    onToolNotReady: (tool) => root.toolNotReady(tool)
                     onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
                     onCanvasClicked: () => root.canvasClicked()
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
@@ -367,7 +364,7 @@ Item {
                 // 标签页（可横向滚动；窄 dock 不截断）
                 BbTabStrip {
                     id: rightTabs
-                    objectName: "rightTabs"  // 调试 --rtab N 用（当前 main.cpp 未接，预留）
+                    objectName: "rightTabs"  // 调试 --rtab N 用（main.cpp 已接）
                     Layout.fillWidth: true
                     Layout.preferredHeight: 30
                     model: [qsTr("属性"), qsTr("时间轴")]

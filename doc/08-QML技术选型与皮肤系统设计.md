@@ -153,7 +153,9 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 
 - [x] `app/CMakeLists.txt`：`find_package(Qt6 COMPONENTS Quick QuickControls2)` + `QQmlApplicationEngine` 入口（M2 完成）；
 - [ ] `theme.json` / `layout.json` schema 正式定稿（含 version 字段与缺省兜底规则；候选 surface 插槽清单见 §3.6）；
-- [x] **UI 动作注册表（皮肤换壳前置）**：✅ 已完成（doc/09）——C++ UiActionRegistry + 24 个动作 + Main.qml 全迁移；
+- [x] **UI 动作注册表（皮肤换壳前置）**：⚠️ **框架已落地、迁移未完成**——C++ UiActionRegistry +
+      24 个动作 id 已注册（doc/09），但 handler 全为 noop、QML 仍手写 Shortcut/菜单/工具条、
+      enabled/checked 未接、无单测；doc/09 §7 验收 1-4 未达成。现状与差距见 **doc/09 §13**；
 - [ ] **theme.json token 与 ThemeManager 对齐（2026-08 布局探索发现）**：ThemeManager 现仅实现
      `keyNote`/`lnTail` 两点；doc/05 §7 完整表（`n1..n4`/`scratch`/`mine`/`ln`/`wave`/`accent2`/
      `note-radius` 等）未落地 → 换肤落地时按完整表补齐（doc/05 §14.3）；

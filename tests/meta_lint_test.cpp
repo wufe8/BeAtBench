@@ -73,6 +73,39 @@ TEST(MetaLint, MetaEditSameValueNoop) {
     EXPECT_EQ(s.chart().meta.at("TITLE"), "测试");
 }
 
+// —— #BASE undo（2026-09 审查修复）：id_base 是结构化状态（parser 不入 meta），
+//    invert 必须快照恢复，不能靠 chart.meta["BASE"] 推断 ——
+
+TEST(MetaLint, MetaEditBaseUndoRestoresIdBase) {
+    // 场景：原谱面 "#BASE 62"（parser 得到 id_base=Base62，meta 无 BASE 键）
+    Chart c = make_chart();
+    c.id_base = IdBase::Base62;
+    EXPECT_EQ(c.meta.count("BASE"), 0u);
+    EditorSession s;
+    s.load(std::move(c));
+    ASSERT_TRUE(s.exec(std::make_unique<MetaEditCommand>("BASE", "36")));
+    EXPECT_EQ(s.chart().id_base, IdBase::Base36);
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().id_base, IdBase::Base62);   // 曾误恢复成 Base36（审查 bug）
+    EXPECT_EQ(s.chart().meta.count("BASE"), 0u);    // 原 meta 无 BASE → 恢复后不残留
+    ASSERT_TRUE(s.redo());
+    EXPECT_EQ(s.chart().id_base, IdBase::Base36);
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().id_base, IdBase::Base62);
+}
+
+TEST(MetaLint, MetaEditBaseUndoFromDefault) {
+    // 场景：原谱面无 #BASE（id_base=Base36）→ 设 62 → undo → 回 Base36
+    Chart c = make_chart();
+    EXPECT_EQ(c.id_base, IdBase::Base36);
+    EditorSession s;
+    s.load(std::move(c));
+    ASSERT_TRUE(s.exec(std::make_unique<MetaEditCommand>("BASE", "62")));
+    EXPECT_EQ(s.chart().id_base, IdBase::Base62);
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().id_base, IdBase::Base36);
+}
+
 // —— lint：重叠 note / 悬挂 LN ——
 
 TEST(MetaLint, LintOverlappingNotes) {

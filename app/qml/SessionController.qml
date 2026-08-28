@@ -677,7 +677,7 @@ QtObject {
         if (!r) return
         refreshSamples()
         sampleModel.selectId(id)  // 保持当前采样为该行；不滚动（视口保持不变）
-        setStatus(qsTr("#WAV%1 → %2（Undo 可恢复）").arg(id, file))
+        setStatus(qsTr("#WAV%1 → %2（Undo 可恢复）").arg(id).arg(file))
     }
 
     /// 重载采样列表（session.samples → sampleModel），并保持列表滚动位置（编辑后视口不跳）。

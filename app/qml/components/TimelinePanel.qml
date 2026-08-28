@@ -12,7 +12,8 @@ import "../components"
 ColumnLayout {
     id: root
 
-    /// 时间轴事件（timing.list 结果；升序）。value 语义：bpm=数值，stop=微秒。
+    /// 时间轴事件（timing.list 结果；升序）。value 语义：bpm=数值；
+    /// stop=原始计数 n（1/192 全音符单位，BMS #STOPxx 原义；毫秒仅是显示换算）。
     property var bpmEvents: []
     property var stopEvents: []
     /// BPM/STOP 定义表（session.samples 的 bpm/stop；[{id(文本), value, refs}]）。

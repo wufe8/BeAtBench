@@ -2104,7 +2104,7 @@ public:
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t id_num = decode(id);
-        const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp
+        const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp / bpm / stop
         session.exec(std::make_unique<edit::DeleteSampleCommand>(kind, id_num));
         Json out = Json::object();
         out.set("ok", true);
