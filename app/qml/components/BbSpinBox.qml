@@ -60,7 +60,7 @@ SpinBox {
             onPaint: {
                 const ctx = getContext("2d")
                 ctx.reset()
-                ctx.fillStyle = "#ffffff"
+                ctx.fillStyle = root.textColor  // 跟随 Theme.text；硬编码 #fff 在亮色皮肤不可见
                 ctx.beginPath()
                 ctx.moveTo(0, 4); ctx.lineTo(3, 0); ctx.lineTo(6, 4)
                 ctx.closePath(); ctx.fill()
@@ -88,7 +88,7 @@ SpinBox {
             onPaint: {
                 const ctx = getContext("2d")
                 ctx.reset()
-                ctx.fillStyle = "#ffffff"
+                ctx.fillStyle = root.textColor  // 跟随 Theme.text；硬编码 #fff 在亮色皮肤不可见
                 ctx.beginPath()
                 ctx.moveTo(0, 0); ctx.lineTo(3, 4); ctx.lineTo(6, 0)
                 ctx.closePath(); ctx.fill()
