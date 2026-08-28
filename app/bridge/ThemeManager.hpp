@@ -18,8 +18,9 @@ public:
     explicit ThemeManager(QObject* parent = nullptr) : QObject(parent) {}
 
     // ---- 颜色 token（访问器；默认值见 doc/beatbench-ui-preview.html :root） ----
+    // NOTIFY tokensChanged：运行时换肤（loadTheme 重载）→ QML 绑定重算（doc/08 §3.3 运行时换肤）。
 #define BB_THEME_COLOR_PROP(name)              \
-    Q_PROPERTY(QColor name READ name CONSTANT) \
+    Q_PROPERTY(QColor name READ name NOTIFY tokensChanged) \
     QColor name() const { return m_##name; }
     BB_THEME_COLOR_PROP(bg)             // 视口底
     BB_THEME_COLOR_PROP(surface)        // 面板底
@@ -62,14 +63,14 @@ public:
 #undef BB_THEME_COLOR_PROP
 
     // ---- 非颜色 token（L2 皮肤：密度/圆角/字体可覆写；默认值见 doc/beatbench-ui-preview.html） ----
-    Q_PROPERTY(qreal radiusSm READ radiusSm CONSTANT)   // 控件圆角（6）
-    Q_PROPERTY(qreal radius READ radius CONSTANT)       // 面板圆角（10）
-    Q_PROPERTY(qreal noteRadius READ noteRadius CONSTANT) // note 圆角（2，= styles.html）
-    Q_PROPERTY(qreal fsBase READ fsBase CONSTANT)       // 正文/按钮（13，= preview.html 基准）
-    Q_PROPERTY(qreal fsSmall READ fsSmall CONSTANT)     // 次级/标签（12）
-    Q_PROPERTY(qreal fsTiny READ fsTiny CONSTANT)       // 提示/占位（11）
-    Q_PROPERTY(QString fontSans READ fontSans CONSTANT)
-    Q_PROPERTY(QString fontMono READ fontMono CONSTANT)
+    Q_PROPERTY(qreal radiusSm READ radiusSm NOTIFY tokensChanged)   // 控件圆角（6）
+    Q_PROPERTY(qreal radius READ radius NOTIFY tokensChanged)       // 面板圆角（10）
+    Q_PROPERTY(qreal noteRadius READ noteRadius NOTIFY tokensChanged) // note 圆角（2，= styles.html）
+    Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)       // 正文/按钮（13，= preview.html 基准）
+    Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)     // 次级/标签（12）
+    Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)       // 提示/占位（11）
+    Q_PROPERTY(QString fontSans READ fontSans NOTIFY tokensChanged)
+    Q_PROPERTY(QString fontMono READ fontMono NOTIFY tokensChanged)
 
     qreal radiusSm() const { return m_radiusSm; }
     qreal radius() const { return m_radius; }
@@ -81,11 +82,36 @@ public:
     QString fontMono() const { return m_fontMono; }
 
     /// 从 theme.json（L1 皮肤层）覆写 token（颜色为主；色值支持 #RRGGBB / #AARRGGBB）。
-    /// 在 QML 加载前调用（Theme.token 是 CONSTANT 属性，QML 绑定在首帧按当前值求值）。
-    /// 未知 key = 跳过（qWarning 汇总）；返回覆写数量。-1 = 文件不存在/解析失败。
+    /// 在 QML 加载前调用（启动时 --skin 单次路径）；运行时换肤走 applyTheme（发射 tokensChanged）。
+    /// 未知 key = 跳过（qWarning 汇总）；返回覆写数量。-1 = 文件不存在/解析失败。**不**发射信号。
     Q_INVOKABLE int loadTheme(const QString& path, QString* error = nullptr);
 
+    /// 运行时换肤（doc/08 §3.3）：loadTheme + 在覆写成功后发射 tokensChanged → QML 绑定重算。
+    /// 若文件不存在/解析失败，返回 -1 且**不**发射信号（保持旧主题）。成功返回覆写数。
+    Q_INVOKABLE int applyTheme(const QString& path);
+
+    /// 重置回内置默认皮肤（皮肤菜单「默认」项）：恢复常量默认值 + 发射 tokensChanged。
+    Q_INVOKABLE void resetDefault();
+
+    // ---- 内置皮肤目录（运行时换肤菜单枚举，doc/08 §3.3） ----
+    /// 当前皮肤目录（""=内置默认，或最后一次应用/加载的皮肤目录）。NOTIFY tokensChanged →
+    /// 皮肤菜单勾选态随运行时切换自动更新。
+    Q_PROPERTY(QString activeSkin READ activeSkin NOTIFY tokensChanged)
+    QString activeSkin() const { return m_activeSkin; }
+    /// 皮肤名清单（不含"默认"；顺序即菜单显示顺序；皮肤目录相对 app 工作目录）。
+    Q_INVOKABLE QStringList skinNames() const;
+    /// 皮肤名 → 目录（"" = 未知名字）；默认皮肤名 = "默认"（空目录，走 resetDefault）。
+    Q_INVOKABLE QString skinDir(const QString& name) const;
+    /// 按名字应用皮肤（"默认"→resetDefault；否则 resolve 目录 applyTheme）。返回覆写数；-1 失败。
+    Q_INVOKABLE int applySkinByName(const QString& name);
+
+signals:
+    /// 任一 token 变化（运行时换肤/重置默认）→ QML 绑定重算 + ChartView 重绘。
+    void tokensChanged();
+
     // 内部：theme.json 覆写用的逐个 setter（仅 loadTheme 调用；QML 侧只读）。
+    // 显式 public：分隔上面的 signals 区（否则 moc 把 set_* 误读为信号）。
+public:
 #define BB_THEME_SETTER(name) void set_##name(const QColor& v) { m_##name = v; }
     BB_THEME_SETTER(bg)
     BB_THEME_SETTER(surface)
@@ -188,6 +214,9 @@ private:
     QString m_fontSans = QStringLiteral("Microsoft YaHei UI");
     // 等宽：Consolas（Windows 自带）；自由备选 Cascadia Mono / JetBrains Mono（OFL）
     QString m_fontMono = QStringLiteral("Consolas");
+
+    // 当前皮肤目录（""=内置默认）；applyTheme/resetDefault 维护
+    QString m_activeSkin;
 };
 
 }  // namespace beatbench::app

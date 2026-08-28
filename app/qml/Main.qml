@@ -262,7 +262,27 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("视图")
-            MenuItem { text: qsTr("皮肤（L1/L2，M2 后）"); enabled: false }
+            // 皮肤（doc/08 §3.3 运行时换肤）：L1 token 覆写 + 运行时切换。
+            // 列出「默认」+ 内置皮肤，当前生效项打勾；点击即运行时切换（Theme.applySkinByName）。
+            Menu {
+                title: qsTr("皮肤")
+                MenuItem {
+                    text: qsTr("默认")
+                    checkable: true
+                    checked: Theme.activeSkin === ""
+                    onTriggered: Theme.applySkinByName("默认")
+                }
+                Repeater {
+                    model: Theme.skinNames()
+                    delegate: MenuItem {
+                        required property string modelData
+                        text: modelData
+                        checkable: true
+                        checked: Theme.activeSkin === Theme.skinDir(modelData)
+                        onTriggered: Theme.applySkinByName(modelData)
+                    }
+                }
+            }
         }
         Menu {
             title: qsTr("工作区")
@@ -968,6 +988,16 @@ ApplicationWindow {
     Connections {
         target: uiActions
         function onStateChanged() { window.uiStateTick++ }
+    }
+    // 运行时换肤（doc/08 §3.3）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定自动重算；
+    // QPalette 由 main.cpp 的 tokensChanged → rebuildPalette 重建；这里只需强制视口重绘
+    // （ChartViewItem 的 note 颜色在 paint 时读 Theme token，重绘后才反映新皮肤）。
+    Connections {
+        target: Theme
+        function onTokensChanged() {
+            if (typeof editPage !== "undefined" && editPage && editPage.locateChartView && editPage.locateChartView())
+                editPage.locateChartView().refreshTheme()
+        }
     }
 
     // ---------- 对话框耦合函数（委托需 window 作用域的对话框，故保留在 Main） ----------

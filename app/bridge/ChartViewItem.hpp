@@ -117,6 +117,10 @@ public:
     qreal contentWidth() const;
     QString hoverText() const { return m_hoverText; }
 
+    /// 运行时换肤（doc/08 §3.3）：Theme token 变化后强制重绘（repaint）视口。
+    /// QML 侧 catch Theme.tokensChanged 时调用；等价于调用底层 QQuickPaintedItem::update()。
+    Q_INVOKABLE void refreshTheme() { update(); }
+
     /// 命中 BGM 列头（视口顶部横条内）→ 列下标（-1 未命中）；QML 点击用于展开/折叠。
     Q_INVOKABLE int bgmHeaderIndexAt(qreal x) const;
 

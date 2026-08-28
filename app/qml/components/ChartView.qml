@@ -95,6 +95,11 @@ Item {
         return view.probe(x, y)
     }
 
+    /// 运行时换肤（doc/08 §3.3）：Theme.tokensChanged 后强制重绘视口（转发 ChartViewItem.refreshTheme）。
+    function refreshTheme() {
+        view.refreshTheme()
+    }
+
     /// 以屏幕 y 为锚点缩放（--zoom-at / 滚轮缩放锚点；转发 ChartViewItem.zoomAt）。
     /// ⚠️ zoomAt 直接改 C++ measureHeight（锚点滚动计算），完成后回写 root.measureHeight
     /// 保持工具条「缩放 %」显示同步（root→view 单向绑定，回写同值不会二次缩放）。

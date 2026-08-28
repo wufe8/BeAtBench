@@ -6,7 +6,9 @@
 #include "bridge/ThemeManager.hpp"
 
 #include <QDebug>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTextStream>
 #include <functional>
 
@@ -143,6 +145,132 @@ int ThemeManager::loadTheme(const QString& path, QString* error) {
                             QStringLiteral(" — ") + QString::fromUtf8(e.what());
         return -1;
     }
+}
+
+int ThemeManager::applyTheme(const QString& path) {
+    QString err;
+    const int n = loadTheme(path, &err);
+    if (n < 0) {
+        qWarning() << "ThemeManager::applyTheme 失败:" << err;
+        return -1;
+    }
+    // 记录当前皮肤目录（皮肤菜单高亮/下次启动回显用）
+    m_activeSkin = QFileInfo(path).absolutePath();
+    emit tokensChanged();
+    qInfo("皮肤已运行时切换：%s（%d 个 token）", qPrintable(m_activeSkin), n);
+    return n;
+}
+
+void ThemeManager::resetDefault() {
+    // 恢复内置默认皮肤骨架（doc/08 §3.4；= doc/beatbench-ui-preview.html :root 常量）。
+    // 全部 token 逐项重置回默认值（与头文件成员默认值一致）。
+#define BB_THEME_RESET_COLOR(name, def) set_##name(QColor(QStringLiteral(def)));
+    BB_THEME_RESET_COLOR(bg, "#0b0d10")
+    BB_THEME_RESET_COLOR(surface, "#12151a")
+    BB_THEME_RESET_COLOR(surface2, "#1a1e24")
+    BB_THEME_RESET_COLOR(surface3, "#21262e")
+    BB_THEME_RESET_COLOR(border, "#262b33")
+    BB_THEME_RESET_COLOR(borderStrong, "#333a44")
+    BB_THEME_RESET_COLOR(text, "#e6e9ee")
+    BB_THEME_RESET_COLOR(textMuted, "#9aa3b2")
+    BB_THEME_RESET_COLOR(textFaint, "#6b7484")
+    BB_THEME_RESET_COLOR(primary, "#6366f1")
+    BB_THEME_RESET_COLOR(primarySoft, "#266366f1")
+    BB_THEME_RESET_COLOR(onAccent, "#ffffff")
+    BB_THEME_RESET_COLOR(accent, "#22d3ee")
+    BB_THEME_RESET_COLOR(success, "#34d399")
+    BB_THEME_RESET_COLOR(warning, "#fbbf24")
+    BB_THEME_RESET_COLOR(danger, "#f87171")
+    BB_THEME_RESET_COLOR(keyNote, "#8b9cf8")
+    BB_THEME_RESET_COLOR(lnTail, "#428b9cf8")
+    BB_THEME_RESET_COLOR(n1, "#8b9cf8")
+    BB_THEME_RESET_COLOR(n2, "#8b9cf8")
+    BB_THEME_RESET_COLOR(n3, "#8b9cf8")
+    BB_THEME_RESET_COLOR(n4, "#8b9cf8")
+    BB_THEME_RESET_COLOR(scratch, "#22d3ee")
+    BB_THEME_RESET_COLOR(mine, "#f87171")
+    BB_THEME_RESET_COLOR(ln, "#428b9cf8")
+    BB_THEME_RESET_COLOR(wave, "#1f8b9cf8")
+    BB_THEME_RESET_COLOR(accent2, "#22d3ee")
+    BB_THEME_RESET_COLOR(keyOdd, "#ffffff")
+    BB_THEME_RESET_COLOR(scratchNote, "#ef5350")
+    BB_THEME_RESET_COLOR(bgmNote, "#4ade80")
+    BB_THEME_RESET_COLOR(bgaBase, "#86efac")
+    BB_THEME_RESET_COLOR(bgaPoor, "#16a34a")
+    BB_THEME_RESET_COLOR(bgaLayer, "#4ade80")
+    BB_THEME_RESET_COLOR(bgaLayer2, "#22c55e")
+#undef BB_THEME_RESET_COLOR
+    set_radiusSm(6.0);
+    set_radius(10.0);
+    set_noteRadius(2.0);
+    set_fsBase(13.0);
+    set_fsSmall(12.0);
+    set_fsTiny(11.0);
+    set_fontSans(QStringLiteral("Microsoft YaHei UI"));
+    set_fontMono(QStringLiteral("Consolas"));
+    m_activeSkin.clear();
+    emit tokensChanged();
+    qInfo("皮肤已重置为内置默认");
+}
+
+// ---- 内置皮肤目录（运行时换肤菜单枚举） ----
+// 目录相对 app 工作目录；每项 {name, dir}。name 唯一；"默认"在 skinNames 之外（resetDefault 语义）。
+namespace {
+struct SkinEntry { const char* name; const char* dir; };
+const SkinEntry kBuiltinSkins[] = {
+    { "Aurora", "skins/Aurora" },
+    { "Linear", "skins/Linear" },
+};
+}
+
+QStringList ThemeManager::skinNames() const {
+    QStringList names;
+    for (const auto& e : kBuiltinSkins) names.append(QString::fromUtf8(e.name));
+    return names;
+}
+
+QString ThemeManager::skinDir(const QString& name) const {
+    for (const auto& e : kBuiltinSkins) {
+        if (name == QLatin1String(e.name)) return QString::fromUtf8(e.dir);
+    }
+    return QString();
+}
+
+int ThemeManager::applySkinByName(const QString& name) {
+    // "默认" 用 QString::fromUtf8 比较（QLatin1String 不能表示多字节 UTF-8 字面量；CLI 经 argv 传入）
+    if (name == QString::fromUtf8("默认")) {
+        resetDefault();
+        return 0;
+    }
+    const QString dirPath = skinDir(name);
+    if (dirPath.isEmpty()) {
+        qWarning() << "ThemeManager::applySkinByName: 未知皮肤" << name;
+        return -1;
+    }
+    // 目录相对「当前工作目录」解析失败时，回退到常见皮肤根（skin.json 随产品根布局，见 ../，
+    // ../../）；启动 --skin 也按工作目录（用户显式传路径），目录清单则尽量自适应。
+    const QString themePath = QDir(dirPath).filePath(QStringLiteral("theme.json"));
+    QString theme = themePath;
+    if (!QFile::exists(theme)) {
+        // exe 常见于 build-gui/app/（皮肤在仓库根 skins/），试探上溯 1..2 级
+        const QStringList bases = { QStringLiteral("."), QStringLiteral(".."),
+                                    QStringLiteral("../.."), QStringLiteral("../../..") };
+        for (const QString& b : bases) {
+            const QString cand = QDir(b).filePath(themePath);
+            if (QFile::exists(cand)) { theme = cand; break; }
+        }
+    }
+    if (!QFile::exists(theme)) {
+        qWarning() << "ThemeManager::applySkinByName: 缺 theme.json" << themePath;
+        return -1;
+    }
+    // applyTheme 用绝对路径记 activeSkin；这里先应用，外层再关 keymap 切肤（见 QML）。
+    const int n = applyTheme(theme);
+    if (n >= 0) {
+        // applyTheme 记录的 activeSkin 是 theme.json 绝对路径的父目录；改存皮肤目录（相对）。
+        m_activeSkin = dirPath;
+    }
+    return n;
 }
 
 }  // namespace beatbench::app

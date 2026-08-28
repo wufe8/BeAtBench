@@ -86,12 +86,21 @@ skins/MySkin/
 | L2 | 写 layout.json（声明式） | 低（看文档照抄） | 面板排列/工具条组成/可见性 |
 | L3 | 写 QML 模块（beatoraja 式） | 高（要会 QML） | 完全自定义布局/控件/交互 |
 
+> **两步命名约定（2026-09 定稿，免讨论混乱）**：「层」只用 L1/L2/L3 指**能力**（改什么）；
+> 「时机」用 **启动时 / 运行时** 指**何时生效**。二者正交，不说"L1.5"这类模糊层级——
+> 例如"L1 运行时换肤"= 皮肤只改 token，但通过菜单**运行时**切换（不是启动时 `--skin`）。
+> 本轮实现的即「L1 运行时换肤」，能力仍是 L1（仅 token），时机为运行时。
+
 ### 3.3 覆写与兜底（核心机制）
 
 - **皮肤继承默认皮肤，只覆写它声明的层**；未提供的层回落内置默认；
 - 覆写优先级：内置默认 < `theme.json` < `assets/` < `layout.json` < `ui/`；
 - 每层 schema 校验 + **版本号字段**（皮肤文件带 `"version"`，token 增删有升级路径）；
 - **功能永远在引擎 + 默认皮肤兜底**：L1/L2 皮肤作者不需要实现任何功能；只有 L3 皮肤（主动要全权）才自担功能——这正面化解「beatoraja 的功能选项由皮肤自己实现」的负担。
+- **运行时换肤（2026-09 已实现，见 §6 四批）**：L1 层 token 属性从 `CONSTANT` 改 NOTIFY，换肤时
+  `applyTheme(path)` → 重发 `tokensChanged` → QML 绑定重算；应用级 `QPalette` 同步重建
+  （main.cpp connect）；视口重绘（`ChartViewItem.refreshTheme()`）。启动时 `--skin` 仍走旧
+  单次路径（等价于"启动时应用一次 L1 皮肤"）。
 
 ### 3.4 内置皮肤双角色
 
@@ -171,6 +180,13 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
       doc/beatbench-ui-styles.html 主题①③⑤⑥ 的**布局改动幅度**，无需 QML 结构改动。
       **仍未做**：真正的**布局结构改动**（工具条行增删/面板排列/整壳重排，即 L2 `layout.json`
       结构层 / L3 QML 壳覆写），属深水区；
+- [x] **运行时换肤（2026-09 四批，L1 运行时）**：`ThemeManager` token 从 `CONSTANT` 改
+      NOTIFY（聚合 `tokensChanged`）；新增 `applyTheme(path)`/`resetDefault()`/`activeSkin`/
+      内置皮肤目录（`skinNames`/`skinDir`/`applySkinByName`，含 `Aurora`/`Linear`）。`--skin`
+      仍为启动时单次路径；菜单「视图→皮肤」列出「默认」+ 内置皮肤，点击即运行时切换——
+      `applyTheme` → `tokensChanged` → QML 绑定重算 + 应用级 QPalette 重建（main.cpp 连接）+
+      视口重绘（`ChartViewItem.refreshTheme()`）。文档验证 `--apply-skin <name>`（同一路径）。
+      皮肤术语定稿：「层 L1/L2/L3 = 能力（改什么）」「启动时/运行时 = 时机（何时生效）」，正交，无 L1.5。
 - [ ] L3 皮肤覆写的粒度约定（整壳替换 vs 按区域 `Replace:` 声明）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME）；
 - [x] 时间轴视口技术路线确认：`QQuickPaintedItem`（QPainter 复用）起步（M2 已落地）；

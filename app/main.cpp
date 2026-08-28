@@ -278,6 +278,31 @@ int main(int argc, char** argv) {
 
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
 
+    // ---- 运行时换肤（doc/08 §3.3）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定重算。
+    // 应用级 QPalette（Fusion 内置控件：菜单/对话框/默认按钮）与 token 脱钩，需在此同步重建——
+    // 把 theme token 重建 QPalette 并 set 到 qApp（见上方 pal 构建；抽出函数复用）。 ----
+    const auto rebuildPalette = [&theme, &app] {
+        QPalette pal;
+        pal.setColor(QPalette::Window, theme.surface());
+        pal.setColor(QPalette::WindowText, theme.text());
+        pal.setColor(QPalette::Base, theme.surface2());
+        pal.setColor(QPalette::AlternateBase, theme.surface());
+        pal.setColor(QPalette::Text, theme.text());
+        pal.setColor(QPalette::Button, theme.surface2());
+        pal.setColor(QPalette::ButtonText, theme.text());
+        pal.setColor(QPalette::Highlight, theme.primary());
+        pal.setColor(QPalette::HighlightedText, theme.onAccent());
+        pal.setColor(QPalette::PlaceholderText, theme.textFaint());
+        pal.setColor(QPalette::ToolTipBase, theme.surface2());
+        pal.setColor(QPalette::ToolTipText, theme.text());
+        pal.setColor(QPalette::Disabled, QPalette::WindowText, theme.textFaint());
+        pal.setColor(QPalette::Disabled, QPalette::Text, theme.textFaint());
+        pal.setColor(QPalette::Disabled, QPalette::ButtonText, theme.textFaint());
+        app.setPalette(pal);
+    };
+    QObject::connect(&theme, &beatbench::app::ThemeManager::tokensChanged,
+                     &app, [rebuildPalette] { rebuildPalette(); });
+
     // 注册已完成、QML 根已加载：补一次 enabled/checked 状态同步（QML 的 Component.onCompleted
     // 在 loadFromModule 期间已执行，此时注册未完成 → 由这里兜底 Main.qml 的 updateActionStates
     // + updateCheckedStates）。
@@ -299,6 +324,17 @@ int main(int argc, char** argv) {
     const int shotIdx = args.indexOf(QStringLiteral("--screenshot"));
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
         scheduleScreenshot(engine, args.at(shotIdx + 1));
+
+    // --apply-skin <name>：启动后运行时换肤（配 --screenshot 验收皮肤菜单切换链路）。
+    // 走 ThemeManager::applySkinByName —— 与菜单「视图→皮肤」同一路径（applyTheme →
+    // tokensChanged → QML 绑定重算 + QPalette 重建 + 视口重绘）。
+    const int asIdx = args.indexOf(QStringLiteral("--apply-skin"));
+    if (asIdx >= 0 && asIdx + 1 < args.size()) {
+        const QString skinName = args.at(asIdx + 1);
+        qInfo("--apply-skin: %s", qPrintable(skinName));
+        if (theme.applySkinByName(skinName) < 0)
+            qWarning() << "--apply-skin 应用失败:" << skinName;
+    }
 
     // --page N：启动时切到第 N 页（调试：验证页面切换渲染；配合 --screenshot 使用）
     const int pageIdx = args.indexOf(QStringLiteral("--page"));

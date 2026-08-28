@@ -107,3 +107,56 @@ TEST(ThemeManager, MissingFileReturnsMinusOne) {
     EXPECT_EQ(th.loadTheme(QStringLiteral("/nonexistent/theme.json"), &err), -1);
     EXPECT_FALSE(err.isEmpty());
 }
+
+TEST(ThemeManager, RuntimeApplyAndReset) {
+    // 运行时换肤（doc/08 §3.3）：applyTheme 覆写 + 发 tokensChanged + activeSkin；resetDefault 还原。
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = write_theme(dir, R"({"bg": "#222222", "primary": "#00ff00"})");
+    ASSERT_FALSE(path.isEmpty());
+
+    ThemeManager th;
+    int sigCount = 0;
+    QObject::connect(&th, &ThemeManager::tokensChanged, [&] { ++sigCount; });
+
+    // applyTheme 成功 → 覆写 + 发信号 + 记录 activeSkin（目录）
+    const int n = th.applyTheme(path);
+    EXPECT_EQ(n, 2);
+    EXPECT_EQ(sigCount, 1);
+    EXPECT_EQ(th.bg(), QColor(QStringLiteral("#222222")));
+    EXPECT_EQ(th.activeSkin(), dir.path());  // theme.json 所在目录
+    EXPECT_EQ(th.primary(), QColor(QStringLiteral("#00ff00")));
+
+    // resetDefault → 全还原 + 再发信号 + activeSkin 清空
+    th.resetDefault();
+    EXPECT_EQ(sigCount, 2);
+    EXPECT_EQ(th.bg(), QColor(QStringLiteral("#0b0d10")));
+    EXPECT_EQ(th.primary(), QColor(QStringLiteral("#6366f1")));
+    EXPECT_TRUE(th.activeSkin().isEmpty());
+}
+
+TEST(ThemeManager, BuiltinSkinCatalog) {
+    // 内置皮肤目录（doc/08 §3.3 菜单枚举）：skinNames 非空、skinDir 可解析、未知名返回空。
+    ThemeManager th;
+    const QStringList names = th.skinNames();
+    EXPECT_FALSE(names.isEmpty());
+    EXPECT_TRUE(names.contains(QStringLiteral("Aurora")));
+    EXPECT_TRUE(names.contains(QStringLiteral("Linear")));
+    EXPECT_EQ(th.skinDir(QStringLiteral("Aurora")), QStringLiteral("skins/Aurora"));
+    EXPECT_EQ(th.skinDir(QStringLiteral("Linear")), QStringLiteral("skins/Linear"));
+    // 未知皮肤名 → 空目录 + applySkinByName 返回 -1
+    EXPECT_TRUE(th.skinDir(QStringLiteral("Nope")).isEmpty());
+    EXPECT_EQ(th.applySkinByName(QStringLiteral("Nope")), -1);
+}
+
+TEST(ThemeManager, ResetDefaultRestoresAllTokens) {
+    // 内置默认皮肤骨架（doc/08 §3.4）：resetDefault 后全部 token = 默认常量。
+    ThemeManager th;
+    th.resetDefault();
+    EXPECT_EQ(th.surface(), QColor(QStringLiteral("#12151a")));
+    EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
+    EXPECT_DOUBLE_EQ(th.noteRadius(), 2.0);
+    EXPECT_DOUBLE_EQ(th.fsBase(), 13.0);
+    EXPECT_EQ(th.fontSans(), QStringLiteral("Microsoft YaHei UI"));
+    EXPECT_EQ(th.fontMono(), QStringLiteral("Consolas"));
+}
