@@ -33,6 +33,11 @@ if (Qt6Core_FOUND)
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.hpp)  # Q_OBJECT 头须显式列入（AUTOMOC 扫描不可靠）
     target_include_directories(ui_action_registry_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
     target_link_libraries(ui_action_registry_test PRIVATE Qt6::Core GTest::gtest_main)
+    # UiActionRegistry 是 Q_OBJECT：需 AUTOMOC 生成 staticMetaObject/信号/vtable。
+    # qt_standard_project_setup 只在 app 子目录启用（app/CMakeLists.txt）；tests 位于其外、且
+    # 本目标不依赖 Quick，故在此显式开启 AUTOMOC（2026-09：此前缺它 → 链接 undefined reference，
+    # 让「Qt 测试目标接入常规构建」实际不可编译，ui_action_registry_test 无法链接/运行）。
+    set_target_properties(ui_action_registry_test PROPERTIES AUTOMOC ON)
     beatbench_set_warnings(ui_action_registry_test)
     add_test(NAME ui_action_registry_tests COMMAND ui_action_registry_test)
 endif()

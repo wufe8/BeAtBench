@@ -3,6 +3,7 @@ local/
 # 构建产物
 /build/
 /build-gui/
+/build-uitest/
 /cmake-build-*/
 /out/
 *.user

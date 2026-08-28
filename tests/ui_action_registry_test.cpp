@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// UiActionRegistry 单测（doc/09 §7 验收 4：注册/重复 id 守卫/状态查询/触发/枚举）。
+// UiActionRegistry 单测（doc/09 §7 验收 4：注册/重复 id 守卫/状态查询/触发/枚举/keymap 覆写）。
 // 本目标只链 Qt6::Core（注册表不依赖 GUI）：在找到 Qt6 的构建配置中启用
-//（见 tests/CMakeLists.txt；MSVC 的 build/ 无 Qt → 跳过）。
+//（tests/CMakeLists.txt；MSVC 的 build/ 无 Qt → 跳过，Qt 版 build-uitest 配置可编跑）。
+// 2026-09：补 AUTOMOC（UiActionRegistry 是 Q_OBJECT）后此目标可正常链接运行。
 #include <gtest/gtest.h>
 
 #include <QString>
@@ -141,4 +142,43 @@ TEST(UiActionRegistry, CheckableAndSetChecked) {
     EXPECT_FALSE(r.checked(QStringLiteral("t")));
     EXPECT_EQ(state, 2);
     EXPECT_EQ(action, 2);
+}
+
+TEST(UiActionRegistry, KeymapOverrideShortcut) {
+    // keymap.json 覆写（doc/09 §9）：setShortcut 覆写单个、applyKeymap 批量；未知 id 跳过。
+    UiActionRegistry r;
+    int state = 0;
+    QObject::connect(&r, &UiActionRegistry::stateChanged, [&] { ++state; });
+    UiActionDef d = make_def(QStringLiteral("file.save"));
+    d.shortcut = QStringLiteral("Ctrl+S");
+    r.add(d);
+    EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+S"));
+
+    // setShortcut 覆写
+    r.setShortcut(QStringLiteral("file.save"), QStringLiteral("Ctrl+Shift+S"));
+    EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+Shift+S"));
+    EXPECT_EQ(state, 1);
+    // 相同值 → 不再发信号
+    r.setShortcut(QStringLiteral("file.save"), QStringLiteral("Ctrl+Shift+S"));
+    EXPECT_EQ(state, 1);
+
+    // 未知 id：警告、不改变 count
+    r.setShortcut(QStringLiteral("nope"), QStringLiteral("Ctrl+Alt+X"));
+    EXPECT_EQ(state, 1);
+
+    // applyKeymap 批量（含未知 id 跳过；有效覆写触发一次 stateChanged）
+    UiActionDef u = make_def(QStringLiteral("edit.undo"));
+    r.add(u);
+    QVariantMap km;
+    km.insert(QStringLiteral("file.save"), QStringLiteral("Ctrl+Alt+S"));
+    km.insert(QStringLiteral("edit.undo"), QStringLiteral("Ctrl+Y"));
+    km.insert(QStringLiteral("unknown.id"), QStringLiteral("Ctrl+Q"));
+    const int n = r.applyKeymap(km);
+    EXPECT_EQ(n, 2);  // file.save + edit.undo（unknown.id 跳过）
+    EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+Alt+S"));
+    EXPECT_EQ(r.shortcut(QStringLiteral("edit.undo")), QStringLiteral("Ctrl+Y"));
+    EXPECT_EQ(state, 2);
+    // 空序列 = 清除快捷键
+    r.setShortcut(QStringLiteral("file.save"), QString());
+    EXPECT_TRUE(r.shortcut(QStringLiteral("file.save")).isEmpty());
 }
