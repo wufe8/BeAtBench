@@ -11,6 +11,7 @@ add_executable(beatbench
     bridge/ChartSession.cpp
     bridge/KeyMonitor.cpp
     bridge/UiActionRegistry.cpp
+    bridge/ThemeManager.cpp
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
     bridge/SampleListModel.hpp
     bridge/LintListModel.hpp

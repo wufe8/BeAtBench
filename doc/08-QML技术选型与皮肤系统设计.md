@@ -153,12 +153,15 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 
 - [x] `app/CMakeLists.txt`：`find_package(Qt6 COMPONENTS Quick QuickControls2)` + `QQmlApplicationEngine` 入口（M2 完成）；
 - [ ] `theme.json` / `layout.json` schema 正式定稿（含 version 字段与缺省兜底规则；候选 surface 插槽清单见 §3.6）；
-- [x] **UI 动作注册表（皮肤换壳前置）**：⚠️ **框架已落地、迁移未完成**——C++ UiActionRegistry +
-      24 个动作 id 已注册（doc/09），但 handler 全为 noop、QML 仍手写 Shortcut/菜单/工具条、
-      enabled/checked 未接、无单测；doc/09 §7 验收 1-4 未达成。现状与差距见 **doc/09 §13**；
-- [ ] **theme.json token 与 ThemeManager 对齐（2026-08 布局探索发现）**：ThemeManager 现仅实现
-     `keyNote`/`lnTail` 两点；doc/05 §7 完整表（`n1..n4`/`scratch`/`mine`/`ln`/`wave`/`accent2`/
-     `note-radius` 等）未落地 → 换肤落地时按完整表补齐（doc/05 §14.3）；
+- [x] **UI 动作注册表（皮肤换壳前置）**：✅ **已落地（2026-09 二批）**——C++ UiActionRegistry +
+      24 个动作 id 注册、invoke 真实化（handler=QMetaObject 调 QML 窗口函数）、`setEnabled`/
+      `updateActionStates`（enabled 打通）、`setChecked`/`updateCheckedStates`（勾选态打通）、
+      `keymap.json` 快捷键覆写（`--keymap`/`--skin`）。**item 3/5/7 未完**：菜单/工具条/快捷键
+      枚举化渲染（doc/09 §7 验收 1-2）、L3 皮肤整壳样例、layout.json schema。详见 doc/09 §13；
+- [x] **theme.json token 与 ThemeManager 对齐（2026-09 二批，L1 样例）**：`ThemeManager` 已实现
+      全部 `n1..n4`/`scratch`/`mine`/`ln`/`wave`/`accent2`/`noteRadius` 等 token（doc/05 §7 完整表），
+      并新增 `loadTheme(path)`（`--skin <dir>` 加载 `theme.json` 覆写颜色 token，QML 加载前应用）。
+      样例皮肤 `skins/Aurora/`（L1 颜色 + keymap）。缺省回落/非颜色 token（radius/fs/fonts）后置；
 - [ ] L3 皮肤覆写的粒度约定（整壳替换 vs 按区域 `Replace:` 声明）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME）；
 - [x] 时间轴视口技术路线确认：`QQuickPaintedItem`（QPainter 复用）起步（M2 已落地）；

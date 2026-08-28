@@ -1,0 +1,22 @@
+{
+  "bg": "#0d0a14",
+  "surface": "#16121f",
+  "surface2": "#1f1a2c",
+  "surface3": "#282040",
+  "border": "#2e2540",
+  "borderStrong": "#3d3052",
+  "text": "#f2ecf8",
+  "textMuted": "#b8a8d0",
+  "textFaint": "#7a6b92",
+  "primary": "#f59e0b",
+  "onAccent": "#201000",
+  "accent": "#fbbf24",
+  "accent2": "#fb923c",
+  "keyOdd": "#f0e6ff",
+  "scratchNote": "#fb7185",
+  "bgmNote": "#34d399",
+  "bgaBase": "#6ee7b7",
+  "bgaPoor": "#10b981",
+  "bgaLayer": "#34d399",
+  "bgaLayer2": "#22c55e"
+}

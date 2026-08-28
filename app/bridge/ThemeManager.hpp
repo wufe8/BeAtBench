@@ -84,6 +84,49 @@ public:
     // 等宽：Consolas（Windows 自带）；自由备选 Cascadia Mono / JetBrains Mono（OFL）
     QString fontMono() const { return QStringLiteral("Consolas"); }
 
+    /// 从 theme.json（L1 皮肤层）覆写 token（颜色为主；色值支持 #RRGGBB / #AARRGGBB）。
+    /// 在 QML 加载前调用（Theme.token 是 CONSTANT 属性，QML 绑定在首帧按当前值求值）。
+    /// 未知 key = 跳过（qWarning 汇总）；返回覆写数量。-1 = 文件不存在/解析失败。
+    Q_INVOKABLE int loadTheme(const QString& path, QString* error = nullptr);
+
+    // 内部：theme.json 覆写用的逐个 setter（仅 loadTheme 调用；QML 侧只读）。
+#define BB_THEME_SETTER(name) void set_##name(const QColor& v) { m_##name = v; }
+    BB_THEME_SETTER(bg)
+    BB_THEME_SETTER(surface)
+    BB_THEME_SETTER(surface2)
+    BB_THEME_SETTER(surface3)
+    BB_THEME_SETTER(border)
+    BB_THEME_SETTER(borderStrong)
+    BB_THEME_SETTER(text)
+    BB_THEME_SETTER(textMuted)
+    BB_THEME_SETTER(textFaint)
+    BB_THEME_SETTER(primary)
+    BB_THEME_SETTER(primarySoft)
+    BB_THEME_SETTER(onAccent)
+    BB_THEME_SETTER(accent)
+    BB_THEME_SETTER(success)
+    BB_THEME_SETTER(warning)
+    BB_THEME_SETTER(danger)
+    BB_THEME_SETTER(keyNote)
+    BB_THEME_SETTER(lnTail)
+    BB_THEME_SETTER(n1)
+    BB_THEME_SETTER(n2)
+    BB_THEME_SETTER(n3)
+    BB_THEME_SETTER(n4)
+    BB_THEME_SETTER(scratch)
+    BB_THEME_SETTER(mine)
+    BB_THEME_SETTER(ln)
+    BB_THEME_SETTER(wave)
+    BB_THEME_SETTER(accent2)
+    BB_THEME_SETTER(keyOdd)
+    BB_THEME_SETTER(scratchNote)
+    BB_THEME_SETTER(bgmNote)
+    BB_THEME_SETTER(bgaBase)
+    BB_THEME_SETTER(bgaPoor)
+    BB_THEME_SETTER(bgaLayer)
+    BB_THEME_SETTER(bgaLayer2)
+#undef BB_THEME_SETTER
+
 private:
     // 成员与上方访问器一一对应（同名同序，新增 token 两处同步）
 #define BB_THEME_COLOR_MEMBER(name, def) \

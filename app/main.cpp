@@ -5,6 +5,7 @@
 // 主题：Fusion + 深色调色板 + ThemeManager token（context property `Theme`，doc/07 §4 禁硬编码）。
 // 调试：--screenshot <png> 渲染完成后 grabWindow 保存并退出（视觉迭代/验收用）。
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QGuiApplication>
 #include <QImage>
@@ -126,6 +127,26 @@ int main(int argc, char** argv) {
     QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
     beatbench::app::ThemeManager theme;
+    // L1 皮肤：--skin <dir> 加载 dir/theme.json 覆盖 token（须在下面用 theme.* 建 QPalette
+    // 与 loadFromModule 之前，否则 CONSTANT 属性已被首帧绑定按默认值求值）。
+    const int skinIdx = app.arguments().indexOf(QStringLiteral("--skin"));
+    if (skinIdx >= 0 && skinIdx + 1 < app.arguments().size()) {
+        const QString skinDir = app.arguments().at(skinIdx + 1);
+        QDir d(skinDir);
+        if (d.exists()) {
+            const QString themePath = d.filePath(QStringLiteral("theme.json"));
+            if (QFile::exists(themePath)) {
+                QString err;
+                const int n = theme.loadTheme(themePath, &err);
+                if (n >= 0) qInfo("皮肤 theme.json 覆写 %d 个 token（%s）", n, qPrintable(themePath));
+                else qWarning() << "皮肤 theme.json 加载失败:" << err;
+            }
+            // skin.json 清单（name/version/api）本步不强校验——L1 只消费 theme.json。
+        } else {
+            qWarning() << "--skin 目录不存在:" << skinDir;
+        }
+    }
+
     QPalette pal;
     pal.setColor(QPalette::Window, theme.surface());
     pal.setColor(QPalette::WindowText, theme.text());
@@ -235,10 +256,20 @@ int main(int argc, char** argv) {
 
         // keymap.json 覆写快捷键（--keymap <path>；皮肤可携带）。须在 loadFromModule 前应用，
         // 否则 QML `sequence:` 函数式绑定已在首帧按默认值求值（改后不生效）。
+        // 优先级：--keymap 显式指定 > --skin 目录自带 keymap.json > 内置默认。
+        QString keymapPath;
         const int kmIdx = app.arguments().indexOf(QStringLiteral("--keymap"));
         if (kmIdx >= 0 && kmIdx + 1 < app.arguments().size()) {
-            loadKeymap(app.arguments().at(kmIdx + 1), uiActions);
+            keymapPath = app.arguments().at(kmIdx + 1);
+        } else {
+            const int skinIdx2 = app.arguments().indexOf(QStringLiteral("--skin"));
+            if (skinIdx2 >= 0 && skinIdx2 + 1 < app.arguments().size()) {
+                const QString skinDir = app.arguments().at(skinIdx2 + 1);
+                const QString p = QDir(skinDir).filePath(QStringLiteral("keymap.json"));
+                if (QFile::exists(p)) keymapPath = p;
+            }
         }
+        if (!keymapPath.isEmpty()) loadKeymap(keymapPath, uiActions);
     }
 
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
