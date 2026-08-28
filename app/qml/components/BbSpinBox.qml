@@ -53,7 +53,9 @@ SpinBox {
         width: 18
         height: Math.floor(root.height / 2)
         enabled: root.enabled
-        opacity: root.up.hovered ? 1.0 : (root.enabled ? 0.85 : 0.45)  // 提高默认不透明度：箭头不过淡
+        // 启用时全不透明（箭头最大对比度；亮色 skins 不再因淡opacity显得白/看不见），
+        // 禁用 0.45 弱化。hover 保持 1.0。
+        opacity: root.up.hovered ? 1.0 : (root.enabled ? 1.0 : 0.45)
         Canvas {
             anchors.centerIn: parent
             width: 6; height: 4
@@ -81,7 +83,7 @@ SpinBox {
         width: 18
         height: Math.ceil(root.height / 2)
         enabled: root.enabled
-        opacity: root.down.hovered ? 1.0 : (root.enabled ? 0.85 : 0.45)
+        opacity: root.down.hovered ? 1.0 : (root.enabled ? 1.0 : 0.45)
         Canvas {
             anchors.centerIn: parent
             width: 6; height: 4
