@@ -31,6 +31,11 @@ struct UiActionDef {
     bool checkable = false;  // 是否为 toggle 动作（网格/通道 id 等）
     bool checked = false;    // 当前勾选态（checkable 动作用）
     bool separator = false;  // 是否为菜单分隔线（枚举渲染用；无 handler/label）
+    QString toolbar;         // 工具条分组（""=菜单/快捷键专用；"page" 页面工具条；"tool" 编辑工具条）
+    QString control;         // 工具条渲染控件（"button"「默认」/ "check" 复选框）；空 = 视为 button
+    QString tooltip;         // 工具条 hover 提示（默认空）
+    QString value;           // 工具选择值（tool.pan→"pan"；互斥 active 判定；非选择工具留空）
+    QString prefix;          // 工具条按钮前缀文本（如 "1 "；默认空）
 };
 
 class UiActionRegistry : public QObject {
@@ -87,6 +92,16 @@ public:
 
     /// 按类别过滤的动作 id 列表。
     Q_INVOKABLE QStringList idsByCategory(const QString& category) const;
+
+    /// 工具条分组访问器（doc/09 §13 工具条注册化）：toolbar 分组可从皮肤/注册表查询。
+    Q_INVOKABLE QString toolbar(const QString& id) const;
+    Q_INVOKABLE QString control(const QString& id) const;   // 工具条控件（"button"/"check"）
+    Q_INVOKABLE QString tooltip(const QString& id) const;   // 工具条 hover 提示
+    Q_INVOKABLE QString value(const QString& id) const;     // 工具选择值（互斥 active 判定）
+    Q_INVOKABLE QString prefix(const QString& id) const;    // 按钮前缀（如 "1 "）
+
+    /// 按工具条分组过滤的动作 id 列表（doc/09 §13.1 工具条枚举渲染）。
+    Q_INVOKABLE QStringList idsByToolbar(const QString& toolbar) const;
 
     // ---- 触发（皮肤壳 / 快捷键唯一入口） ----
 

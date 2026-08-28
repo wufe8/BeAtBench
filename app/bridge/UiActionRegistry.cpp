@@ -150,6 +150,42 @@ QStringList UiActionRegistry::idsByCategory(const QString& category) const {
     return result;
 }
 
+QString UiActionRegistry::toolbar(const QString& id) const {
+    auto* def = findConst(id);
+    return def ? def->toolbar : QString();
+}
+
+QString UiActionRegistry::control(const QString& id) const {
+    auto* def = findConst(id);
+    // 空 = 视为 button（缺省渲染控件）
+    return (def && !def->control.isEmpty()) ? def->control : QStringLiteral("button");
+}
+
+QString UiActionRegistry::tooltip(const QString& id) const {
+    auto* def = findConst(id);
+    return def ? def->tooltip : QString();
+}
+
+QString UiActionRegistry::value(const QString& id) const {
+    auto* def = findConst(id);
+    return def ? def->value : QString();
+}
+
+QString UiActionRegistry::prefix(const QString& id) const {
+    auto* def = findConst(id);
+    return def ? def->prefix : QString();
+}
+
+QStringList UiActionRegistry::idsByToolbar(const QString& toolbar) const {
+    QStringList result;
+    for (const auto& a : m_actions) {
+        if (a.toolbar == toolbar) {
+            result.append(a.id);
+        }
+    }
+    return result;
+}
+
 // ---- 触发 ----
 
 bool UiActionRegistry::invoke(const QString& id, const QVariantMap& args) {

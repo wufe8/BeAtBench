@@ -240,15 +240,17 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "", "view", nullptr, qml("uiActionToggleChannelIds"), true});
         uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view", nullptr, qml("uiActionToggleExtras"), true});
         // 工具动作（数字键 1-5；handler = 设置 editorTool 属性）
-        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr, setProp("editorTool", "pan")});
-        uiActions.add(UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr, setProp("editorTool", "select")});
-        uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, setProp("editorTool", "note")});
-        uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, setProp("editorTool", "ln")});
-        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, setProp("editorTool", "mine")});
-        // 变换动作
-        uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, qml("quantizeSelection")});
-        uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, qml("uiActionMirror")});
-        uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, qml("uiActionRotate")});
+        // toolbar="tool" = 编辑工具条工具选择条（互斥单选；value = 当前工具，prefix = 快捷键前缀）。
+        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr, setProp("editorTool", "pan"), false, false, false, "tool", "button", QCoreApplication::tr("平移视口（拖拽空白区）"), "pan", "1 "});
+        uiActions.add(UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr, setProp("editorTool", "select"), false, false, false, "tool", "button", QCoreApplication::tr("点选/框选 note（Shift 加选；Ctrl 临时显示通道 id）"), "select", "2 "});
+        uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, setProp("editorTool", "note"), false, false, false, "tool", "button", QCoreApplication::tr("在当前采样槽位放置 note（吸附按 snap）"), "note", "3 "});
+        uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, setProp("editorTool", "ln"), false, false, false, "tool", "button", QCoreApplication::tr("放置 LN（同轨连点两次：先头后尾；Esc 取消）"), "ln", "4 "});
+        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, setProp("editorTool", "mine"), false, false, false, "tool", "button", QCoreApplication::tr("放置地雷（mine note）"), "mine", "5 "});
+        // 变换动作（toolbar="transform" = 页面工具条变换条；新变换可注册进组，工具条自动渲染）
+        uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, qml("quantizeSelection"), false, false, false, "transform", "button", QCoreApplication::tr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")});
+        uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, qml("uiActionMirror"), false, false, false, "transform", "button", QCoreApplication::tr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")});
+        uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, qml("uiActionRotate"), false, false, false, "transform", "button", QCoreApplication::tr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")});
+        // tool.toggleLn：编辑工具条专属（单点↔LN 转换），保持硬编码渲染；不并入 transform 组。
         uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, qml("toggleLnSelection")});
         // 页面切换动作
         uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, setProp("currentPage", 0), true});

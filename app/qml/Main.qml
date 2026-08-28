@@ -340,27 +340,18 @@ ApplicationWindow {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("开/关槽位弱线（网格显示开关；吸附不依赖此开关）")
                 }
-                BbToolButton {
-                    text: uiActions.label("tool.quantize")
-                    // 2026-09：变换类按钮需先选中 note 才点亮（量化/镜像/旋转一致）
-                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.quantize")
-                    onClicked: uiActions.invoke("tool.quantize")
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
-                }
-                BbToolButton {
-                    text: uiActions.label("tool.mirror")
-                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.mirror")
-                    onClicked: uiActions.invoke("tool.mirror")
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")
-                }
-                BbToolButton {
-                    text: uiActions.label("tool.rotate")
-                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.rotate")
-                    onClicked: uiActions.invoke("tool.rotate")
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")
+                // 变换动作（doc/09 §13.1 工具条注册化）：按注册表 transform 组枚举渲染，
+                // 皮肤/注册表新增变换动作即自动出现在页面工具条（无需改 QML）。
+                Repeater {
+                    model: uiActions.idsByToolbar("transform")
+                    delegate: BbToolButton {
+                        property string actId: modelData
+                        text: uiActions.label(actId)
+                        enabled: window.uiStateTick >= 0 && uiActions.enabled(actId)
+                        onClicked: uiActions.invoke(actId)
+                        ToolTip.visible: hovered
+                        ToolTip.text: uiActions.tooltip(actId)
+                    }
                 }
                 // 更多轨道：BGA 图层通道列（04/06/07/0A，游玩轨与背景轨之间，iBMSC 式）
                 BbCheckBox {
@@ -407,17 +398,20 @@ ApplicationWindow {
                 Label { text: qsTr("工具"); color: Theme.textFaint
                         font.pixelSize: Theme.fsTiny; padding: 4 }
                 // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题。
-                // 顺序：1=拖拽（默认） 2=选择 3=放置 4=LN 5=地雷；快捷键同序。
-                BbToolButton { text: "1 " + uiActions.label("tool.pan"); active: window.editorTool === "pan"; flatStyle: true
-                               onClicked: uiActions.invoke("tool.pan") }
-                BbToolButton { text: "2 " + uiActions.label("tool.select"); active: window.editorTool === "select"; flatStyle: true
-                               onClicked: uiActions.invoke("tool.select") }
-                BbToolButton { text: "3 " + uiActions.label("tool.note"); active: window.editorTool === "note"; flatStyle: true
-                               onClicked: uiActions.invoke("tool.note") }
-                BbToolButton { text: "4 " + uiActions.label("tool.ln"); active: window.editorTool === "ln"; flatStyle: true
-                               onClicked: uiActions.invoke("tool.ln") }
-                BbToolButton { text: "5 " + uiActions.label("tool.mine"); active: window.editorTool === "mine"; flatStyle: true
-                               onClicked: uiActions.invoke("tool.mine") }
+                // 工具选择条按注册表 tool 组枚举渲染（doc/09 §13.1）：prefix=快捷键前缀，
+                // value=当前工具值（互斥 active 判定）；新增工具只需注册进组。
+                Repeater {
+                    model: uiActions.idsByToolbar("tool")
+                    delegate: BbToolButton {
+                        property string actId: modelData
+                        text: uiActions.prefix(actId) + uiActions.label(actId)
+                        active: window.editorTool === uiActions.value(actId)
+                        flatStyle: true
+                        onClicked: uiActions.invoke(actId)
+                        ToolTip.visible: hovered
+                        ToolTip.text: uiActions.tooltip(actId)
+                    }
+                }
                 // 平移 = 轴锁定开关（不占工具位、非门控）：勾选后拖拽选中 note 按方向主轴
                 // 移动——纵向=时间（note.move，通道不变）；横向=通道（delete+put，时间不变）。
                 // 未勾选 = 自由 2D（时间+通道都动）。无论勾选与否，拖拽选中 note 都可移动。

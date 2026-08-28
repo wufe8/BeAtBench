@@ -209,3 +209,44 @@ TEST(UiActionRegistry, KeymapOverrideShortcut) {
     r.setShortcut(QStringLiteral("file.save"), QString());
     EXPECT_TRUE(r.shortcut(QStringLiteral("file.save")).isEmpty());
 }
+
+TEST(UiActionRegistry, ToolbarGroupMetadata) {
+    // 工具条注册化（doc/09 §13）：toolbar/control/tooltip/value/prefix 元数据 + idsByToolbar 枚举。
+    // 目标是新变换/工具动作只需注册进组，工具条 Repeater 自动渲染（无需改 QML）。
+    UiActionRegistry r;
+    // 工具选择（toolbar="tool"；prefix=快捷键前缀，value=互斥 active 判定）
+    UiActionDef pan = make_def(QStringLiteral("tool.pan"));
+    pan.toolbar = QStringLiteral("tool");
+    pan.prefix = QStringLiteral("1 ");
+    pan.value = QStringLiteral("pan");
+    pan.tooltip = QStringLiteral("平移视口");
+    r.add(pan);
+    // 变换（toolbar="transform"；普通按钮）
+    UiActionDef q = make_def(QStringLiteral("tool.quantize"));
+    q.toolbar = QStringLiteral("transform");
+    q.tooltip = QStringLiteral("量化选中");
+    r.add(q);
+    // 菜单专用（toolbar 空 → 不进任何工具条）
+    r.add(make_def(QStringLiteral("file.save")));
+
+    // idsByToolbar 分组
+    EXPECT_TRUE(r.idsByToolbar(QStringLiteral("tool")).contains(QStringLiteral("tool.pan")));
+    EXPECT_TRUE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.quantize")));
+    EXPECT_FALSE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.pan")));
+    EXPECT_FALSE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("file.save")));
+    EXPECT_EQ(r.idsByToolbar(QStringLiteral("transform")).size(), 1u);
+    EXPECT_EQ(r.idsByToolbar(QStringLiteral("tool")).size(), 1u);
+    EXPECT_EQ(r.idsByToolbar(QStringLiteral("page")).size(), 0u);
+
+    // 元数据访问
+    EXPECT_EQ(r.toolbar(QStringLiteral("tool.pan")), QStringLiteral("tool"));
+    EXPECT_EQ(r.control(QStringLiteral("tool.pan")), QStringLiteral("button"));
+    EXPECT_EQ(r.prefix(QStringLiteral("tool.pan")), QStringLiteral("1 "));
+    EXPECT_EQ(r.value(QStringLiteral("tool.pan")), QStringLiteral("pan"));
+    EXPECT_EQ(r.tooltip(QStringLiteral("tool.pan")), QStringLiteral("平移视口"));
+    // 未设置 → 空串/button 缺省
+    EXPECT_TRUE(r.toolbar(QStringLiteral("file.save")).isEmpty());
+    EXPECT_EQ(r.control(QStringLiteral("file.save")), QStringLiteral("button"));
+    EXPECT_TRUE(r.value(QStringLiteral("file.save")).isEmpty());
+    EXPECT_TRUE(r.prefix(QStringLiteral("file.save")).isEmpty());
+}
