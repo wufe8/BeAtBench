@@ -88,6 +88,13 @@ public:
     /// 设置 toggle 动作的勾选态（处理器内部调用；非 checkable 动作调用 = qWarning）。
     Q_INVOKABLE void setChecked(const QString& id, bool checked);
 
+    /// 覆写动作快捷键（keymap.json：动作 id → 快捷键文本；皮肤可携带 keymap）。
+    /// 未知 id = qWarning + 跳过；空序列 = 清除快捷键。变化 → stateChanged。
+    Q_INVOKABLE void setShortcut(const QString& id, const QString& seq);
+
+    /// 批量应用 keymap（QVariantMap：id → 快捷键文本）；返回成功覆写的数量。
+    int applyKeymap(const QVariantMap& keymap);
+
 signals:
     /// enabled/checked 状态变化 → QML 菜单/工具条刷新。
     void stateChanged();
@@ -100,7 +107,8 @@ private:
     const UiActionDef* findConst(const QString& id) const;
 
     std::vector<UiActionDef> m_actions;
-    std::map<QString, bool> m_enabledOverride;  // setEnabled 覆写（id → enabled）
+    std::map<QString, bool> m_enabledOverride;   // setEnabled 覆写（id → enabled）
+    std::map<QString, QString> m_shortcutOverride;  // setShortcut 覆写（id → 快捷键文本）
 };
 
 }  // namespace beatbench::app

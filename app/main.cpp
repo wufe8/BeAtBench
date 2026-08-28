@@ -87,6 +87,33 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
 // 调试/迭代用：--open <bms 路径>——启动即「打开谱面」，走 QML openChart()（与 Ctrl+O 同路径，
 // 见 Main.qml；由 debugOpenPath 属性触发）。配合 --screenshot/--tab 做真数据界面验收。
 
+// keymap.json：动作 id → 快捷键文本（皮肤可携带；如 {"file.save":"Ctrl+Shift+S"}）。
+// 加载成功返回应用数量（>0）；文件不存在/解析失败返回 -1（不阻塞启动）。
+static int loadKeymap(const QString& path, beatbench::app::UiActionRegistry& uiActions) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "keymap: 无法打开" << path;
+        return -1;
+    }
+    try {
+        const auto req = beatbench::json::Json::parse(
+            QTextStream(&f).readAll().toStdString());
+        QVariantMap map;
+        if (req.is_object()) {
+            for (const auto& [k, v] : req.as_object()) {
+                if (v.is_string()) map.insert(QString::fromUtf8(k.c_str()),
+                                              QString::fromUtf8(v.as_str().c_str()));
+            }
+        }
+        const int n = uiActions.applyKeymap(map);
+        qInfo("keymap 应用：%d 个（%s）", n, qPrintable(path));
+        return n;
+    } catch (const beatbench::json::JsonError& e) {
+        qWarning() << "keymap: 解析失败" << path << QString::fromStdString(e.what());
+        return -1;
+    }
+}
+
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("BeAtBench"));
@@ -205,6 +232,13 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, setProp("currentPage", 1), true});
         uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, setProp("currentPage", 2), true});
         qInfo("UI 动作注册完成：%d 个", static_cast<int>(uiActions.ids().size()));
+
+        // keymap.json 覆写快捷键（--keymap <path>；皮肤可携带）。须在 loadFromModule 前应用，
+        // 否则 QML `sequence:` 函数式绑定已在首帧按默认值求值（改后不生效）。
+        const int kmIdx = app.arguments().indexOf(QStringLiteral("--keymap"));
+        if (kmIdx >= 0 && kmIdx + 1 < app.arguments().size()) {
+            loadKeymap(app.arguments().at(kmIdx + 1), uiActions);
+        }
     }
 
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));

@@ -97,7 +97,10 @@ QString UiActionRegistry::label(const QString& id) const {
 
 QString UiActionRegistry::shortcut(const QString& id) const {
     auto* def = findConst(id);
-    return def ? def->shortcut : QString();
+    if (!def) return QString();
+    // keymap 覆写优先（setShortcut）；未覆写用注册时的默认值
+    const auto it = m_shortcutOverride.find(id);
+    return it != m_shortcutOverride.end() ? it->second : def->shortcut;
 }
 
 QString UiActionRegistry::category(const QString& id) const {
@@ -158,6 +161,35 @@ void UiActionRegistry::setChecked(const QString& id, bool checked) {
         emit actionStateChanged(id);
         emit stateChanged();
     }
+}
+
+void UiActionRegistry::setShortcut(const QString& id, const QString& seq) {
+    if (!findConst(id)) {
+        qWarning() << "UiActionRegistry::setShortcut: unknown action" << id;
+        return;
+    }
+    const auto it = m_shortcutOverride.find(id);
+    if (it != m_shortcutOverride.end() && it->second == seq) return;
+    m_shortcutOverride[id] = seq;
+    emit actionStateChanged(id);
+    emit stateChanged();
+}
+
+int UiActionRegistry::applyKeymap(const QVariantMap& keymap) {
+    int applied = 0;
+    for (auto it = keymap.constBegin(); it != keymap.constEnd(); ++it) {
+        if (!findConst(it.key())) {
+            qWarning() << "UiActionRegistry::applyKeymap: unknown id" << it.key();
+            continue;
+        }
+        const QString seq = it.value().toString();
+        m_shortcutOverride[it.key()] = seq;
+        ++applied;
+    }
+    if (applied > 0) {
+        emit stateChanged();
+    }
+    return applied;
 }
 
 }  // namespace beatbench::app
