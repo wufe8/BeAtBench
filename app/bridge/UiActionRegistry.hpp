@@ -6,6 +6,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -44,12 +45,18 @@ public:
     /// 批量注册（便利方法）。
     void addAll(std::vector<UiActionDef> defs);
 
+    /// 运行时启用态覆写（QML 状态变化驱动；优先级高于注册的 enabled 谓词）。
+    /// 使能状态变化 → stateChanged/actionStateChanged。
+    Q_INVOKABLE void setEnabled(const QString& id, bool enabled);
+
     // ---- 查询（QML 只读消费） ----
 
     /// 动作是否存在。
     Q_INVOKABLE bool exists(const QString& id) const;
 
-    /// 动作是否可触发（启用条件谓词求值）。
+    /// 动作是否可触发：**setEnabled 覆写 > enabled 谓词 > 恒可（无谓词）**。
+    /// 2026-09：QML 侧状态（chartMeta/selection 等）经 setEnabled 驱动；
+    /// 独立谓词保留供无 QML 状态依赖的调用方使用。
     Q_INVOKABLE bool enabled(const QString& id) const;
 
     /// toggle 动作的勾选态。
@@ -93,6 +100,7 @@ private:
     const UiActionDef* findConst(const QString& id) const;
 
     std::vector<UiActionDef> m_actions;
+    std::map<QString, bool> m_enabledOverride;  // setEnabled 覆写（id → enabled）
 };
 
 }  // namespace beatbench::app

@@ -140,46 +140,64 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
 
-    // ---- 试点动作注册（doc/09 §7：file/edit/view/tool 四类高频动作） ----
-    // 处理器暂时包装 QML 函数调用（迁移期兼容）；验证后逐步内联。
-    // 注意：enabled 谓词在 QML 加载后才有效（需要 window.* 状态），此处先注册无谓词版本；
-    // QML 侧可在注册后通过 setEnabled 覆写，或在 handler 内自行判断。
-    {
-        using namespace beatbench::app;
-        auto noop = [](const QVariantMap&) -> bool { return true; };
-        // 文件动作（label 用 QCoreApplication::tr，因为 main 函数不是 QObject）
-        uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file", nullptr, noop});
-        uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, noop});
-        uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, noop});
-        uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file", nullptr, noop});
-        // 编辑动作
-        uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit", nullptr, noop});
-        uiActions.add(UiActionDef{"edit.redo", QCoreApplication::tr("重做"), "Ctrl+Y", "edit", nullptr, noop});
-        uiActions.add(UiActionDef{"edit.copy", QCoreApplication::tr("复制"), "Ctrl+C", "edit", nullptr, noop});
-        uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit", nullptr, noop});
-        uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit", nullptr, noop});
-        // 视图动作
-        uiActions.add(UiActionDef{"view.toggleGrid", QCoreApplication::tr("网格"), "", "view", nullptr, noop, true});
-        uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "", "view", nullptr, noop, true});
-        uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view", nullptr, noop, true});
-        // 工具动作
-        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, noop});
-        // 变换动作
-        uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, noop});
-        uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, noop});
-        // 页面切换动作
-        uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, noop, true});
-        uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, noop, true});
-        uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, noop, true});
-    }
-
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
+
+    // ---- 动作注册（doc/09 §5/§7）：必须等 QML 根加载后——handler 经 QMetaObject 调用
+    // Main.qml 的窗口函数（迁移期机制：行为原点仍在 QML，但 invoke 已是唯一入口，
+    // 皮肤壳/快捷键都走 id；QML 侧 enabled 状态经 setEnabled 驱动，见 Main.qml）。 ----
+    if (QObject* root = engine.rootObjects().value(0)) {
+        using namespace beatbench::app;
+        // QML 无参方法调用（返回 false = 方法不存在/调用失败 → qWarning）
+        const auto qml = [root](const char* method) {
+            return ActionHandler([root, method](const QVariantMap&) {
+                if (!QMetaObject::invokeMethod(root, method, Qt::DirectConnection)) {
+                    qWarning() << "UiActionRegistry: QML 方法不存在" << method;
+                    return false;
+                }
+                return true;
+            });
+        };
+        // 设置窗口属性（工具/页面切换类动作）
+        const auto setProp = [root](const char* prop, const QVariant& v) {
+            return ActionHandler([root, prop, v](const QVariantMap&) {
+                return root->setProperty(prop, v);
+            });
+        };
+        // 文件动作（label 用 QCoreApplication::tr，因为 main 函数不是 QObject）
+        uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file", nullptr, qml("uiActionOpen")});
+        uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, qml("saveChart")});
+        uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, qml("uiActionSaveAs")});
+        uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file", nullptr, qml("uiActionExit")});
+        // 编辑动作
+        uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit", nullptr, qml("undoEdit")});
+        uiActions.add(UiActionDef{"edit.redo", QCoreApplication::tr("重做"), "Ctrl+Y", "edit", nullptr, qml("redoEdit")});
+        uiActions.add(UiActionDef{"edit.copy", QCoreApplication::tr("复制"), "Ctrl+C", "edit", nullptr, qml("copySelection")});
+        uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit", nullptr, qml("pasteClipboard")});
+        uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit", nullptr, qml("uiActionDelete")});
+        // 视图动作（checkable：勾选态 QML 自持，注册表仅声明；见 doc/09 §12）
+        uiActions.add(UiActionDef{"view.toggleGrid", QCoreApplication::tr("网格"), "", "view", nullptr, qml("toggleGrid"), true});
+        uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "", "view", nullptr, qml("uiActionToggleChannelIds"), true});
+        uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view", nullptr, qml("uiActionToggleExtras"), true});
+        // 工具动作（数字键 1-5；handler = 设置 editorTool 属性）
+        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr, setProp("editorTool", "pan")});
+        uiActions.add(UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr, setProp("editorTool", "select")});
+        uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, setProp("editorTool", "note")});
+        uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, setProp("editorTool", "ln")});
+        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, setProp("editorTool", "mine")});
+        // 变换动作
+        uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, qml("quantizeSelection")});
+        uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, qml("uiActionMirror")});
+        uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, qml("uiActionRotate")});
+        uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, qml("toggleLnSelection")});
+        // 页面切换动作
+        uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, setProp("currentPage", 0), true});
+        uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, setProp("currentPage", 1), true});
+        uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, setProp("currentPage", 2), true});
+        // QML 的 Component.onCompleted 在 loadFromModule 期间已执行（此时注册未完成），
+        // 注册后补一次 enabled 状态同步（Main.qml::updateActionStates → setEnabled）。
+        QMetaObject::invokeMethod(root, "updateActionStates", Qt::DirectConnection);
+        qInfo("UI 动作注册完成：%d 个", static_cast<int>(uiActions.ids().size()));
+    }
 
     const QStringList args = app.arguments();
 

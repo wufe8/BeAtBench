@@ -157,55 +157,54 @@ ApplicationWindow {
     }
 
     // ---------- 全局快捷键（从 uiActions 注册表查表生成，doc/09） ----------
-    // 迁移期：保留 QML enabled 条件 + handler 内联实际逻辑（invoke 返回 false 时走兜底）。
-    // 后续：handler 迁入 C++ 注册表，QML 只生成 Shortcut。
+    // 2026-09：handler 已迁入 C++ 注册表（invoke = 唯一入口）；QML Shortcut 只负责
+    // 序列 + enabled 条件（含文本焦点让行等注册表不建模的细节）。
 
     // 文件动作
     Shortcut { sequence: uiActions.shortcut("file.open")
-               onActivated: { uiActions.invoke("file.open"); fileDialog.open() } }
+               onActivated: uiActions.invoke("file.open") }
     Shortcut { sequence: uiActions.shortcut("file.save")
                enabled: chartMeta !== null
-               onActivated: { uiActions.invoke("file.save"); saveChart() } }
+               onActivated: uiActions.invoke("file.save") }
     Shortcut { sequence: uiActions.shortcut("file.saveAs")
                enabled: chartMeta !== null
-               onActivated: { uiActions.invoke("file.saveAs"); saveAsDialog.open() } }
+               onActivated: uiActions.invoke("file.saveAs") }
     Shortcut { sequence: uiActions.shortcut("file.exit")
-               onActivated: { uiActions.invoke("file.exit"); window.close() } }
+               onActivated: uiActions.invoke("file.exit") }
 
     // 编辑动作
     Shortcut { sequence: uiActions.shortcut("edit.undo")
                enabled: chartMeta !== null
-               onActivated: { uiActions.invoke("edit.undo"); undoEdit() } }
+               onActivated: uiActions.invoke("edit.undo") }
     Shortcut { sequence: uiActions.shortcut("edit.redo")
                enabled: chartMeta !== null
-               onActivated: { uiActions.invoke("edit.redo"); redoEdit() } }
+               onActivated: uiActions.invoke("edit.redo") }
     Shortcut { sequence: uiActions.shortcut("edit.copy")
                enabled: chartMeta !== null && window.selectionRefs.length > 0
-               onActivated: { uiActions.invoke("edit.copy"); copySelection() } }
+               onActivated: uiActions.invoke("edit.copy") }
     Shortcut { sequence: uiActions.shortcut("edit.paste")
                enabled: chartMeta !== null && window.clipboardLines.length > 0
-               onActivated: { uiActions.invoke("edit.paste"); pasteClipboard() } }
+               onActivated: uiActions.invoke("edit.paste") }
     Shortcut { sequence: uiActions.shortcut("edit.delete")
                enabled: chartMeta !== null && currentPage === 0
-               onActivated: { uiActions.invoke("edit.delete");
-                   (window.metaSelection.length > 0) ? deleteMetaSelection() : deleteSelection() } }
+               onActivated: uiActions.invoke("edit.delete") }
 
     // 工具动作（数字 1-5：文本输入焦点时让行）
     Shortcut { sequence: uiActions.shortcut("tool.pan")
                enabled: currentPage === 0 && !window.textInputFocused
-               onActivated: { uiActions.invoke("tool.pan"); window.editorTool = "pan" } }
+               onActivated: uiActions.invoke("tool.pan") }
     Shortcut { sequence: uiActions.shortcut("tool.select")
                enabled: currentPage === 0 && !window.textInputFocused
-               onActivated: { uiActions.invoke("tool.select"); window.editorTool = "select" } }
+               onActivated: uiActions.invoke("tool.select") }
     Shortcut { sequence: uiActions.shortcut("tool.note")
                enabled: currentPage === 0 && !window.textInputFocused
-               onActivated: { uiActions.invoke("tool.note"); window.editorTool = "note" } }
+               onActivated: uiActions.invoke("tool.note") }
     Shortcut { sequence: uiActions.shortcut("tool.ln")
                enabled: currentPage === 0 && !window.textInputFocused
-               onActivated: { uiActions.invoke("tool.ln"); window.editorTool = "ln" } }
+               onActivated: uiActions.invoke("tool.ln") }
     Shortcut { sequence: uiActions.shortcut("tool.mine")
                enabled: currentPage === 0 && !window.textInputFocused
-               onActivated: { uiActions.invoke("tool.mine"); window.editorTool = "mine" } }
+               onActivated: uiActions.invoke("tool.mine") }
 
     // Esc：取消未完成的 LN 头（LNTYPE 2 放置；文本输入焦点时让行）
     // 注意：Esc 不在注册表中（非全局动作），保留硬编码
@@ -219,36 +218,40 @@ ApplicationWindow {
             title: qsTr("文件")
             MenuItem {
                 text: uiActions.label("file.open") + "    " + uiActions.shortcut("file.open")
-                onTriggered: { uiActions.invoke("file.open"); fileDialog.open() }
+                onTriggered: uiActions.invoke("file.open")
             }
             MenuItem {
                 text: uiActions.label("file.save") + "    " + uiActions.shortcut("file.save")
-                enabled: chartMeta !== null
-                onTriggered: { uiActions.invoke("file.save"); saveChart() }
+                enabled: window.uiStateTick >= 0 && uiActions.enabled("file.save")
+                onTriggered: uiActions.invoke("file.save")
             }
             MenuItem {
                 text: uiActions.label("file.saveAs") + "    " + uiActions.shortcut("file.saveAs")
-                enabled: chartMeta !== null
-                onTriggered: { uiActions.invoke("file.saveAs"); saveAsDialog.open() }
+                enabled: window.uiStateTick >= 0 && uiActions.enabled("file.saveAs")
+                onTriggered: uiActions.invoke("file.saveAs")
             }
             MenuSeparator {}
             MenuItem {
                 text: uiActions.label("file.exit") + "    " + uiActions.shortcut("file.exit")
-                onTriggered: { uiActions.invoke("file.exit"); window.close() }
+                onTriggered: uiActions.invoke("file.exit")
             }
         }
         Menu {
             title: qsTr("编辑")
             enabled: chartMeta !== null
             MenuItem { text: uiActions.label("edit.undo") + "    " + uiActions.shortcut("edit.undo")
-                       onTriggered: { uiActions.invoke("edit.undo"); undoEdit() } }
+                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.undo")
+                       onTriggered: uiActions.invoke("edit.undo") }
             MenuItem { text: uiActions.label("edit.redo") + "    " + uiActions.shortcut("edit.redo")
-                       onTriggered: { uiActions.invoke("edit.redo"); redoEdit() } }
+                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.redo")
+                       onTriggered: uiActions.invoke("edit.redo") }
             MenuSeparator {}
             MenuItem { text: uiActions.label("edit.copy") + "    " + uiActions.shortcut("edit.copy")
-                       onTriggered: { uiActions.invoke("edit.copy"); copySelection() } }
+                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.copy")
+                       onTriggered: uiActions.invoke("edit.copy") }
             MenuItem { text: uiActions.label("edit.paste") + "    " + uiActions.shortcut("edit.paste")
-                       onTriggered: { uiActions.invoke("edit.paste"); pasteClipboard() } }
+                       enabled: window.uiStateTick >= 0 && uiActions.enabled("edit.paste")
+                       onTriggered: uiActions.invoke("edit.paste") }
         }
         Menu {
             title: qsTr("视图")
@@ -257,11 +260,11 @@ ApplicationWindow {
         Menu {
             title: qsTr("工作区")
             MenuItem { text: uiActions.label("view.page.edit"); checkable: true; checked: currentPage === 0
-                       onTriggered: { uiActions.invoke("view.page.edit"); currentPage = 0 } }
+                       onTriggered: uiActions.invoke("view.page.edit") }
             MenuItem { text: uiActions.label("view.page.slice"); checkable: true; checked: currentPage === 1
-                       onTriggered: { uiActions.invoke("view.page.slice"); currentPage = 1 } }
+                       onTriggered: uiActions.invoke("view.page.slice") }
             MenuItem { text: uiActions.label("view.page.test"); checkable: true; checked: currentPage === 2
-                       onTriggered: { uiActions.invoke("view.page.test"); currentPage = 2 } }
+                       onTriggered: uiActions.invoke("view.page.test") }
         }
         Menu {
             title: qsTr("帮助")
@@ -322,30 +325,30 @@ ApplicationWindow {
                     text: uiActions.label("view.toggleGrid")
                     // 外部态驱动高亮（外部激活而非 checkable 自翻，避免断绑定，doc/04 §5）
                     active: window.showGrid
-                    enabled: chartMeta !== null
-                    onClicked: { uiActions.invoke("view.toggleGrid"); toggleGrid() }
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled("view.toggleGrid")
+                    onClicked: uiActions.invoke("view.toggleGrid")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("开/关槽位弱线（网格显示开关；吸附不依赖此开关）")
                 }
                 BbToolButton {
                     text: uiActions.label("tool.quantize")
                     // 2026-09：变换类按钮需先选中 note 才点亮（量化/镜像/旋转一致）
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: { uiActions.invoke("tool.quantize"); quantizeSelection() }
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.quantize")
+                    onClicked: uiActions.invoke("tool.quantize")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")
                 }
                 BbToolButton {
                     text: uiActions.label("tool.mirror")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: { uiActions.invoke("tool.mirror"); transformSelection(true, 0) }
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.mirror")
+                    onClicked: uiActions.invoke("tool.mirror")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")
                 }
                 BbToolButton {
                     text: uiActions.label("tool.rotate")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: { uiActions.invoke("tool.rotate"); transformSelection(false, 1) }
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.rotate")
+                    onClicked: uiActions.invoke("tool.rotate")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")
                 }
@@ -354,7 +357,7 @@ ApplicationWindow {
                     id: extrasCheck
                     text: uiActions.label("view.toggleExtras")
                     checked: window.showExtras
-                    onToggled: { uiActions.invoke("view.toggleExtras"); window.showExtras = checked }
+                    onToggled: uiActions.invoke("view.toggleExtras")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("在游玩轨与背景轨之间显示 BGA 图层通道（BGA/LAYER/POOR/LAYER2 = 04/06/07/0A）")
                 }
@@ -396,15 +399,15 @@ ApplicationWindow {
                 // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题。
                 // 顺序：1=拖拽（默认） 2=选择 3=放置 4=LN 5=地雷；快捷键同序。
                 BbToolButton { text: "1 " + uiActions.label("tool.pan"); active: window.editorTool === "pan"; flatStyle: true
-                               onClicked: { uiActions.invoke("tool.pan"); window.editorTool = "pan" } }
+                               onClicked: uiActions.invoke("tool.pan") }
                 BbToolButton { text: "2 " + uiActions.label("tool.select"); active: window.editorTool === "select"; flatStyle: true
-                               onClicked: { uiActions.invoke("tool.select"); window.editorTool = "select" } }
+                               onClicked: uiActions.invoke("tool.select") }
                 BbToolButton { text: "3 " + uiActions.label("tool.note"); active: window.editorTool === "note"; flatStyle: true
-                               onClicked: { uiActions.invoke("tool.note"); window.editorTool = "note" } }
+                               onClicked: uiActions.invoke("tool.note") }
                 BbToolButton { text: "4 " + uiActions.label("tool.ln"); active: window.editorTool === "ln"; flatStyle: true
-                               onClicked: { uiActions.invoke("tool.ln"); window.editorTool = "ln" } }
+                               onClicked: uiActions.invoke("tool.ln") }
                 BbToolButton { text: "5 " + uiActions.label("tool.mine"); active: window.editorTool === "mine"; flatStyle: true
-                               onClicked: { uiActions.invoke("tool.mine"); window.editorTool = "mine" } }
+                               onClicked: uiActions.invoke("tool.mine") }
                 // 平移 = 轴锁定开关（不占工具位、非门控）：勾选后拖拽选中 note 按方向主轴
                 // 移动——纵向=时间（note.move，通道不变）；横向=通道（delete+put，时间不变）。
                 // 未勾选 = 自由 2D（时间+通道都动）。无论勾选与否，拖拽选中 note 都可移动。
@@ -427,11 +430,11 @@ ApplicationWindow {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("勾选=点 LN 任一段自动选中配对两端（整体移动/删除）；未勾=LNs 当单 note")
                 }
-                // 单点 ↔ LN 转换（2026-09 用户）：选中游玩轨 note 一键转换
+                // 单点 ↔ LN 转换（2026-09 用户）：选中游玩轨 note 一键转换（注册表动作，仅 LN 轨）
                 BbToolButton {
-                    text: qsTr("单点/LN")
-                    enabled: chartMeta !== null && window.selectionRefs.length > 0
-                    onClicked: toggleLnSelection()
+                    text: uiActions.label("tool.toggleLn")
+                    enabled: window.uiStateTick >= 0 && uiActions.enabled("tool.toggleLn")
+                    onClicked: uiActions.invoke("tool.toggleLn")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("按 LNTYPE 切换选中 note 的 LN 通道（LNTYPE 1：普通↔5x/6x）；"
                                        + "配对由同通道时间序交替自动组成（无向前查询）")
@@ -439,9 +442,9 @@ ApplicationWindow {
                 // 轨道名 → 实际通道 id（皿=16、键1=11、BGM=01…；Ctrl 临时切换，Adobe 式）
                 BbCheckBox {
                     id: channelIdCheck
-                    text: qsTr("通道 ID")
+                    text: uiActions.label("view.toggleChannelIds")
                     checked: window.showChannelIds
-                    onToggled: window.showChannelIds = checked
+                    onToggled: uiActions.invoke("view.toggleChannelIds")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("轨道列头显示 BMS 通道号（Ctrl 按住临时显示；Alt 会被菜单栏拦截）")
                 }
@@ -888,6 +891,63 @@ ApplicationWindow {
     function toggleLnSelection() { return session.toggleLnSelection() }
     function transformSelection(mirror, rotate) { return session.transformSelection(mirror, rotate) }
     function undoEdit() { return session.undoEdit() }
+
+    // ---------- UI 动作注册表（doc/09）：invoke = 唯一入口；以下包装函数是 handler 落点 ----------
+    // 迁移期机制：行为原点不变（原 chrome 的第 2 遍调用并入 handler）；invoke 失败 =
+    // 方法不存在（C++ qWarning）或动作禁用（静默）。
+    function uiActionOpen() { fileDialog.open() }
+    function uiActionSaveAs() { saveAsDialog.open() }
+    function uiActionExit() { window.close() }
+    function uiActionDelete() {
+        if (window.metaSelection.length > 0) deleteMetaSelection()
+        else deleteSelection()
+    }
+    function uiActionToggleChannelIds() { window.showChannelIds = !window.showChannelIds }
+    function uiActionToggleExtras() { window.showExtras = !window.showExtras }
+    function uiActionMirror() { transformSelection(true, 0) }
+    function uiActionRotate() { transformSelection(false, 1) }
+    /// 注册表 enabled 状态同步（QML 状态变化 → setEnabled → stateChanged → 菜单/工具条重算）。
+    /// 与 Shortcut 自带的 enabled 条件镜像（后者还多文本焦点等细节，保持原样）。
+    /// ⚠️ load 期间（注册未完成）曾有状态 on*Changed 触发——用 exists 守卫跳过，免启动期误报；
+    /// 注册完成后 main.cpp 补调一次 updateActionStates（正确值兜底）。
+    function setActionEnabled(id, state) {
+        if (uiActions.exists(id)) uiActions.setEnabled(id, state)
+    }
+    function updateActionStates() {
+        setActionEnabled("file.save", chartMeta !== null)
+        setActionEnabled("file.saveAs", chartMeta !== null)
+        setActionEnabled("edit.undo", chartMeta !== null)
+        setActionEnabled("edit.redo", chartMeta !== null)
+        setActionEnabled("edit.copy", chartMeta !== null && selectionRefs.length > 0)
+        setActionEnabled("edit.paste", chartMeta !== null && clipboardLines.length > 0)
+        setActionEnabled("edit.delete", chartMeta !== null && currentPage === 0 &&
+                                           (selectionRefs.length > 0 || metaSelection.length > 0))
+        setActionEnabled("tool.quantize", selectionRefs.length > 0)
+        setActionEnabled("tool.mirror", selectionRefs.length > 0)
+        setActionEnabled("tool.rotate", selectionRefs.length > 0)
+        setActionEnabled("tool.toggleLn", selectionRefs.length > 0)
+        setActionEnabled("tool.pan", currentPage === 0)
+        setActionEnabled("tool.select", currentPage === 0)
+        setActionEnabled("tool.note", currentPage === 0)
+        setActionEnabled("tool.ln", currentPage === 0)
+        setActionEnabled("tool.mine", currentPage === 0)
+        setActionEnabled("view.toggleGrid", chartMeta !== null)
+    }
+    onChartMetaChanged: updateActionStates()
+    onSelectionRefsChanged: updateActionStates()
+    onClipboardLinesChanged: updateActionStates()
+    onCurrentPageChanged: updateActionStates()
+    onMetaSelectionChanged: updateActionStates()
+    // 注意：不挂 Component.onCompleted——onCompleted 在 loadFromModule 期间执行，
+    // 此时 C++ 注册尚未完成（setEnabled 会 unknown）；注册后由 main.cpp 补调 updateActionStates。
+    // 菜单/工具条 enabled 绑定依赖的「重算触发器」：QML 绑定不会因函数返回值自动重算，
+    // 绑定到 uiStateTick（stateChanged 信号 +1），表达式统一形如
+    // `enabled: window.uiStateTick >= 0 && uiActions.enabled("id")`。
+    property int uiStateTick: 0
+    Connections {
+        target: uiActions
+        function onStateChanged() { window.uiStateTick++ }
+    }
 
     // ---------- 对话框耦合函数（委托需 window 作用域的对话框，故保留在 Main） ----------
     function editMetaObject(obj) {

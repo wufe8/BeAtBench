@@ -21,3 +21,18 @@ target_compile_definitions(beatbench_tests PRIVATE
     BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 beatbench_set_warnings(beatbench_tests)
 add_test(NAME core_tests COMMAND beatbench_tests)
+
+# UiActionRegistry 单测（doc/09 §7 验收 4）：只依赖 Qt6::Core 的轻量目标。
+# 仅在找到 Qt6 的构建配置中启用：MSVC build/（无 Qt）→ 自动跳过；
+# 需要时用 `cmake -S . -B build-uitest -DBEATBENCH_BUILD_TESTS=ON -DCMAKE_PREFIX_PATH=<Qt>`
+# 配置（gtest 走 FetchContent）。
+find_package(Qt6 COMPONENTS Core QUIET)
+if (Qt6Core_FOUND)
+    add_executable(ui_action_registry_test ui_action_registry_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.hpp)  # Q_OBJECT 头须显式列入（AUTOMOC 扫描不可靠）
+    target_include_directories(ui_action_registry_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(ui_action_registry_test PRIVATE Qt6::Core GTest::gtest_main)
+    beatbench_set_warnings(ui_action_registry_test)
+    add_test(NAME ui_action_registry_tests COMMAND ui_action_registry_test)
+endif()

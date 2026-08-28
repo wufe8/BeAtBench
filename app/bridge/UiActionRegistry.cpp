@@ -65,8 +65,23 @@ bool UiActionRegistry::exists(const QString& id) const {
 bool UiActionRegistry::enabled(const QString& id) const {
     auto* def = findConst(id);
     if (!def) return false;
+    // 优先级：setEnabled 运行时覆写 > 注册谓词 > 恒可
+    const auto it = m_enabledOverride.find(id);
+    if (it != m_enabledOverride.end()) return it->second;
     if (def->enabled) return def->enabled();
     return true;  // 无谓词 = 始终启用
+}
+
+void UiActionRegistry::setEnabled(const QString& id, bool enabled) {
+    if (!findConst(id)) {
+        qWarning() << "UiActionRegistry::setEnabled: unknown action" << id;
+        return;
+    }
+    const auto it = m_enabledOverride.find(id);
+    if (it != m_enabledOverride.end() && it->second == enabled) return;
+    m_enabledOverride[id] = enabled;
+    emit actionStateChanged(id);
+    emit stateChanged();
 }
 
 bool UiActionRegistry::checked(const QString& id) const {

@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// UiActionRegistry 单测（doc/09 §7 验收 4：注册/重复 id 守卫/状态查询/触发/枚举）。
+// 本目标只链 Qt6::Core（注册表不依赖 GUI）：在找到 Qt6 的构建配置中启用
+//（见 tests/CMakeLists.txt；MSVC 的 build/ 无 Qt → 跳过）。
+#include <gtest/gtest.h>
+
+#include <QString>
+#include <QVariantMap>
+
+#include "bridge/UiActionRegistry.hpp"
+
+using namespace beatbench::app;
+
+namespace {
+
+UiActionDef make_def(const QString& id, bool handler_ok = true, int* calls = nullptr,
+                     QVariantMap* lastArgs = nullptr) {
+    UiActionDef d;
+    d.id = id;
+    d.label = QStringLiteral("动作 ") + id;
+    d.category = id.split(QLatin1Char('.')).value(0);
+    d.handler = [handler_ok, calls, lastArgs](const QVariantMap& args) {
+        if (calls) ++*calls;
+        if (lastArgs) *lastArgs = args;
+        return handler_ok;
+    };
+    return d;
+}
+
+}  // namespace
+
+TEST(UiActionRegistry, AddQueryEnum) {
+    UiActionRegistry r;
+    EXPECT_FALSE(r.exists(QStringLiteral("file.save")));
+    EXPECT_EQ(r.ids().size(), 0u);
+
+    r.add(make_def(QStringLiteral("file.save")));
+    r.add(make_def(QStringLiteral("edit.undo")));
+    EXPECT_TRUE(r.exists(QStringLiteral("file.save")));
+    EXPECT_FALSE(r.exists(QStringLiteral("file.nope")));
+    EXPECT_EQ(r.ids().size(), 2u);
+    EXPECT_TRUE(r.ids().contains(QStringLiteral("file.save")));
+    // 查询
+    EXPECT_EQ(r.category(QStringLiteral("file.save")), QStringLiteral("file"));
+    EXPECT_EQ(r.category(QStringLiteral("edit.undo")), QStringLiteral("edit"));
+    EXPECT_TRUE(r.label(QStringLiteral("file.save")).contains(QStringLiteral("file.save")));
+    EXPECT_TRUE(r.shortcut(QStringLiteral("file.save")).isEmpty());
+    EXPECT_FALSE(r.checkable(QStringLiteral("file.save")));
+    // 分类枚举
+    EXPECT_EQ(r.idsByCategory(QStringLiteral("file")).size(), 1u);
+    EXPECT_EQ(r.idsByCategory(QStringLiteral("edit")).size(), 1u);
+    EXPECT_EQ(r.idsByCategory(QStringLiteral("view")).size(), 0u);
+}
+
+TEST(UiActionRegistry, DuplicateIdGuardOverwrites) {
+    UiActionRegistry r;
+    UiActionDef a = make_def(QStringLiteral("file.save"));
+    a.label = QStringLiteral("旧标签");
+    a.handler = [](const QVariantMap&) { return false; };
+    r.add(a);
+    int calls = 0;
+    UiActionDef b = make_def(QStringLiteral("file.save"));
+    b.label = QStringLiteral("新标签");
+    b.handler = [&calls](const QVariantMap&) {
+        ++calls;
+        return true;
+    };
+    r.add(b);  // 覆盖（qWarning + 替换 handler/label）
+    EXPECT_EQ(r.ids().size(), 1u);
+    EXPECT_EQ(r.label(QStringLiteral("file.save")), QStringLiteral("新标签"));
+    EXPECT_TRUE(r.invoke(QStringLiteral("file.save")));
+    EXPECT_EQ(calls, 1);  // 生效的是新 handler
+}
+
+TEST(UiActionRegistry, EnabledPrecedence) {
+    UiActionRegistry r;
+    // 无谓词 → 恒可
+    r.add(make_def(QStringLiteral("a")));
+    EXPECT_TRUE(r.enabled(QStringLiteral("a")));
+    // 谓词 false → 禁；setEnabled 覆写优先
+    UiActionDef d = make_def(QStringLiteral("b"));
+    d.enabled = [] { return false; };
+    r.add(d);
+    EXPECT_FALSE(r.enabled(QStringLiteral("b")));
+    r.setEnabled(QStringLiteral("b"), true);  // 覆写
+    EXPECT_TRUE(r.enabled(QStringLiteral("b")));
+    r.setEnabled(QStringLiteral("b"), false);
+    EXPECT_FALSE(r.enabled(QStringLiteral("b")));
+    // 未知 id
+    EXPECT_FALSE(r.enabled(QStringLiteral("nope")));
+    r.setEnabled(QStringLiteral("nope"), true);  // 仅警告，不崩溃
+}
+
+TEST(UiActionRegistry, InvokeSemantics) {
+    UiActionRegistry r;
+    int calls = 0;
+    QVariantMap last;
+    r.add(make_def(QStringLiteral("x"), true, &calls, &last));
+    // 成功
+    EXPECT_TRUE(r.invoke(QStringLiteral("x"), {{QStringLiteral("k"), 1}}));
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(last.value(QStringLiteral("k")).toInt(), 1);
+    // 未知
+    EXPECT_FALSE(r.invoke(QStringLiteral("unknown")));
+    EXPECT_EQ(calls, 1);
+    // 禁用 → 处理器不执行
+    int calls2 = 0;
+    r.add(make_def(QStringLiteral("y"), true, &calls2));
+    r.setEnabled(QStringLiteral("y"), false);
+    EXPECT_FALSE(r.invoke(QStringLiteral("y")));
+    EXPECT_EQ(calls2, 0);
+    // handler 返回 false → invoke false
+    r.add(make_def(QStringLiteral("z"), false, &calls2));
+    EXPECT_FALSE(r.invoke(QStringLiteral("z")));
+    EXPECT_EQ(calls2, 1);
+}
+
+TEST(UiActionRegistry, CheckableAndSetChecked) {
+    UiActionRegistry r;
+    int state = 0, action = 0;
+    QObject::connect(&r, &UiActionRegistry::stateChanged, [&] { ++state; });
+    QObject::connect(&r, &UiActionRegistry::actionStateChanged, [&](const QString&) { ++action; });
+
+    UiActionDef plain = make_def(QStringLiteral("p"));
+    r.add(plain);
+    EXPECT_FALSE(r.checkable(QStringLiteral("p")));
+    r.setChecked(QStringLiteral("p"), true);  // 非 checkable → 警告，不改
+    EXPECT_FALSE(r.checked(QStringLiteral("p")));
+    EXPECT_EQ(state, 0);
+
+    UiActionDef tog = make_def(QStringLiteral("t"));
+    tog.checkable = true;
+    r.add(tog);
+    EXPECT_TRUE(r.checkable(QStringLiteral("t")));
+    r.setChecked(QStringLiteral("t"), true);
+    EXPECT_TRUE(r.checked(QStringLiteral("t")));
+    r.setChecked(QStringLiteral("t"), true);  // 相同值 → 不再发信号
+    EXPECT_EQ(state, 1);
+    EXPECT_EQ(action, 1);
+    r.setChecked(QStringLiteral("t"), false);
+    EXPECT_FALSE(r.checked(QStringLiteral("t")));
+    EXPECT_EQ(state, 2);
+    EXPECT_EQ(action, 2);
+}
