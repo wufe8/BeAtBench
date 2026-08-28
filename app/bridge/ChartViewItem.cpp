@@ -1171,7 +1171,10 @@ void ChartViewItem::paint(QPainter* p) {
     for (std::size_t i = 0; i < m_columns.size(); ++i) {
         const QRectF& r = m_colRects[i];
         const Column& col = m_columns[i];
-        QColor tint;
+        // ⚠️ 默认构造 QColor = 黑（alpha 255）；无 tint 的列（key 键轨/BPM/STOP）必须用
+        // Qt::transparent（alpha 0），否则 alpha()>0 判定误判 → 整列填黑（2026-09 用户：
+        // 深色 skin 下 key 轨显黑、浅色 skin 下 key 轨也是黑）。
+        QColor tint = Qt::transparent;
         if (col.bgm) {
             tint = th->wave();
             if (col.bgmId != 0) tint.setAlpha(18);  // 展开列：更淡的底色（2026-08 跟进，保对比度）
@@ -1186,6 +1189,10 @@ void ChartViewItem::paint(QPainter* p) {
             tint.setAlpha(22);
         }
         if (tint.alpha() > 0) p->fillRect(r, tint);
+        if (col.lane.kind == beatbench::LaneKind::Key && m_debugLaneTint) {
+            qInfo("DBG lane key col=%zu x=%f w=%f tint.alpha=%d bg=%s", i, r.x(), r.width(),
+                  tint.alpha(), qPrintable(th ? th->bg().name() : QStringLiteral("nil")));
+        }
         p->setPen(QPen(th->border(), 1.0));
         p->drawLine(r.topLeft(), r.bottomLeft());
     }

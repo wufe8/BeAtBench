@@ -271,6 +271,7 @@ private:
     bool m_showGrid = true;   // 槽位弱线显示开关（「网格」按钮）
     qreal m_scrollX = 0.0;
     bool m_perfLog = false;  // paint 帧耗时采样（--perf-log）
+    bool m_debugLaneTint = false;  // 调试：打印 key 轨列底色（排查深色皮肤下 key 轨显黑）
     std::vector<Column> m_columns;
     std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
     QFont m_rulerFont;
