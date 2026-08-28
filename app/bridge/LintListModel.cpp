@@ -84,6 +84,25 @@ void LintListModel::loadFromCheck(const QString& checkJson) {
             add_flag("missing_rank", "缺失 #RANK（判定难度，播放器将用默认值）");
             add_flag("missing_total", "缺失 #TOTAL（回血总量，播放器将用默认值）");
             add_flag("empty", "空谱面（未解析到任何内容）");
+            // 3b) 定位类 lint：overlapping_notes / dangling_ln（check 把这些对象置于
+            //     lint.* 数组；loadFromCheck 此前忽略 → 打开谱面时 lint 面板不显示，
+            //     只有编辑触发 refreshLint（session.lint → loadFromIssues）才出现）。
+            //     2026-09 用户：补齐「打开即显示重叠 note / 悬挂 LN」。
+            const auto add_positional = [&](const char* key,
+                                            const QString& fallbackType) {
+                if (const Json* arr = lint->find(key); arr && arr->is_array()) {
+                    for (const auto& d : arr->as_array()) {
+                        Entry e;
+                        e.severity = QStringLiteral("warning");
+                        if (const Json* v = d.find("message"))
+                            e.message = QString::fromUtf8(v->as_str().c_str());
+                        if (e.message.isEmpty()) e.message = fallbackType;
+                        rows.push_back(std::move(e));
+                    }
+                }
+            };
+            add_positional("overlapping_notes", QStringLiteral("重叠 note"));
+            add_positional("dangling_ln", QStringLiteral("悬挂 LN"));
             // 4) wav_ext_mismatch（引用 .wav 存在 .ogg 等）：信息级（文件实际可用），
             // 聚合为一条（上千条同因信息不刷屏）
             if (const Json* arr3 = lint->find("wav_ext_mismatch"); arr3 && arr3->is_array()) {
