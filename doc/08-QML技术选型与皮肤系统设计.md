@@ -156,12 +156,21 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 - [x] **UI 动作注册表（皮肤换壳前置）**：✅ **已落地（2026-09 二批）**——C++ UiActionRegistry +
       24 个动作 id 注册、invoke 真实化（handler=QMetaObject 调 QML 窗口函数）、`setEnabled`/
       `updateActionStates`（enabled 打通）、`setChecked`/`updateCheckedStates`（勾选态打通）、
-      `keymap.json` 快捷键覆写（`--keymap`/`--skin`）。**item 3/5/7 未完**：菜单/工具条/快捷键
-      枚举化渲染（doc/09 §7 验收 1-2）、L3 皮肤整壳样例、layout.json schema。详见 doc/09 §13；
+      `keymap.json` 快捷键覆写（`--keymap`/`--skin`）。**2026-09 三批再收敛**：菜单/工具条
+      枚举化渲染——文件/编辑菜单按 `idsByCategory` 生成 + 分隔线建模；页面工具条变换组与
+      编辑工具条工具选择条按 `idsByToolbar` 枚举（`toolbar`/`value`/`prefix`/`tooltip` 元数据）。
+      **item 3/5/7 未完**：L3 皮肤整壳样例、layout.json schema。详见 doc/09 §13；
 - [x] **theme.json token 与 ThemeManager 对齐（2026-09 二批，L1 样例）**：`ThemeManager` 已实现
       全部 `n1..n4`/`scratch`/`mine`/`ln`/`wave`/`accent2`/`noteRadius` 等 token（doc/05 §7 完整表），
       并新增 `loadTheme(path)`（`--skin <dir>` 加载 `theme.json` 覆写颜色 token，QML 加载前应用）。
-      样例皮肤 `skins/Aurora/`（L1 颜色 + keymap）。缺省回落/非颜色 token（radius/fs/fonts）后置；
+      样例皮肤 `skins/Aurora/`（L1 颜色 + keymap）；
+- [x] **theme.json 非颜色 token 覆写（2026-09 三批，L2 样例）**：`ThemeManager` 的
+      `radiusSm/radius/noteRadius/fsBase/fsSmall/fsTiny/fontSans/fontMono` 改为可覆写成员，
+      `loadTheme` 解析数字 + 字体（`noteRadius` 允许 0 = 方形 note；`_` 前缀 key 跳过不进未知汇总）。
+      样例皮肤 `skins/Linear/`（L1+L2）演示密度/圆角/字体/note 造型幅度——皮肤可达
+      doc/beatbench-ui-styles.html 主题①③⑤⑥ 的**布局改动幅度**，无需 QML 结构改动。
+      **仍未做**：真正的**布局结构改动**（工具条行增删/面板排列/整壳重排，即 L2 `layout.json`
+      结构层 / L3 QML 壳覆写），属深水区；
 - [ ] L3 皮肤覆写的粒度约定（整壳替换 vs 按区域 `Replace:` 声明）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME）；
 - [x] 时间轴视口技术路线确认：`QQuickPaintedItem`（QPainter 复用）起步（M2 已落地）；
