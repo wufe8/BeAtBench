@@ -67,17 +67,21 @@ bool set_color(ThemeManager& th, const QString& key, const QString& value) {
     return false;
 }
 
-// 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）。radius/fs 须为正（0 半径只在 noteRadius 合法，
-// 方形 note 是 doc 主题① 的关键差异）；字体须非空；非法值跳过（防 skin 写错导致布局/文本异常）。
+// 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）。radius/fs 须 > 0；0 半径只在 note/button/box 合法
+// （方形 note 是 doc 主题① 的关键差异、方形按钮/复选框是 console 风）；字体须非空；非法值跳过。
 bool set_number(ThemeManager& th, const QString& key, const double v) {
-    // radiusSm/radius/fs* 须 > 0；noteRadius 允许 0（方形 note，doc 主题① iBMSC）
-    const bool allowZero = (key == QLatin1String("noteRadius"));
+    // radiusSm/radius/fs* 须 > 0；noteRadius/buttonRadius/boxRadius 允许 0（方形）
+    const bool allowZero = (key == QLatin1String("noteRadius"))
+                        || (key == QLatin1String("buttonRadius"))
+                        || (key == QLatin1String("boxRadius"));
     if (!(v > 0.0) && !(allowZero && v == 0.0)) return false;
 #define BB_THEME_NUM_SET(name) \
     if (key == QLatin1String(#name)) { th.set_##name(static_cast<qreal>(v)); return true; }
     BB_THEME_NUM_SET(radiusSm)
     BB_THEME_NUM_SET(radius)
     BB_THEME_NUM_SET(noteRadius)
+    BB_THEME_NUM_SET(buttonRadius)
+    BB_THEME_NUM_SET(boxRadius)
     BB_THEME_NUM_SET(fsBase)
     BB_THEME_NUM_SET(fsSmall)
     BB_THEME_NUM_SET(fsTiny)
@@ -203,6 +207,8 @@ void ThemeManager::resetDefault() {
     set_radiusSm(6.0);
     set_radius(10.0);
     set_noteRadius(2.0);
+    set_buttonRadius(6.0);
+    set_boxRadius(6.0);
     set_fsBase(13.0);
     set_fsSmall(12.0);
     set_fsTiny(11.0);
@@ -220,6 +226,7 @@ struct SkinEntry { const char* name; const char* dir; };
 const SkinEntry kBuiltinSkins[] = {
     { "Aurora", "skins/Aurora" },
     { "Linear", "skins/Linear" },
+    { "OsuLight", "skins/OsuLight" },
 };
 }
 

@@ -31,7 +31,7 @@ CheckBox {
         y: root.topPadding + (root.availableHeight - height) / 2
         width: 14
         height: 14
-        radius: Theme.radiusSm
+        radius: Theme.boxRadius
         color: root.checked ? root.boxChecked : root.boxColor
         border.color: root.hovered ? Theme.accent : root.boxBorder
         border.width: 1

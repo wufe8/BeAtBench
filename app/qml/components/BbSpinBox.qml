@@ -108,7 +108,7 @@ SpinBox {
     stepSize: root.stepFactor > 0 ? 0 : 1
 
     background: Rectangle {
-        radius: Theme.radiusSm
+        radius: Theme.boxRadius
         border.width: 1
         border.color: root.activeFocus ? Theme.primary : Theme.borderStrong
         color: Theme.surface2

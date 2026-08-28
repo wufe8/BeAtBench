@@ -142,8 +142,10 @@ TEST(ThemeManager, BuiltinSkinCatalog) {
     EXPECT_FALSE(names.isEmpty());
     EXPECT_TRUE(names.contains(QStringLiteral("Aurora")));
     EXPECT_TRUE(names.contains(QStringLiteral("Linear")));
+    EXPECT_TRUE(names.contains(QStringLiteral("OsuLight")));  // 亮色内置皮肤
     EXPECT_EQ(th.skinDir(QStringLiteral("Aurora")), QStringLiteral("skins/Aurora"));
     EXPECT_EQ(th.skinDir(QStringLiteral("Linear")), QStringLiteral("skins/Linear"));
+    EXPECT_EQ(th.skinDir(QStringLiteral("OsuLight")), QStringLiteral("skins/OsuLight"));
     // 未知皮肤名 → 空目录 + applySkinByName 返回 -1
     EXPECT_TRUE(th.skinDir(QStringLiteral("Nope")).isEmpty());
     EXPECT_EQ(th.applySkinByName(QStringLiteral("Nope")), -1);
@@ -159,4 +161,29 @@ TEST(ThemeManager, ResetDefaultRestoresAllTokens) {
     EXPECT_DOUBLE_EQ(th.fsBase(), 13.0);
     EXPECT_EQ(th.fontSans(), QStringLiteral("Microsoft YaHei UI"));
     EXPECT_EQ(th.fontMono(), QStringLiteral("Consolas"));
+}
+
+TEST(ThemeManager, IndependentShapeTokens) {
+    // L1 控件形状细分（doc/10 §2）：buttonRadius/boxRadius 独立于 radiusSm，可单独覆写/重置。
+    ThemeManager th;
+    // 默认 = radiusSm（6）
+    EXPECT_DOUBLE_EQ(th.buttonRadius(), 6.0);
+    EXPECT_DOUBLE_EQ(th.boxRadius(), 6.0);
+    EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
+
+    // 单独覆写 buttonRadius=0（方形按钮）、boxRadius=8（圆角复选框）；radiusSm 不变
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = write_theme(dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6})");
+    ASSERT_FALSE(path.isEmpty());
+    th.loadTheme(path);
+    EXPECT_DOUBLE_EQ(th.buttonRadius(), 0.0);
+    EXPECT_DOUBLE_EQ(th.boxRadius(), 8.0);
+    EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
+
+    // resetDefault 还原
+    th.resetDefault();
+    EXPECT_DOUBLE_EQ(th.buttonRadius(), 6.0);
+    EXPECT_DOUBLE_EQ(th.boxRadius(), 6.0);
+    EXPECT_DOUBLE_EQ(th.radiusSm(), 6.0);
 }

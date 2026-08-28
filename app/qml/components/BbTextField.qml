@@ -22,7 +22,7 @@ TextField {
     property var escapeHandler: null
 
     background: Rectangle {
-        radius: Theme.radiusSm
+        radius: Theme.boxRadius
         border.width: 1
         border.color: root.activeFocus ? Theme.primary : Theme.borderStrong
         color: Theme.surface2

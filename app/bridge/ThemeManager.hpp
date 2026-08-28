@@ -63,9 +63,11 @@ public:
 #undef BB_THEME_COLOR_PROP
 
     // ---- 非颜色 token（L2 皮肤：密度/圆角/字体可覆写；默认值见 doc/beatbench-ui-preview.html） ----
-    Q_PROPERTY(qreal radiusSm READ radiusSm NOTIFY tokensChanged)   // 控件圆角（6）
+    Q_PROPERTY(qreal radiusSm READ radiusSm NOTIFY tokensChanged)   // 控件圆角（6）= button/box 默认
     Q_PROPERTY(qreal radius READ radius NOTIFY tokensChanged)       // 面板圆角（10）
     Q_PROPERTY(qreal noteRadius READ noteRadius NOTIFY tokensChanged) // note 圆角（2，= styles.html）
+    Q_PROPERTY(qreal buttonRadius READ buttonRadius NOTIFY tokensChanged) // 按钮/工具条按钮圆角（= radiusSm）
+    Q_PROPERTY(qreal boxRadius READ boxRadius NOTIFY tokensChanged)   // 复选框/输入框/下拉圆角（= radiusSm）
     Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)       // 正文/按钮（13，= preview.html 基准）
     Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)     // 次级/标签（12）
     Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)       // 提示/占位（11）
@@ -75,6 +77,8 @@ public:
     qreal radiusSm() const { return m_radiusSm; }
     qreal radius() const { return m_radius; }
     qreal noteRadius() const { return m_noteRadius; }
+    qreal buttonRadius() const { return m_buttonRadius; }
+    qreal boxRadius() const { return m_boxRadius; }
     qreal fsBase() const { return m_fsBase; }
     qreal fsSmall() const { return m_fsSmall; }
     qreal fsTiny() const { return m_fsTiny; }
@@ -154,6 +158,8 @@ public:
     BB_THEME_NUM_SETTER(radiusSm)
     BB_THEME_NUM_SETTER(radius)
     BB_THEME_NUM_SETTER(noteRadius)
+    BB_THEME_NUM_SETTER(buttonRadius)
+    BB_THEME_NUM_SETTER(boxRadius)
     BB_THEME_NUM_SETTER(fsBase)
     BB_THEME_NUM_SETTER(fsSmall)
     BB_THEME_NUM_SETTER(fsTiny)
@@ -205,6 +211,8 @@ private:
     qreal m_radiusSm = 6.0;
     qreal m_radius = 10.0;
     qreal m_noteRadius = 2.0;
+    qreal m_buttonRadius = 6.0;   // = radiusSm（按钮/工具条按钮）
+    qreal m_boxRadius = 6.0;       // = radiusSm（复选框/输入框/下拉）
     qreal m_fsBase = 13.0;
     qreal m_fsSmall = 12.0;
     qreal m_fsTiny = 11.0;

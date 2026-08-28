@@ -42,7 +42,7 @@ ComboBox {
 
     background: Rectangle {
         implicitHeight: 24
-        radius: Theme.radiusSm
+        radius: Theme.boxRadius
         border.width: 1
         border.color: root.hovered ? Theme.accent : Theme.borderStrong
         color: Theme.surface2
@@ -55,7 +55,7 @@ ComboBox {
         implicitHeight: contentItem.implicitHeight + 8
         padding: 4
         background: Rectangle {
-            radius: Theme.radiusSm
+            radius: Theme.boxRadius
             border.width: 1
             border.color: Theme.borderStrong
             color: Theme.surface
@@ -77,7 +77,7 @@ ComboBox {
                     leftPadding: 8
                 }
                 background: Rectangle {
-                    radius: Theme.radiusSm
+                    radius: Theme.boxRadius
                     color: ListView.isCurrentItem ? Theme.surface3 : "transparent"
                 }
                 onClicked: {

@@ -1,0 +1,8 @@
+{
+  "name": "OsuLight",
+  "version": "0.2",
+  "api": 1,
+  "author": "BeAtBench team",
+  "layers": ["L1"],
+  "provides": ["theme.json", "keymap.json"]
+}

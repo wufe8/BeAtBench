@@ -20,7 +20,7 @@ ToolButton {
     opacity: root.enabled ? 1.0 : 0.45
 
     background: Rectangle {
-        radius: Theme.radiusSm
+        radius: Theme.buttonRadius
         color: {
             if (root.lit)
                 return Theme.primarySoft
