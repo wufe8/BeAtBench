@@ -1,0 +1,8 @@
+{
+  "name": "Win10",
+  "version": "0.1",
+  "api": 1,
+  "author": "BeAtBench team",
+  "layers": ["L1"],
+  "provides": ["theme.json", "keymap.json"]
+}

@@ -143,9 +143,11 @@ TEST(ThemeManager, BuiltinSkinCatalog) {
     EXPECT_TRUE(names.contains(QStringLiteral("Aurora")));
     EXPECT_TRUE(names.contains(QStringLiteral("Linear")));
     EXPECT_TRUE(names.contains(QStringLiteral("OsuLight")));  // 亮色内置皮肤
+    EXPECT_TRUE(names.contains(QStringLiteral("Win10")));      // 直角/扁平内置皮肤
     EXPECT_EQ(th.skinDir(QStringLiteral("Aurora")), QStringLiteral("skins/Aurora"));
     EXPECT_EQ(th.skinDir(QStringLiteral("Linear")), QStringLiteral("skins/Linear"));
     EXPECT_EQ(th.skinDir(QStringLiteral("OsuLight")), QStringLiteral("skins/OsuLight"));
+    EXPECT_EQ(th.skinDir(QStringLiteral("Win10")), QStringLiteral("skins/Win10"));
     // 未知皮肤名 → 空目录 + applySkinByName 返回 -1
     EXPECT_TRUE(th.skinDir(QStringLiteral("Nope")).isEmpty());
     EXPECT_EQ(th.applySkinByName(QStringLiteral("Nope")), -1);

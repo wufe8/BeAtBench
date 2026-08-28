@@ -67,14 +67,16 @@ bool set_color(ThemeManager& th, const QString& key, const QString& value) {
     return false;
 }
 
-// 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）。radius/fs 须 > 0；0 半径只在 note/button/box 合法
-// （方形 note 是 doc 主题① 的关键差异、方形按钮/复选框是 console 风）；字体须非空；非法值跳过。
+// 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）。fs* 须 > 0；所有 radius/note/button/box 允许 0
+// （方形 = 直角风，doc 主题① 与 Win10 皮肤用）；字体须非空；非法值跳过。
 bool set_number(ThemeManager& th, const QString& key, const double v) {
-    // radiusSm/radius/fs* 须 > 0；noteRadius/buttonRadius/boxRadius 允许 0（方形）
-    const bool allowZero = (key == QLatin1String("noteRadius"))
-                        || (key == QLatin1String("buttonRadius"))
-                        || (key == QLatin1String("boxRadius"));
-    if (!(v > 0.0) && !(allowZero && v == 0.0)) return false;
+    // fs* 须 > 0；radiusSm/radius/noteRadius/buttonRadius/boxRadius 允许 0（直角风）
+    const bool isRadius = (key == QLatin1String("radiusSm"))
+                       || (key == QLatin1String("radius"))
+                       || (key == QLatin1String("noteRadius"))
+                       || (key == QLatin1String("buttonRadius"))
+                       || (key == QLatin1String("boxRadius"));
+    if (!(v > 0.0) && !(isRadius && v == 0.0)) return false;
 #define BB_THEME_NUM_SET(name) \
     if (key == QLatin1String(#name)) { th.set_##name(static_cast<qreal>(v)); return true; }
     BB_THEME_NUM_SET(radiusSm)
@@ -227,6 +229,7 @@ const SkinEntry kBuiltinSkins[] = {
     { "Aurora", "skins/Aurora" },
     { "Linear", "skins/Linear" },
     { "OsuLight", "skins/OsuLight" },
+    { "Win10", "skins/Win10" },
 };
 }
 
@@ -271,12 +274,17 @@ int ThemeManager::applySkinByName(const QString& name) {
         qWarning() << "ThemeManager::applySkinByName: 缺 theme.json" << themePath;
         return -1;
     }
-    // applyTheme 用绝对路径记 activeSkin；这里先应用，外层再关 keymap 切肤（见 QML）。
-    const int n = applyTheme(theme);
-    if (n >= 0) {
-        // applyTheme 记录的 activeSkin 是 theme.json 绝对路径的父目录；改存皮肤目录（相对）。
-        m_activeSkin = dirPath;
+    // ⚠️ 不经过 applyTheme（它会先把 activeSkin 设成绝对路径并发 tokensChanged → QML 绑定
+    // 按绝对路径求值 ≠ 任何 skinDir，菜单勾选对不上；这里由本函数统一设置相对目录并**只发一次**）。
+    QString err;
+    const int n = loadTheme(theme, &err);
+    if (n < 0) {
+        qWarning() << "ThemeManager::applySkinByName 加载失败:" << err;
+        return -1;
     }
+    m_activeSkin = dirPath;  // 相对目录（= skinDir(name)，供菜单 checked 比对）
+    emit tokensChanged();
+    qInfo("皮肤已运行时切换：%s（%d 个 token）", qPrintable(dirPath), n);
     return n;
 }
 
