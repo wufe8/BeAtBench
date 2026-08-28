@@ -61,7 +61,7 @@ public:
     BB_THEME_COLOR_PROP(bgaLayer2)      // ch0A layer2：中绿
 #undef BB_THEME_COLOR_PROP
 
-    // ---- 非颜色 token ----
+    // ---- 非颜色 token（L2 皮肤：密度/圆角/字体可覆写；默认值见 doc/beatbench-ui-preview.html） ----
     Q_PROPERTY(qreal radiusSm READ radiusSm CONSTANT)   // 控件圆角（6）
     Q_PROPERTY(qreal radius READ radius CONSTANT)       // 面板圆角（10）
     Q_PROPERTY(qreal noteRadius READ noteRadius CONSTANT) // note 圆角（2，= styles.html）
@@ -71,18 +71,14 @@ public:
     Q_PROPERTY(QString fontSans READ fontSans CONSTANT)
     Q_PROPERTY(QString fontMono READ fontMono CONSTANT)
 
-    qreal radiusSm() const { return 6.0; }
-    qreal radius() const { return 10.0; }
-    qreal noteRadius() const { return 2.0; }
-    qreal fsBase() const { return 13.0; }
-    qreal fsSmall() const { return 12.0; }
-    qreal fsTiny() const { return 11.0; }
-    // 中文界面默认黑体：Microsoft YaHei UI（Win 全系自带，UI 密度优于 YaHei）。
-    // 自由/免费字体备选：Noto Sans SC / 思源黑体（OFL，可随包分发、跨平台一致）——
-    // 打包（M7）或皮肤主题（theme.json 字体 token）时再定，本阶段用系统自带避免体积。
-    QString fontSans() const { return QStringLiteral("Microsoft YaHei UI"); }
-    // 等宽：Consolas（Windows 自带）；自由备选 Cascadia Mono / JetBrains Mono（OFL）
-    QString fontMono() const { return QStringLiteral("Consolas"); }
+    qreal radiusSm() const { return m_radiusSm; }
+    qreal radius() const { return m_radius; }
+    qreal noteRadius() const { return m_noteRadius; }
+    qreal fsBase() const { return m_fsBase; }
+    qreal fsSmall() const { return m_fsSmall; }
+    qreal fsTiny() const { return m_fsTiny; }
+    QString fontSans() const { return m_fontSans; }
+    QString fontMono() const { return m_fontMono; }
 
     /// 从 theme.json（L1 皮肤层）覆写 token（颜色为主；色值支持 #RRGGBB / #AARRGGBB）。
     /// 在 QML 加载前调用（Theme.token 是 CONSTANT 属性，QML 绑定在首帧按当前值求值）。
@@ -127,6 +123,18 @@ public:
     BB_THEME_SETTER(bgaLayer2)
 #undef BB_THEME_SETTER
 
+    // 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）；仅 loadTheme 调用，QML 只读。
+#define BB_THEME_NUM_SETTER(name) void set_##name(qreal v) { m_##name = v; }
+    BB_THEME_NUM_SETTER(radiusSm)
+    BB_THEME_NUM_SETTER(radius)
+    BB_THEME_NUM_SETTER(noteRadius)
+    BB_THEME_NUM_SETTER(fsBase)
+    BB_THEME_NUM_SETTER(fsSmall)
+    BB_THEME_NUM_SETTER(fsTiny)
+#undef BB_THEME_NUM_SETTER
+    void set_fontSans(const QString& v) { m_fontSans = v; }
+    void set_fontMono(const QString& v) { m_fontMono = v; }
+
 private:
     // 成员与上方访问器一一对应（同名同序，新增 token 两处同步）
 #define BB_THEME_COLOR_MEMBER(name, def) \
@@ -166,6 +174,20 @@ private:
     BB_THEME_COLOR_MEMBER(bgaLayer, "#4ade80")       // ch07 layer：亮绿
     BB_THEME_COLOR_MEMBER(bgaLayer2, "#22c55e")      // ch0A layer2：中绿
 #undef BB_THEME_COLOR_MEMBER
+
+    // 非颜色 token 成员（与上方访问器一一对应；默认值 = 内置默认皮肤骨架）
+    qreal m_radiusSm = 6.0;
+    qreal m_radius = 10.0;
+    qreal m_noteRadius = 2.0;
+    qreal m_fsBase = 13.0;
+    qreal m_fsSmall = 12.0;
+    qreal m_fsTiny = 11.0;
+    // 中文界面默认黑体：Microsoft YaHei UI（Win 全系自带，UI 密度优于 YaHei）。
+    // 自由/免费字体备选：Noto Sans SC / 思源黑体（OFL，可随包分发、跨平台一致）——
+    // 打包（M7）或皮肤主题（theme.json 字体 token）时再定，本阶段用系统自带避免体积。
+    QString m_fontSans = QStringLiteral("Microsoft YaHei UI");
+    // 等宽：Consolas（Windows 自带）；自由备选 Cascadia Mono / JetBrains Mono（OFL）
+    QString m_fontMono = QStringLiteral("Consolas");
 };
 
 }  // namespace beatbench::app

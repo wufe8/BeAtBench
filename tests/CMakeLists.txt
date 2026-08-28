@@ -40,4 +40,21 @@ if (Qt6Core_FOUND)
     set_target_properties(ui_action_registry_test PROPERTIES AUTOMOC ON)
     beatbench_set_warnings(ui_action_registry_test)
     add_test(NAME ui_action_registry_tests COMMAND ui_action_registry_test)
+
+    # ThemeManager 单测（doc/08 §3.5）：链 Qt6::Gui（QColor）+ core 的 Json。
+    # 验证 theme.json 颜色 + 非颜色 token 覆写（L2 皮肤布局改动幅度的根基）。
+    find_package(Qt6 COMPONENTS Gui QUIET)
+    if (Qt6Gui_FOUND)
+        add_executable(theme_manager_test theme_manager_test.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.hpp)
+        target_include_directories(theme_manager_test PRIVATE
+            ${CMAKE_SOURCE_DIR}/app ${CMAKE_SOURCE_DIR}/core/include)
+        target_link_libraries(theme_manager_test PRIVATE
+            beatbench_core Qt6::Gui Qt6::Core GTest::gtest_main)
+        # ThemeManager 是 Q_OBJECT：需 AUTOMOC 生成 staticMetaObject。
+        set_target_properties(theme_manager_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(theme_manager_test)
+        add_test(NAME theme_manager_tests COMMAND theme_manager_test)
+    endif()
 endif()

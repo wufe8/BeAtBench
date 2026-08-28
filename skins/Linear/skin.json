@@ -1,0 +1,8 @@
+{
+  "name": "Linear",
+  "version": "0.2",
+  "api": 1,
+  "author": "BeAtBench team",
+  "layers": ["L1", "L2"],
+  "provides": ["theme.json", "keymap.json"]
+}

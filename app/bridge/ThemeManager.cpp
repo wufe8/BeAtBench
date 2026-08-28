@@ -65,6 +65,31 @@ bool set_color(ThemeManager& th, const QString& key, const QString& value) {
     return false;
 }
 
+// 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）。radius/fs 须为正（0 半径只在 noteRadius 合法，
+// 方形 note 是 doc 主题① 的关键差异）；字体须非空；非法值跳过（防 skin 写错导致布局/文本异常）。
+bool set_number(ThemeManager& th, const QString& key, const double v) {
+    // radiusSm/radius/fs* 须 > 0；noteRadius 允许 0（方形 note，doc 主题① iBMSC）
+    const bool allowZero = (key == QLatin1String("noteRadius"));
+    if (!(v > 0.0) && !(allowZero && v == 0.0)) return false;
+#define BB_THEME_NUM_SET(name) \
+    if (key == QLatin1String(#name)) { th.set_##name(static_cast<qreal>(v)); return true; }
+    BB_THEME_NUM_SET(radiusSm)
+    BB_THEME_NUM_SET(radius)
+    BB_THEME_NUM_SET(noteRadius)
+    BB_THEME_NUM_SET(fsBase)
+    BB_THEME_NUM_SET(fsSmall)
+    BB_THEME_NUM_SET(fsTiny)
+#undef BB_THEME_NUM_SET
+    return false;
+}
+
+bool set_font(ThemeManager& th, const QString& key, const QString& value) {
+    if (value.trimmed().isEmpty()) return false;
+    if (key == QLatin1String("fontSans")) { th.set_fontSans(value); return true; }
+    if (key == QLatin1String("fontMono")) { th.set_fontMono(value); return true; }
+    return false;
+}
+
 }  // namespace
 
 int ThemeManager::loadTheme(const QString& path, QString* error) {
@@ -84,10 +109,25 @@ int ThemeManager::loadTheme(const QString& path, QString* error) {
         QStringList unknown;
         for (const auto& [k, v] : req.as_object()) {
             const QString key = QString::fromUtf8(k.c_str());
-            if (!v.is_string()) continue;  // 忽略非字符串 token
-            const QString value = QString::fromUtf8(v.as_str().c_str());
-            if (set_color(*this, key, value)) {
-                ++n;
+            // 下划线前缀的 key = 皮肤元注释（如 _comment），跳过不进未知汇总（doc/08 §3 约定）
+            if (key.startsWith(QLatin1Char('_'))) continue;
+            if (v.is_string()) {
+                const QString value = QString::fromUtf8(v.as_str().c_str());
+                if (set_color(*this, key, value)) {
+                    ++n;
+                } else if (set_font(*this, key, value)) {
+                    ++n;
+                } else {
+                    ++skipped;
+                    unknown.push_back(key);
+                }
+            } else if (v.is_number()) {
+                if (set_number(*this, key, v.as_f64())) {
+                    ++n;
+                } else {
+                    ++skipped;
+                    unknown.push_back(key);
+                }
             } else {
                 ++skipped;
                 unknown.push_back(key);
