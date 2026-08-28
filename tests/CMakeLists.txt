@@ -31,8 +31,11 @@ if (Qt6Core_FOUND)
     add_executable(ui_action_registry_test ui_action_registry_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.hpp)  # Q_OBJECT 头须显式列入（AUTOMOC 扫描不可靠）
-    target_include_directories(ui_action_registry_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
-    target_link_libraries(ui_action_registry_test PRIVATE Qt6::Core GTest::gtest_main)
+    target_include_directories(ui_action_registry_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/app ${CMAKE_SOURCE_DIR}/core/include)
+    # UiActionRegistry.cpp 现依赖 core 的 Json（applyKeymapFile 解析 keymap.json）→ 链 beatbench_core。
+    target_link_libraries(ui_action_registry_test PRIVATE
+        beatbench_core Qt6::Core GTest::gtest_main)
     # UiActionRegistry 是 Q_OBJECT：需 AUTOMOC 生成 staticMetaObject/信号/vtable。
     # qt_standard_project_setup 只在 app 子目录启用（app/CMakeLists.txt）；tests 位于其外、且
     # 本目标不依赖 Quick，故在此显式开启 AUTOMOC（2026-09：此前缺它 → 链接 undefined reference，

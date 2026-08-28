@@ -327,13 +327,23 @@ int main(int argc, char** argv) {
 
     // --apply-skin <name>：启动后运行时换肤（配 --screenshot 验收皮肤菜单切换链路）。
     // 走 ThemeManager::applySkinByName —— 与菜单「视图→皮肤」同一路径（applyTheme →
-    // tokensChanged → QML 绑定重算 + QPalette 重建 + 视口重绘）。
+    // tokensChanged → QML 绑定重算 + QPalette 重建 + 视口重绘）。同时应用该皮肤 keymap。
     const int asIdx = args.indexOf(QStringLiteral("--apply-skin"));
     if (asIdx >= 0 && asIdx + 1 < args.size()) {
         const QString skinName = args.at(asIdx + 1);
         qInfo("--apply-skin: %s", qPrintable(skinName));
-        if (theme.applySkinByName(skinName) < 0)
+        if (theme.applySkinByName(skinName) < 0) {
             qWarning() << "--apply-skin 应用失败:" << skinName;
+        } else {
+            if (skinName == QString::fromUtf8("默认")) {
+                uiActions.clearKeymap();
+            } else {
+                const QString dir = theme.skinDirResolved(skinName);
+                if (!dir.isEmpty())
+                    uiActions.applyKeymapFile(
+                        QDir(dir).filePath(QStringLiteral("keymap.json")));
+            }
+        }
     }
 
     // --page N：启动时切到第 N 页（调试：验证页面切换渲染；配合 --screenshot 使用）

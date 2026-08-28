@@ -108,6 +108,8 @@ public:
     Q_INVOKABLE QStringList skinNames() const;
     /// 皮肤名 → 目录（"" = 未知名字）；默认皮肤名 = "默认"（空目录，走 resetDefault）。
     Q_INVOKABLE QString skinDir(const QString& name) const;
+    /// 解析到真实存在的皮肤目录（含 relative ../ 回退；找不到返回空串）。供 keymap 等伴生文件定位。
+    Q_INVOKABLE QString skinDirResolved(const QString& name) const;
     /// 按名字应用皮肤（"默认"→resetDefault；否则 resolve 目录 applyTheme）。返回覆写数；-1 失败。
     Q_INVOKABLE int applySkinByName(const QString& name);
 

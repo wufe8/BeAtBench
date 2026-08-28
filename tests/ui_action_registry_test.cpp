@@ -5,7 +5,9 @@
 // 2026-09：补 AUTOMOC（UiActionRegistry 是 Q_OBJECT）后此目标可正常链接运行。
 #include <gtest/gtest.h>
 
+#include <QFile>
 #include <QString>
+#include <QTemporaryDir>
 #include <QVariantMap>
 
 #include "bridge/UiActionRegistry.hpp"
@@ -208,6 +210,36 @@ TEST(UiActionRegistry, KeymapOverrideShortcut) {
     // 空序列 = 清除快捷键
     r.setShortcut(QStringLiteral("file.save"), QString());
     EXPECT_TRUE(r.shortcut(QStringLiteral("file.save")).isEmpty());
+}
+
+TEST(UiActionRegistry, KeymapFileApplyAndClear) {
+    // 运行时换肤 keymap（doc/10 §4）：applyKeymapFile 从文件应用；clearKeymap 清除覆写恢复内置默认。
+    UiActionRegistry r;
+    UiActionDef d = make_def(QStringLiteral("file.save"));
+    d.shortcut = QStringLiteral("Ctrl+S");
+    r.add(d);
+    int state = 0;
+    QObject::connect(&r, &UiActionRegistry::stateChanged, [&] { ++state; });
+    EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+S"));
+
+    // 写 keymap.json（覆盖 file.save）
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("keymap.json"));
+    { QFile f(path); ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Text));
+      f.write("{\"file.save\":\"Ctrl+Alt+S\"}"); }
+    const int n = r.applyKeymapFile(path);
+    EXPECT_EQ(n, 1);
+    EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+Alt+S"));
+    EXPECT_EQ(state, 1);
+
+    // clearKeymap 清除（恢复内置默认 Ctrl+S）+ 发一次 stateChanged
+    r.clearKeymap();
+    EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+S"));
+    EXPECT_EQ(state, 2);
+
+    // 缺失文件 → -1（不阻塞，不崩溃）
+    EXPECT_EQ(r.applyKeymapFile(QStringLiteral("/nonexistent/keymap.json")), -1);
 }
 
 TEST(UiActionRegistry, ToolbarGroupMetadata) {

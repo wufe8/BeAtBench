@@ -250,6 +250,22 @@ QString ThemeManager::skinDir(const QString& name) const {
     return QString();
 }
 
+// 解析到真实存在的皮肤目录（含 ../、../../ 回退）；找不到返回空串。
+QString ThemeManager::skinDirResolved(const QString& name) const {
+    const QString dirPath = skinDir(name);
+    if (dirPath.isEmpty()) return QString();
+    QString theme = QDir(dirPath).filePath(QStringLiteral("theme.json"));
+    if (!QFile::exists(theme)) {
+        const QStringList bases = { QStringLiteral("."), QStringLiteral(".."),
+                                    QStringLiteral("../.."), QStringLiteral("../../..") };
+        for (const QString& b : bases) {
+            const QString cand = QDir(b).filePath(theme);
+            if (QFile::exists(cand)) { theme = cand; break; }
+        }
+    }
+    return QFile::exists(theme) ? QFileInfo(theme).absolutePath() : QString();
+}
+
 int ThemeManager::applySkinByName(const QString& name) {
     // "默认" 用 QString::fromUtf8 比较（QLatin1String 不能表示多字节 UTF-8 字面量；CLI 经 argv 传入）
     if (name == QString::fromUtf8("默认")) {
@@ -261,23 +277,13 @@ int ThemeManager::applySkinByName(const QString& name) {
         qWarning() << "ThemeManager::applySkinByName: 未知皮肤" << name;
         return -1;
     }
-    // 目录相对「当前工作目录」解析失败时，回退到常见皮肤根（skin.json 随产品根布局，见 ../，
-    // ../../）；启动 --skin 也按工作目录（用户显式传路径），目录清单则尽量自适应。
-    const QString themePath = QDir(dirPath).filePath(QStringLiteral("theme.json"));
-    QString theme = themePath;
-    if (!QFile::exists(theme)) {
-        // exe 常见于 build-gui/app/（皮肤在仓库根 skins/），试探上溯 1..2 级
-        const QStringList bases = { QStringLiteral("."), QStringLiteral(".."),
-                                    QStringLiteral("../.."), QStringLiteral("../../..") };
-        for (const QString& b : bases) {
-            const QString cand = QDir(b).filePath(themePath);
-            if (QFile::exists(cand)) { theme = cand; break; }
-        }
-    }
-    if (!QFile::exists(theme)) {
-        qWarning() << "ThemeManager::applySkinByName: 缺 theme.json" << themePath;
+    // 解析到真实存在的皮肤目录（含 ../、../../ 回退——exe 常见于 build-gui/app/，皮肤在仓库根 skins/）
+    const QString resolvedDir = skinDirResolved(name);
+    if (resolvedDir.isEmpty()) {
+        qWarning() << "ThemeManager::applySkinByName: 缺 theme.json（皮肤目录未找到）" << dirPath;
         return -1;
     }
+    const QString theme = QDir(resolvedDir).filePath(QStringLiteral("theme.json"));
     // ⚠️ 不经过 applyTheme（它会先把 activeSkin 设成绝对路径并发 tokensChanged → QML 绑定
     // 按绝对路径求值 ≠ 任何 skinDir，菜单勾选对不上；这里由本函数统一设置相对目录并**只发一次**）。
     QString err;

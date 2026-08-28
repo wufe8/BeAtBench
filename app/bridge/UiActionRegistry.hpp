@@ -118,6 +118,13 @@ public:
     /// 批量应用 keymap（QVariantMap：id → 快捷键文本）；返回成功覆写的数量。
     int applyKeymap(const QVariantMap& keymap);
 
+    /// 从 keymap.json 文件应用快捷键（运行时换肤用；皮肤目录携带 keymap.json）。
+    /// 文件不存在/解析失败返回 -1（不阻塞）；空 keymap 文件 = 清除既有覆写（切回默认）。
+    Q_INVOKABLE int applyKeymapFile(const QString& path);
+
+    /// 清除全部快捷键覆写（切回默认皮肤：恢复注册时的内置默认快捷键）。
+    Q_INVOKABLE void clearKeymap();
+
 signals:
     /// enabled/checked 状态变化 → QML 菜单/工具条刷新。
     void stateChanged();

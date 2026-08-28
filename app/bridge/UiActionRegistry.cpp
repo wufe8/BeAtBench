@@ -2,8 +2,13 @@
 // UI 动作注册表实现（doc/09 操作注册规范化）。
 #include "UiActionRegistry.hpp"
 
-#include <algorithm>
 #include <QDebug>
+#include <QFile>
+#include <QTextStream>
+
+#include <algorithm>
+
+#include "beatbench/core/json/Json.hpp"
 
 namespace beatbench::app {
 
@@ -247,6 +252,41 @@ int UiActionRegistry::applyKeymap(const QVariantMap& keymap) {
         emit stateChanged();
     }
     return applied;
+}
+
+int UiActionRegistry::applyKeymapFile(const QString& path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "UiActionRegistry::applyKeymapFile: 无法打开" << path;
+        return -1;
+    }
+    try {
+        const auto req = beatbench::json::Json::parse(
+            QTextStream(&f).readAll().toStdString());
+        QVariantMap map;
+        if (req.is_object()) {
+            for (const auto& [k, v] : req.as_object()) {
+                if (v.is_string())
+                    map.insert(QString::fromUtf8(k.c_str()),
+                               QString::fromUtf8(v.as_str().c_str()));
+            }
+        }
+        // 空 map（或无 keymap 文件）→ 清除既有快捷键覆写（切回默认皮肤时恢复内置默认）
+        const int n = applyKeymap(map);
+        qInfo("keymap 应用：%d 个（%s）", n, qPrintable(path));
+        return n;
+    } catch (const beatbench::json::JsonError& e) {
+        qWarning() << "UiActionRegistry::applyKeymapFile: 解析失败" << path
+                   << QString::fromStdString(e.what());
+        return -1;
+    }
+}
+
+void UiActionRegistry::clearKeymap() {
+    if (m_shortcutOverride.empty()) return;
+    m_shortcutOverride.clear();
+    emit stateChanged();
+    qInfo("keymap 覆写已清除（恢复内置默认快捷键）");
 }
 
 }  // namespace beatbench::app

@@ -264,13 +264,14 @@ ApplicationWindow {
             title: qsTr("视图")
             // 皮肤（doc/08 §3.3 运行时换肤）：L1 token 覆写 + 运行时切换。
             // 列出「默认」+ 内置皮肤，当前生效项打勾；点击即运行时切换（Theme.applySkinByName）。
+            // ⚠️ 运行时切肤同时应用该皮肤目录的 keymap.json（doc/10 §4 待改进）——默认皮肤清除覆写。
             Menu {
                 title: qsTr("皮肤")
                 MenuItem {
                     text: qsTr("默认")
                     checkable: true
                     checked: Theme.activeSkin === ""
-                    onTriggered: Theme.applySkinByName("默认")
+                    onTriggered: window.applySkinByName("默认")
                 }
                 Repeater {
                     model: Theme.skinNames()
@@ -279,7 +280,7 @@ ApplicationWindow {
                         text: modelData
                         checkable: true
                         checked: Theme.activeSkin === Theme.skinDir(modelData)
-                        onTriggered: Theme.applySkinByName(modelData)
+                        onTriggered: window.applySkinByName(modelData)
                     }
                 }
             }
@@ -922,6 +923,17 @@ ApplicationWindow {
     function uiActionOpen() { fileDialog.open() }
     function uiActionSaveAs() { saveAsDialog.open() }
     function uiActionExit() { window.close() }
+    /// 运行时换肤（doc/08 §3.3）：应用皮肤 token（applySkinByName）+ 该皮肤目录 keymap.json。
+    /// "默认" 清除 keymap 覆写（恢复内置默认快捷键）；皮肤目录携带 keymap.json 时同步应用（doc/10 §4）。
+    function applySkinByName(name) {
+        Theme.applySkinByName(name)
+        if (name === "默认") {
+            uiActions.clearKeymap()              // 恢复内置默认快捷键
+        } else {
+            const p = Theme.skinDirResolved(name) + "/keymap.json"
+            uiActions.applyKeymapFile(p)         // 皮肤无 keymap.json → 打开失败返回 -1，不阻塞
+        }
+    }
     function uiActionDelete() {
         if (window.metaSelection.length > 0) deleteMetaSelection()
         else deleteSelection()
