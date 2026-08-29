@@ -519,7 +519,10 @@ ColumnLayout {
                 id: rawArea
                 visible: root.expandRaw
                 Layout.fillWidth: true
-                Layout.preferredHeight: 120
+                Layout.minimumHeight: 80
+                Layout.preferredHeight: 160
+                Layout.maximumHeight: 320   // 最多 320px；超过后 TextArea 内部滚动（Qt 自带 Flickable）
+                clip: true                  // 内容不越出框（截断 + 滚动，而非溢出绘制）
                 text: root.rawText
                 wrapMode: TextEdit.NoWrap
                 color: Theme.text
