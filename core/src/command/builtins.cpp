@@ -506,18 +506,6 @@ Lane lane_from_json(const Json& j) {
     return l;
 }
 
-Json lane_to_json(const Lane& l) {
-    Json j = Json::object();
-    j.set("player", static_cast<std::int64_t>(l.player));
-    j.set("index", static_cast<std::int64_t>(l.index));
-    std::string kind = "key";
-    if (l.kind == LaneKind::Scratch) kind = "scratch";
-    else if (l.kind == LaneKind::Pedal) kind = "pedal";
-    else if (l.kind == LaneKind::Bgm) kind = "bgm";
-    j.set("kind", std::move(kind));
-    return j;
-}
-
 // 从 args 读 (measure, pos)（"measure": int, "pos": {"num":n,"den":d} 或 [n,d]）
 Rational pos_from_json(const Json& args) {
     if (const Json* p = args.find("pos")) {
@@ -1645,14 +1633,14 @@ public:
         bool has_delta = false;
         if (const Json* d = args.find("delta")) {
             if (!d->is_object()) throw CommandError("bad_args", "delta 应为对象 {measure,pos}");
-            if (const Json* dm = d->find("measure")) delta_m = static_cast<std::uint32_t>(dm->as_i64());
-            if (const Json* dp = d->find("pos")) delta_p = pos_from_json(*d);
+            if (d->find("measure")) delta_m = static_cast<std::uint32_t>(d->find("measure")->as_i64());
+            if (d->find("pos")) delta_p = pos_from_json(*d);
             has_delta = true;
         }
         std::uint32_t abs_m = 0; Rational abs_p(0, 1);
         bool has_abs = args.find("to_measure") || args.find("to_pos");
-        if (const Json* v = args.find("to_measure")) abs_m = u32_arg(args, "to_measure");
-        if (const Json* v = args.find("to_pos")) abs_p = pos_from_json(args);
+        if (args.find("to_measure")) abs_m = u32_arg(args, "to_measure");
+        if (args.find("to_pos")) abs_p = pos_from_json(args);
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
             std::uint32_t tm; Rational tp;
@@ -1742,8 +1730,8 @@ public:
         Rational d_pos(0, 1);
         const Json* d = args.find("delta");
         if (!d || !d->is_object()) throw CommandError("bad_args", "缺少 delta {measure,pos}");
-        if (const Json* dm = d->find("measure")) d_measure = dm->as_i64();
-        if (const Json* dp = d->find("pos")) d_pos = pos_from_json(*d);
+        if (d->find("measure")) d_measure = d->find("measure")->as_i64();
+        if (d->find("pos")) d_pos = pos_from_json(*d);
         // 可选 to_lane：整组统一换轨（拖拽横向移动）；缺省 = 纯时间
         std::optional<Lane> to_lane;
         if (const Json* tl = args.find("to_lane")) {

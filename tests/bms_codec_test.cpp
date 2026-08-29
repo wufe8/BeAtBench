@@ -1046,13 +1046,19 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
         // 回读必须走与产品一致的**文件入口**（read_bms_file）：模式按扩展名推断
         //（.pms → pms9k）。纯文本 read_bms 无法从内容恢复扩展名语义——#PLAYER 3 的
         // 9key .pms 会误推成 dp，导致 13 个 .pms 被误判「往返不一致」（2026-09 实测）。
-        const fs::path tmp = fs::temp_directory_path() / ("bb_real_rt" + ext);
+        // ⚠️ 临时文件用唯一名（计数器 + 进程 id），避免并发/残留同名；删除容错
+        //（杀软/其它进程可能短暂锁住文件 → fs::remove 抛异常；已跑完回读，删除失败可忽略）。
+        static std::uint64_t tmp_seq = 0;
+        const fs::path tmp = fs::temp_directory_path() /
+                             ("bb_real_rt" + std::to_string(tmp_seq++) + "_" +
+                              std::to_string(reinterpret_cast<std::uintptr_t>(&r1)) + ext);
         {
             std::ofstream f(tmp, std::ios::binary);
             f << out;
         }
         const auto r2 = read_bms_file(tmp.string());
-        fs::remove(tmp);
+        std::error_code ec;
+        fs::remove(tmp, ec);
         const auto& a = r1.chart;
         const auto& b = r2.chart;
         const auto na = normalize_notes(a.notes);
