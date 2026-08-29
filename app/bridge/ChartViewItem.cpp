@@ -1095,6 +1095,9 @@ void ChartViewItem::rebuildColumns() {
         }
     }
     emit columnCountChanged();
+    emit contentWidthChanged();  // 2026-09：列重建（含 BGM 展开/收起）后列宽变化 → QML 水平滚动条
+                                 // visible 绑定重算（此前只发 columnCountChanged，hbar 永不出现在
+                                 // 底部——内容超宽时也没有横向滚动条）。
     update();
 }
 
