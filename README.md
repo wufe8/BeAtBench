@@ -8,28 +8,32 @@
 
 ## 功能特性
 
-### 已完成（v0.1.0-alpha）
+### 已完成（v0.1.0-alpha，M1-M3）
 
-- **BMS 读写**：完整解析/写出 .bms/.bme 文件，支持 UTF-8/SJIS 编码
-- **谱面编辑**：note 放置/移动/删除、LN（长音）/地雷编辑、undo/redo
-- **时间轴**：BPM/STOP/节拍事件编辑、可视化时间轴
-- **元信息编辑**：TITLE/ARTIST/BPM/PLAYER 等头部字段，支持下拉选择
-- **采样管理**：#WAV/#BMP 定义表管理，支持 base62 id
-- **多文档会话**：同时编辑多个谱面
-- **快捷键**：Ctrl+O/S/Z/Y/C/V 等标准快捷键
-- **iBMSC 兼容**：输出格式接近 iBMSC，方便 diff 检查
+- **BMS 读写**：完整解析/写出 .bms/.bme/.pms，支持 UTF-8/SJIS 编码、base62 id、#BASE 62 大小写敏感、iBMSC 式输出（定义表顺序/分割线注释）
+- **谱面编辑**：note 放置/移动/删除、拖拽/框选/点选、LN（长音，LNTYPE 1/2）/地雷、单点<->LN 转换、量化/镜像/旋转变换、undo/redo、剪贴板（BMS 原始行，外部工具兼容）
+- **时间轴**：BPM/STOP/节拍事件编辑（点放/列表/改值/删除）、可视化竖向时间轴、BGM 轨展开分列（按 ch01 行序）、BGA 图层列（更多轨道）
+- **元信息编辑**：TITLE/ARTIST/BPM/PLAYER 等全字段（含"更多字段"/"扩展代码"raw 兜底）、下拉可选（label/value 分离）、#BASE 62
+- **采样管理**：#WAV/#BMP/#BPM/#STOP 定义表管理、采样面板（搜索/分组/排序/索引/缺失徽标）、note 引用采样切换
+- **BGA/BMP**：BGA 图层事件编辑、#BMP 定义管理
+- **多文档会话**：SessionRegistry，多标签页前瞻
+- **lint**：解析诊断 + 音符检查（缺失采样/重叠 note/悬挂 LN 等），打开即显示
+- **快捷键/动作注册表**：全部动作走 UiActionRegistry（invoke 唯一入口），菜单/工具条按注册表枚举；keymap.json 快捷键覆写
+- **皮肤（L1）**：theme.json token 覆写（颜色/字号/字体/圆角/note 样式/键轨着色）、内置皮肤（Aurora/Linear/OsuLight 浅色/Win10 直角）、运行时切换（菜单"视图->皮肤"）、皮肤可携带 keymap
+- **命令即接口**：GUI/CLI/脚本共用 JSON 命令协议（doc/06 §3），40+ 命令
 
 ### 计划中
 
 - 音频解码/波形显示/试听（Phase B）
 - 切音工作台（Phase C）
-- L2/L3 皮肤系统
+- L2 布局皮肤（layout.json，设计已定稿，见 doc/08 §3.6）
+- #RANDOM/#IF 块内容编辑（已知限制，见 doc/04 §6）
 
 ## 状态
 
-**M3 编辑层已基本完成**（2026-09）：UI 动作注册表 + 元信息面板 + 采样管理 + BPM/STOP 编辑 + hover 状态栏 + BMS 输出格式优化。
+**M1-M3 已完成**（2026-09）：BMS codec + timing + CLI + QML 编辑器（编辑/时间轴/元信息/采样/BGA/lint/剪贴板/多文档/动作注册表/皮肤 L1）。测试全绿（core 254 例 + 真实谱面时序自洽 361 例 + Qt 侧 17 例）。
 
-当前里程碑任务见 `doc/04-开发手册.md`。
+当前里程碑任务见 `doc/04-开发手册.md`；皮肤系统后续计划见 `local/doc/10-主题与皮肤路线.md`（gitignore）。
 
 ## 文档导航
 
