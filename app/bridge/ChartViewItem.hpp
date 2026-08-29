@@ -266,6 +266,9 @@ private:
     int m_snapNum = 1;   // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）
     int m_snapDen = 16;  // 吸附粒度分母
     bool m_bgmExpanded = false;
+    /// BGM 展开子通道高水位（本会话单调不减，2026-09）：列数 = max(m_bgmMaxLine, 实际行)+1+PAD；
+    /// 空白尾行保存时天然丢弃（bms_writer 按 max(bgm_line)+1 写），故只增不减安全，新谱面也能放。
+    std::uint32_t m_bgmMaxLine = 0;
     bool m_showChannelIds = false;
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
     bool m_lnSelectMode = false;  // LN 选取模式（默认关）：点 LN 任一段自动返回配对

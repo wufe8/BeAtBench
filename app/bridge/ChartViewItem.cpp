@@ -93,6 +93,7 @@ void ChartViewItem::setTheme(QObject* theme) {
 }
 
 void ChartViewItem::onSessionChartChanged() {
+    m_bgmMaxLine = 0;  // 新文档：BGM 展开高水位重置（按新谱面实际行 + PAD）
     rebuildColumns();
     emit contentHeightChanged();
     emit chartChanged();
@@ -1068,7 +1069,7 @@ void ChartViewItem::rebuildColumns() {
                     add({0, beatbench::LaneKind::Bgm, 0}, label, false, false, 0, layer);
                 }
             }
-            if (!bgmIds.empty()) {
+            if (!bgmIds.empty() || m_bgmExpanded) {
                 const beatbench::Lane bgmLane{0, beatbench::LaneKind::Bgm, 0};
                 if (!m_bgmExpanded) {
                     add(bgmLane, columnLabel(bgmLane, QStringLiteral("BGM")), true);
@@ -1076,6 +1077,10 @@ void ChartViewItem::rebuildColumns() {
                     // 2026-09 用户确认：BGM 展开 = 按 ch01 **行序**分列（同小节多次读到的
                     // 01 通道 = 独立背景音轨），非按 #WAV id。行数 = 各 measure 的最大
                     // bgm_line+1（空行占位）；note 按 bgm_line 落列。
+                    // 2026-09 补充（用户）：预留 PAD 个空虚拟子通道——新谱面/无 BGM 数据也能
+                    // 点击放置新增子通道；m_bgmMaxLine 只升不降（保存端按 max(bgm_line)+1 写，
+                    // 尾部全空行天然丢弃，故"只加不减"安全）。
+                    constexpr std::uint32_t kBgmPad = 8;  // 预留空子通道数（真实用满后可随手扩）
                     std::uint32_t maxLine = 0;
                     int maxLineSaw = -1;
                     for (const auto& ev : chart->notes) {
@@ -1085,7 +1090,10 @@ void ChartViewItem::rebuildColumns() {
                             maxLine = ev.value.bgm_line;
                         }
                     }
-                    for (std::uint32_t line = 0; line <= maxLine; ++line) {
+                    // 高水位：只升不降（用户：只加不减；删除最高行 note 后虚拟列保留，空行保存丢弃）
+                    if (maxLine > m_bgmMaxLine) m_bgmMaxLine = maxLine;
+                    const std::uint32_t lineCount = m_bgmMaxLine + 1 + kBgmPad;
+                    for (std::uint32_t line = 0; line < lineCount; ++line) {
                         const QString label =
                             QStringLiteral("bgm%1").arg(static_cast<int>(line + 1));
                         add(bgmLane, label, true, false, 0, -1, false, false, line);
