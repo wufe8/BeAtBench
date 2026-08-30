@@ -70,6 +70,8 @@ Item {
     signal selectionFinished(var refs)
     /// select 点击命中 note（选中；ctrl = 多选切换）
     signal noteClicked(var ref, bool ctrl)
+    /// 点击 note（按下→释放无拖动）→ 播放该采样（M4.3 前端；拖动移动不播）
+    signal playNoteSample(var ref)
     /// select 点击空白（清空选中）
     signal canvasClicked()
     /// 右键命中 note（删除）
@@ -336,6 +338,7 @@ Item {
                     onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
                     onSelectionFinished: (refs) => root.selectionFinished(refs)
                     onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
+                    onPlayNoteSample: (ref) => root.playNoteSample(ref)
                     onCanvasClicked: () => root.canvasClicked()
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
                     onNoteEditRequested: (ref) => root.noteEditRequested(ref)

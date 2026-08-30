@@ -328,7 +328,9 @@ ColumnLayout {
                         }
                         background: Rectangle {
                             implicitHeight: 26
-                            radius: Theme.radiusSm
+                            radius: Theme.boxRadius  // ⚠️ 控件圆角统一 boxRadius（曾用 radiusSm
+                                                     // → OsuLight（radiusSm=10 vs boxRadius=6）下
+                                                     // 下拉框比文本框圆角大，M4.2 用户实测）
                             border.width: 1
                             border.color: combo.hovered ? Theme.accent : Theme.borderStrong
                             color: Theme.surface2
@@ -340,7 +342,7 @@ ColumnLayout {
                             implicitHeight: contentItem.implicitHeight + 8
                             padding: 4
                             background: Rectangle {
-                                radius: Theme.radiusSm
+                                radius: Theme.boxRadius
                                 border.width: 1
                                 border.color: Theme.borderStrong
                                 color: Theme.surface

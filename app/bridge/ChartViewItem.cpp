@@ -1010,6 +1010,28 @@ void ChartViewItem::rebuildColumns() {
                 }
             }
             std::sort(bgmIds.begin(), bgmIds.end());  // 通道从小到大（= #WAV id 升序）
+            // ⚠️ 空谱/半空谱模式默认列补齐（2026-09 用户需求：空文件载入后要能直接编辑
+            // 对应通道——#PLAYER 定了模式就能放 note；扫描只见「已存在」的通道，
+            // 空谱无 note → 一无所有 → 编辑区空白）。按 chart.mode_id 提升下限：
+            // sp7k → 7键+皿+踏板；dp/battle → 2P 亦同；pms9k → 9键（无皿踏板）。
+            // 扫描发现的更多通道（5key 谱/缺轨谱）保持原样（下限取 max）。
+            {
+                std::string mode = "sp7k";
+                if (chart->mode_id) mode = *chart->mode_id;
+                const int needKeys = (mode == "pms9k") ? 9 : 7;
+                const bool needAux = (mode != "pms9k");
+                maxKey1 = std::max(maxKey1, needKeys);
+                // sp7k：只补 1P；dp/battle：补 2P；pms9k：无皿/踏板
+                if (mode == "dp" || mode == "battle") {
+                    maxKey2 = std::max(maxKey2, needKeys);
+                    scratch2 = true;
+                    pedal2 = true;
+                }
+                if (needAux) {
+                    scratch1 = true;
+                    pedal1 = true;
+                }
+            }
             const auto add = [this](const beatbench::Lane& lane, const QString& label,
                                     bool bgmCol = false, bool p2 = false,
                                     std::uint32_t bgmId = 0, int bgaLayer = -1,

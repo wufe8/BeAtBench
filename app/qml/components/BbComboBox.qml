@@ -3,6 +3,10 @@
 // 右侧小三角。⚠️ ComboBox.delegate 是 FINAL 属性（不可覆写），内建 delegate 文字用系统
 // 调色板（黑字，深色主题不可读，2026-09 实测反馈）→ popup 完全自定义 ListView：
 // 自管 model/高亮/点击（鼠标交互完备；键盘导航作为取舍暂不迁移）。
+// M4.2 扩展：**对象模型支持**——内容显示走内建 `textRole`（ComboBox.displayText），
+// popup delegate 显示 `modelData[root.textRole]`（对象模型取字段；字符串模型原样）。
+// ⚠️ 不可自定义 `textRole`（ComboBox 内建 FINAL 属性，覆写报「无法重写 FINAL」，
+// M4.2 实测）；对象模型用内建 textRole 即可。
 import QtQuick
 import QtQuick.Controls
 
@@ -20,6 +24,8 @@ ComboBox {
         font: root.font
         verticalAlignment: Text.AlignVCenter
         leftPadding: 8
+        // 长文本（设备名等）省略号收尾，不撑破 / 不截断（M4.2 用户：「当前音频输出的文本框太小显示不全」）
+        elide: Text.ElideRight
     }
 
     indicator: Item {
@@ -68,9 +74,15 @@ ComboBox {
             delegate: ItemDelegate {
                 width: root.popup ? root.popup.width - 8 : root.width
                 required property int index
-                required property string modelData
+                required property var modelData
                 contentItem: Label {
-                    text: modelData
+                    // 对象模型：modelData[textRole]；字符串模型：modelData 原样
+                    text: {
+                        const r = root.textRole
+                        if (r !== "" && modelData && (r in modelData))
+                            return modelData[r]
+                        return String(modelData)
+                    }
                     color: Theme.text
                     font: root.font
                     verticalAlignment: Text.AlignVCenter

@@ -22,6 +22,7 @@
 #include <QTranslator>
 #include <QVariant>
 
+#include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/CommandDispatcher.hpp"
 #include "bridge/KeyMonitor.hpp"
@@ -174,6 +175,8 @@ int main(int argc, char** argv) {
     // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
     // 与 info/check 命令共用同一 core 解析入口（doc/06 §3.6）
     beatbench::app::ChartSession chartSession;
+    // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
+    beatbench::app::AudioEngine audioEngine;
     // 全局修饰键监控（Ctrl 按住态；QML Keys 收不到独立修饰键，Alt 又被菜单栏拦截）
     beatbench::app::KeyMonitor keyMonitor;
     app.installEventFilter(&keyMonitor);
@@ -186,6 +189,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
     engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
+    engine.rootContext()->setContextProperty(QStringLiteral("audioEngine"), &audioEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
 
     // ---- 动作注册（doc/09 §5/§7）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
@@ -325,6 +329,13 @@ int main(int argc, char** argv) {
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
         scheduleScreenshot(engine, args.at(shotIdx + 1));
 
+    // --render <out.wav>：调试——启动后自动渲染谱面→WAV（复现 Space；M4.3b 崩溃定位）
+    const int renderIdx = args.indexOf(QStringLiteral("--render"));
+    if (renderIdx >= 0 && renderIdx + 1 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugRenderPath", args.at(renderIdx + 1));
+    }
+
     // --apply-skin <name>：启动后运行时换肤（配 --screenshot 验收皮肤菜单切换链路）。
     // 走 ThemeManager::applySkinByName —— 与菜单「视图→皮肤」同一路径（applyTheme →
     // tokensChanged → QML 绑定重算 + QPalette 重建 + 视口重绘）。同时应用该皮肤 keymap。
@@ -368,6 +379,12 @@ int main(int argc, char** argv) {
                     tabBar->setProperty("currentIndex", t);
             }
         }
+    }
+
+    // --settings：启动即打开首选项对话框（M4.2 设置页验收；配 --screenshot）
+    if (args.contains(QStringLiteral("--settings"))) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugOpenSettings", true);
     }
 
     // --rtab N：右 Dock 标签（0 属性 1 时间轴；配合 --screenshot 验收面板）

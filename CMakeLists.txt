@@ -20,6 +20,10 @@ endfunction()
 
 add_subdirectory(core)
 
+# 音频库（Phase B，M4.1）：miniaudio 内嵌 + PortAudio FetchContent；零 Qt。
+# 无网/PortAudio 构建失败 → 跳过（GUI/测试侧音频功能不可用，但不阻塞主链）。
+add_subdirectory(audio)
+
 # CLI：无第三方依赖，始终构建
 add_subdirectory(cli)
 

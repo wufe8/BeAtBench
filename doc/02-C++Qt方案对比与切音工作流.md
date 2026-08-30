@@ -184,7 +184,7 @@ BeAtBench (GPL-3.0, C++20, CMake)
 | | M1 格式 | ✅ BMS codec + timing + CLI check/convert + JSON 命令框架 + 黄金测试 |
 | | M2 面板 | ✅ 元信息表单 + 文件绑定管理 + lint + 多会话 + QML 外壳；⏳ 时间轴视图 |
 | | M3 编辑 | ✅ CodecRegistry + 编辑命令（put/move/delete/undo）+ 时间轴事件 + 变换/量化 + 自动保存 + BGA + 剪贴板 + 多文档；⏳ 输入接线 + 多模式视图 |
-| **Phase B** | M4 音频基座 | 解码缓存、波形显示、采样试听（单发）、offset 校准、测 BPM |
+| **Phase B** | M4 音频基座 | ✅ **M4.1 单发试听最小闭环（2026-09）**：`audio/` 库（PortAudio 后端 + miniaudio 解码 + SamplePlayer 内核）+ 采样面板单击播放；⏳ 波形显示、解码缓存/LRU、offset 校准、测 BPM、音频设置 UI |
 | | M5 随时播放 | **编辑期间随时播放**：任意起播/暂停/循环区间、播放头跟随、scrub 试听 keysound（无判定） |
 | **Phase C** | M6 切音 | 切音工作台（§7.1，工作区/模式切换）+ lint 全量 + 采样管理 |
 | | M7 交付 | zip 打包 + 外部预览集成（beatoraja / [raindrop](https://github.com/zardoru/raindrop) previewer commands）+ BGA 最小可视 |
@@ -206,6 +206,7 @@ stem 导入 → offset 对齐 → 网格/瞬态检测切分 → 36 进制 ID 分
 **v1 适用**：大谱解析（999 小节、10 万 note）流式处理；时间轴渲染分块缓存 + 视口裁剪；Command 栈内存预算；编码转换一次性缓存。
 
 **Phase B 适用（沿用 v0.2）**：千采样全解码 ≈ 265MB 不可全载 → LRU 常驻预算（~80-120MB）+ 后台预解码线程池 + **离线重采样**（回调内只做整数插值）；波形金字塔落盘缓存（`.beatbench-cache/`，gitignore）；混音回调无锁无分配，SPSC ring 命令队列，voice 池 256。
+**M4.1 已落地（音频层）**：SamplePlayer 内核 = SPSC ring（命令/事件/回收三队列）+ 8 voice 池（试听槽 7）+ 回调内线性插值重采样（零分配）+ 5ms 包络；回调线程零 delete（引用经回收队列交 UI 线程释放）。M5 完整播放复用同内核（调度器新增，不改内核）。
 
 ---
 

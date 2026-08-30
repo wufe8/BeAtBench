@@ -22,6 +22,47 @@ target_compile_definitions(beatbench_tests PRIVATE
 beatbench_set_warnings(beatbench_tests)
 add_test(NAME core_tests COMMAND beatbench_tests)
 
+# 音频层单测（M4.1）：解码 + SamplePlayer 内核（无设备/无 Qt；不链 PortAudio——
+# 只测纯逻辑 + miniaudio 解码，不碰设备 IO。链 beatbench_audio 即可）。
+add_executable(audio_test audio_test.cpp ${CMAKE_SOURCE_DIR}/audio/src/decoder_miniaudio.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/sample_player.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/sample_cache.cpp)
+target_include_directories(audio_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/audio/include ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
+target_compile_definitions(audio_test PRIVATE
+    BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(audio_test PRIVATE GTest::gtest_main)
+beatbench_set_warnings(audio_test)
+add_test(NAME audio_tests COMMAND audio_test)
+
+# SampleCache 单测（M4.3a）：LRU/预算/并发合并/失效；注入解码器（不碰设备 I/O；
+# sample_cache.cpp 引用 decode_audio_file*（默认解码器），须链 decoder_miniaudio.cpp）。
+add_executable(sample_cache_test sample_cache_test.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/sample_cache.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/decoder_miniaudio.cpp)
+target_include_directories(sample_cache_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/audio/include ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
+target_compile_definitions(sample_cache_test PRIVATE
+    BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(sample_cache_test PRIVATE GTest::gtest_main)
+beatbench_set_warnings(sample_cache_test)
+add_test(NAME sample_cache_tests COMMAND sample_cache_test)
+
+# ChartRenderer 单测（M4.3b）：离线渲染（合成谱面 + 注入解码器；不碰设备/磁盘谱图）。
+# 依赖 core（Chart/TimingEngine）+ audio（SampleCache）；sample_cache 引用
+# decode_audio_file*（默认解码器）→ 链 decoder_miniaudio.cpp。
+add_executable(chart_renderer_test chart_renderer_test.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/chart_renderer.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/sample_cache.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/decoder_miniaudio.cpp)
+target_include_directories(chart_renderer_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/audio/include ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
+target_compile_definitions(chart_renderer_test PRIVATE
+    BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(chart_renderer_test PRIVATE beatbench_core GTest::gtest_main)
+beatbench_set_warnings(chart_renderer_test)
+add_test(NAME chart_renderer_tests COMMAND chart_renderer_test)
+
 # UiActionRegistry 单测（doc/09 §7 验收 4）：只依赖 Qt6::Core 的轻量目标。
 # 仅在找到 Qt6 的构建配置中启用：MSVC build/（无 Qt）→ 自动跳过；
 # 需要时用 `cmake -S . -B build-uitest -DBEATBENCH_BUILD_TESTS=ON -DCMAKE_PREFIX_PATH=<Qt>`

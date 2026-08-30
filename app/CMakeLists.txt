@@ -12,14 +12,16 @@ add_executable(beatbench
     bridge/KeyMonitor.cpp
     bridge/UiActionRegistry.cpp
     bridge/ThemeManager.cpp
+    bridge/AudioEngine.cpp
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
     bridge/SampleListModel.hpp
     bridge/LintListModel.hpp
     bridge/ChartSession.hpp
     bridge/KeyMonitor.hpp
     bridge/UiActionRegistry.hpp
+    bridge/AudioEngine.hpp    # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
 )
-target_link_libraries(beatbench PRIVATE beatbench_core Qt6::Quick Qt6::QuickControls2)
+target_link_libraries(beatbench PRIVATE beatbench_core beatbench_audio Qt6::Quick Qt6::QuickControls2)
 beatbench_set_warnings(beatbench)
 
 qt_add_qml_module(beatbench
@@ -41,6 +43,7 @@ qt_add_qml_module(beatbench
         qml/components/BbTextField.qml
         qml/components/BbComboBox.qml
         qml/components/SamplePanel.qml
+        qml/components/SettingsDialog.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml
         qml/components/PropertiesPanel.qml

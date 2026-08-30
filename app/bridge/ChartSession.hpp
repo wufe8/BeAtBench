@@ -55,11 +55,21 @@ public:
     /// 故 BMP id 解码走这里）。空文本/无文档 → -1。
     Q_INVOKABLE int decodeId(const QString& idText) const;
 
+    /// id 数值 → 采样页签（WAV 定义表）：相对路径字符串（空 = 未绑定文件/无定义）。
+    /// 用于点击 note 试听（note.sample.id → 文件 → audioEngine.playPreview）。
+    /// 不做存在性校验（AudioEngine 的 resolveAudioPath 处理扩展名回退 + 缺失提示）。
+    Q_INVOKABLE QString wavFileOfId(int id) const;
+
+    /// M4.3b：渲染当前谱面 → 混音 WAV 文件（CLI render 的编辑器侧等价物；
+    /// Space 触发——M5 改为随时播放）。同步执行（中小谱面 <1s；大谱面卡顿后置后台化）。
+    /// 返回 true = 成功写出；false = 失败（errorMessage() 有原因）。
+    Q_INVOKABLE bool renderToFile(const QString& outPath, qreal sampleRate = 44100.0);
+
     /// 活动会话视图（core 所有；不可 delete；documentChanged 后须 refresh 或重取）。
     const beatbench::Chart* chart() const { return m_chart; }
     const beatbench::TimingEngine* timing() const { return m_timing.get(); }
     QString path() const { return m_path; }
-    QString errorMessage() const { return m_error; }
+    Q_INVOKABLE QString errorMessage() const { return m_error; }
     bool hasChart() const { return m_chart != nullptr; }
     QString activeSessionId() const { return QString::fromStdString(m_sessionId); }
 

@@ -131,6 +131,8 @@ ApplicationWindow {
     // 吸附（放置用）：snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）
     property int snapNum: 1
     property int snapDen: 16
+    /// 音频设备 API 筛选（首选项音频页；0 = 全部，1.. = audioEngine.devices 去重后的 api 序）
+    property int apiFilterIndex: 0
     // 缩放锚点（2026-09 用户：鼠标滚轮缩放时往鼠标位置放大；默认开）
     property bool zoomToCursor: true
     // 平移模式（checkbox 开关，默认关）：拖拽选中 note = 移动；勾选=按方向轴锁定
@@ -212,51 +214,85 @@ ApplicationWindow {
                 !window.textInputFocused && chartMeta !== null
                 onActivated: cancelPendingLn() }
 
+    // 首选项（M4.2 设置页；菜单「设置→首选项…」同源）
+    Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
+
+    // M4.3b 验证：Space = 渲染当前谱面 → 混音 WAV（M5 时改为随时播放）
+    // 文本输入焦点时让行；只在编辑页 + 已打开谱面时可用
+    Shortcut {
+        sequence: "Space"
+        enabled: currentPage === 0 && chartMeta !== null && !window.textInputFocused
+        onActivated: renderChartToFile()
+    }
+
     // ---------- 菜单栏（固定全局；doc/09：从 uiActions 注册表查表） ----------
     menuBar: MenuBar {
         Menu {
             title: qsTr("文件")
             // 枚举渲染（doc/09 §7 验收 2）：文件菜单动作按注册表 idsByCategory("file") 生成，
-            // 分隔线由注册表 isSeparator(id) 判定（addSeparator 建模）。Loader 按 id 选择
-            // MenuItem / MenuSeparator 组件。
-            Component { id: fileMenuSep; MenuSeparator {} }
-            Component {
-                id: fileMenuItem
-                MenuItem {
-                    property string actId
-                    text: uiActions.label(actId) + "    " + uiActions.shortcut(actId)
-                    enabled: window.uiStateTick >= 0 && uiActions.enabled(actId)
-                    onTriggered: uiActions.invoke(actId)
-                }
-            }
+            // 分隔线由注册表 isSeparator(id) 判定（addSeparator 建模）。
+            // ⚠️ 单 Repeater + delegate 统一 MenuItem（分隔线 = MenuItem 视觉模拟横线）：
+            // Repeater delegate 只能是单一组件类型（MenuSeparator/MenuItem 混排需 Loader；
+            // Loader wrapper 破坏菜单导航 → hover 高亮失效，2026-09 用户实测两轮）。
+            // 分隔线 MenuItem：无文字、背景画横线、不可点击。
             Repeater {
                 model: uiActions.idsByCategory("file")
-                delegate: Loader {
-                    property string actId: modelData
-                    sourceComponent: uiActions.isSeparator(actId) ? fileMenuSep : fileMenuItem
-                    onLoaded: if (item && ("actId" in item)) item.actId = actId
+                delegate: MenuItem {
+                    id: fileItem
+                    required property string modelData
+                    readonly property bool isSep: uiActions.isSeparator(modelData)
+                    text: isSep ? "" : uiActions.label(modelData) + "    " + uiActions.shortcut(modelData)
+                    enabled: !isSep && window.uiStateTick >= 0 && uiActions.enabled(modelData)
+                    visible: true
+                    onTriggered: if (!isSep) uiActions.invoke(modelData)
+                    // ⚠️ 分隔线 + hover 高亮 = **系统 QPalette Highlight**（2026-09 用户实测：
+                    // 菜单 hover 色来自 Windows 系统主题色（QPalette::Highlight），不是皮肤
+                    // token——工作区菜单（QQC2 默认）hover = 系统紫；文件菜单曾用
+                    // Theme.primary（皮肤靛蓝）→ 换 Windows 主题色/换肤时分叉）。统一：
+                    // 用 Palette.highlight（Qt 调色板 = QPalette::Highlight，main.cpp 已把
+                    // apply 到 qApp）+ 文字默认（highlighted 时 MenuItem 内容转 HighlightedText）。
+                    // 这使文件/编辑/工作区菜单 hover 全走同一系统色，与 Windows 主题一致。
+                    background: Rectangle {
+                        color: fileItem.highlighted
+                              ? (window.palette ? window.palette.highlight : Theme.primary)
+                              : "transparent"
+                        Rectangle {
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.leftMargin: 8; anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: 1
+                            visible: fileItem.isSep && !fileItem.highlighted
+                            color: Theme.border
+                        }
+                    }
                 }
             }
         }
         Menu {
             title: qsTr("编辑")
             enabled: chartMeta !== null
-            Component { id: editMenuSep; MenuSeparator {} }
-            Component {
-                id: editMenuItem
-                MenuItem {
-                    property string actId
-                    text: uiActions.label(actId) + "    " + uiActions.shortcut(actId)
-                    enabled: window.uiStateTick >= 0 && uiActions.enabled(actId)
-                    onTriggered: uiActions.invoke(actId)
-                }
-            }
             Repeater {
                 model: uiActions.idsByCategory("edit")
-                delegate: Loader {
-                    property string actId: modelData
-                    sourceComponent: uiActions.isSeparator(actId) ? editMenuSep : editMenuItem
-                    onLoaded: if (item && ("actId" in item)) item.actId = actId
+                delegate: MenuItem {
+                    id: editItem
+                    required property string modelData
+                    readonly property bool isSep: uiActions.isSeparator(modelData)
+                    text: isSep ? "" : uiActions.label(modelData) + "    " + uiActions.shortcut(modelData)
+                    enabled: !isSep && window.uiStateTick >= 0 && uiActions.enabled(modelData)
+                    onTriggered: if (!isSep) uiActions.invoke(modelData)
+                    background: Rectangle {
+                        color: editItem.highlighted
+                              ? (window.palette ? window.palette.highlight : Theme.primary)
+                              : "transparent"
+                        Rectangle {
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.leftMargin: 8; anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: 1
+                            visible: editItem.isSep && !editItem.highlighted
+                            color: Theme.border
+                        }
+                    }
                 }
             }
         }
@@ -296,6 +332,13 @@ ApplicationWindow {
             MenuItem { text: uiActions.label("view.page.test"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.test")
                        onTriggered: uiActions.invoke("view.page.test") }
+        }
+        Menu {
+            title: qsTr("设置")
+            MenuItem {
+                text: qsTr("首选项…") + "    Ctrl+,"
+                onTriggered: settingsDialog.open()
+            }
         }
         Menu {
             title: qsTr("帮助")
@@ -566,12 +609,18 @@ ApplicationWindow {
                     // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
                     window.currentSampleId = id
                     setStatus(qsTr("当前采样：#WAV%1 %2").arg(id).arg(file))
+                    // M4.1 试听：单击采样行 → 播放该采样文件（缺失/解码失败 → statusText）
+                    if (file !== "" && typeof audioEngine !== "undefined" && audioEngine) {
+                        // 只对「绑定文件」的行试听；未绑定槽位（file 空）不播（lint 已报）
+                        audioEngine.playPreview(file)
+                    }
                 }
                 onSampleFileRequested: (id, file) => setSampleFile(id, file)
                 onSampleAddRequested: (id, file) => addWavSample(id, file)
                 onHitPlaceRequested: (hit) => placeNote(hit)
                 onSelectionFinished: (refs) => onSelectionMade(refs)
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
+                onPlayNoteSample: (ref) => session.playNoteSample(ref)
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onNoteEditRequested: (ref) => editNoteSample(ref)
@@ -717,6 +766,9 @@ ApplicationWindow {
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
     property string debugOpenPath: ""
     onDebugOpenPathChanged: if (debugOpenPath !== "") openChart(debugOpenPath)
+    // --settings 调试参数：启动即打开首选项（M4.2 设置页验收）
+    property bool debugOpenSettings: false
+    onDebugOpenSettingsChanged: if (debugOpenSettings) settingsDialog.open()
     // --tool / --click / --probe 调试参数（配 --screenshot 验收点击链）：工具 + 一次模拟点击
     property string debugTool: ""
     property double debugClickX: -1
@@ -758,6 +810,16 @@ ApplicationWindow {
     property double debugDragY1: -1
     property double debugDragX2: -1
     property double debugDragY2: -1
+    /// --render <out.wav>：调试——启动后自动 renderChartToFile（复现 Space 渲染；M4.3b）
+    property string debugRenderPath: ""
+    onDebugRenderPathChanged: debugRenderTimer.restart()
+    Timer {
+        id: debugRenderTimer
+        interval: 800  // 等 openChart + 首帧（渲染路径依赖 chartPath/chartSession）
+        onTriggered: {
+            if (debugRenderPath !== "") renderChartToFile()
+        }
+    }
     Timer {
         id: debugDragTimer
         interval: 150
@@ -840,6 +902,12 @@ ApplicationWindow {
             var checkResp = beatbench.dispatch(JSON.stringify({ command: "check", args: { path: path } }))
             sampleModel.loadFromCheck(checkResp)
             lintModel.loadFromCheck(checkResp)
+            // M4.1 音频：设置采样相对路径解析基准（谱面目录）。setChartPath 内部
+            // 用 QFileInfo 解析（兼容 / 与 \）——试听点击在 onSamplePicked 触发时
+            // 经 audioEngine.playPreview(file) 解析。
+            if (typeof audioEngine !== "undefined" && audioEngine) {
+                audioEngine.setChartPath(r.result.path)
+            }
         } else {
             window.chartMeta = null
             window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code).arg(r.error.message)
@@ -854,6 +922,26 @@ ApplicationWindow {
         if (s.charAt(0) === "/" && /^\/[A-Za-z]:/.test(s))
             s = s.slice(1)
         return decodeURIComponent(s)
+    }
+
+    // ---------- M4.3b：渲染当前谱面 → 混音 WAV（Space 触发验证；M5 改为播放） ----------
+    // 输出 = 谱面同目录 <basename>-render.wav（验证阶段；将来导出对话框/后台化）。
+    function renderChartToFile() {
+        if (typeof chartSession === "undefined" || !chartSession || !chartSession.hasChart) return
+        if (chartPath === "") return
+        // 输出路径：同目录 <basename>.render.wav
+        var slash = Math.max(chartPath.lastIndexOf("/"), chartPath.lastIndexOf("\\"))
+        var dir = slash >= 0 ? chartPath.substring(0, slash + 1) : ""
+        var base = chartPath.substring(slash + 1)
+        var dot = base.lastIndexOf(".")
+        var stem = dot > 0 ? base.substring(0, dot) : base
+        var out = dir + stem + ".render.wav"
+        var ok = chartSession.renderToFile(out, 44100.0)
+        if (ok) {
+            setStatus(qsTr("已渲染：%1（Space 后续改为播放）").arg(out))
+        } else {
+            setStatus(qsTr("渲染失败：%1").arg(chartSession.errorMessage()))
+        }
     }
 
     // ---------- 会话控制器委托（业务逻辑抽离到 SessionController，2026-09） ----------
@@ -1027,6 +1115,12 @@ ApplicationWindow {
 
 
     // ---------- 关于对话框 ----------
+    // 首选项（M4.2）：音频设置 + 显示（皮肤）。皮肤切换经信号 → applySkinByName（与菜单同源）。
+    SettingsDialog {
+        id: settingsDialog
+        onSkinRequested: (name) => window.applySkinByName(name)
+    }
+
     Dialog {
         id: aboutDialog
         title: qsTr("关于 BeAtBench")

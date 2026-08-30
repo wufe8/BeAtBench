@@ -37,7 +37,12 @@ public:
         }  // 其余（含空/auto）→ Auto（bms 默认）
         bo.mode = opts.mode;  // 模式覆盖（空 → read_bms_file 按扩展名/#PLAYER 推断）
 
-        const auto r = beatbench::bms::read_bms_file(path.string(), bo);
+        // ⚠️ path.u8string()（UTF-8）而非 path.string()（ACP）——后者对日文等
+        // Unicode 字符抛 system_error（「No mapping for the Unicode character…」，
+        // 2026-09 CLI 日文谱面渲染/读取异常）；read_bms_file 内部 u8path 还原宽 API。
+        const std::u8string u8 = path.u8string();
+        const auto r = beatbench::bms::read_bms_file(
+            std::string(reinterpret_cast<const char*>(u8.data()), u8.size()), bo);
         ReadResult out;
         out.chart = std::move(r.chart);
         out.diagnostics.reserve(r.diagnostics.size());

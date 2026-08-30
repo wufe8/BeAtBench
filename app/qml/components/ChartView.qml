@@ -45,6 +45,7 @@ Item {
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
+    signal playNoteSample(var ref)          // 点击 note（按下→释放无拖动）→ 播放该采样（M4.3 前端）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
     signal noteEditRequested(var ref)       // 双击命中 note（切音手工版：改引用采样 id）
@@ -194,6 +195,7 @@ Item {
     property real _moveDeltaF: 0    // 当前时间位移（拍位小数）
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
     property var _moveSourceLane: null  // 拖起的 note 所在轨（{player,kind,index}；跨通道多换轨判定用）
+    property var _pressedNoteRef: null  // press 命中的 note（有值 = 点击待确认；release 无拖译才播放）
 
     /// 平移判定：按下点在选中集内的某个 note 上？
     function isSelectedNote(hit) {
@@ -249,7 +251,11 @@ Item {
                     root.noteClicked(obj, true)
                     return
                 }
-                if (!isSelectedNote(obj)) root.noteClicked(obj, false)
+                // 点击（无论是否已选中）→ noteClicked（选中；播放延后到 release 无拖动
+                // 时——拖动 = 移动操作不播，2026-09 用户「点击播放/移动不播」语义。
+                // 重复点击（已选中）也播放（用户「重复点击播放」确认）。
+                root.noteClicked(obj, false)
+                _pressedNoteRef = obj
                 _moving = true
                 _moveKind = ""
                 _moveObj = null
@@ -340,6 +346,11 @@ Item {
                     root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane)
                 }
             }
+            // 点击（按下→释放，无拖动）= 播放一次；拖动（移动 note）= 不播。
+            if (!_dragged && _pressedNoteRef) {
+                root.playNoteSample(_pressedNoteRef)
+            }
+            _pressedNoteRef = null
             root._moveKind = ""
             root._moveObj = null
             _dragged = false

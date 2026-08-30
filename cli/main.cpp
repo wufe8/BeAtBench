@@ -24,6 +24,9 @@
 #include "beatbench/core/command/Builtins.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/json/Json.hpp"
+#include "beatbench/core/timing/TimingEngine.hpp"
+#include "beatbench/audio/ChartRenderer.hpp"
+#include "beatbench/audio/SampleCache.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -49,6 +52,7 @@ void print_usage() {
         "  info <file> [--format <fmt>]  解析并输出谱面信息（元信息/定义表/事件统计）\n"
         "  check <file> [--format <fmt>] 谱面检查（解析诊断 + lint：缺失采样/#RANK/#TOTAL）\n"
         "  convert <in> <out> [--encoding utf8|sjis] [--format <fmt>]  编码/往返写出转换\n"
+        "  render <in> <out.wav> [--sample-rate <Hz>] [--format <fmt>] 混合输出音频（M4.3b）\n"
         "  version             打印版本与许可信息\n"
         "（--format 省略时按扩展名推断；当前支持: bms）\n",
         static_cast<int>(beatbench::kVersion.size()), beatbench::kVersion.data());
@@ -60,6 +64,14 @@ std::string severity_name(beatbench::codec::Severity s) {
         case beatbench::codec::Severity::Warning: return "WARN ";
         default: return "INFO ";
     }
+}
+
+/// argv（窄字符串）→ std::filesystem::path：**ACP 原生**（Windows 的 main(argv)
+/// 已经过 CRT 从 UTF-16 → ACP 转换——argv 就是 GBK 字节；`u8path(GBK)` 会把
+/// GBK 字节当 UTF-8 解 → 无效序列抛异常（2026-09 CLI 日文渲染异常实测）。
+/// `path(string)`（ACP 解读）与 argv 编码一致 → 正确。
+std::filesystem::path u8ps(const std::string& s) {
+    return std::filesystem::path(s);
 }
 
 void print_diagnostics(const std::vector<beatbench::codec::Diagnostic>& diags) {
@@ -249,6 +261,65 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
     return 0;
 }
 
+/// M4.3b：渲染谱面 → 混音 WAV（可听验证用；M5 播放的前置产物）。
+/// 用法：beatbench-cli render <in.bms> <out.wav> [--sample-rate <Hz>] [--format <fmt>]
+int cmd_render_impl(const std::string& in_path, const std::string& out_path,
+                    double sampleRate, const std::string& format);
+
+int cmd_render(const std::string& in_path, const std::string& out_path,
+               double sampleRate, const std::string& format) {
+    try {
+        return cmd_render_impl(in_path, out_path, sampleRate, format);
+    } catch (const std::exception& e) {
+        std::printf("[ERROR] 渲染异常: %s\n", e.what());
+        return 1;
+    } catch (...) {
+        std::printf("[ERROR] 渲染异常（未知）\n");
+        return 1;
+    }
+}
+
+int cmd_render_impl(const std::string& in_path, const std::string& out_path,
+                    double sampleRate, const std::string& format) {
+    const auto* codec =
+        format.empty() ? beatbench::codec::global_codec_registry().by_path(in_path)
+                       : beatbench::codec::global_codec_registry().by_id(format);
+    if (!codec) {
+        std::printf("[ERROR] 无法识别格式: %s（可用 format 参数）\n", in_path.c_str());
+        return 2;
+    }
+    beatbench::codec::ReadOptions ropts;
+    const auto result = codec->read(u8ps(in_path), ropts);
+    print_diagnostics(result.diagnostics);
+
+    // 谱面目录：采样相对路径解析基准（samples.file 为相对路径）
+    // ⚠️ 宽字符（Windows UTF-16）：日文目录用窄 string（ACP）会 mojibake
+    // → 渲染器找不到采样 → 空音频（2026-09 日文谱面复现）。
+    const std::filesystem::path inFs = u8ps(in_path);
+    const std::wstring sourceDir = inFs.parent_path().wstring();
+
+    // 时序引擎 + 解码缓存 + 渲染（宽字符版：日文路径正确）
+    beatbench::TimingEngine timing;
+    timing.rebuild(result.chart);
+    beatbench::audio::SampleCache cache;
+    const auto r = beatbench::audio::render_chart_w(result.chart, timing, cache,
+                                                    sampleRate, sourceDir);
+    if (!r.ok) {
+        std::printf("[ERROR] 渲染失败: %s\n", r.message.c_str());
+        return 1;
+    }
+    std::string err;
+    // ⚠️ 宽字符写（日文输出路径；窄 fopen ACP 打不开）
+    if (!beatbench::audio::write_wav_file_w(u8ps(out_path).wstring(), r.audio, &err)) {
+        std::printf("[ERROR] 写出 WAV 失败: %s\n", err.c_str());
+        return 1;
+    }
+    std::printf("渲染完成: %s -> %s（%.2f 秒，%d Hz）\n", in_path.c_str(),
+                out_path.c_str(), r.audio.durationSeconds(),
+                static_cast<int>(r.audio.sampleRate));
+    return 0;
+}
+
 // --json 模式：解析请求 → 进程内 dispatch → 输出信封。
 // 单请求（内联参数或 stdin 单块）：解析 → dispatch → 输出。
 // stdin 多行模式（doc/06 待办「批处理模式」2026-08 落地）：每行一个请求，
@@ -398,6 +469,24 @@ int main(int argc, char** argv) {
             encoding = argv[4];  // 兼容裸参数
         }
         return cmd_convert(argv[2], argv[3], encoding, format);
+    }
+    if (cmd == "render") {
+        if (argc < 4) {
+            std::printf("用法: beatbench-cli render <in> <out.wav> [--sample-rate <Hz>] [--format <fmt>]\n");
+            return 2;
+        }
+        double sampleRate = 44100.0;
+        std::string format;
+        for (int i = 4; i + 1 < argc; ++i) {
+            if (std::string_view(argv[i]) == "--sample-rate") {
+                sampleRate = std::atof(argv[i + 1]);
+                ++i;
+            } else if (std::string_view(argv[i]) == "--format") {
+                format = argv[i + 1];
+                ++i;
+            }
+        }
+        return cmd_render(argv[2], argv[3], sampleRate, format);
     }
     std::printf("未知子命令: %.*s\n\n", static_cast<int>(cmd.size()), cmd.data());
     print_usage();

@@ -20,18 +20,21 @@
 - **lint**：解析诊断 + 音符检查（缺失采样/重叠 note/悬挂 LN 等），打开即显示
 - **快捷键/动作注册表**：全部动作走 UiActionRegistry（invoke 唯一入口），菜单/工具条按注册表枚举；keymap.json 快捷键覆写
 - **皮肤（L1）**：theme.json token 覆写（颜色/字号/字体/圆角/note 样式/键轨着色）、内置皮肤（Aurora/Linear/OsuLight 浅色/Win10 直角）、运行时切换（菜单"视图->皮肤"）、皮肤可携带 keymap
+- **音频（M4.1）**：点击采样列表播放（PortAudio WASAPI 输出 + miniaudio 解码 wav/ogg/mp3/flac；voice 池混音内核，M5 随时播放复用）
 - **命令即接口**：GUI/CLI/脚本共用 JSON 命令协议（doc/06 §3），40+ 命令
 
 ### 计划中
 
-- 音频解码/波形显示/试听（Phase B）
+- 音频解码/波形显示/试听（Phase B，M4.1 单发试听已完成；波形/缓存/校准待做）
 - 切音工作台（Phase C）
 - L2 布局皮肤（layout.json，设计已定稿，见 doc/08 §3.6）
 - #RANDOM/#IF 块内容编辑（已知限制，见 doc/04 §6）
 
 ## 状态
 
-**M1-M3 已完成**（2026-09）：BMS codec + timing + CLI + QML 编辑器（编辑/时间轴/元信息/采样/BGA/lint/剪贴板/多文档/动作注册表/皮肤 L1）。测试全绿（core 254 例 + 真实谱面时序自洽 361 例 + Qt 侧 17 例）。
+**M1-M3 已完成**（2026-09）：BMS codec + timing + CLI + QML 编辑器（编辑/时间轴/元信息/采样/BGA/lint/剪贴板/多文档/动作注册表/皮肤 L1）。
+**M4.1 音频单发试听已完成**（2026-09）：PortAudio 输出 + miniaudio 解码 + voice 池内核，采样面板单击播放。
+测试全绿（core 254 例 + 真实谱面时序自洽 361 例 + Qt 侧 17 例 + 音频 8 例）。
 
 当前里程碑任务见 `doc/04-开发手册.md`；皮肤系统后续计划见 `local/doc/10-主题与皮肤路线.md`（gitignore）。
 
@@ -88,11 +91,13 @@ build-gui/app/beatbench.exe
 
 ```
 core/       格式无关模型 + BMS codec + timing + JSON 命令框架（零 Qt 依赖）
+audio/      音频层（零 Qt）：PortAudio 后端 + miniaudio 解码 + SamplePlayer 混音内核（M4.1）
 cli/        beatbench-cli 批处理入口（info/check/convert/version + --json 协议）
 app/        Qt Quick/QML GUI（C++ bridge + QML 界面）
-  bridge/   CommandDispatcher + ChartSession + ThemeManager + UiActionRegistry
+  bridge/   CommandDispatcher + ChartSession + ThemeManager + UiActionRegistry + AudioEngine
   qml/      Main.qml + pages/ + components/
 tests/      GoogleTest 单元测试
+third_party/  vendored 头文件（miniaudio.h）
 doc/        设计文档与开发手册
 ```
 

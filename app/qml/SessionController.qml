@@ -296,8 +296,24 @@ QtObject {
             setStatus(qsTr("已选中 %1 个 note").arg(arr.length))
             return
         }
-        window.selectionRefs = [ref]
-        setStatus(qsTr("选中 #WAV%1（Del 删除 / 右键删除 / 拖拽平移）").arg(ref.sample))
+        // 重复点击（已选中）不再选中（保留多选组，可拖动整组）；未选中 → 单选
+        // 2026-09 用户：点击要「播放一次」——已选中 note 重复点击也播放（不取消选中）。
+        var alreadySelected = false
+        for (var i = 0; i < window.selectionRefs.length; ++i)
+            if (refEquals(window.selectionRefs[i], ref)) { alreadySelected = true; break }
+        if (!alreadySelected) {
+            window.selectionRefs = [ref]
+            setStatus(qsTr("选中 #WAV%1（Del 删除 / 右键删除 / 拖拽平移）").arg(ref.sample))
+        }
+    }
+    /// 播放 note 的采样（点击 note（按下→释放无拖动）触发；平移/框选不播）。
+    /// 空音（id 0/无定义/未绑定）→ wavFileOfId 空串 → 不播无报错（lint 已报）。
+    function playNoteSample(ref) {
+        if (!ref || !(typeof ref.sample === "number") || ref.sample <= 0) return
+        const file = chartSession.wavFileOfId(ref.sample)
+        if (file !== "" && typeof audioEngine !== "undefined" && audioEngine) {
+            audioEngine.playPreview(file)
+        }
     }
     function onCanvasClicked() {
         if (window.selectionRefs.length > 0) window.selectionRefs = []

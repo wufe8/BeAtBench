@@ -5,12 +5,16 @@
 
 #include <bit>
 
+#include <QFileInfo>
+
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
+#include "beatbench/audio/ChartRenderer.hpp"
+#include "beatbench/audio/SampleCache.hpp"
 
 namespace beatbench::app {
 
@@ -90,6 +94,42 @@ QString ChartSession::idTextOf(int id) const {
         *m_chart, static_cast<std::uint32_t>(id)));
 }
 
+QString ChartSession::wavFileOfId(int id) const {
+    if (!m_chart || id <= 0) return QString();
+    const auto it = m_chart->samples.find(
+        {beatbench::SampleKind::Wav, static_cast<std::uint32_t>(id)});
+    if (it == m_chart->samples.end()) return QString();
+    return QString::fromStdString(it->second.file);  // 相对谱面目录（AudioEngine 解析）
+}
+
+bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
+    if (!m_chart || !m_timing) {
+        m_error = QStringLiteral("未打开谱面");
+        return false;
+    }
+    // 采样相对路径基准 = 谱面目录（chart.path 有目录部分）
+    // ⚠️ 宽字符（Windows UTF-16）：日文目录窄 string（ACP）mojibake → 空音频
+    const QFileInfo fi(m_path);
+    const std::wstring sourceDir = fi.absolutePath().toStdWString();
+    // 渲染器用独立缓存（不占 AudioEngine 的试听缓存；渲染是全量顺序解码，
+    // 帧内无并发——简单 SampleCache 即可）
+    beatbench::audio::SampleCache cache;
+    const auto r = beatbench::audio::render_chart_w(
+        *m_chart, *m_timing, cache, static_cast<double>(sampleRate), sourceDir);
+    if (!r.ok) {
+        m_error = QString::fromStdString(r.message);
+        return false;
+    }
+    std::string err;
+    // ⚠️ 宽字符写（Windows 日文路径；窄 fopen ACP 打不开 → 「路径不可写」2026-09）
+    if (!beatbench::audio::write_wav_file_w(outPath.toStdWString(), r.audio, &err)) {
+        m_error = QString::fromStdString(err);
+        return false;
+    }
+    m_error.clear();
+    return true;
+}
+
 QString ChartSession::laneChannel(int player, const QString& kindStr, int index) const {
     if (!m_chart) return QString();
     beatbench::Lane lane;
@@ -156,6 +196,8 @@ int ChartSession::measureCount() const {
     for (const auto& e : m_chart->stop_events) touch(e.measure);
     for (const auto& e : m_chart->measure_events) touch(e.measure);
     for (const auto& e : m_chart->bga_events) touch(e.measure);
+    // ⚠️ 空谱保底 1 小节（2026-09：空文件载入后编辑区至少 1 小节 + 模式默认列
+    // → 可立即放置编辑；此前返回 0 → paint 显示「打开谱面开始编辑」占位、无网格）。
     return static_cast<int>(maxMeasure + 1);
 }
 
