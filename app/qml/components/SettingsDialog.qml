@@ -358,6 +358,17 @@ Dialog {
                                         color: Theme.text; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 40 }
                             }
 
+                            // M5 播放策略：Space 等待渲染完成后播放（默认关 = 播放优先）
+                            RowLayout {
+                                spacing: 8
+                                CheckBox {
+                                    id: waitRenderCheck
+                                    checked: audioEngine.waitRenderSetting
+                                    text: qsTr("播放前等待渲染完成（默认关：Space 立即播放当前的渲染版本）")
+                                    onToggled: audioEngine.setWaitRenderSetting(checked)
+                                }
+                            }
+
                             // 测试音（Ableton 测试区）
                             RowLayout {
                                 spacing: 8

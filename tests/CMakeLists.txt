@@ -72,6 +72,24 @@ target_link_libraries(waveform_pyramid_test PRIVATE GTest::gtest_main)
 beatbench_set_warnings(waveform_pyramid_test)
 add_test(NAME waveform_pyramid_tests COMMAND waveform_pyramid_test)
 
+# M5 播放单测（PcmPlayback + PlaybackPlan）：纯逻辑 + SamplePlayer 内核（无设备/无 Qt）。
+# 依赖 core（Chart/TimingEngine）；sample_player.cpp 引用 decode_audio_file*（解码器）
+# → 链 decoder_miniaudio.cpp？不——只有 sample_cache.cpp 引用；本测试只链
+# sample_player.cpp + pcm_playback.cpp + playback_plan.cpp（playback_plan 引用
+# resolve_audio_path_w → audio_path.cpp）。play 本身零解码（DecodedSample 直接喂）。
+add_executable(m5_playback_test m5_playback_test.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/sample_player.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/pcm_playback.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/playback_plan.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/audio_path.cpp)
+target_include_directories(m5_playback_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/audio/include ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
+target_compile_definitions(m5_playback_test PRIVATE
+    BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(m5_playback_test PRIVATE beatbench_core GTest::gtest_main)
+beatbench_set_warnings(m5_playback_test)
+add_test(NAME m5_playback_tests COMMAND m5_playback_test)
+
 # UiActionRegistry 单测（doc/09 §7 验收 4）：只依赖 Qt6::Core 的轻量目标。
 # 仅在找到 Qt6 的构建配置中启用：MSVC build/（无 Qt）→ 自动跳过；
 # 需要时用 `cmake -S . -B build-uitest -DBEATBENCH_BUILD_TESTS=ON -DCMAKE_PREFIX_PATH=<Qt>`

@@ -71,7 +71,8 @@ static void loadNativeTranslations(QGuiApplication& app) {
 // 2026-09 M4.3c 波形验收：--screenshot 配合 --wait-render（等待后台渲染完成再抓帧，
 // 否则大谱面 17 分钟级渲染完成前截图 → 波形总览条不可见）。
 static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& outPath,
-                               bool waitRender = false, bool expectIncremental = false) {
+                               bool waitRender = false, bool expectIncremental = false,
+                               double playDuration = 0.0) {
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().value(0));
     if (!win) {
         qWarning("screenshot: root window 不可用");
@@ -79,19 +80,34 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
         return;
     }
     QTimer* wait = nullptr;
-    QTimer::singleShot(waitRender ? 0 : 1500, win, [win, outPath, waitRender, expectIncremental] {
+    QTimer::singleShot(waitRender ? 0 : 1500, win, [win, outPath, waitRender, expectIncremental, playDuration] {
         if (waitRender) {
             // 波形/增量验收：等 ChartSession 渲染完成（renderFinished → QML 置
             // debugRenderDone）+ 增量也完成（--click-after-render 场景等 count ≥ 2）。
             // 纯渲染场景（无点击）count ≥ 1 即可（增量不会发生）。
             static QTimer poll;
             poll.setInterval(300);
-            QObject::connect(&poll, &QTimer::timeout, &poll, [win, outPath, &poll, expectIncremental] {
+            QObject::connect(&poll, &QTimer::timeout, &poll, [win, outPath, &poll, expectIncremental, playDuration] {
                 const bool done = win->property("debugRenderDone").toBool();
                 const int cnt = win->property("debugRenderCount").toInt();
                 if (!done) return;
                 if (expectIncremental && cnt < 2) return;  // 增量未完成
                 poll.stop();
+                // M5 --play：渲染完成后自动播放（QML 处理）；截图延迟 playDuration 秒
+                // 让播放时钟推进（验收：状态栏时间 / 位置变化）。
+                if (playDuration > 0.0) {
+                    QTimer::singleShot(
+                        static_cast<int>(playDuration * 1000.0), win,
+                        [win, outPath] {
+                            const QImage img = win->grabWindow();
+                            if (img.save(outPath))
+                                qInfo("screenshot saved: %s", qPrintable(outPath));
+                            else
+                                qWarning("screenshot save failed: %s", qPrintable(outPath));
+                            QCoreApplication::exit(0);
+                        });
+                    return;
+                }
                 const QImage img = win->grabWindow();
                 if (img.save(outPath))
                     qInfo("screenshot saved: %s", qPrintable(outPath));
@@ -216,6 +232,8 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
     engine.rootContext()->setContextProperty(QStringLiteral("audioEngine"), &audioEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
+    // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
+    audioEngine.setChartSession(&chartSession);
 
     // ---- 动作注册（doc/09 §5/§7）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
     // 是函数式绑定，只在首帧求值一次（注册表为空则取到空串）。若在 loadFromModule 后注册，
@@ -353,8 +371,14 @@ int main(int argc, char** argv) {
     const int shotIdx = args.indexOf(QStringLiteral("--screenshot"));
     const bool waitRender = args.contains(QStringLiteral("--wait-render"));
     const bool expectIncremental = args.contains(QStringLiteral("--click-after-render"));
+    // --play-duration <秒>：--play 自动播放时长（截图延迟对应时长——验收播放时钟推进）
+    double playDuration = 0.0;
+    const int playDurIdx = args.indexOf(QStringLiteral("--play-duration"));
+    if (playDurIdx >= 0 && playDurIdx + 1 < args.size())
+        playDuration = args.at(playDurIdx + 1).toDouble();
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
-        scheduleScreenshot(engine, args.at(shotIdx + 1), waitRender, expectIncremental);
+        scheduleScreenshot(engine, args.at(shotIdx + 1), waitRender, expectIncremental,
+                           playDuration);
 
     // --render <out.wav>：调试——启动后自动渲染谱面→WAV（复现 Space；M4.3b 崩溃定位）
     const int renderIdx = args.indexOf(QStringLiteral("--render"));
@@ -487,6 +511,25 @@ int main(int argc, char** argv) {
         if (ok) {
             if (QObject* root = engine.rootObjects().value(0))
                 root->setProperty("debugSeekSeconds", s);
+        }
+    }
+
+    // --play：渲染完成后自动播放（M5 播放验收：载入自动渲染 → Space 等效 → 时钟推进；
+    // 配 --wait-render/--screenshot [--play-duration <秒>] 验证播放中截图）
+    const int playIdx = args.indexOf(QStringLiteral("--play"));
+    if (playIdx >= 0) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugPlayAfterRender", true);
+    }
+    // --play-duration <秒>：QML 自动停止时长（截图延迟值在 scheduleScreenshot 前读取，
+    // 这里设置 QML 属性——播放时长到点自动 stopPlay）
+    const int pdIdx = args.indexOf(QStringLiteral("--play-duration"));
+    if (pdIdx >= 0 && pdIdx + 1 < args.size()) {
+        bool ok = false;
+        const double d = args.at(pdIdx + 1).toDouble(&ok);
+        if (ok) {
+            if (QObject* root = engine.rootObjects().value(0))
+                root->setProperty("debugPlayDuration", d);
         }
     }
 

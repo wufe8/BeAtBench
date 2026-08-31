@@ -70,6 +70,17 @@ public:
     /// 回调侧：无空闲槽时丢弃（同样 unref 归还）。
     bool play(DecodedSample* sample, float volume, double startSec);
 
+    /// M5 零拷贝播放：共享 PCM（渲染代理缓冲；专用槽 kPcmSlot）。
+    /// **保活协议**：pcm 缓冲的生命周期由本函数创建的 DecodedSample 包装持有——
+    /// 包装存 sharedPcm（引用计数 1 = 本函数持有）→ 所有权转移给命令（同 play）；
+    /// voice 结束回调 unref 归零 → 入回收 → **UI 线程 drainReclaimed delete** →
+    /// shared_ptr 在 UI 线程析构释放（回调绝不析构 shared_ptr，纪律不变）。
+    /// 调用方把 shared_ptr 的一份持有**转移**给本函数（失败 = 归还）。
+    /// startSec = 起始秒（截取窗口 [startSec, 时长)）。volume 0..1。
+    /// 重复调用 = 停旧启新（Stop + Start 同槽保序）。返回 false = 队列满（归还）。
+    bool playSharedPcm(std::shared_ptr<const std::vector<float>> pcm, double sampleRate,
+                       float volume, double startSec);
+
     /// 试听专用：停掉试听槽现有 voice 再启动（同采样连点 = 重播）。
     /// 所有权转移同上；volume = 1.0（设定页音量后置）。
     bool playPreview(DecodedSample* sample, float volume = 1.0f);
@@ -102,14 +113,31 @@ public:
     /// 当前活跃 voice 数（原子快照）。
     int activeCount() const;
 
+    // —— M5 播放时钟（callback 线程原子更新；UI 读）——
+    /// 回调整体输出帧数（自构造起累计；采样级音频时钟，零额外信号）。
+    std::uint64_t totalFramesRendered() const {
+        return m_totalFrames.load(std::memory_order_relaxed);
+    }
+    /// PCM voice（kPcmSlot）启动时的输出帧基线（渲染帧数 = total - baseline；
+    /// 试听不影响——只记 kPcmSlot 的 Started）。-1 = 未在播。
+    std::int64_t pcmBaselineFrame() const {
+        return m_pcmBaseline.load(std::memory_order_relaxed);
+    }
+    /// PCM voice 起始秒 + 采样时长（segmeted 加载/显示用，非时钟）。
+    void pcmInfo(double* startSec, double* durationSec) const {
+        if (startSec) *startSec = m_pcmStartSec.load(std::memory_order_relaxed);
+        if (durationSec) *durationSec = m_pcmDurationSec.load(std::memory_order_relaxed);
+    }
+
 private:
-    enum class CmdType : std::uint8_t { Start, Stop, StopAll };
+    enum class CmdType : std::uint8_t { Start, Stop, StopAll, StartSharedPcm };
     struct Command {
         CmdType type = CmdType::StopAll;
         DecodedSample* sample = nullptr;  ///< Start：要播的采样（裸指针，引用已转移）
         float volume = 1.0f;
         double startSec = 0.0;
         int slot = -1;                    ///< 目标槽位（-1 = 任意空闲；kPreviewVoice=试听槽）
+        double sampleRate = 0.0;          ///< StartSharedPcm：共享 PCM 采样率
     };
     enum class EventType : std::uint8_t { Started, Ended };
     struct Event {
@@ -122,6 +150,8 @@ private:
         std::uint64_t framePos = 0;      ///< 当前源帧（整数部分）
         double frac = 0.0;               ///< 源帧小数部分（插值）
         double step = 1.0;               ///< 源帧/输出帧 = srcRate / deviceRate
+        // M5 startSec 截取：起点源帧（包络 base——相对截取点算，见 render 注释）
+        std::uint64_t startFrame0 = 0;
         float volume = 1.0f;
         float env = 0.0f;                ///< 0..1 包络（起止防爆音）
         bool active = false;
@@ -136,6 +166,16 @@ private:
     SpscRing<DecodedSample*, 128> m_reclaimRing;    ///< 回调 → UI（归还；UI 线程 delete）
     std::atomic<int> m_activeCount{0};
     std::atomic<float> m_masterVolume{1.0f};        ///< 主音量（UI 写/回调读）
+    /// M5 时钟：回调整体输出帧数（所有 render 调用累计）。
+    std::atomic<std::uint64_t> m_totalFrames{0};
+    /// M5 时钟：kPcmSlot 启动时的输出帧基线（回调事件设置；UI 读）。
+    std::atomic<std::int64_t> m_pcmBaseline{-1};
+    /// kPcmSlot 的 startSec / durationSec（UI/回调写；UI 读）。
+    std::atomic<double> m_pcmStartSec{0.0};
+    std::atomic<double> m_pcmDurationSec{0.0};
 };
+
+/// kPcmSlot：PCM 播放专用槽位（不与其他 note/试听抢占）。
+inline constexpr int kPcmSlot = 6;
 
 }  // namespace beatbench::audio

@@ -35,11 +35,19 @@ struct DecodedSample {
     double sampleRate = 0.0;
     /// 交错 float32 立体声（L,R,L,R…）；分帧数为 frames = size()/2。
     std::vector<float> interleavedStereo;
+    /// M5 零拷贝播放：共享 PCM（渲染代理缓冲）。非空 → pcm()/frameCount() 读这里，
+    /// interleavedStereo 保持空。生命周期由共享方持有（渲染代理的 shared_ptr），
+    /// 本对象仅借用——销毁时绝不释放共享缓冲。
+    std::shared_ptr<const std::vector<float>> sharedPcm;
     /// 源文件绝对路径（诊断/去重用；可为空）。
     std::string path;
 
+    /// 实际 PCM 视图（自持 or 共享）。
+    const std::vector<float>& pcm() const {
+        return sharedPcm ? *sharedPcm : interleavedStereo;
+    }
     std::size_t frameCount() const {
-        return interleavedStereo.size() / 2;
+        return pcm().size() / 2;
     }
     /// 总时长（秒；空采样 → 0）。
     double durationSeconds() const {

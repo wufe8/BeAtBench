@@ -62,6 +62,10 @@ bool ChartSession::openChart(const QString& path) {
     attachActive(true);
     emit documentChanged();
     emit chartChanged();
+    // M5：载入即后台渲染（内存 only，不写盘；多线程不卡 UI）——波形/播放就绪。
+    // 空谱/无 note 也会渲染（安静 PCM；无害）。失败（无采样文件等）→ renderFinished(false)
+    // 状态栏提示，波形不显示；不影响编辑。
+    if (m_chart && m_timing) renderAsync(44100.0, false);
     return true;
 }
 
@@ -174,7 +178,7 @@ static QString noteSnapKey(const beatbench::Event<beatbench::Note>& n) {
 /// 区间外已渲染 PCM 保持不变，其尾音延伸进脏区间的部分由区间重混按倒推衔接处理）。
 static constexpr double kTailSec = 8.0;
 
-bool ChartSession::renderAsync(qreal sampleRate) {
+bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
     if (!m_chart || !m_timing) return false;
     // 去重：渲染中忽略（完成信号回 UI；再次触发等 finish）
     bool expected = false;
@@ -185,6 +189,7 @@ bool ChartSession::renderAsync(qreal sampleRate) {
     // 否则边渲染边编辑 → 竞态。TimingEngine move-only → 后台 rebuild。
     const beatbench::Chart chartCopy = *m_chart;
     // 输出 = 谱面同目录 <stem>.render.wav（去原扩展名；与 CLI render 命名一致）
+    // ⚠️ M5 saveWav=false（自动/增量）：不写盘（PCM 内存驻留；发布行为）
     const QFileInfo outFi(m_path);
     const QString outPath = outFi.absolutePath() + QStringLiteral("/") +
                             outFi.completeBaseName() + QStringLiteral(".render.wav");
@@ -203,7 +208,7 @@ bool ChartSession::renderAsync(qreal sampleRate) {
     }
 
     QThreadPool::globalInstance()->start(
-        [this, chartCopy, sourceDir, sr, outPath, version, incremental, dirtyLo, dirtyHi] {
+        [this, chartCopy, sourceDir, sr, outPath, version, incremental, dirtyLo, dirtyHi, saveWav] {
         // 后台：重建 timing（快照 chart；全量/增量都需要——增量仅用于事件→秒换算）
         beatbench::TimingEngine timing;
         timing.rebuild(chartCopy);
@@ -261,8 +266,8 @@ bool ChartSession::renderAsync(qreal sampleRate) {
         // ---- 全量（首次 / timing 变化 / 无旧结果） ----
         auto rPtr = std::make_shared<beatbench::audio::RenderResult>(
             beatbench::audio::render_chart_w(chartCopy, timing, cache, sr, sourceDir));
-        // 后台写 .wav（宽字符；M4.3b 验证产物；IO 在后台线程不卡 UI）
-        if (rPtr->ok) {
+        // M5：saveWav 手动（Ctrl+R）才写 .wav（debug 验证产物）；载入自动/增量只内存
+        if (rPtr->ok && saveWav) {
             std::string werr;
             beatbench::audio::write_wav_file_w(outPath.toStdWString(), rPtr->audio, &werr);
         }
@@ -372,6 +377,17 @@ void ChartSession::updateNoteSnapshot(const beatbench::Chart& chart,
         s.triggerUs = static_cast<std::uint64_t>(timing.time_us({n.measure, n.pos}));
         m_noteSnap[noteSnapKey(n).toStdString()] = s;
     }
+}
+
+std::shared_ptr<const std::vector<float>> ChartSession::renderedPcm() const {
+    auto h = m_rendered;  // shared_ptr 拷贝（原子读；null = 无）
+    if (!h) return nullptr;
+    return h->pcm;
+}
+
+double ChartSession::renderedSampleRate() const {
+    auto h = m_rendered;
+    return h ? h->sampleRate : 0.0;
 }
 
 QVariantMap ChartSession::renderInfo() const {

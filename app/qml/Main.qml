@@ -228,10 +228,15 @@ ApplicationWindow {
     // 首选项（M4.2 设置页；菜单「设置→首选项…」同源）
     Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
 
-    // M4.3b 验证：Space = 渲染当前谱面 → 混音 WAV（M5 时改为随时播放）
+    // M5：Space = 播放/暂停（渲染代理 PCM；无渲染时提示/等待渲染）。Ctrl+R = 手动渲染。
     // 文本输入焦点时让行；只在编辑页 + 已打开谱面时可用
     Shortcut {
         sequence: "Space"
+        enabled: currentPage === 0 && chartMeta !== null && !window.textInputFocused
+        onActivated: togglePlayback()
+    }
+    Shortcut {
+        sequence: "Ctrl+R"
         enabled: currentPage === 0 && chartMeta !== null && !window.textInputFocused
         onActivated: renderChartToFile()
     }
@@ -716,6 +721,15 @@ ApplicationWindow {
                     Layout.maximumWidth: 320
                 }
                 // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
+                // M5 播放时间（hasPcm 时显示；播放中实时，暂停/停止 = 位置）
+                Label {
+                    visible: typeof audioEngine !== "undefined" && audioEngine.hasPcm
+                    text: window.fmtTime(audioEngine.positionSec) + " / " + window.fmtTime(audioEngine.durationSec)
+                    color: audioEngine.playing ? Theme.accent : Theme.textFaint
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    Layout.rightMargin: 2
+                }
                 Label {
                     text: chartMeta ? window.modeLabel() + "·" + (chartMeta.PLAYER !== undefined ? chartMeta.PLAYER : "") : ""
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
@@ -958,21 +972,33 @@ ApplicationWindow {
         return decodeURIComponent(s)
     }
 
-    // ---------- M4.3c+：后台异步渲染当前谱面 → 混音 WAV（Space 触发；M5 改为播放） ----------
+    // M5 播放时间格式化（m:ss.cc；与秒标尺一致——秒以下十进制）
+    function fmtTime(sec) {
+        if (typeof sec !== "number" || !isFinite(sec) || sec < 0) sec = 0
+        var m = Math.floor(sec / 60)
+        var s = sec - m * 60
+        var whole = Math.floor(s)
+        var cs = Math.floor((s - whole) * 100)
+        return m + ":" + (whole < 10 ? "0" : "") + whole + "." + (cs < 10 ? "0" : "") + cs
+    }
+
+    // ---------- M5：Space = 播放/暂停（渲染代理 PCM）；Ctrl+R = 手动渲染 ----------
+    function togglePlayback() {
+        if (typeof audioEngine === "undefined" || !audioEngine) return
+        var ok = audioEngine.togglePlay()
+        if (!ok) {
+            // 播放失败：状态栏已提示（音声引擎）；无 PCM 时也提示
+            // （渲染中 waitRender 场景 = 返回 true 排队）
+        }
+    }
+    // ---------- M4.3c+：后台异步渲染当前谱面 → 混音 WAV（Ctrl+R 手动；M5 载入自动内存化） ----------
     // 多线程（用户 2026-09 拍板）：renderAsync 提交 QThreadPool 后台解码+混音，
-    // UI 不卡；完成时 renderFinished 信号 → 状态栏提示。输出 = 谱面同目录
-    // <basename>.render.wav（验证阶段；将来导出对话框）。
+    // UI 不卡；完成时 renderFinished 信号 → 状态栏提示。Ctrl+R 输出 = 谱面同目录
+    // <basename>.render.wav（验证产物）；载入自动/增量渲染 = 内存 only（不写盘）。
     function renderChartToFile() {
         if (typeof chartSession === "undefined" || !chartSession || !chartSession.hasChart) return
         if (chartPath === "") return
-        // 输出路径：同目录 <basename>.render.wav
-        var slash = Math.max(chartPath.lastIndexOf("/"), chartPath.lastIndexOf("\\"))
-        var dir = slash >= 0 ? chartPath.substring(0, slash + 1) : ""
-        var base = chartPath.substring(slash + 1)
-        var dot = base.lastIndexOf(".")
-        var stem = dot > 0 ? base.substring(0, dot) : base
-        var out = dir + stem + ".render.wav"
-        var ok = chartSession.renderAsync(44100.0)
+        var ok = chartSession.renderAsync(44100.0, true)
         if (!ok) {
             setStatus(qsTr("渲染进行中…（请稍候；完成时提示）"))
         } else {
@@ -988,10 +1014,34 @@ ApplicationWindow {
             // 渲染完成计数（--wait-render 增量验收：等全量+增量都完成）
             window.debugRenderCount += 1
             if (ok) {
-                setStatus(qsTr("已渲染：%1（%2 秒）").arg(outPath).arg(durationSec.toFixed(1)))
+                // M5：自动/增量渲染不写盘（outPath 仅 Ctrl+R 手动写）；文案统一「已完成」
+                setStatus(qsTr("渲染完成：%1 秒").arg(durationSec.toFixed(1)))
+                // --play：渲染完成后自动播放（M5 播放验收）
+                if (window.debugPlayAfterRender && typeof audioEngine !== "undefined") {
+                    audioEngine.play()
+                    // 播放启动后才开始倒计时（避免属性设置时机早于播放 → 过早停止）
+                    window.debugPlayStart()
+                }
             } else {
                 setStatus(qsTr("渲染失败：%1").arg(chartSession.errorMessage()))
             }
+        }
+    }
+    // --play-duration <秒>：播放指定时长后停止（配合 --play/--screenshot 验收）
+    property bool debugPlayAfterRender: false
+    property var debugPlayDuration: 0
+    Timer {
+        id: playAutoStop
+        interval: 3000
+        onTriggered: {
+            if (typeof audioEngine !== "undefined") audioEngine.stopPlay()
+        }
+    }
+    // 播放启动后开始倒计时（--play 播放验收；属性设置时机早于播放 → 不能在那里 restart）
+    function debugPlayStart() {
+        if (debugPlayDuration > 0) {
+            playAutoStop.interval = Math.max(100, Math.round(debugPlayDuration * 1000))
+            playAutoStop.restart()
         }
     }
 

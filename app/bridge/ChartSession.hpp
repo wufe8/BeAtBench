@@ -74,8 +74,20 @@ public:
     /// render_chart_w（快照 chart/timing，后台解码+混音），UI 不卡；完成时发
     /// renderFinishedSignal（成功 + 时长）并缓存结果（renderedAudio() 供波形/播放）。
     /// 渲染期间再次调用 → 忽略（in-flight 去重，版本号丢弃过期结果）。
+    /// M5 saveWav：**全量渲染时是否写 .render.wav**——载入自动/增量 = false（只内存，
+    /// 发布行为）；Ctrl+R 手动 = true（debug 验证产物）。写盘在后台线程（IO 不卡 UI）。
     /// 返回 true = 已提交后台任务。
-    Q_INVOKABLE bool renderAsync(qreal sampleRate = 44100.0);
+    Q_INVOKABLE bool renderAsync(qreal sampleRate = 44100.0, bool saveWav = false);
+
+    /// M5 播放：渲染 PCM 共享指针（渲染代理缓冲；供 PcmPlayback 零拷贝播放）。
+    /// 返回空 = 未渲染成功过。线程安全（shared_ptr 拷贝原子读）。
+    std::shared_ptr<const std::vector<float>> renderedPcm() const;
+
+    /// M5 播放：渲染 PCM 的采样率（0 = 无）。
+    double renderedSampleRate() const;
+
+    /// 是否已有渲染结果（PCM 有效；UI 判断可不可以播放）。
+    bool hasRendered() const { return m_rendered != nullptr; }
 
     /// 最近一次后台渲染结果（完成后有效；UI 读——波形金字塔/播放消费）。
     /// 数据结构：{ok, path, durationSec, sampleRate, frames}（音频数据存

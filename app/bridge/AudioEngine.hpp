@@ -20,10 +20,13 @@
 #include <memory>
 
 #include "beatbench/audio/AudioBackend.hpp"
+#include "beatbench/audio/PcmPlayback.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 #include "beatbench/audio/SamplePlayer.hpp"
 
 namespace beatbench::app {
+
+class ChartSession;
 
 class AudioEngine : public QObject {
     Q_OBJECT
@@ -31,6 +34,14 @@ class AudioEngine : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
+
+    // ---- M5 播放状态（QML 绑定：播放/暂停按钮、状态栏时间） ----
+    Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
+    Q_PROPERTY(qreal positionSec READ positionSec NOTIFY playbackChanged)
+    Q_PROPERTY(qreal durationSec READ durationSec NOTIFY playbackChanged)
+    Q_PROPERTY(bool hasPcm READ hasPcm NOTIFY playbackChanged)
+    Q_PROPERTY(bool waitRender READ waitRender NOTIFY waitRenderChanged)
+    Q_PROPERTY(bool waitRenderSetting READ waitRenderSetting NOTIFY waitRenderSettingChanged)
 
     // ---- 设置页可读项（M4.2；写走 Q_INVOKABLE applySettings，改后 NOTIFY） ----
     Q_PROPERTY(QVariantList devices READ devices NOTIFY devicesChanged)  // [{index,name,api,sampleRate}]
@@ -73,6 +84,32 @@ public:
     /// 兼容 Windows `\` 与 `/`）。
     Q_INVOKABLE void setChartPath(const QString& path);
 
+    // ---- M5 播放控制（QML 调用；PcmPlayback 封装在 m_playback） ----
+    /// 装载渲染 PCM（ChartSession.renderFinished 后由 QML 或内部调用；见 setChartSession）。
+    /// session = ChartSession（渲染代理 PCM 来源）；null = 清除。
+    Q_INVOKABLE void setChartSession(QObject* session);
+
+    /// 播放/暂停切换（Space）：playing → pause；否则 play（从当前位置）。
+    /// 返回 true = 已切换（QML 状态栏）；false = 失败（无 PCM / 渲染中 waitRender）。
+    Q_INVOKABLE bool togglePlay();
+    /// 播放（从当前位置；无 PCM 或条件不满足返回 false）。
+    Q_INVOKABLE bool play();
+    /// 暂停（冻结位置）。
+    Q_INVOKABLE void pause();
+    /// 停止（保持位置；Space 再按 = 续播）。
+    Q_INVOKABLE void stopPlay();
+    /// seek：跳转秒（播放中就地续播；停止/暂停 = 定位）。
+    Q_INVOKABLE bool seekSeconds(double seconds);
+
+    /// 「等待渲染后播放」设置（默认 false = 播放优先）。
+    Q_INVOKABLE void setWaitRenderSetting(bool v);
+    bool waitRenderSetting() const { return m_waitRenderSetting; }
+
+    bool playing() const { return m_playback.playing(); }
+    qreal positionSec() const { return m_playback.currentSec(); }
+    qreal durationSec() const { return m_playback.durationSec(); }
+    bool hasPcm() const { return m_playback.hasLoaded(); }
+
     // ---- 设置读取（QML 绑定） ----
     bool available() const { return m_initialized; }
     bool busy() const { return m_busy; }
@@ -100,6 +137,9 @@ public:
     /// 设置错误提示（音频页顶部错误条；成功清空）。
     QString errorText() const { return m_errorText; }
 
+    /// M5 等待渲染状态（waitRender 生效时：Space → renderFinished 后续播）。
+    bool waitRender() const { return m_waitRender; }
+
     /// 设备信息（诊断/状态栏）。
     Q_INVOKABLE QString deviceDescription() const;
 
@@ -110,6 +150,14 @@ signals:
     void devicesChanged();
     void settingsChanged();
     void errorTextChanged();
+    /// M5 播放状态变化（playing/positionSec/durationSec/hasPcm）。
+    void playbackChanged();
+    /// M5 播放自然结束（PCM 播完；QML 状态栏「已播完」）。
+    void playbackFinished();
+    /// M5 等待渲染状态变化。
+    void waitRenderChanged();
+    /// M5 waitRenderSetting 变化（设置面板）。
+    void waitRenderSettingChanged();
 
 private:
     /// 音频路径解析 + **扩展名回退**：原路径存在 → 用它；否则按相同 basename
@@ -140,6 +188,11 @@ private:
     beatbench::audio::AudioSettings m_settings;  ///< 当前设置（设备/采样率/缓冲）
     QVariantList m_devices;                      ///< 设备快照（[{index,name,api,sampleRate}]）
     QString m_errorText;                         ///< 设置错误（音频页显示；成功清空）
+    // ---- M5 播放 ----
+    beatbench::audio::PcmPlayback m_playback;    ///< PCM 播放状态机（UI 线程；设备率随流更新）
+    ChartSession* m_chartSession = nullptr;      ///< 渲染 PCM 来源（ChartSession；不拥有）
+    bool m_waitRender = false;                   ///< 等待渲染中（renderFinished 后续播）
+    bool m_waitRenderSetting = false;            ///< 设置：Space 等待渲染完成（默认关）
 };
 
 }  // namespace beatbench::app

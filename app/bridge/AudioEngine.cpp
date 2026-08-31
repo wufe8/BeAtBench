@@ -21,6 +21,7 @@
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/SampleCache.hpp"
+#include "bridge/ChartSession.hpp"
 
 namespace beatbench::app {
 
@@ -45,7 +46,8 @@ beatbench::audio::DecodedSample* makeTestToneSample() {
 }
 }  // namespace
 
-AudioEngine::AudioEngine(QObject* parent) : QObject(parent) {
+AudioEngine::AudioEngine(QObject* parent)
+    : QObject(parent), m_playback(&m_player, 44100.0) {
     // 1) 加载持久化设置（设备/采样率/缓冲/音量）
     loadSettings();
     m_player.setMasterVolume(static_cast<float>(masterVolume()));
@@ -64,6 +66,8 @@ AudioEngine::AudioEngine(QObject* parent) : QObject(parent) {
             // 设备采样率 = 流实际参数（streamInfo 在 start 成功后有效）
             m_renderCtx.deviceRate.store(
                 static_cast<double>(m_backend->streamInfo().sampleRate));
+            m_playback.setDeviceRate(
+                static_cast<double>(m_backend->streamInfo().sampleRate));
             m_initialized = true;
         } else {
             // 启动失败（可能设置里设备/采样率不可用）：回退默认（手动再试一次）
@@ -78,6 +82,8 @@ AudioEngine::AudioEngine(QObject* parent) : QObject(parent) {
                     &m_renderCtx, fallback, &err)) {
                 m_settings = fallback;  // 用回退值（设置页显示真实）
                 m_renderCtx.deviceRate.store(
+                    static_cast<double>(m_backend->streamInfo().sampleRate));
+                m_playback.setDeviceRate(
                     static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_initialized = true;
                 m_statusText = QStringLiteral("指定设备不可用，已回退默认设备");
@@ -107,7 +113,14 @@ AudioEngine::AudioEngine(QObject* parent) : QObject(parent) {
                 m_busy = false;
                 emit busyChanged();
             }
+            // PCM 槽结束 → 播放状态变化（positionSec 触底）
+            if (slot == beatbench::audio::kPcmSlot) {
+                emit playbackChanged();
+                emit playbackFinished();  // 完成信号（QML 状态栏/后续）
+            }
         }
+        // M5 播放时钟：播放中 positionSec 持续变化 → playbackChanged（20Hz 状态栏刷新）
+        if (m_playback.playing()) emit playbackChanged();
     });
     poll->start();
 }
@@ -256,6 +269,8 @@ bool AudioEngine::reopenStream() {
             &m_renderCtx, m_settings, &err)) {
         m_renderCtx.deviceRate.store(
             static_cast<double>(m_backend->streamInfo().sampleRate));
+        m_playback.setDeviceRate(
+            static_cast<double>(m_backend->streamInfo().sampleRate));
         return true;
     }
     // 失败：回退旧设置重开
@@ -287,6 +302,123 @@ void AudioEngine::setChartPath(const QString& path) {
         return;
     }
     m_sourceDir = QFileInfo(path).absoluteDir().path();
+}
+
+// —— M5 播放（PCM 渲染代理；零拷贝经 SamplePlayer 播出） ——
+
+/// 装载渲染 PCM（ChartSession 渲染完成时调用；session 为 PCM 来源）。
+void AudioEngine::setChartSession(QObject* session) {
+    // 断开旧连接（重复 set → 避免重复装载）
+    if (m_chartSession)
+        disconnect(m_chartSession, nullptr, this, nullptr);
+    m_chartSession = qobject_cast<ChartSession*>(session);
+    if (!m_chartSession) {
+        // 无 session：清除播放（停止 + 载入空）
+        m_playback.stop();
+        m_playback.load(nullptr, 0.0);
+        m_waitRender = false;
+        emit playbackChanged();
+        return;
+    }
+    // 已有渲染结果 → 载入（载入谱面后自动渲染未完成时为空，等 renderFinished）
+    if (m_chartSession->hasRendered()) {
+        m_playback.load(m_chartSession->renderedPcm(),
+                        m_chartSession->renderedSampleRate());
+    }
+    // renderFinished → 装载新 PCM + waitRender 续播
+    connect(m_chartSession, &ChartSession::renderFinished, this,
+            [this](bool ok, const QString&, double) {
+        if (!ok) {
+            m_waitRender = false;
+            emit waitRenderChanged();
+            return;
+        }
+        if (m_chartSession && m_chartSession->hasRendered()) {
+            m_playback.load(m_chartSession->renderedPcm(),
+                            m_chartSession->renderedSampleRate());
+            emit playbackChanged();
+        }
+        // waitRender 等待中 → 续播（从当前位置/开头）
+        if (m_waitRender) {
+            m_waitRender = false;
+            emit waitRenderChanged();
+            play();
+        }
+    });
+    // 编辑即停（M5 决策）：内容变化 → 停止播放（计划/渲染过期；下次起播用新版）
+    connect(m_chartSession, &ChartSession::contentChanged, this,
+            [this] {
+        if (m_playback.playing()) {
+            m_playback.stop();
+            emit playbackChanged();
+        }
+        m_waitRender = false;
+        emit waitRenderChanged();
+    });
+    emit playbackChanged();
+}
+
+bool AudioEngine::togglePlay() {
+    if (m_playback.playing()) {
+        m_playback.pause();
+        emit playbackChanged();
+        return true;
+    }
+    return play();
+}
+
+bool AudioEngine::play() {
+    if (!m_chartSession || !m_chartSession->hasRendered()) {
+        // 无 PCM：可能渲染中（waitRender）或从未渲染
+        if (m_waitRenderSetting && m_chartSession &&
+            !m_chartSession->hasRendered()) {
+            m_waitRender = true;
+            emit waitRenderChanged();
+            m_statusText = QStringLiteral("渲染中…完成即播放");
+            emit statusTextChanged();
+            return true;  // 已排队（renderFinished 后续播）
+        }
+        m_statusText = QStringLiteral("无渲染结果（请先 Ctrl+R 手动渲染）");
+        emit statusTextChanged();
+        return false;
+    }
+    // 停止中的旧 PCM 若无 → 重载（增量可能换了 PCM）
+    if (!m_playback.hasLoaded() || m_playback.durationSec() <= 0.0) {
+        m_playback.load(m_chartSession->renderedPcm(),
+                        m_chartSession->renderedSampleRate());
+    }
+    const float vol = m_player.masterVolume();
+    if (m_playback.play(vol)) {
+        m_statusText = QStringLiteral("播放中…");
+        emit statusTextChanged();
+        emit playbackChanged();
+        return true;
+    }
+    m_statusText = QString::fromStdString(m_playback.lastError());
+    emit statusTextChanged();
+    return false;
+}
+
+void AudioEngine::pause() {
+    m_playback.pause();
+    emit playbackChanged();
+}
+
+void AudioEngine::stopPlay() {
+    m_playback.stop();
+    emit playbackChanged();
+}
+
+bool AudioEngine::seekSeconds(double seconds) {
+    if (!m_playback.hasLoaded()) return false;
+    m_playback.seek(seconds);
+    emit playbackChanged();
+    return true;
+}
+
+void AudioEngine::setWaitRenderSetting(bool v) {
+    m_waitRenderSetting = v;
+    emit waitRenderSettingChanged();
 }
 
 /// 音频路径解析 + 扩展名回退（非成员静态；playPreview 调用）。
