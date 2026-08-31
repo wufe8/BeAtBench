@@ -175,6 +175,19 @@ void ChartViewItem::zoomAt(qreal screenY, qreal factor) {
     update();
 }
 
+void ChartViewItem::scrollToTime(double seconds) {
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->timing() || seconds < 0.0) return;
+    // position_at 对超出谱面末尾的时间返回末尾附近位置（自动夹逼）
+    const auto pos = cs->timing()->position_at(static_cast<std::int64_t>(seconds * 1e6));
+    if (!pos) return;
+    const qreal mf = pos->measure + posDouble(pos->pos);
+    // 目标拍位放视口中心（topHigh 已处理）
+    const qreal targetContent = m_topHigh ? (contentHeight() - mf * m_measureHeight)
+                                          : (mf * m_measureHeight);
+    setScrollY(targetContent - height() / 2.0);
+}
+
 void ChartViewItem::setRulerWidth(qreal v) {
     if (qFuzzyCompare(m_rulerWidth, v)) return;
     m_rulerWidth = v;
@@ -516,7 +529,7 @@ QVariantMap ChartViewItem::objectAt(qreal x, qreal y) const {
             return res;
         }
     }
-    // STOP 元事件轨（note 高块）
+    // STOP 元事件轨（横线 + 下方值/秒两行文字；命中区 = 线 ± 向下 28px——与 BPM 同构）
     for (std::size_t i = 0; i < m_columns.size(); ++i) {
         if (!m_columns[i].stop || static_cast<std::size_t>(i) >= m_colRects.size()) continue;
         const QRectF& r = m_colRects[i];
@@ -525,8 +538,7 @@ QVariantMap ChartViewItem::objectAt(qreal x, qreal y) const {
                 static_cast<int>(ev.measure) > measure + 1)
                 continue;
             const qreal ny = yOf(ev.measure + posDouble(ev.pos));
-            const QRectF nr(r.x() + kNoteHMargin, ny - noteH,
-                            r.width() - 2.0 * kNoteHMargin, noteH);
+            const QRectF nr(r.x(), ny - 6, r.width(), 30);  // 线 ± 下方文字区
             if (!nr.contains(QPointF(x, y))) continue;
             res.insert(QStringLiteral("valid"), true);
             res.insert(QStringLiteral("kind"), QStringLiteral("stop"));
@@ -811,7 +823,7 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                                 continue;
                             const qreal y = yOf(ev.measure + posDouble(ev.pos));
                             const QRectF& colRect = m_colRects[i];
-                            const QRectF hit(colRect.x(), y - noteH, colRect.width(), noteH * 2);
+                            const QRectF hit(colRect.x(), y - 6, colRect.width(), 34);
                             if (hit.contains(pos)) {
                                 const QString refText = ev.value.ref_id
                                     ? QStringLiteral(" #STOP%1").arg(QString::fromStdString(
@@ -1268,16 +1280,36 @@ void ChartViewItem::paint(QPainter* p) {
         p->drawLine(QPointF(metaRight, yOf(m)), QPointF(w, yOf(m)));
     }
 
-    // ---- 小节标尺（左列：小节号，贴小节起始线下方；BPM 数值移到右邻 BPM 轨） ----
+    // ---- 小节标尺 + 秒标尺（左列：固定，不随水平滚动——与 BPM/STOP 轨同列区） ----
+    // 每小节线下方：上行 = 小节号（%03d），下行 = 该小节起始秒（m:ss.cc；
+    // 十进制秒以下 0.01s——2026-09 用户问进制：秒以下无 60 进制惯例
+    // （音频延迟/采样率全十进），0.01s 对制谱编辑足够；60 进制仅用于分→秒）。
+    // TimingEngine 真实时间——变速/STOP 谱面正确。低缩放（小节高 < 30px）秒行省略。
+    // 2026-09 验证：Doppelganger _A7 STOP 1536（measure 135 pos0，@BPM280 ≈ 6.86s）
+    // → 135 小节 1:50 / 136 小节 1:57（+7s 跳变，正确）；rulerWidth 72→56（用户：太宽）。
     p->fillRect(QRectF(0, 0, rulerW, h), th->surface());
     p->setPen(QPen(th->border(), 1.0));
     p->drawLine(QPointF(rulerW, 0), QPointF(rulerW, h));
     p->setFont(m_rulerFont);
+    const bool showSec = m_measureHeight >= 30.0;  // 低缩放避免秒行重叠（2026-09）
+    const beatbench::TimingEngine* timing = cs->timing();
     for (int m = first; m <= last; ++m) {
         const qreal y0 = yOf(m);
         p->setPen(th->textMuted());
-        p->drawText(QRectF(3, y0 + 1, rulerW - 6, 13),
-                    Qt::AlignLeft | Qt::AlignTop, QString::asprintf("%03d", m));
+        const QRectF box(3, y0 + 1, rulerW - 6, 13);
+        p->drawText(box, Qt::AlignLeft | Qt::AlignTop, QString::asprintf("%03d", m));
+        if (showSec && timing) {
+            // 该小节起点秒（m:ss.cc；STOP 间隙向下取整——起点本身不受 STOP 影响）
+            const double sec = static_cast<double>(timing->time_us(
+                beatbench::Position{static_cast<std::uint32_t>(m), beatbench::Rational()})) / 1e6;
+            const int cs = static_cast<int>(std::lround(sec * 100.0));
+            const int mm = cs / 6000;
+            const int ss = (cs / 100) % 60;
+            const int cc = cs % 100;
+            p->setPen(th->textFaint());
+            p->drawText(QRectF(3, y0 + 14, rulerW - 6, 12),
+                        Qt::AlignLeft | Qt::AlignTop, QString::asprintf("%d:%02d.%02d", mm, ss, cc));
+        }
     }
 
     // ---- BPM / STOP 元事件轨（固定置左窄列；标记画在实际 (measure,pos)，值贴事件下缘） ----
@@ -1294,7 +1326,7 @@ void ChartViewItem::paint(QPainter* p) {
     if (bpmColI >= 0 && static_cast<std::size_t>(bpmColI) < m_colRects.size()) {
         const QRectF r = m_colRects[bpmColI];
         p->setFont(m_rulerFont);
-        const auto drawBpm = [&](double value, qreal y, bool selected) {
+        const auto drawBpm = [&](double value, qreal y, bool selected, double startSec = -1.0) {
             if (y < -14 || y > h + 14) return;
             QColor tick = th->accent();
             tick.setAlpha(200);
@@ -1305,15 +1337,30 @@ void ChartViewItem::paint(QPainter* p) {
             }
             p->fillRect(QRectF(r.x() + 1, y - 1, r.width() - 2, 2), tick);
             p->setPen(th->accent2());
+            // BPM 值 + 该拍位起点秒（m:ss.cc；用户 2026-09：BPM 线加秒便于变速段对时；
+            // 格式 `280·1:50.57`——窄列（36px）放不下 → 两行：值行 + 秒行（value 下方）
             p->drawText(QRectF(r.x() + 2, y + 2, r.width() - 3, 12),
                         Qt::AlignLeft | Qt::AlignTop, QString::number(value, 'g', 6));
+            if (startSec >= 0.0) {
+                const int cs = static_cast<int>(std::lround(startSec * 100.0));
+                const int mm = cs / 6000;
+                const int ss = (cs / 100) % 60;
+                const int cc = cs % 100;
+                p->setPen(th->textFaint());
+                p->drawText(QRectF(r.x() + 2, y + 13, r.width() - 3, 12),
+                            Qt::AlignLeft | Qt::AlignTop,
+                            QString::asprintf("%d:%02d.%02d", mm, ss, cc));
+            }
         };
         for (const auto& ev : chart.bpm_events) {
             if (static_cast<int>(ev.measure) < first - 1 ||
                 static_cast<int>(ev.measure) > last + 1)
                 continue;
+            double startSec = -1.0;
+            if (timing) startSec = static_cast<double>(timing->time_us(
+                beatbench::Position{ev.measure, ev.pos})) / 1e6;
             drawBpm(ev.value.value, yOf(ev.measure + posDouble(ev.pos)),
-                    metaSelected(ev.measure, ev.pos, -1, -1));
+                    metaSelected(ev.measure, ev.pos, -1, -1), startSec);
         }
         // 无 (0,0) BPM 事件 → 头 #BPM 基准值画在 0 小节起点
         bool hasStart = false;
@@ -1323,7 +1370,7 @@ void ChartViewItem::paint(QPainter* p) {
             double bpm = 130.0;
             if (const auto it = chart.meta.find("BPM"); it != chart.meta.end())
                 bpm = std::atof(it->second.c_str());
-            drawBpm(bpm, yOf(0), false);
+            drawBpm(bpm, yOf(0), false, 0.0);
         }
     }
     if (stopColI >= 0 && static_cast<std::size_t>(stopColI) < m_colRects.size()) {
@@ -1335,24 +1382,32 @@ void ChartViewItem::paint(QPainter* p) {
                 static_cast<int>(ev.measure) > last + 1)
                 continue;
             const qreal y = yOf(ev.measure + posDouble(ev.pos));
-            if (y < -noteH - 2 || y > h + noteH + 2) continue;
-            // STOP 按「普通 note」看待（2026-09 用户）：只在 STOP 列画位置标记，不预览停止
-            // 时长段——刻度线为小节的编辑态无法准确呈现持续时间（精确时长需 TimingEngine，
-            // 秒标尺后置）；时长段预览留待视图切换模式。颜色走 warning（黄），与 note 同高。
-            p->setPen(Qt::NoPen);
-            p->fillRect(QRectF(r.x() + kNoteHMargin, y - noteH,
-                               r.width() - 2.0 * kNoteHMargin, noteH), th->warning());
-            if (metaSelected(ev.measure, ev.pos, -1, -1)) {  // STOP：layer/sample 无意义 → -1
+            if (y < -28 || y > h + 28) continue;
+            // STOP 2026-09 用户：改成 BPM 同构样式（横线 + 下方两行文字）——
+            // 原「note 高方块 + 单行 count·秒」在 48px 窄轨挤不下（1536·6.9s 截断）。
+            // 横线 = 位置标记（同 BPM tick）；值行 = count；秒行 = 实际时长。
+            QColor tick = th->warning();
+            tick.setAlpha(200);
+            if (metaSelected(ev.measure, ev.pos, -1, -1)) {  // 选中：描边框（同 BPM）
                 p->setPen(QPen(th->onAccent(), 1.4));
                 p->setBrush(Qt::NoBrush);
-                p->drawRect(QRectF(r.x() + kNoteHMargin - 1, y - noteH - 1,
-                                   r.width() - 2.0 * kNoteHMargin + 2, noteH + 2));
+                p->drawRect(QRectF(r.x() + 1, y - 5, r.width() - 2, 10));
             }
-            p->setPen(th->bg());
-            // STOP 标签显示原始计数 n（1/192 全音符单位；秒数依赖该拍位 BPM，由 TimingEngine 换算）
-            QString t = QString::number(ev.value.count);
-            p->drawText(QRectF(r.x() + 1, y - noteH, r.width() - 2, noteH),
-                        Qt::AlignCenter, t);
+            p->fillRect(QRectF(r.x() + 1, y - 1, r.width() - 2, 2), tick);
+            // 值行：count（黄色，醒目）
+            p->setPen(th->warning());
+            p->drawText(QRectF(r.x() + 2, y + 2, r.width() - 3, 12),
+                        Qt::AlignLeft | Qt::AlignTop, QString::number(ev.value.count));
+            // 秒行：实际时长（count×1.25/该拍位 BPM；TimingEngine::bpm_at）
+            const double bpm = timing ? timing->bpm_at(
+                beatbench::Position{ev.measure, ev.pos}) : 0.0;
+            if (bpm > 0.0) {
+                const double sec = static_cast<double>(ev.value.count) * 1.25 / bpm;
+                p->setPen(th->textFaint());
+                p->drawText(QRectF(r.x() + 2, y + 13, r.width() - 3, 12),
+                            Qt::AlignLeft | Qt::AlignTop,
+                            QString::asprintf("%.2fs", sec));
+            }
         }
     }
 

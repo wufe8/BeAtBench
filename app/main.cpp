@@ -68,15 +68,40 @@ static void loadNativeTranslations(QGuiApplication& app) {
 // 调试/迭代用：--screenshot <png 路径>——窗口渲染后 grabWindow 抓帧保存并退出。
 // 外部窗口捕获（PrintWindow 等）对 RHI/D3D 内容不可靠（黑屏/找不到窗口），
 // grabWindow 与渲染器同源、保真且确定（主题/时间轴视觉迭代、截图验收都用它）。
-static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& outPath) {
+// 2026-09 M4.3c 波形验收：--screenshot 配合 --wait-render（等待后台渲染完成再抓帧，
+// 否则大谱面 17 分钟级渲染完成前截图 → 波形总览条不可见）。
+static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& outPath,
+                               bool waitRender = false, bool expectIncremental = false) {
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().value(0));
     if (!win) {
         qWarning("screenshot: root window 不可用");
         QCoreApplication::exit(2);
         return;
     }
-    // 等首帧渲染完成再抓（加载后 1.5s 足够，含主题/字体初始化）
-    QTimer::singleShot(1500, win, [win, outPath] {
+    QTimer* wait = nullptr;
+    QTimer::singleShot(waitRender ? 0 : 1500, win, [win, outPath, waitRender, expectIncremental] {
+        if (waitRender) {
+            // 波形/增量验收：等 ChartSession 渲染完成（renderFinished → QML 置
+            // debugRenderDone）+ 增量也完成（--click-after-render 场景等 count ≥ 2）。
+            // 纯渲染场景（无点击）count ≥ 1 即可（增量不会发生）。
+            static QTimer poll;
+            poll.setInterval(300);
+            QObject::connect(&poll, &QTimer::timeout, &poll, [win, outPath, &poll, expectIncremental] {
+                const bool done = win->property("debugRenderDone").toBool();
+                const int cnt = win->property("debugRenderCount").toInt();
+                if (!done) return;
+                if (expectIncremental && cnt < 2) return;  // 增量未完成
+                poll.stop();
+                const QImage img = win->grabWindow();
+                if (img.save(outPath))
+                    qInfo("screenshot saved: %s", qPrintable(outPath));
+                else
+                    qWarning("screenshot save failed: %s", qPrintable(outPath));
+                QCoreApplication::exit(0);
+            });
+            poll.start();
+            return;
+        }
         const QImage img = win->grabWindow();
         if (img.save(outPath))
             qInfo("screenshot saved: %s", qPrintable(outPath));
@@ -326,8 +351,10 @@ int main(int argc, char** argv) {
 
     // --screenshot <png>：截图后退出（见 scheduleScreenshot）
     const int shotIdx = args.indexOf(QStringLiteral("--screenshot"));
+    const bool waitRender = args.contains(QStringLiteral("--wait-render"));
+    const bool expectIncremental = args.contains(QStringLiteral("--click-after-render"));
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
-        scheduleScreenshot(engine, args.at(shotIdx + 1));
+        scheduleScreenshot(engine, args.at(shotIdx + 1), waitRender, expectIncremental);
 
     // --render <out.wav>：调试——启动后自动渲染谱面→WAV（复现 Space；M4.3b 崩溃定位）
     const int renderIdx = args.indexOf(QStringLiteral("--render"));
@@ -452,6 +479,17 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --seek <秒>：调试跳转（波形总览 seek 同一路径；配 --wait-render/--screenshot 验收）
+    const int seekIdx = args.indexOf(QStringLiteral("--seek"));
+    if (seekIdx >= 0 && seekIdx + 1 < args.size()) {
+        bool ok = false;
+        const double s = args.at(seekIdx + 1).toDouble(&ok);
+        if (ok) {
+            if (QObject* root = engine.rootObjects().value(0))
+                root->setProperty("debugSeekSeconds", s);
+        }
+    }
+
     // --tool <select|note|ln|mine|pan>：编辑工具（配 --click 验收手势分发）
     const int toolIdx = args.indexOf(QStringLiteral("--tool"));
     if (toolIdx >= 0 && toolIdx + 1 < args.size()) {
@@ -474,6 +512,20 @@ int main(int argc, char** argv) {
             if (QObject* root = engine.rootObjects().value(0)) {
                 root->setProperty("debugClickX", cx);
                 root->setProperty("debugClickY", cy);
+            }
+        }
+    }
+    // --click-after-render <x> <y>：渲染完成后再点击（增量重渲染验收：全量渲染 →
+    // 编辑 note → 自动增量渲染 → 波形更新；配 --render/--wait-render/--screenshot）
+    const int clickArIdx = args.indexOf(QStringLiteral("--click-after-render"));
+    if (clickArIdx >= 0 && clickArIdx + 2 < args.size()) {
+        bool okx = false, oky = false;
+        const double cx = args.at(clickArIdx + 1).toDouble(&okx);
+        const double cy = args.at(clickArIdx + 2).toDouble(&oky);
+        if (okx && oky) {
+            if (QObject* root = engine.rootObjects().value(0)) {
+                root->setProperty("debugClickAfterRenderX", cx);
+                root->setProperty("debugClickAfterRenderY", cy);
             }
         }
     }

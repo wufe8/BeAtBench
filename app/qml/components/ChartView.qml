@@ -69,7 +69,7 @@ Item {
         id: view
         anchors.fill: parent
         anchors.bottomMargin: 12   // 底部水平滚动条区域
-        anchors.rightMargin: 12    // 右侧垂直滚动条区域
+        anchors.rightMargin: waveform.visible ? (waveform.width + 12) : 12  // 右侧波形条 + 垂直滚动条区域
         session: typeof chartSession !== "undefined" ? chartSession : null
         theme: Theme
         measureHeight: root.measureHeight
@@ -88,6 +88,45 @@ Item {
         onChartChanged: {
             // 谱面切换 → 定位到开头（hi-top 下小节 0 在视口底部）
             view.scrollY = view.topHigh ? Math.max(0, view.contentHeight - view.height) : 0
+        }
+    }
+
+    // ---- M4.3c 波形总览条（2026-09 用户：右侧垂直条；Space 渲染后显示；点击/拖动跳转） ----
+    WaveformOverviewItem {
+        id: waveform
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.topMargin: 0
+        anchors.bottomMargin: 12   // 底部水平滚动条区域留白
+        orientation: 1             // 垂直（右侧条；时间轴方向与视口一致 topHigh 感知）
+        visible: false              // 有波形时显示（renderFinished 后置 true）
+        width: 60
+        session: typeof chartSession !== "undefined" ? chartSession : null
+        theme: Theme
+        // 视口状态绑定（换算可见窗口指示）
+        measureHeight: root.measureHeight
+        scrollY: view.scrollY
+        contentHeight: view.contentHeight
+        topHigh: root.topHigh
+        viewportHeight: view.height
+        onSeekRequested: (sec) => view.scrollToTime(sec)
+    }
+
+    // 渲染完成 → 显示波形总览；文档/内容变化 → 隐藏（等下一次渲染）
+    Connections {
+        target: typeof chartSession !== "undefined" ? chartSession : null
+        function onRenderFinished(ok, outPath, durationSec) {
+            waveform.visible = ok
+        }
+    }
+    Connections {
+        target: typeof chartSession !== "undefined" ? chartSession : null
+        function onDocumentChanged() {
+            waveform.visible = false
+        }
+        function onContentChanged() {
+            waveform.visible = false
         }
     }
 
@@ -489,12 +528,13 @@ Item {
         border.width: 1
     }
 
-    // 右侧垂直滚动条（内容高于视口时出现；点击/拖拽滑块滑动）
+    // 右侧垂直滚动条（内容高于视口时出现；点击/拖拽滑块滑动）。
+    // 2026-09：波形条在右缘 → vbar 移到波形条左侧（波形可见时）。
     Rectangle {
         id: vbar
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: parent.right
+        anchors.right: waveform.visible ? waveform.left : parent.right
         width: 12
         z: 2
         color: Theme.surface2
@@ -525,7 +565,8 @@ Item {
         }
     }
 
-    // 底部水平滚动条（轨道列超宽时出现；点击/拖拽滑块滑动）
+    // 底部水平滚动条（轨道列超宽时出现；点击/拖拽滑块滑动）。
+    // 2026-09：波形条在右侧（垂直，bottomMargin 12 给 hbar 让位）→ hbar 全宽不受影响。
     Rectangle {
         id: hbar
         anchors.left: parent.left
@@ -567,6 +608,11 @@ Item {
         const h = view.height / 2
         return view.topHigh ? (view.contentHeight - (view.scrollY + h)) / view.measureHeight
                             : (view.scrollY + h) / view.measureHeight
+    }
+
+    /// 秒 → 视口滚动（波形总览 seekRequested / --seek 调试走同一路径）。
+    function seekToSeconds(sec) {
+        view.scrollToTime(sec)
     }
 
     // 状态栏用：鼠标位置 + note 信息（hoverText 由 ChartViewItem 计算）

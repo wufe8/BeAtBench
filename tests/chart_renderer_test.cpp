@@ -120,8 +120,6 @@ TEST(ChartRendererTest, MixTwoNotes) {
 }
 
 TEST(ChartRendererTest, BackFillBeforeRangeStart) {
-    // 区间 [0.6, 1.0)：note 在 t=0.5 触发（pos 1/4，BPM 120，4 拍/小节 → 0.5s），
-    // 采样 0.5s → 播 0.5~1.0 → 区间 [0.6, 1.0) 覆盖后段 → 倒推衔接非零。
     beatbench::Chart chart;
     chart.meta["BPM"] = "120";
     chart.samples[{beatbench::SampleKind::Wav, 1}] = {"a.wav", ""};
@@ -264,6 +262,73 @@ TEST(ChartRendererTest, WriteWavFile) {
     const auto sz = std::filesystem::file_size(tmp);
     EXPECT_EQ(sz, 44u + 44100u * 4u);
     std::filesystem::remove(tmp);
+}
+
+// M4.3c 增量重渲染根基：**区间渲染 == 全量渲染的对应片段**（逐帧一致）。
+// 增量实现 = 脏区间重混 + 区间外 PCM 静态保留；数学等价性由本测试保证：
+// 任意 [lo, hi) 区间的 render_chart_range 输出 == render_chart 全量输出的
+// [lo, hi) 切片（变速谱 + 多个采样 + 尾音越过区间边界的场景）。
+TEST(ChartRendererTest, IncrementalRangeEqualsFullSlice) {
+    // 变速谱面：BPM 200 → 100（1 小节后）+ 3 个不同采样（2.5s/0.5s/1.5s 长），
+    // note 分布跨变速 + 尾音跨区间边界。
+    beatbench::Chart chart;
+    chart.meta["BPM"] = "200";
+    chart.meta["TOTAL"] = "400";
+    chart.samples[{beatbench::SampleKind::Wav, 1}] = {"a.wav", ""};
+    chart.samples[{beatbench::SampleKind::Wav, 2}] = {"b.wav", ""};
+    chart.samples[{beatbench::SampleKind::Wav, 3}] = {"c.wav", ""};
+    // 变速：BPM 200；measure 1 pos 0 → 100
+    beatbench::Event<beatbench::Bpm> bpmEv;
+    bpmEv.measure = 1; bpmEv.pos = beatbench::Rational(0, 1); bpmEv.value.value = 100.0;
+    chart.bpm_events.push_back(bpmEv);
+
+    const auto addNote = [&](std::uint32_t m, const beatbench::Rational& p,
+                             std::uint32_t id) {
+        beatbench::Event<beatbench::Note> ev;
+        ev.measure = m; ev.pos = p;
+        ev.value.sample.id = id;
+        ev.value.lane.kind = beatbench::LaneKind::Key; ev.value.lane.index = 1;
+        chart.notes.push_back(ev);
+    };
+
+    beatbench::TimingEngine timing;
+    timing.rebuild(chart);
+    // 时序锚点（BPM 200 = 0.3s/拍，1 小节 1.2s；measure 1 后 BPM 100 = 0.6s/拍）
+    EXPECT_EQ(timing.time_us({0, beatbench::Rational(0, 1)}), 0);
+    EXPECT_EQ(timing.time_us({0, beatbench::Rational(1, 4)}), 300000);
+    EXPECT_EQ(timing.time_us({1, beatbench::Rational(0, 1)}), 1200000);
+
+    addNote(0, beatbench::Rational(0, 1), 1);         // t=0.0（a 2.5s → 尾音到 2.5）
+    addNote(0, beatbench::Rational(1, 2), 2);         // t=0.6（b 0.5s）
+    addNote(1, beatbench::Rational(1, 2), 3);         // t=1.8（c 1.5s → 尾音到 3.3）
+    addNote(2, beatbench::Rational(1, 4), 3);         // t=3.6（c 1.5s；BPM 100 段）
+    addNote(2, beatbench::Rational(2, 4), 2);         // t=4.2（b 0.5s → 尾音到 4.7）
+
+    SampleCache cache;
+    installDecoder(cache, "a.wav", [](const std::string&) { return makeSine(44100.0, 440.0, 2.5); });
+    installDecoder(cache, "b.wav", [](const std::string&) { return makeSine(44100.0, 220.0, 0.5); });
+    installDecoder(cache, "c.wav", [](const std::string&) { return makeSine(44100.0, 330.0, 1.5); });
+
+    // 全量渲染 [0, 5.5)
+    const auto full = render_chart_range(chart, timing, cache, 44100.0, 0.0, 5.5, "");
+    ASSERT_TRUE(full.ok) << full.message;
+    // 区间 [2.0, 4.0)（覆盖变速段 + 尾音跨边界：a 尾音到 2.5 → 2.0 起在区间内）
+    const auto seg = render_chart_range(chart, timing, cache, 44100.0, 2.0, 4.0, "");
+    ASSERT_TRUE(seg.ok) << seg.message;
+
+    // 逐帧比较：seg[0] == full[2.0*44100]（帧偏移 = 88200）
+    const std::size_t f0 = static_cast<std::size_t>(2.0 * 44100.0);
+    ASSERT_GE(full.audio.frameCount(), f0 + 1);
+    const std::size_t n = std::min(seg.audio.frameCount(), full.audio.frameCount() - f0);
+    ASSERT_GT(n, 0u);
+    float maxDiff = 0.0f;
+    for (std::size_t i = 0; i < n; ++i) {
+        maxDiff = std::max(maxDiff, std::fabs(seg.audio.interleavedStereo[2 * i] -
+                                              full.audio.interleavedStereo[2 * (f0 + i)]));
+        maxDiff = std::max(maxDiff, std::fabs(seg.audio.interleavedStereo[2 * i + 1] -
+                                              full.audio.interleavedStereo[2 * (f0 + i) + 1]));
+    }
+    EXPECT_LT(maxDiff, 1e-4f) << "区间渲染与全量切片不一致（增量根基破坏）";
 }
 
 }  // namespace

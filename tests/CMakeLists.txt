@@ -54,7 +54,8 @@ add_test(NAME sample_cache_tests COMMAND sample_cache_test)
 add_executable(chart_renderer_test chart_renderer_test.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/chart_renderer.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/sample_cache.cpp
-    ${CMAKE_SOURCE_DIR}/audio/src/decoder_miniaudio.cpp)
+    ${CMAKE_SOURCE_DIR}/audio/src/decoder_miniaudio.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/audio_path.cpp)
 target_include_directories(chart_renderer_test PRIVATE
     ${CMAKE_SOURCE_DIR}/audio/include ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
 target_compile_definitions(chart_renderer_test PRIVATE
@@ -62,6 +63,14 @@ target_compile_definitions(chart_renderer_test PRIVATE
 target_link_libraries(chart_renderer_test PRIVATE beatbench_core GTest::gtest_main)
 beatbench_set_warnings(chart_renderer_test)
 add_test(NAME chart_renderer_tests COMMAND chart_renderer_test)
+
+# WaveformPyramid 单测（M4.3c）：min/max 金字塔构建/查询（纯内存，无依赖）。
+add_executable(waveform_pyramid_test waveform_pyramid_test.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/waveform_pyramid.cpp)
+target_include_directories(waveform_pyramid_test PRIVATE ${CMAKE_SOURCE_DIR}/audio/include)
+target_link_libraries(waveform_pyramid_test PRIVATE GTest::gtest_main)
+beatbench_set_warnings(waveform_pyramid_test)
+add_test(NAME waveform_pyramid_tests COMMAND waveform_pyramid_test)
 
 # UiActionRegistry 单测（doc/09 §7 验收 4）：只依赖 Qt6::Core 的轻量目标。
 # 仅在找到 Qt6 的构建配置中启用：MSVC build/（无 Qt）→ 自动跳过；

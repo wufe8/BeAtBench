@@ -13,6 +13,7 @@ add_executable(beatbench
     bridge/UiActionRegistry.cpp
     bridge/ThemeManager.cpp
     bridge/AudioEngine.cpp
+    bridge/WaveformOverviewItem.cpp
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
     bridge/SampleListModel.hpp
     bridge/LintListModel.hpp
@@ -20,6 +21,7 @@ add_executable(beatbench
     bridge/KeyMonitor.hpp
     bridge/UiActionRegistry.hpp
     bridge/AudioEngine.hpp    # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
+    bridge/WaveformOverviewItem.hpp
 )
 target_link_libraries(beatbench PRIVATE beatbench_core beatbench_audio Qt6::Quick Qt6::QuickControls2)
 beatbench_set_warnings(beatbench)
@@ -51,9 +53,12 @@ qt_add_qml_module(beatbench
         qml/components/BgaPanel.qml
     # C++ 注册类型（QML_ELEMENT，经 qmltyperegistrar 注册为 BeatBench 组件）：
     # ChartViewItem = 竖向时间轴自绘视口（皮肤 L3 按组件覆写的落点，doc/05 §8）
+    # WaveformOverviewItem = 波形总览条（M4.3c；Space 渲染后显示，点击/拖动跳转）
     SOURCES
         bridge/ChartViewItem.cpp
         bridge/ChartViewItem.hpp
+        bridge/WaveformOverviewItem.cpp
+        bridge/WaveformOverviewItem.hpp
 )
 
 # qmltyperegistrar 生成 #include <ChartViewItem.hpp>（按 basename）；

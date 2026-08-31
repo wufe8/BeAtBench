@@ -36,6 +36,11 @@ public:
     /// 拍位 → 微秒。
     std::int64_t time_us(Position p) const;
 
+    /// 该拍位生效 BPM（分段积分语义：取 start ≤ pos 的最后一个 BPM 分段；
+    /// 同 pos 后者覆盖与 rebuild 一致）。STOP 秒换算 = count×1.25/bpm_at。
+    /// 无该 measure / 无分段 → 0.0。
+    double bpm_at(Position p) const;
+
     /// 微秒 → 拍位（时间超出谱面末尾时返回末尾附近位置）。
     std::optional<Position> position_at(std::int64_t time_us) const;
 

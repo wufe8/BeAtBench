@@ -132,6 +132,11 @@ Item {
         return chartView ? chartView.centerMeasure() : 0
     }
 
+    /// 秒 → 视口滚动（波形总览 seek；--seek 调试走同一路径）。
+    function seekToSeconds(sec) {
+        if (chartView) chartView.seekToSeconds(sec)
+    }
+
     /// 元信息载入（Main 打开谱面后调用 → metaPanel.reload()）。
     function reloadMeta() {
         if (metaPanel) metaPanel.reload()

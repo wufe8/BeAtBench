@@ -133,6 +133,10 @@ public:
     /// factor > 1 放大；内部换算锚点拍位 → 新 measureHeight → 反推 scrollY。
     Q_INVOKABLE void zoomAt(qreal screenY, qreal factor);
 
+    /// M4.3c 波形总览跳转：秒 → 拍位（TimingEngine::position_at）→ 滚动视口
+    /// （目标拍位居中；topHigh 已处理）。无 timing/超出 → no-op。
+    Q_INVOKABLE void scrollToTime(double seconds);
+
     /// 屏幕矩形内 note 枚举（clipboard.copy 的 selection 数组：{measure, pos:{num,den},
     /// lane:{player,kind,index}, sample}；按 (measure,pos) 稳定升序）。
     Q_INVOKABLE QVariantList notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) const;
@@ -258,9 +262,9 @@ private:
     QObject* m_session = nullptr;
     QObject* m_theme = nullptr;
     qreal m_measureHeight = 96.0;
-    qreal m_rulerWidth = 56.0;
+    qreal m_rulerWidth = 56.0;  // 左列：小节号 + 秒标尺（m:ss；2026-09 回收窄——双行字号 11px 够）
     qreal m_laneWidth = 38.0;
-    qreal m_metaTrackWidth = 36.0;  // BPM/STOP 元事件轨宽（窄于普通轨道，iBMSC 式）
+    qreal m_metaTrackWidth = 48.0;  // BPM/STOP 元事件轨宽（2026-09 36→48：BPM 线秒行 m:ss.cc 显示）
     qreal m_scrollY = 0.0;
     bool m_topHigh = true;
     int m_snapNum = 1;   // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）

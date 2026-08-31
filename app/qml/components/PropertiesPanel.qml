@@ -292,7 +292,7 @@ ColumnLayout {
                 Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
             }
         }
-        // STOP：数值（按单位换算）+ 引用 id
+        // STOP：数值（按单位换算）+ 实际时长（count×1.25/生效BPM；用户 2026-09 需要）
         RowLayout {
             visible: root._singleMeta && root._singleMeta.kind === "stop"
             Layout.fillWidth: true
@@ -306,6 +306,26 @@ ColumnLayout {
                 font.pixelSize: Theme.fsSmall
                 elide: Text.ElideRight
                 Layout.minimumWidth: 0   // 隐式宽=文本宽 → 撑宽 dock；限制可收缩（elide 处理显示）
+            }
+        }
+        // 实际时长（括号：秒）；⚠️ 换算 BPM 用 stopBpm（窗口头部 BPM）——实际应为
+        // STOP 拍位生效 BPM（变速后 STOP 时长不同）；精确值由 ChartView 轨显示
+        //（bpm_at 已接入），此处为快捷参考（2026-09 用户要求加括号实际时间）。
+        RowLayout {
+            visible: root._singleMeta && root._singleMeta.kind === "stop"
+            Layout.fillWidth: true
+            spacing: 6
+            Label { text: qsTr("时长"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 40 }
+            Label {
+                Layout.fillWidth: true
+                text: root._singleMeta ? "(" + (root.stopBpm > 0
+                        ? (root._singleMeta.value * 1.25 / root.stopBpm).toFixed(2) + "s"
+                        : "?") + ")" : ""
+                color: Theme.textMuted
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideRight
+                Layout.minimumWidth: 0
             }
         }
         RowLayout {

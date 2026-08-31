@@ -30,6 +30,8 @@ add_library(beatbench_audio STATIC
   src/sample_player.cpp
   src/sample_cache.cpp
   src/chart_renderer.cpp
+  src/audio_path.cpp
+  src/waveform_pyramid.cpp
 )
 target_include_directories(beatbench_audio
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/core/include

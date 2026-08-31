@@ -91,6 +91,17 @@ ApplicationWindow {
                 editPage.locateChartView().zoomAt(debugZoomY, debugZoomFactor)
         }
     }
+    // --seek <秒>：调试跳转（波形总览 seekRequested 同一路径；配 --wait-render 验收）
+    property real debugSeekSeconds: -1
+    onDebugSeekSecondsChanged: if (debugSeekSeconds >= 0) debugSeekTimer.restart()
+    Timer {
+        id: debugSeekTimer
+        interval: 400
+        onTriggered: {
+            if (typeof editPage !== "undefined" && editPage && editPage.locateChartView())
+                editPage.locateChartView().seekToSeconds(debugSeekSeconds)
+        }
+    }
     // --delete-selection：点击后自动 Del（验收删除链）
     property bool debugDeleteSelection: false
     onDebugDeleteSelectionChanged: if (debugDeleteSelection) debugDeleteTimer.restart()
@@ -766,6 +777,10 @@ ApplicationWindow {
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
     property string debugOpenPath: ""
     onDebugOpenPathChanged: if (debugOpenPath !== "") openChart(debugOpenPath)
+    // --wait-render 截图等待标志（main.cpp 轮询；波形验收用）
+    property bool debugRenderDone: false
+    // 渲染完成次数（--wait-render 增量验收：等待全量 + 增量都完成）
+    property int debugRenderCount: 0
     // --settings 调试参数：启动即打开首选项（M4.2 设置页验收）
     property bool debugOpenSettings: false
     onDebugOpenSettingsChanged: if (debugOpenSettings) settingsDialog.open()
@@ -810,6 +825,25 @@ ApplicationWindow {
     property double debugDragY1: -1
     property double debugDragX2: -1
     property double debugDragY2: -1
+    /// --click-after-render <x> <y>：渲染完成后再模拟点击（增量重渲染验收：
+    /// 先全量渲染 → 编辑 note → 触发 refresh → 自动增量渲染 → 波形更新）。
+    property double debugClickAfterRenderX: -1
+    property double debugClickAfterRenderY: -1
+    onDebugClickAfterRenderXChanged: debugMaybeClickAfterRender()
+    onDebugClickAfterRenderYChanged: debugMaybeClickAfterRender()
+    function debugMaybeClickAfterRender() {
+        if (debugClickAfterRenderX < 0 || debugClickAfterRenderY < 0) return
+        debugClickAfterRenderTimer.restart()
+    }
+    Timer {
+        id: debugClickAfterRenderTimer
+        interval: 150
+        onTriggered: {
+            // 等 renderFinished（waveform.visible 置 true）后再点击
+            if (!window.debugRenderDone) { debugClickAfterRenderTimer.restart(); return }
+            editPage.clickLocal(debugClickAfterRenderX, debugClickAfterRenderY)
+        }
+    }
     /// --render <out.wav>：调试——启动后自动 renderChartToFile（复现 Space 渲染；M4.3b）
     property string debugRenderPath: ""
     onDebugRenderPathChanged: debugRenderTimer.restart()
@@ -924,8 +958,10 @@ ApplicationWindow {
         return decodeURIComponent(s)
     }
 
-    // ---------- M4.3b：渲染当前谱面 → 混音 WAV（Space 触发验证；M5 改为播放） ----------
-    // 输出 = 谱面同目录 <basename>-render.wav（验证阶段；将来导出对话框/后台化）。
+    // ---------- M4.3c+：后台异步渲染当前谱面 → 混音 WAV（Space 触发；M5 改为播放） ----------
+    // 多线程（用户 2026-09 拍板）：renderAsync 提交 QThreadPool 后台解码+混音，
+    // UI 不卡；完成时 renderFinished 信号 → 状态栏提示。输出 = 谱面同目录
+    // <basename>.render.wav（验证阶段；将来导出对话框）。
     function renderChartToFile() {
         if (typeof chartSession === "undefined" || !chartSession || !chartSession.hasChart) return
         if (chartPath === "") return
@@ -936,11 +972,26 @@ ApplicationWindow {
         var dot = base.lastIndexOf(".")
         var stem = dot > 0 ? base.substring(0, dot) : base
         var out = dir + stem + ".render.wav"
-        var ok = chartSession.renderToFile(out, 44100.0)
-        if (ok) {
-            setStatus(qsTr("已渲染：%1（Space 后续改为播放）").arg(out))
+        var ok = chartSession.renderAsync(44100.0)
+        if (!ok) {
+            setStatus(qsTr("渲染进行中…（请稍候；完成时提示）"))
         } else {
-            setStatus(qsTr("渲染失败：%1").arg(chartSession.errorMessage()))
+            setStatus(qsTr("渲染中…（后台线程，可继续编辑）"))
+        }
+    }
+    // 后台渲染完成（ChartSession.renderFinished 转发）→ 状态栏
+    Connections {
+        target: typeof chartSession !== "undefined" ? chartSession : null
+        function onRenderFinished(ok, outPath, durationSec) {
+            // 调试（--wait-render）：截图等待标志（main.cpp 轮询窗口属性）
+            window.debugRenderDone = true
+            // 渲染完成计数（--wait-render 增量验收：等全量+增量都完成）
+            window.debugRenderCount += 1
+            if (ok) {
+                setStatus(qsTr("已渲染：%1（%2 秒）").arg(outPath).arg(durationSec.toFixed(1)))
+            } else {
+                setStatus(qsTr("渲染失败：%1").arg(chartSession.errorMessage()))
+            }
         }
     }
 

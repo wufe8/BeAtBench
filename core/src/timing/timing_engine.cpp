@@ -207,6 +207,22 @@ std::int64_t TimingEngine::time_us(Position p) const {
     return static_cast<std::int64_t>(std::llround((mm.start_sec + rel) * 1e6));
 }
 
+double TimingEngine::bpm_at(Position p) const {
+    const Impl& im = *impl_;
+    const auto it = im.measures.find(p.measure);
+    if (it == im.measures.end()) return 0.0;
+    const auto& mm = it->second;
+    const double pos = rational_to_double(p.pos);
+    double bpm = 0.0;
+    for (const auto& s : mm.segs) {
+        // 分段乘积区间 [start, end)：pos ∈ [start, end) 生效（同 pos 前者）
+        if (pos >= s.start && (pos < s.end || s.end == 1.0)) { bpm = s.bpm; break; }
+    }
+    // 兜底：pos 落在段外（浮点边界）→ 取最后段
+    if (bpm == 0.0 && !mm.segs.empty()) bpm = mm.segs.back().bpm;
+    return bpm;
+}
+
 std::optional<Position> TimingEngine::position_at(std::int64_t t_us) const {
     const Impl& im = *impl_;
     if (im.measures.empty()) return std::nullopt;
