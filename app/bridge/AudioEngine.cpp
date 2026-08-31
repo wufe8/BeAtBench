@@ -120,7 +120,11 @@ AudioEngine::AudioEngine(QObject* parent)
             }
         }
         // M5 播放时钟：播放中 positionSec 持续变化 → playbackChanged（20Hz 状态栏刷新）
-        if (m_playback.playing()) emit playbackChanged();
+        if (m_playback.playing()) {
+            emit playbackChanged();
+            // M5.2 A-B 循环：播放头越过 B → 绕回 A（playbackChanged 后触发——UI 已刷新）
+            if (m_playback.loopTick()) emit playbackChanged();
+        }
     });
     poll->start();
 }
@@ -419,6 +423,30 @@ bool AudioEngine::seekSeconds(double seconds) {
 void AudioEngine::setWaitRenderSetting(bool v) {
     m_waitRenderSetting = v;
     emit waitRenderSettingChanged();
+}
+
+bool AudioEngine::setLoopA() {
+    const double cur = m_playback.currentSec();
+    // 同点再点 = 解除（当前 A == 位置 → -1）
+    const double a = (m_playback.loopA() >= 0.0 &&
+                      std::abs(m_playback.loopA() - cur) < 0.01) ? -1.0 : cur;
+    m_playback.setLoopGap(a, m_playback.loopB());
+    emit playbackChanged();
+    return a >= 0.0;
+}
+
+bool AudioEngine::setLoopB() {
+    const double cur = m_playback.currentSec();
+    const double b = (m_playback.loopB() >= 0.0 &&
+                      std::abs(m_playback.loopB() - cur) < 0.01) ? -1.0 : cur;
+    m_playback.setLoopGap(m_playback.loopA(), b);
+    emit playbackChanged();
+    return b >= 0.0;
+}
+
+void AudioEngine::setLoopEnabled(bool v) {
+    m_playback.setLoopEnabled(v);
+    emit playbackChanged();
 }
 
 /// 音频路径解析 + 扩展名回退（非成员静态；playPreview 调用）。

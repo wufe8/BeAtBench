@@ -41,6 +41,9 @@ Item {
     property var metaSelection: []       // 选中 BGA/BPM/STOP 对象集合（回填 view.metaSelection 高亮）
     property bool perfLog: false         // paint 帧耗时采样（--perf-log）
     property bool _ctrlHeld: false       // 本次按下是否 Ctrl（多选切换）
+    /// M5.2 播放头跟随（默认开——用户拍板；用户滚动自动置 false；工具条 checkbox 经
+    /// EditPage.followPlayhead 绑定此属性）
+    property bool followPlayhead: true
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
@@ -83,12 +86,33 @@ Item {
         selection: root.selection
         metaSelection: root.metaSelection
         perfLog: root.perfLog
+        // M5.2 播放头跟随（单向：root.followPlayhead → view；用户滚动改 root
+        // （EditPage.followPlayhead 绑定 root → 工具条 checkbox 自动更新）
+        // ⚠️ 不写 onFollowPlayheadChanged 回写——双向回写 QML 会断绑定（2026-09 实测）
+        followPlayhead: root.followPlayhead
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）
         showChannelIds: root.showChannelIds !== keyMonitor.ctrlHeld
         onChartChanged: {
             // 谱面切换 → 定位到开头（hi-top 下小节 0 在视口底部）
             view.scrollY = view.topHigh ? Math.max(0, view.contentHeight - view.height) : 0
         }
+    }
+
+    // ---- M5.2 播放头叠层（性能拆层 2026-09）：红线 + A/B 标记只重绘本层（<1ms），
+    //     播放时钟 20Hz 更新不触发 ChartViewItem 全量重绘（30fps → 60fps+） ----
+    PlayheadOverlayItem {
+        id: playheadOverlay
+        anchors.fill: view
+        session: typeof chartSession !== "undefined" ? chartSession : null
+        measureHeight: view.measureHeight
+        scrollY: view.scrollY
+        contentHeight: view.contentHeight
+        topHigh: view.topHigh
+        rulerWidth: view.rulerWidth
+        playheadSec: -1
+        loopASec: -1
+        loopBSec: -1
+        z: 10
     }
 
     // ---- M4.3c 波形总览条（2026-09 用户：右侧垂直条；Space 渲染后显示；点击/拖动跳转） ----
@@ -124,9 +148,32 @@ Item {
         target: typeof chartSession !== "undefined" ? chartSession : null
         function onDocumentChanged() {
             waveform.visible = false
+            view.playheadSec = -1  // 谱面切换：隐藏播放头（等新渲染/播放）
         }
         function onContentChanged() {
             waveform.visible = false
+            // 编辑即停（AudioEngine 已停）；播放头保留当前时间点（暂停态位置）
+        }
+    }
+
+    // ---- M5.2 播放头：当前时间点红线 + 视口跟随 ----
+    // 时间源 = AudioEngine 播放时钟（20Hz 刷新；暂停/停止也显示当前位置）。
+    // 跟随：播放头出安全区 → 视口滚动（自动）；用户滚动 → 关闭（见 wheel/滚动条）。
+    Connections {
+        target: typeof audioEngine !== "undefined" ? audioEngine : null
+        function onPlaybackChanged() {
+            // 位置（秒）→ 播放头（overlay 红线；暂停/停止 = 冻结位置；无 PCM = 隐藏）
+            if (typeof audioEngine !== "undefined" && audioEngine.hasPcm) {
+                const pos = audioEngine.positionSec
+                playheadOverlay.playheadSec = pos   // 叠层绘线（低成本）
+                playheadOverlay.loopASec = audioEngine.loopA
+                playheadOverlay.loopBSec = audioEngine.loopB
+                view.playheadSec = pos               // 跟随 tick 数据源（ChartViewItem）
+                // 硬锁定跟随：**只在播放中**钉播放头在视口 90%（底部 10%）——
+                // 暂停/停止自由滚动（用户 2026-09「只要在播放期间锁定即可」）
+                if (view.followPlayhead && audioEngine.playing)
+                    view.followPlayheadTick()
+            }
         }
     }
 
@@ -212,8 +259,15 @@ Item {
             const dy = event.pixelDelta.y !== 0 ? event.pixelDelta.y
                                                 : event.angleDelta.y / 120 * 48
             view.scrollY -= dy
+            root.userScroll()  // 用户滚动 → 关跟随
             event.accepted = true
         }
+    }
+
+    /// 用户主动滚动：**不阻断**（跟随只在播放中锁定——用户 2026-09「只要在播放期间锁定即可」；
+    /// 暂停/停止可自由滚动浏览）。此函数保留为空壳（原自动关跟随逻辑废弃——硬锁定优先）。
+    function userScroll() {
+        // no-op：跟随开启时仅播放中锁定（见 onPlaybackChanged 的 playing 判定）
     }
 
     // 手势（M3 接线）：列头命中 → 展开；否则按工具分发：
@@ -343,6 +397,7 @@ Item {
         if (_dragged) {
             view.scrollY -= (y - _lastY)
             view.scrollX -= (x - _lastX)
+            root.userScroll()  // 拖动滚动 → 关跟随
         }
         _lastY = y
         _lastX = x
@@ -556,11 +611,14 @@ Item {
                 grabOffset = mouse.y - vthumb.y
                 view.scrollY = (mouse.y - vthumb.height / 2) /
                                Math.max(1, vbar.height - vthumb.height) * vbar.maxY
+                root.userScroll()
             }
             onPositionChanged: (mouse) => {
-                if (pressed)
+                if (pressed) {
                     view.scrollY = (mouse.y - grabOffset) /
                                    Math.max(1, vbar.height - vthumb.height) * vbar.maxY
+                    root.userScroll()
+                }
             }
         }
     }

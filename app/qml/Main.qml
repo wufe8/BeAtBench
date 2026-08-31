@@ -455,7 +455,41 @@ ApplicationWindow {
                     ToolTip.text: qsTr("勾选=Ctrl+滚轮缩放时往鼠标位置放大（锚点=光标拍位）；"
                                        + "未勾=固定往视口中心放大") }
                 Item { Layout.fillWidth: true }
-                BbToolButton { text: qsTr("▶ 试听（Phase B）"); enabled: false }
+                // ---- M5 播放控制（工具条右区）：跟随 / A/B 循环 / 播放 / 暂停 ----
+                BbCheckBox {
+                    text: qsTr("跟随")
+                    checked: editPage.followPlayhead
+                    onToggled: editPage.setFollowPlayhead(checked)
+                    visible: chartMeta !== null
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("播放时视口锁定跟随播放头（底部 20% 固定高度）；用户滚动自动关闭")
+                }
+                BbToolButton { text: qsTr("A")
+                               enabled: chartMeta !== null
+                               highlighted: audioEngine && audioEngine.loopA >= 0
+                               onClicked: {
+                                   var on = audioEngine.setLoopA()
+                                   setStatus(on ? qsTr("循环起点 A = %1 秒（再点解除）").arg(audioEngine.loopA.toFixed(2))
+                                                : qsTr("循环起点 A 已解除"))
+                               }
+                               ToolTip.visible: hovered
+                               ToolTip.text: qsTr("设循环起点 A（当前播放位置；再点解除）") }
+                BbToolButton { text: qsTr("B")
+                               enabled: chartMeta !== null
+                               highlighted: audioEngine && audioEngine.loopB >= 0
+                               onClicked: {
+                                   var on = audioEngine.setLoopB()
+                                   setStatus(on ? qsTr("循环终点 B = %1 秒（再点解除）").arg(audioEngine.loopB.toFixed(2))
+                                                : qsTr("循环终点 B 已解除"))
+                               }
+                               ToolTip.visible: hovered
+                               ToolTip.text: qsTr("设循环终点 B（当前播放位置；再点解除）") }
+                BbToolButton { text: audioEngine && audioEngine.playing ? qsTr("⏸") : qsTr("▶")
+                               enabled: chartMeta !== null
+                               onClicked: togglePlayback()
+                               highlighted: audioEngine && audioEngine.playing
+                               ToolTip.visible: hovered
+                               ToolTip.text: qsTr("播放/暂停（Space）") }
                 Label { text: window.modeLabel(); color: Theme.accent; font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall; padding: 4 }
             }

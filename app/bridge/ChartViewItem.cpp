@@ -88,6 +88,8 @@ void ChartViewItem::setSession(QObject* session) {
 void ChartViewItem::setTheme(QObject* theme) {
     if (m_theme == theme) return;
     m_theme = theme;
+    invalidateBgTile();  // M7 性能：tile 用主题色
+    clearHaloCache();    // M7 性能：halo 文本色缓存随主题失效
     emit themeChanged();
     update();
 }
@@ -151,6 +153,7 @@ void ChartViewItem::setMeasureHeight(qreal v) {
     // 中心拍位恒为负 → setScrollY 钳到最底，Ctrl+滚轮必跳回 01 小节）。
     const qreal centerMf = measureAt(height() / 2.0);
     m_measureHeight = v;
+    invalidateBgTile();  // M7 性能：tile 依赖缩放
     const qreal centerContent = m_topHigh
                                     ? (contentHeight() - centerMf * m_measureHeight)
                                     : (centerMf * m_measureHeight);
@@ -198,6 +201,7 @@ void ChartViewItem::setRulerWidth(qreal v) {
 void ChartViewItem::setLaneWidth(qreal v) {
     if (qFuzzyCompare(m_laneWidth, v)) return;
     m_laneWidth = v;
+    invalidateBgTile();  // M7 性能：列宽在 tile 内
     emit laneWidthChanged();
     update();
 }
@@ -218,6 +222,7 @@ qreal ChartViewItem::contentHeight() const {
 void ChartViewItem::setTopHigh(bool v) {
     if (m_topHigh == v) return;
     m_topHigh = v;
+    invalidateBgTile();  // M7 性能：方向翻转为上下镜像（tile 内容坐标不变，无需滑——
     emit topHighChanged();
     update();
 }
@@ -230,6 +235,7 @@ void ChartViewItem::setSnapNum(int v) {
     const int clamped = std::clamp(v, 1, 999);
     if (m_snapNum == clamped) return;
     m_snapNum = clamped;
+    invalidateBgTile();  // M7 性能：槽位弱线在 tile 内
     emit snapNumChanged();
     update();
 }
@@ -238,6 +244,7 @@ void ChartViewItem::setSnapDen(int v) {
     const int clamped = std::clamp(v, 1, 192);
     if (m_snapDen == clamped) return;
     m_snapDen = clamped;
+    invalidateBgTile();  // M7 性能：槽位弱线在 tile 内
     emit snapDenChanged();
     update();
 }
@@ -632,6 +639,7 @@ void ChartViewItem::setNoteSampleMode(int v) {
     const int clamped = std::clamp(v, 0, 2);
     if (m_noteSampleMode == clamped) return;
     m_noteSampleMode = clamped;
+    clearHaloCache();  // M7 性能：标签模式切换清 halo 缓存
     emit noteSampleModeChanged();
     update();
 }
@@ -662,6 +670,54 @@ void ChartViewItem::setPerfLog(bool v) {
     if (m_perfLog == v) return;
     m_perfLog = v;
     emit perfLogChanged();
+}
+
+void ChartViewItem::setPlayheadSec(double v) {
+    if (qFuzzyCompare(m_playheadSec, v)) return;
+    m_playheadSec = v;
+    emit playheadSecChanged();
+    // ⚠️ 不 update()：播放头线已迁 PlayheadOverlayItem（性能拆层 2026-09）——
+    // 本值只服务 followPlayheadTick（读 m_playheadSec）；重绘由 overlay 承担。
+}
+
+void ChartViewItem::setFollowPlayhead(bool v) {
+    if (m_followPlayhead == v) return;
+    m_followPlayhead = v;
+    emit followPlayheadChanged();
+}
+
+void ChartViewItem::setLoopASec(double v) {
+    if (qFuzzyCompare(m_loopASec, v)) return;
+    m_loopASec = v;
+    emit loopASecChanged();
+    update();
+}
+
+void ChartViewItem::setLoopBSec(double v) {
+    if (qFuzzyCompare(m_loopBSec, v)) return;
+    m_loopBSec = v;
+    emit loopBSecChanged();
+    update();
+}
+
+bool ChartViewItem::followPlayheadTick() {
+    if (!m_followPlayhead || m_playheadSec < 0.0) return false;
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->timing()) return false;
+    const auto pos = cs->timing()->position_at(
+        static_cast<std::int64_t>(m_playheadSec * 1e6));
+    if (!pos) return false;
+    const qreal h = height();
+    if (h <= 0) return false;
+    // ⚠️ **硬锁定**：播放头无条件钉在视口 90%（底部 10% 固定高度）——
+    // 不判断安全区、不滑动，每次 tick 直接算 scrollY 让播放头 = 90%。
+    // （用户 2026-09：底部 10% 观感更好；只在播放中锁定——QML 侧 playing 判定）
+    const qreal cPx = (static_cast<qreal>(pos->measure) + posDouble(pos->pos)) * m_measureHeight;
+    const qreal targetY = h * 0.90;
+    const qreal contentC = m_topHigh ? (contentHeight() - cPx) : cPx;
+    const qreal newScroll = contentC - targetY;
+    setScrollY(std::clamp(newScroll, 0.0, std::max<qreal>(0.0, contentHeight() - h)));
+    return true;
 }
 
 qreal ChartViewItem::metaTrackWidth() const {
@@ -1140,7 +1196,83 @@ void ChartViewItem::rebuildColumns() {
     emit contentWidthChanged();  // 2026-09：列重建（含 BGM 展开/收起）后列宽变化 → QML 水平滚动条
                                  // visible 绑定重算（此前只发 columnCountChanged，hbar 永不出现在
                                  // 底部——内容超宽时也没有横向滚动条）。
+    invalidateBgTile();  // M7 性能：列布局在 tile 内
     update();
+}
+
+/// M7 性能：背景 tile 重建（2 小节周期：底纹交替 + 网格 + 列底色/分隔）。
+/// tile 内容坐标 = 小节内相对位置（不随 scrollY）；paint 用 drawTiledPixmap 平铺。
+/// ⚠️ 只含「滚动时内容不动」的静态层；note/标尺/元轨/文本仍动态重画。
+void ChartViewItem::rebuildBgTile(const beatbench::Chart* chart,
+                                  const ThemeManager* th, qreal w, qreal h,
+                                  qreal metaRight) {
+    const int tileH = static_cast<int>(std::ceil(m_measureHeight * 2.0));  // 2 小节周期
+    if (tileH < 8 || w < 8) { m_bgTile = QImage(); return; }
+    QImage tile(static_cast<int>(std::ceil(w)), tileH, QImage::Format_ARGB32_Premultiplied);
+    tile.fill(th ? th->bg() : QColor(QStringLiteral("#0b0d10")));
+    QPainter tp(&tile);
+
+    // 列底色/分隔（纵向周期 = 小节高，tile 含 2 小节 → 重复两次）
+    const auto drawCols = [&](int y0) {
+        for (std::size_t i = 0; i < m_columns.size(); ++i) {
+            const QRectF r = m_colRects[i];  // 已算好（不随 y）
+            QColor tint = Qt::transparent;
+            const Column& col = m_columns[i];
+            if (col.bgm) {
+                tint = th->wave();
+                if (col.bgmId != 0) tint.setAlpha(18);
+            } else if (col.lane.kind == beatbench::LaneKind::Scratch) {
+                tint = th->accent();
+                tint.setAlpha(26);
+            } else if (col.lane.kind == beatbench::LaneKind::Key && th->keyLaneTintAlpha() > 0) {
+                tint = noteColor(col.lane);
+                tint.setAlpha(static_cast<int>(th->keyLaneTintAlpha()));
+            } else if (col.p2) {
+                tint = th->primary();
+                tint.setAlpha(13);
+            } else if (col.bgaLayer >= 0) {
+                tint = th->primarySoft();
+                tint.setAlpha(22);
+            }
+            if (tint.alpha() > 0) tp.fillRect(QRectF(r.x(), y0, r.width(), m_measureHeight), tint);
+            tp.setPen(QPen(th->border(), 1.0));
+            tp.drawLine(QPointF(r.x(), y0), QPointF(r.x(), y0 + m_measureHeight));
+        }
+    };
+
+    // 2 小节：底纹（奇数小节）+ 网格 + 列
+    const int num = std::max(1, m_snapNum), den = std::max(1, m_snapDen);
+    const int slotCount = std::max(1, den / num);
+    const bool drawWeak = m_showGrid && slotCount > 1 && slotCount <= 64;
+    QColor alt = th->surface();
+    alt.setAlpha(70);
+    QPen strong(th->borderStrong());
+    strong.setWidthF(1.0);
+    QColor weakC = th->border();
+    weakC.setAlpha(140);
+    QPen weak(weakC);
+    weak.setWidthF(1.0);
+    for (int sub = 0; sub < 2; ++sub) {
+        const int y0 = static_cast<int>(sub * m_measureHeight);
+        if (sub == 1) tp.fillRect(QRectF(0, y0, w, m_measureHeight), alt);  // 奇数小节底纹
+        if (drawWeak) {
+            for (int i = 1; i < slotCount; ++i) {
+                const qreal yy = y0 + (i / static_cast<qreal>(slotCount)) * m_measureHeight;
+                tp.setPen(weak);
+                tp.drawLine(QPointF(metaRight, yy), QPointF(w, yy));
+            }
+        }
+        tp.setPen(strong);
+        tp.drawLine(QPointF(metaRight, y0), QPointF(w, y0));  // 小节强线
+        drawCols(y0);
+    }
+
+    m_bgTile = std::move(tile);
+    m_bgTileW = w;
+    m_bgTileMeasureH = m_measureHeight;
+    m_bgTileSnapNum = m_snapNum;
+    m_bgTileSnapDen = m_snapDen;
+    m_bgTileDirty = false;
 }
 
 void ChartViewItem::drawHint(QPainter* p, const QString& text) {
@@ -1214,49 +1346,33 @@ void ChartViewItem::paint(QPainter* p) {
         if (first > last) return;  // 视口在谱面末之后（空窗口）
     }
 
-    // ---- 小节底纹（交叉间隔） ----
-    QColor alt = th->surface();
-    alt.setAlpha(70);
-    for (int m = first; m <= last; ++m) {
-        if (m % 2 == 1) p->fillRect(QRectF(0, yOf(m), w, m_measureHeight), alt);
-    }
-
-    // ---- 轨道列底色 / 分隔 ----
-    for (std::size_t i = 0; i < m_columns.size(); ++i) {
-        const QRectF& r = m_colRects[i];
-        const Column& col = m_columns[i];
-        // ⚠️ 默认构造 QColor = 黑（alpha 255）；无 tint 的列（key 键轨/BPM/STOP）必须用
-        // Qt::transparent（alpha 0），否则 alpha()>0 判定误判 → 整列填黑（2026-09 用户：
-        // 深色 skin 下 key 轨显黑、浅色 skin 下 key 轨也是黑）。
-        QColor tint = Qt::transparent;
-        if (col.bgm) {
-            tint = th->wave();
-            if (col.bgmId != 0) tint.setAlpha(18);  // 展开列：更淡的底色（2026-08 跟进，保对比度）
-        } else if (col.lane.kind == beatbench::LaneKind::Scratch) {
-            tint = th->accent();
-            tint.setAlpha(26);  // ≈ preview .lane.scratch 7%
-        } else if (col.lane.kind == beatbench::LaneKind::Key && th->keyLaneTintAlpha() > 0) {
-            // 键轨底色（每轨轻着色，doc/10 §2）：按通道序循环 n1..n4，按 keyLaneTintAlpha 铺底；
-            // 0(alpha)= 关闭（= 原无 tint 行为）。给 key 轨「轨感」，深/浅皮肤下都不至于素/黑。
-            tint = noteColor(col.lane);
-            tint.setAlpha(static_cast<int>(th->keyLaneTintAlpha()));
-        } else if (col.p2) {
-            tint = th->primary();
-            tint.setAlpha(13);
-        } else if (col.bgaLayer >= 0) {
-            tint = th->primarySoft();  // BGA 图层列（更多轨道）
-            tint.setAlpha(22);
+    // ---- M7 性能：背景 tile 平铺（底纹/列底/网格——滚动只 blit，不逐线画） ----
+    // tile 无效化条件：theme/缩放/snap/列布局/宽度/方向变化（setter 置 m_bgTileDirty）。
+    {
+        const bool needRebuild = m_bgTileDirty || m_bgTile.isNull() ||
+            !qFuzzyCompare(m_bgTileW, w) ||
+            !qFuzzyCompare(m_bgTileMeasureH, m_measureHeight) ||
+            m_bgTileSnapNum != m_snapNum || m_bgTileSnapDen != m_snapDen;
+        if (needRebuild) {
+            rebuildBgTile(&chart, th, w, h, metaRight);
         }
-        if (tint.alpha() > 0) p->fillRect(r, tint);
-        if (col.lane.kind == beatbench::LaneKind::Key && m_debugLaneTint) {
-            qInfo("DBG lane key col=%zu x=%f w=%f tint.alpha=%d bg=%s", i, r.x(), r.width(),
-                  tint.alpha(), qPrintable(th ? th->bg().name() : QStringLiteral("nil")));
+        if (!m_bgTile.isNull()) {
+            // M7 性能：逐小节 blit tile 的对应半节行（每可见小节一次 drawImage——替代几百
+            // drawLine/fillRect）。tile 高 = 2×measureHeight（sub0=偶数小节内容, sub1=奇数）。
+            // ⚠️ 相位不搞 drawTiledPixmap（顶/底镜像易错）——逐小节对应子节最直白。
+            const int halfH = static_cast<int>(std::round(m_measureHeight));
+            const int tileH = m_bgTile.height();
+            for (int m = first; m <= last; ++m) {
+                const qreal y0 = yOf(m);
+                const int sub = m & 1;
+                QRectF dst(0, y0, w, m_measureHeight);
+                QRect src(0, sub == 0 ? 0 : halfH, static_cast<int>(std::ceil(w)), halfH);
+                // 夹逼（视口边缘小节只画可见部分也可——blit 超界安全：QRectF 与 QRect
+                // 混合会被裁剪，直接画）
+                p->drawImage(dst, m_bgTile, src);
+            }
         }
-        p->setPen(QPen(th->border(), 1.0));
-        p->drawLine(r.topLeft(), r.bottomLeft());
     }
-
-    // ---- 网格（小节强线 + 槽位弱线） ----
     QPen strong(th->borderStrong());
     strong.setWidthF(1.0);
     QColor weakC = th->border();
@@ -1450,6 +1566,8 @@ void ChartViewItem::paint(QPainter* p) {
     // 文件名模式 <10fps）→ 改为 8 方向 0.6px 偏移 drawText（快）。2026-09 用户：**id 与文件名都
     // 要描边**（原来 id 模式贴 note 内裁剪、无描边，note 窄时看不清）→ 统一走 halo，不再区分
     // 短文本单次深色绘制（短文本也在亮 note 上叠同色 halo，贴深底溢出部分才可见，无副作用）。
+    // ⚠️ M7 性能（2026-09）：8 方向 drawText ≈ 9×/note → note 标签模式 15ms。改**预渲染缓存**：
+    // 同一 label+halo色+bg色 → QImage（一次画好 8 方向描边+文字），paint 只 drawImage 一次。
     const auto drawHaloLabel = [&](const QRectF& cell, const qreal y, const QString& label,
                                    const QColor& halo) {
         if (label.isEmpty()) return;
@@ -1458,17 +1576,38 @@ void ChartViewItem::paint(QPainter* p) {
         const int tw = fm.horizontalAdvance(label);
         const qreal baseline = (y - noteH / 2.0) + (fm.ascent() - fm.descent()) / 2.0;
         const QPointF bp(cell.center().x() - tw / 2.0, baseline);
-        // 8 方向浅色描边 + 中心深色（深底也清晰；亮 note 上描边同色不可见，无副作用）
-        static constexpr qreal kR = 0.6;
-        p->setPen(halo);
-        for (int i = 0; i < 8; ++i) {
-            const qreal dx = (i % 3 - 1) * kR;
-            const qreal dy = (i / 3 - 1) * kR;
-            if (dx == 0 && dy == 0) continue;
-            p->drawText(bp + QPointF(dx, dy), label);
+        // 缓存 key = label + halo色 + bg色 + 字号
+        const QColor bg = th->bg();
+        const HaloKey key{label, halo.rgb(), bg.rgb(), m_noteLabelFont.pixelSize()};
+        const auto it = m_haloCache.find(key);
+        if (it != m_haloCache.end()) {
+            // 命中：drawImage（bitmap 以文字中心为锚，paint 摆到 bp）
+            const QImage& img = it->second;
+            p->drawImage(QPointF(bp.x() - img.width() / 2.0, bp.y() - img.height() / 2.0), img);
+            return;
         }
-        p->setPen(th->bg());
-        p->drawText(bp, label);
+        // 未命中：预渲染到 QImage（含 8 方向描边 + 中心文字；大小 = 文字 + 描边余量）
+        constexpr int kPad = 3;
+        QImage img(tw + 2 * kPad, fm.height() + 2 * kPad, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        {
+            QPainter ip(&img);
+            ip.setFont(m_noteLabelFont);
+            const QPointF origin(kPad, kPad + fm.ascent());
+            static constexpr qreal kR = 0.6;
+            ip.setPen(halo);
+            for (int i = 0; i < 8; ++i) {
+                const qreal dx = (i % 3 - 1) * kR;
+                const qreal dy = (i / 3 - 1) * kR;
+                if (dx == 0 && dy == 0) continue;
+                ip.drawText(origin + QPointF(dx, dy), label);
+            }
+            ip.setPen(bg);
+            ip.drawText(origin, label);
+        }
+        m_haloCache.emplace(key, img);
+        // drawImage（锚点 = 图片中心 → bp）
+        p->drawImage(QPointF(bp.x() - img.width() / 2.0, bp.y() - img.height() / 2.0), img);
     };
     // note 内采样标签：id 只显示 00-ZZ（无 #WAV 前缀）；文件名去扩展名。两者统一走 drawHaloLabel
     //（带描边、不裁剪——2026-09 用户：原来 id 模式贴 note 内裁剪，note 窄/矮时看不清）。
@@ -1627,6 +1766,9 @@ void ChartViewItem::paint(QPainter* p) {
             }
         }
     }
+
+    // ---- M5.2 播放头红线 / A-B 标记：已迁 PlayheadOverlayItem（性能拆层：
+    // 播放时钟 20Hz 更新只重绘 overlay（<1ms），本画布仅内容/滚动/缩放重绘）----
 
     // ---- 悬停参考线（状态栏拍位位置） ----
     if (m_hoverY >= 0 && m_hoverY < h) {

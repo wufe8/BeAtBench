@@ -27,6 +27,14 @@ Item {
     property bool showExtras: false
     /// 槽位弱线显示开关（「网格」按钮；默认开）。吸附不依赖此开关。
     property bool showGrid: true
+    /// M5.2 播放头跟随（默认开——用户拍板；**单向绑定**：Main checkbox ↔ 本属性；
+    /// 用户滚动 ChartView 内部 root.followPlayhead=false → 本属性自动跟随（绑定）
+    /// ——无需回写，避免 QML 绑定循环断绑（2026-09 实测：双向回写断绑定 → 默认关+无效果））。
+    /// ⚠️ 写入口 = setFollowPlayhead（checkbox onToggled 走它；直接赋值会断绑定）。
+    property bool followPlayhead: chartView ? chartView.followPlayhead : true
+    function setFollowPlayhead(v) {
+        if (chartView) chartView.followPlayhead = v
+    }
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
     property string editorTool: "select"
     /// 平移开关（拖拽选中 note；默认关=自由 2D，勾选=轴锁定）
@@ -332,6 +340,9 @@ Item {
                     showGrid: root.showGrid
                     editorTool: root.editorTool
                     moveMode: root.moveMode
+                    // M5.2 播放头跟随：单向绑定（root.followPlayhead = chartView 的值；
+                    // 用户滚动 ChartView 内部改——此处不设值，只让 root 读）
+                    followPlayhead: root.followPlayhead
                     sampleId: root.sampleId
                     sampleText: root.sampleText
                     selection: root.selection

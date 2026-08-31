@@ -11,10 +11,12 @@
 
 #include <QColor>
 #include <QFont>
+#include <QImage>
 #include <QQuickPaintedItem>
 #include <QtQml/qqmlregistration.h>
 
 #include <vector>
+#include <unordered_map>
 
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/Lane.hpp"
@@ -65,6 +67,13 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(QVariantList metaSelection READ metaSelection WRITE setMetaSelection NOTIFY metaSelectionChanged)
     /// 性能检测：paint 帧耗时采样落日志（--perf-log；每 20 帧一条）
     Q_PROPERTY(bool perfLog READ perfLog WRITE setPerfLog NOTIFY perfLogChanged)
+    /// M5.2 播放头：当前时间点（秒；负值 = 隐藏线）。暂停/停止也显示（当前时间点位置）。
+    Q_PROPERTY(double playheadSec READ playheadSec WRITE setPlayheadSec NOTIFY playheadSecChanged)
+    /// M5.2 播放头跟随（QML 开关；用户滚动自动关由 QML 侧置 false）。
+    Q_PROPERTY(bool followPlayhead READ followPlayhead WRITE setFollowPlayhead NOTIFY followPlayheadChanged)
+    /// M5.2 A-B 循环标记（秒；-1 = 未设）。paint 画虚线标记（A 绿 / B 橙）+ 左侧标签。
+    Q_PROPERTY(double loopASec READ loopASec WRITE setLoopASec NOTIFY loopASecChanged)
+    Q_PROPERTY(double loopBSec READ loopBSec WRITE setLoopBSec NOTIFY loopBSecChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -88,6 +97,17 @@ public:
     void setMetaSelection(const QVariantList& v);
     bool perfLog() const { return m_perfLog; }
     void setPerfLog(bool v);
+    double playheadSec() const { return m_playheadSec; }
+    void setPlayheadSec(double v);
+    bool followPlayhead() const { return m_followPlayhead; }
+    void setFollowPlayhead(bool v);
+    double loopASec() const { return m_loopASec; }
+    void setLoopASec(double v);
+    double loopBSec() const { return m_loopBSec; }
+    void setLoopBSec(double v);
+    /// M5.2 跟随：**硬锁定**——播放头无条件钉在视口 80%（底部 20% 固定高度）。
+    /// QML 每 playbackChanged 调；顶部/底部 20% 处滑动返回 80%。返回 true = 已调整。
+    Q_INVOKABLE bool followPlayheadTick();
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
     qreal contentHeight() const;
@@ -189,6 +209,10 @@ signals:
     void selectionChanged();
     void metaSelectionChanged();
     void perfLogChanged();
+    void playheadSecChanged();
+    void followPlayheadChanged();
+    void loopASecChanged();
+    void loopBSecChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -280,11 +304,49 @@ private:
     bool m_showGrid = true;   // 槽位弱线显示开关（「网格」按钮）
     qreal m_scrollX = 0.0;
     bool m_perfLog = false;  // paint 帧耗时采样（--perf-log）
+    double m_playheadSec = -1.0;  // M5.2 播放头秒（负 = 隐藏；暂停/停止也显示）
+    bool m_followPlayhead = true;  // M5.2 播放头跟随开关（默认开——用户拍板）
+    double m_loopASec = -1.0;     // M5.2 A 循环点秒（-1 = 未设）
+    double m_loopBSec = -1.0;     // M5.2 B 循环点秒（-1 = 未设）
+    // —— M7 性能：背景 tile 缓存（网格/列底/底纹；滚动只 blit，不逐线画） ——
+    // tile = 2 小节周期（偶数+奇数底纹交替）高 × 全宽；内容坐标首行含网格。
+    // 无效化条件：theme/measureHeight/snap/列布局/宽度/方向变化。
+    QImage m_bgTile;
+    qreal m_bgTileW = -1.0;       // 缓存时宽度（无效化用）
+    double m_bgTileMeasureH = -1.0;
+    int m_bgTileSnapNum = -1;
+    int m_bgTileSnapDen = -1;
+    bool m_bgTileDirty = true;    // 需求有效化（theme/列/缩放变化置位）
+    void invalidateBgTile() { m_bgTileDirty = true; }
+    void rebuildBgTile(const beatbench::Chart* chart, const ThemeManager* th,
+                       qreal w, qreal h, qreal metaRight);
     bool m_debugLaneTint = false;  // 调试：打印 key 轨列底色（排查深色皮肤下 key 轨显黑）
     std::vector<Column> m_columns;
     std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
     QFont m_rulerFont;
     QFont m_noteLabelFont;  // note 内采样标签（9px）
+    // —— M7 性能：note 标签 halo 文本预渲染缓存（同一 label+色 → QImage；paint 一次
+    // drawImage 替代 9 次 drawText——note 标签模式性能优化，2026-09） ——
+    struct HaloKey {
+        QString label;
+        QRgb halo = 0;  // noteColor (halo)
+        QRgb bg = 0;    // th->bg() (中心文字色)
+        int fontPx = 10;
+        bool operator==(const HaloKey& o) const {
+            return label == o.label && halo == o.halo && bg == o.bg && fontPx == o.fontPx;
+        }
+    };
+    struct HaloKeyHash {
+        std::size_t operator()(const HaloKey& k) const {
+            std::size_t h = std::hash<std::string>()(k.label.toStdString());
+            h ^= static_cast<std::size_t>(k.halo) << 1;
+            h ^= static_cast<std::size_t>(k.bg) << 2;
+            h ^= static_cast<std::size_t>(k.fontPx) << 3;
+            return h;
+        }
+    };
+    std::unordered_map<HaloKey, QImage, HaloKeyHash> m_haloCache;
+    void clearHaloCache() { m_haloCache.clear(); }
     QString m_hoverText;   // 鼠标位置 + note 信息（状态栏）
     int m_hoverMeasure = -1;
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）

@@ -132,6 +132,51 @@ TEST(PcmPlaybackTest, DeviceRateClock) {
     player.drainReclaimed();
 }
 
+TEST(PcmPlaybackTest, LoopAtoB) {
+    SamplePlayer player;
+    PcmPlayback pb(&player, 44100.0);
+    pb.load(makePcm(44100.0, 44100 * 4), 44100.0);  // 4 秒
+    // A=1.0, B=2.0（循环段）
+    pb.setLoopGap(1.0, 2.0);
+    EXPECT_TRUE(pb.loopEnabled());
+    // 从 A 播放
+    ASSERT_TRUE(pb.seek(1.0));
+    ASSERT_TRUE(pb.play(1.0f));
+    renderFrames(player, 44100);  // 1s → 到 B (2.0)
+    EXPECT_NEAR(pb.currentSec(), 2.0, 0.02);
+    // 越过 B → loopTick 绕回 A
+    renderFrames(player, 44100 / 10);  // 0.1s → 2.1 > B
+    EXPECT_TRUE(pb.loopTick());
+    EXPECT_NEAR(pb.currentSec(), 1.0, 0.05);  // 绕回 A 附近（重播起点）
+    EXPECT_EQ(pb.state(), PcmPlayback::State::Playing);
+    pb.stop();
+    player.drainReclaimed();
+}
+
+TEST(PcmPlaybackTest, LoopDisabledNoWrap) {
+    SamplePlayer player;
+    PcmPlayback pb(&player, 44100.0);
+    pb.load(makePcm(44100.0, 44100 * 4), 44100.0);
+    pb.setLoopGap(1.0, 2.0);
+    pb.setLoopEnabled(false);  // 关闭循环
+    EXPECT_FALSE(pb.loopEnabled());
+    ASSERT_TRUE(pb.seek(1.0));
+    ASSERT_TRUE(pb.play(1.0f));
+    renderFrames(player, 44100);  // 到 2.0
+    EXPECT_FALSE(pb.loopTick());  // 不绕回
+    pb.stop();
+    player.drainReclaimed();
+}
+
+TEST(PcmPlaybackTest, LoopToggleSamePoint) {
+    SamplePlayer player;
+    PcmPlayback pb(&player, 44100.0);
+    pb.load(makePcm(44100.0, 44100 * 4), 44100.0);
+    // 同点再设 = 解除（AudioEngine.setLoopA 语义；此处直接测 gap 无效）
+    pb.setLoopGap(1.0, 1.0);  // A == B → 无效
+    EXPECT_FALSE(pb.loopEnabled());
+}
+
 // —— PlaybackPlan（映射层） ——
 
 TEST(PlaybackPlanTest, SortAndSearch) {

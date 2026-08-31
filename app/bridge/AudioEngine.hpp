@@ -105,6 +105,19 @@ public:
     Q_INVOKABLE void setWaitRenderSetting(bool v);
     bool waitRenderSetting() const { return m_waitRenderSetting; }
 
+    // ---- M5.2 A-B 循环 ----
+    /// 设循环点 A（当前播放位置；同点再点 = 解除）。返回生效结果（A≥0）。
+    Q_INVOKABLE bool setLoopA();
+    Q_INVOKABLE bool setLoopB();
+    /// 循环开关（双设后默认 true；关闭 = 边界保留不生效）。
+    Q_INVOKABLE void setLoopEnabled(bool v);
+    Q_PROPERTY(bool loopEnabled READ loopEnabled NOTIFY playbackChanged)
+    Q_PROPERTY(qreal loopA READ loopA NOTIFY playbackChanged)
+    Q_PROPERTY(qreal loopB READ loopB NOTIFY playbackChanged)
+    bool loopEnabled() const { return m_playback.loopEnabled(); }
+    qreal loopA() const { return m_playback.loopA(); }
+    qreal loopB() const { return m_playback.loopB(); }
+
     bool playing() const { return m_playback.playing(); }
     qreal positionSec() const { return m_playback.currentSec(); }
     qreal durationSec() const { return m_playback.durationSec(); }

@@ -53,6 +53,20 @@ public:
     /// 超出时长 → 夹逼 [0, 时长)。
     bool seek(double seconds);
 
+    /// M5.2 A-B 循环：设循环段（-1 = 解除；A 须 < B 才生效——双设后自动循环）。
+    /// 循环 = 播放头到 B 或"即将越过 B"→ 绕回 A（stopAll + 从 A 重播）。
+    /// setLoopGap(A, B) 一次设置；setLoopPoint('A'/'B', sec) 单点（toggle：同点再设 = -1）。
+    void setLoopGap(double a, double b);
+    /// 循环开关（双设后默认 true；关闭 = 边界保留不生效）。
+    void setLoopEnabled(bool v);
+    bool loopEnabled() const { return m_loopEnabled; }
+    double loopA() const { return m_loopA; }
+    double loopB() const { return m_loopB; }
+
+    /// M5.2 循环 tick（AudioEngine 轮询调用；播放中越过 B → 绕回 A 重播）。
+    /// 返回 true = 本次绕回（调用方可刷新 UI）。
+    bool loopTick();
+
     State state() const { return m_state; }
     bool playing() const { return m_state == State::Playing; }
     /// 当前时钟位置（秒；播放中实时，暂停/停止 = 冻结值）。
@@ -84,6 +98,11 @@ private:
     /// currentSec = startSec + (totalFrames - frames0)/rate。
     double m_playStartSec = 0.0;
     std::uint64_t m_playFrames0 = 0;
+    // ---- M5.2 A-B 循环 ----
+    double m_loopA = -1.0;
+    double m_loopB = -1.0;
+    bool m_loopEnabled = false;
+    bool m_loopWrapped = false;  ///< 内部：本次播放是否已绕回（防连续触发）
 };
 
 }  // namespace beatbench::audio
