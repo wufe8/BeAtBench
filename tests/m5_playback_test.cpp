@@ -177,6 +177,24 @@ TEST(PcmPlaybackTest, LoopToggleSamePoint) {
     EXPECT_FALSE(pb.loopEnabled());
 }
 
+TEST(PcmPlaybackTest, LoopBOnlyPausesAtB) {
+    SamplePlayer player;
+    PcmPlayback pb(&player, 44100.0);
+    pb.load(makePcm(44100.0, 44100 * 4), 44100.0);
+    // 只设 B（无 A = 停点）：用户「没有 A 点播放到 B 即暂停」
+    pb.setLoopGap(-1.0, 2.0);
+    EXPECT_FALSE(pb.loopEnabled());  // 无 A → 非循环
+    ASSERT_TRUE(pb.seek(1.0));
+    ASSERT_TRUE(pb.play(1.0f));
+    renderFrames(player, 44100);          // 1s → 2.0
+    renderFrames(player, 44100 / 10);     // 0.1s → 2.1 > B
+    EXPECT_TRUE(pb.loopTick());           // 到 B → 暂停
+    EXPECT_EQ(pb.state(), PcmPlayback::State::Paused);
+    EXPECT_NEAR(pb.currentSec(), 2.0, 0.15);
+    pb.stop();
+    player.drainReclaimed();
+}
+
 // —— PlaybackPlan（映射层） ——
 
 TEST(PlaybackPlanTest, SortAndSearch) {

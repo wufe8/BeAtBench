@@ -81,6 +81,8 @@ void ChartViewItem::setSession(QObject* session) {
     rebuildColumns();
     emit sessionChanged();
     emit contentHeightChanged();
+    emit cursorChanged();  // M5.2 视口光标读数（红线下方内容）随图/滚动/缩放刷新
+    emit maxScrollYChanged();  // contentHeight 变（开头留白计入）→ 滚动上限变
     emit chartChanged();
     update();
 }
@@ -98,6 +100,8 @@ void ChartViewItem::onSessionChartChanged() {
     m_bgmMaxLine = 0;  // 新文档：BGM 展开高水位重置（按新谱面实际行 + PAD）
     rebuildColumns();
     emit contentHeightChanged();
+    emit cursorChanged();  // M5.2 视口光标读数
+    emit maxScrollYChanged();
     emit chartChanged();
     update();
 }
@@ -109,6 +113,8 @@ void ChartViewItem::onSessionContentChanged() {
     // 注：删光某列唯一 note → 该列消失（数据驱动列的固有行为，合乎 iBMSC 惯例）。
     rebuildColumns();
     emit contentHeightChanged();
+    emit cursorChanged();  // M5.2 视口光标读数（内容变化可能改 contentHeight）
+    emit maxScrollYChanged();
     update();
 }
 
@@ -154,12 +160,12 @@ void ChartViewItem::setMeasureHeight(qreal v) {
     const qreal centerMf = measureAt(height() / 2.0);
     m_measureHeight = v;
     invalidateBgTile();  // M7 性能：tile 依赖缩放
-    const qreal centerContent = m_topHigh
-                                    ? (contentHeight() - centerMf * m_measureHeight)
-                                    : (centerMf * m_measureHeight);
+    const qreal centerContent = contentPosOf(centerMf);
     setScrollY(centerContent - height() / 2.0);
     emit measureHeightChanged();
     emit contentHeightChanged();
+    emit cursorChanged();  // M5.2 视口光标读数（缩放改变红线下方拍位）
+    emit maxScrollYChanged();
     update();
 }
 
@@ -169,12 +175,12 @@ void ChartViewItem::zoomAt(qreal screenY, qreal factor) {
     const qreal newH = qBound(24.0, m_measureHeight * factor, 480.0);
     if (qFuzzyCompare(m_measureHeight, newH)) return;
     m_measureHeight = newH;
-    const qreal anchorContent = m_topHigh
-                                    ? (contentHeight() - anchorMf * m_measureHeight)
-                                    : (anchorMf * m_measureHeight);
+    const qreal anchorContent = contentPosOf(anchorMf);
     setScrollY(anchorContent - screenY);
     emit measureHeightChanged();
     emit contentHeightChanged();
+    emit cursorChanged();  // M5.2 视口光标读数
+    emit maxScrollYChanged();
     update();
 }
 
@@ -185,10 +191,24 @@ void ChartViewItem::scrollToTime(double seconds) {
     const auto pos = cs->timing()->position_at(static_cast<std::int64_t>(seconds * 1e6));
     if (!pos) return;
     const qreal mf = pos->measure + posDouble(pos->pos);
-    // 目标拍位放视口中心（topHigh 已处理）
-    const qreal targetContent = m_topHigh ? (contentHeight() - mf * m_measureHeight)
-                                          : (mf * m_measureHeight);
+    // 目标拍位放视口中心（topHigh 已处理；含开头留白）
+    const qreal targetContent = contentPosOf(mf);
     setScrollY(targetContent - height() / 2.0);
+}
+
+void ChartViewItem::scrollToStart() {
+    if (height() <= 0.0) {  // 未布局（首帧前）：等几何尺寸就绪再定位（geometryChange 兜底）
+        m_startPending = true;
+        return;
+    }
+    if (m_topHigh) {
+        // 小节 0 起点落在视口 90%（播放线位置）；留白在底部兜底
+        const qreal target = contentPosOf(0.0) - height() * 0.90;
+        setScrollY(std::clamp(target, 0.0, maxScrollY()));
+    } else {
+        setScrollY(0.0);  // 非 topHigh：0 小节在顶，顶即起点
+    }
+    m_startPending = false;
 }
 
 void ChartViewItem::setRulerWidth(qreal v) {
@@ -207,16 +227,35 @@ void ChartViewItem::setLaneWidth(qreal v) {
 }
 
 void ChartViewItem::setScrollY(qreal v) {
-    const qreal clamped = std::clamp(v, 0.0, std::max<qreal>(0.0, contentHeight() - height()));
+    const qreal clamped = std::clamp(v, 0.0, maxScrollY());
     if (qFuzzyCompare(m_scrollY, clamped)) return;
     m_scrollY = clamped;
     emit scrollYChanged();
+    emit cursorChanged();  // M5.2 视口光标读数（滚动/播放跟随都会走到这）
     update();
 }
 
 qreal ChartViewItem::contentHeight() const {
     const ChartSession* cs = sessionObj();
-    return (cs ? cs->measureCount() : 0) * m_measureHeight;
+    // 开头 m_leadMeasures 小节纯留白（评分起点 0 前）：给「硬锁定 90%」在 0 小节留出下落空间，
+    // 否则播放头在 0-1 小节（视口底部）时锁不住 → 跳变（用户 2026-09）。
+    return (cs ? cs->measureCount() : 0) * m_measureHeight + m_leadMeasures * m_measureHeight;
+}
+
+/// 内容坐标（不含 scrollY）中某拍位的位置；topHigh 感知（含开头留白偏移）。
+qreal ChartViewItem::contentPosOf(qreal measureFloat) const {
+    const qreal c = (measureFloat + m_leadMeasures) * m_measureHeight;
+    return (m_topHigh ? (contentHeight() - c) : c);
+}
+
+qreal ChartViewItem::maxScrollY() const {
+    const qreal h = height();
+    const qreal naturalMax = std::max<qreal>(0.0, contentHeight() - h);
+    if (!m_topHigh || h <= 0.0) return naturalMax;
+    // topHigh：滚到底 = 小节 0 落在播放线(90%)（=scrollToStart 对齐位）。
+    // ⚠️ 不用 contentHeight-h：那会把红线滚进留白区（读负拍位→起播夹 0→对齐跳变）。
+    const qreal aligned = contentPosOf(0.0) - h * 0.90;
+    return std::clamp(aligned, 0.0, naturalMax);
 }
 
 void ChartViewItem::setTopHigh(bool v) {
@@ -224,6 +263,8 @@ void ChartViewItem::setTopHigh(bool v) {
     m_topHigh = v;
     invalidateBgTile();  // M7 性能：方向翻转为上下镜像（tile 内容坐标不变，无需滑——
     emit topHighChanged();
+    emit cursorChanged();  // M5.2 视口光标读数（方向翻转改红线下方拍位）
+    emit maxScrollYChanged();
     update();
 }
 
@@ -712,12 +753,48 @@ bool ChartViewItem::followPlayheadTick() {
     // ⚠️ **硬锁定**：播放头无条件钉在视口 90%（底部 10% 固定高度）——
     // 不判断安全区、不滑动，每次 tick 直接算 scrollY 让播放头 = 90%。
     // （用户 2026-09：底部 10% 观感更好；只在播放中锁定——QML 侧 playing 判定）
-    const qreal cPx = (static_cast<qreal>(pos->measure) + posDouble(pos->pos)) * m_measureHeight;
+    const qreal contentC = contentPosOf(static_cast<qreal>(pos->measure) + posDouble(pos->pos));
     const qreal targetY = h * 0.90;
-    const qreal contentC = m_topHigh ? (contentHeight() - cPx) : cPx;
     const qreal newScroll = contentC - targetY;
-    setScrollY(std::clamp(newScroll, 0.0, std::max<qreal>(0.0, contentHeight() - h)));
+    setScrollY(std::clamp(newScroll, 0.0, maxScrollY()));
     return true;
+}
+
+double ChartViewItem::playheadReadoutSec() const {
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->timing()) return 0.0;
+    beatbench::Position p;
+    if (!cursorPosition(p)) return 0.0;
+    return static_cast<double>(cs->timing()->time_us(p)) / 1e6;
+}
+
+bool ChartViewItem::cursorPosition(beatbench::Position& out) const {
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->timing()) return false;
+    const qreal mf = measureAt(height() * 0.90);
+    // 留白区（0 小节前）→ 夹到 0 小节起点（评分起点；避免 uint 溢出）
+    const qreal cmf = std::max(0.0, mf);
+    // 连续拍位（measure + pos float）→ Position（量化 pos；TimingEngine 内部 clamp [0,1)）
+    const int measure = static_cast<int>(std::floor(cmf));
+    const double frac = cmf - static_cast<double>(measure);
+    // frac → Rational（量化到 1e9；构造即约分）
+    const qint64 num = static_cast<qint64>(std::llround(frac * 1e9));
+    out = beatbench::Position{static_cast<std::uint32_t>(measure),
+                              beatbench::Rational(num, 1000000000LL)};
+    return true;
+}
+
+qreal ChartViewItem::cursorSec() const {
+    return static_cast<qreal>(playheadReadoutSec());
+}
+
+QString ChartViewItem::cursorPosText() const {
+    beatbench::Position p;
+    if (!cursorPosition(p)) return QString();
+    // 只显示小节整数（红线下方内容所在小节）；节内拍位为**连续量**（滚动不吸附），
+    // 若显示精确约分分数会得到 500000000/1000000000 这类夸张分母（大数/长串），
+    // 用户 2026-09：「不想跳变或近似」→ 用精确小节号 + 精确秒，节内拍位留给标尺网格。
+    return QString::number(p.measure);
 }
 
 qreal ChartViewItem::metaTrackWidth() const {
@@ -912,13 +989,17 @@ void ChartViewItem::geometryChange(const QRectF& newGeometry, const QRectF& oldG
         const qreal before = m_scrollY;
         clampScroll();
         if (!qFuzzyCompare(before, m_scrollY)) emit scrollYChanged();
+        // 首帧尺寸就绪 → 执行未完成的起点定位（开头留白把 0 小节放到 90%）
+        if (m_startPending && newGeometry.height() > 0.0) scrollToStart();
+        emit cursorChanged();  // M5.2 视口光标读数：height 变 → 0.9h 线位置变 → 下方拍位变
+        emit maxScrollYChanged();  // height 变 → 滚动上限变
         update();
     }
     if (!qFuzzyCompare(newGeometry.width(), oldGeometry.width())) clampScrollX();
 }
 
 void ChartViewItem::clampScroll() {
-    const qreal clamped = std::clamp(m_scrollY, 0.0, std::max<qreal>(0.0, contentHeight() - height()));
+    const qreal clamped = std::clamp(m_scrollY, 0.0, maxScrollY());
     if (!qFuzzyCompare(m_scrollY, clamped)) {
         m_scrollY = clamped;
         emit scrollYChanged();
@@ -926,14 +1007,14 @@ void ChartViewItem::clampScroll() {
 }
 
 qreal ChartViewItem::yOf(qreal measureFloat) const {
-    const qreal c = measureFloat * m_measureHeight;
-    return (m_topHigh ? (contentHeight() - c) : c) - m_scrollY;
+    return contentPosOf(measureFloat) - m_scrollY;
 }
 
 qreal ChartViewItem::measureAt(qreal screenY) const {
     const qreal c = screenY + m_scrollY;  // 屏幕 → 内容坐标
-    return m_topHigh ? (contentHeight() - c) / m_measureHeight
-                     : c / m_measureHeight;
+    // 名义拍位（含开头留白偏移）：留白区 mf < 0
+    return (m_topHigh ? (contentHeight() - c) / m_measureHeight
+                      : c / m_measureHeight) - m_leadMeasures;
 }
 
 qreal ChartViewItem::posDouble(const beatbench::Rational& r) const {
@@ -1329,20 +1410,15 @@ void ChartViewItem::paint(QPainter* p) {
         metaRight = rulerW + metaW;
     }
 
-    // ---- 可见小节范围（内容坐标 → 拍位） ----
+    // ---- 可见小节范围（屏幕 y → 拍位；含开头留白，负拍位夹到 0） ----
     int first = 0, last = mCount - 1;
     {
-        qreal cLo, cHi;
-        if (m_topHigh) {
-            cLo = contentHeight() - (m_scrollY + h);
-            cHi = contentHeight() - m_scrollY;
-        } else {
-            cLo = m_scrollY;
-            cHi = m_scrollY + h;
-        }
-        first = std::max(0, static_cast<int>(std::floor(cLo / m_measureHeight)));
-        last = std::min(mCount - 1,
-                        static_cast<int>(std::ceil(cHi / m_measureHeight)) - 1);
+        const qreal mfLo = measureAt(0.0);   // 视口顶
+        const qreal mfHi = measureAt(h);     // 视口底（topHigh 下此时为最小拍位）
+        const qreal lo = std::min(mfLo, mfHi);
+        const qreal hi = std::max(mfLo, mfHi);
+        first = std::max(0, static_cast<int>(std::floor(lo)));
+        last = std::min(mCount - 1, static_cast<int>(std::ceil(hi)) - 1);
         if (first > last) return;  // 视口在谱面末之后（空窗口）
     }
 

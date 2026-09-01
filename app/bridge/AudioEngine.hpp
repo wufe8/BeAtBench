@@ -106,9 +106,10 @@ public:
     bool waitRenderSetting() const { return m_waitRenderSetting; }
 
     // ---- M5.2 A-B 循环 ----
-    /// 设循环点 A（当前播放位置；同点再点 = 解除）。返回生效结果（A≥0）。
-    Q_INVOKABLE bool setLoopA();
-    Q_INVOKABLE bool setLoopB();
+    /// 设循环点 A（**红线/视口光标**位置，由 QML 传入 cursorSec；同点再点 = 解除）。
+    /// 返回生效结果（A≥0）。
+    Q_INVOKABLE bool setLoopA(double sec);
+    Q_INVOKABLE bool setLoopB(double sec);
     /// 循环开关（双设后默认 true；关闭 = 边界保留不生效）。
     Q_INVOKABLE void setLoopEnabled(bool v);
     Q_PROPERTY(bool loopEnabled READ loopEnabled NOTIFY playbackChanged)

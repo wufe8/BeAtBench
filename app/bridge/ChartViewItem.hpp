@@ -20,6 +20,7 @@
 
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/Lane.hpp"
+#include "beatbench/core/timing/TimingEngine.hpp"
 
 class QPainter;
 
@@ -74,6 +75,15 @@ class ChartViewItem : public QQuickPaintedItem {
     /// M5.2 A-B 循环标记（秒；-1 = 未设）。paint 画虚线标记（A 绿 / B 橙）+ 左侧标签。
     Q_PROPERTY(double loopASec READ loopASec WRITE setLoopASec NOTIFY loopASecChanged)
     Q_PROPERTY(double loopBSec READ loopBSec WRITE setLoopBSec NOTIFY loopBSecChanged)
+    /// 开头纯留白小节数（Overlay 画 A/B 标记时须扣留白——否则标记比实际值早 1-2 小节）。
+    Q_PROPERTY(qreal leadMeasures READ leadMeasures CONSTANT)
+    /// 滚动上限（topHigh 下滚到底 = 小节 0 落播放线 90%；滚动条/跟随 clamp 用）。
+    Q_PROPERTY(qreal maxScrollY READ maxScrollY NOTIFY maxScrollYChanged)
+    /// M5.2 视口光标（红线、固定视口底部 10%）读数：秒 + 小节号文本（"m"）。
+    /// ⚠️ 源 = 「红线下方内容」（measureAt(0.9h)），**非播放时钟**——滚动视口内容滚过
+    /// 红线 → 值随视口变；播放中跟随滚动内容 → 值自然前进。状态栏显示用（2026-09 用户）。
+    Q_PROPERTY(qreal cursorSec READ cursorSec NOTIFY cursorChanged)
+    Q_PROPERTY(QString cursorPosText READ cursorPosText NOTIFY cursorChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -105,9 +115,19 @@ public:
     void setLoopASec(double v);
     double loopBSec() const { return m_loopBSec; }
     void setLoopBSec(double v);
-    /// M5.2 跟随：**硬锁定**——播放头无条件钉在视口 80%（底部 20% 固定高度）。
-    /// QML 每 playbackChanged 调；顶部/底部 20% 处滑动返回 80%。返回 true = 已调整。
+    qreal leadMeasures() const { return m_leadMeasures; }
+    /// M5.2 跟随：**硬锁定**——播放头无条件钉在视口 90%（底部 10% 固定高度）。
+    /// QML 每 playbackChanged 调；播放中滚动内容让红线下方 = 播放时钟。
     Q_INVOKABLE bool followPlayheadTick();
+
+    /// M5.2 播放红线的时间读数：红线（视口底部 10% 固定）下方的内容拍位 → 秒。
+    /// ⚠️ 剪辑软件语义：红线固定视口，滚动视口内容滚过红线 → 读数随视口变。
+    Q_INVOKABLE double playheadReadoutSec() const;
+    /// 红线（视口底部 10%）下方内容的时间（秒）。滚动视口 → 内容滚过红线 → 值变。
+    qreal cursorSec() const;
+    /// 红线下方内容所在**小节号**文本（整数；节内拍位为连续量，精确约分分母太夸张，
+    /// 用户「不想跳变或近似」→ 只给精确小节号 + 精确秒；无图/无 timing → 空）。
+    QString cursorPosText() const;
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
     qreal contentHeight() const;
@@ -156,6 +176,11 @@ public:
     /// M4.3c 波形总览跳转：秒 → 拍位（TimingEngine::position_at）→ 滚动视口
     /// （目标拍位居中；topHigh 已处理）。无 timing/超出 → no-op。
     Q_INVOKABLE void scrollToTime(double seconds);
+
+    /// 定位到评分起点（小节 0）于播放线（视口 90%；topHigh）/顶部（非 topHigh）。
+    /// 开头留白让小节 0 可落到 90% —— 打开谱面/跳转起点用它，避免「播放线在 0-1 小节时
+    /// 播放头锁不住 90% → 开始播放跳变」（用户 2026-09）。
+    Q_INVOKABLE void scrollToStart();
 
     /// 屏幕矩形内 note 枚举（clipboard.copy 的 selection 数组：{measure, pos:{num,den},
     /// lane:{player,kind,index}, sample}；按 (measure,pos) 稳定升序）。
@@ -213,6 +238,11 @@ signals:
     void followPlayheadChanged();
     void loopASecChanged();
     void loopBSecChanged();
+    /// 视口光标（红线）读数变化：scrollY / contentHeight / topHigh / measureHeight /
+    /// 尺寸（height）任一变化 → 红线下方内容拍位变 → 状态栏时间随之刷新。
+    void cursorChanged();
+    /// 滚动上限变化（height/contentHeight/topHigh/measureHeight 任一变化）。
+    void maxScrollYChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -266,8 +296,16 @@ private:
 
     /// 拍位（measureFloat = measure + pos，0 起）→ 屏幕 y（含方向翻转与滚动）。
     qreal yOf(qreal measureFloat) const;
-    /// 屏幕 y → 拍位（yOf 的逆；状态栏鼠标位置用）。
+    /// 拍位 → 内容坐标（不含 scrollY；含开头留白偏移；topHigh 感知）。
+    /// contentHeight/yOf/measureAt/scrollToTime/followPlayheadTick 统一用它。
+    qreal contentPosOf(qreal measureFloat) const;
+    /// 滚动上限：topHigh 下滚到底 = 小节 0 落播放线(90%)——手动滚动不进入留白区，
+    /// 否则红线读留白、起播对齐跳变（用户 2026-09「从底部起播仍跳变」）。
+    qreal maxScrollY() const;
+    /// 屏幕 y → 拍位（yOf 的逆；状态栏鼠标位置用）。留白区返回负拍位。
     qreal measureAt(qreal screenY) const;
+    /// 红线（视口底部 10%）下方的内容拍位；无图/无 timing/无效 → false。
+    bool cursorPosition(beatbench::Position& out) const;
     qreal posDouble(const beatbench::Rational& r) const;
     void clampScroll();
     /// note 高度：随缩放浮动但带上下限（clamp(measureHeight * scale, min, max)）。
@@ -290,6 +328,10 @@ private:
     qreal m_laneWidth = 38.0;
     qreal m_metaTrackWidth = 48.0;  // BPM/STOP 元事件轨宽（2026-09 36→48：BPM 线秒行 m:ss.cc 显示）
     qreal m_scrollY = 0.0;
+    /// 开头纯留白小节数（评分起点 0 之前；给「硬锁定 90%」在 0 小节留缓冲，
+    /// 否则播放头在 0-1 小节/视口底部时锁不住 → 开始播放跳变；用户 2026-09）。
+    qreal m_leadMeasures = 2.0;
+    bool m_startPending = false;  // 未布局时的起点定位待办（geometryChange 就绪后执行）
     bool m_topHigh = true;
     int m_snapNum = 1;   // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）
     int m_snapDen = 16;  // 吸附粒度分母

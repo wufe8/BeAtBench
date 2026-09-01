@@ -468,22 +468,22 @@ ApplicationWindow {
                                enabled: chartMeta !== null
                                highlighted: audioEngine && audioEngine.loopA >= 0
                                onClicked: {
-                                   var on = audioEngine.setLoopA()
+                                   var on = audioEngine.setLoopA(editPage.cursorSec)
                                    setStatus(on ? qsTr("循环起点 A = %1 秒（再点解除）").arg(audioEngine.loopA.toFixed(2))
                                                 : qsTr("循环起点 A 已解除"))
                                }
                                ToolTip.visible: hovered
-                               ToolTip.text: qsTr("设循环起点 A（当前播放位置；再点解除）") }
+                               ToolTip.text: qsTr("设循环起点 A（红线位置；再点解除）") }
                 BbToolButton { text: qsTr("B")
                                enabled: chartMeta !== null
                                highlighted: audioEngine && audioEngine.loopB >= 0
                                onClicked: {
-                                   var on = audioEngine.setLoopB()
+                                   var on = audioEngine.setLoopB(editPage.cursorSec)
                                    setStatus(on ? qsTr("循环终点 B = %1 秒（再点解除）").arg(audioEngine.loopB.toFixed(2))
                                                 : qsTr("循环终点 B 已解除"))
                                }
                                ToolTip.visible: hovered
-                               ToolTip.text: qsTr("设循环终点 B（当前播放位置；再点解除）") }
+                               ToolTip.text: qsTr("设循环终点 B（红线位置；再点解除）") }
                 BbToolButton { text: audioEngine && audioEngine.playing ? qsTr("⏸") : qsTr("▶")
                                enabled: chartMeta !== null
                                onClicked: togglePlayback()
@@ -755,10 +755,14 @@ ApplicationWindow {
                     Layout.maximumWidth: 320
                 }
                 // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
-                // M5 播放时间（hasPcm 时显示；播放中实时，暂停/停止 = 位置）
+                // M5.2 视口光标时间：红线（固定视口底部 10%）下方的拍位+秒，随视口滚动变；
+                // 播放中跟随滚动内容 → 值自然前进（红线=视口光标，非播放时钟；2026-09 用户）。
                 Label {
-                    visible: typeof audioEngine !== "undefined" && audioEngine.hasPcm
-                    text: window.fmtTime(audioEngine.positionSec) + " / " + window.fmtTime(audioEngine.durationSec)
+                    visible: typeof chartSession !== "undefined" && chartSession && chartSession.hasChart
+                    text: "小节 " + (editPage.cursorPosText !== "" ? editPage.cursorPosText : "—") +
+                          " ｜ " + window.fmtTime(editPage.cursorSec) +
+                          (typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm
+                                ? " / " + window.fmtTime(audioEngine.durationSec) : "")
                     color: audioEngine.playing ? Theme.accent : Theme.textFaint
                     font.family: Theme.fontMono
                     font.pixelSize: Theme.fsSmall
@@ -1017,13 +1021,14 @@ ApplicationWindow {
     }
 
     // ---------- M5：Space = 播放/暂停（渲染代理 PCM）；Ctrl+R = 手动渲染 ----------
+    // ⚠️ 播放起点 = 循环 A（若设）否则**红线（视口光标）**——红线是当前编辑位置（用户 2026-09：
+    // 「没有 A 点则从播放线开始播放」）。点击 A/B 的 setLoopA/B 也传入红线位置（编辑处即循环点）。
     function togglePlayback() {
         if (typeof audioEngine === "undefined" || !audioEngine) return
-        var ok = audioEngine.togglePlay()
-        if (!ok) {
-            // 播放失败：状态栏已提示（音声引擎）；无 PCM 时也提示
-            // （渲染中 waitRender 场景 = 返回 true 排队）
-        }
+        if (audioEngine.playing) { audioEngine.pause(); return }
+        var start = (audioEngine.loopA >= 0) ? audioEngine.loopA : editPage.cursorSec
+        if (audioEngine.hasPcm) audioEngine.seekSeconds(start)
+        audioEngine.play()
     }
     // ---------- M4.3c+：后台异步渲染当前谱面 → 混音 WAV（Ctrl+R 手动；M5 载入自动内存化） ----------
     // 多线程（用户 2026-09 拍板）：renderAsync 提交 QThreadPool 后台解码+混音，

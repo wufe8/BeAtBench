@@ -130,24 +130,33 @@ void PcmPlayback::setLoopEnabled(bool v) {
 }
 
 bool PcmPlayback::loopTick() {
-    if (m_state != State::Playing || !m_loopEnabled) return false;
-    if (m_loopA < 0.0 || m_loopB <= m_loopA) return false;
-    // 播放头 >= B → 绕回 A（stopAll 保证循环点干净 + 从 A 重播）
+    if (m_state != State::Playing) return false;
     const double sec = currentSec();
-    if (sec >= m_loopB) {
-        if (m_loopWrapped) return false;  // 已绕回（防连发）
-        m_loopWrapped = true;
-        if (m_player) m_player->stopAll();
-        m_positionSec = m_loopA;
-        // 从 A 重新播放（截取窗口）
-        if (m_player->playSharedPcm(m_pcm, m_sampleRate, m_volume, m_loopA)) {
-            m_playStartSec = m_loopA;
-            m_playFrames0 = m_player->totalFramesRendered();
-            m_state = State::Playing;
-            return true;
+    // 循环 A→B（需 A 有效且 B>A）
+    if (m_loopEnabled) {
+        if (m_loopA < 0.0 || m_loopB <= m_loopA) return false;
+        // 播放头 >= B → 绕回 A（stopAll 保证循环点干净 + 从 A 重播）
+        if (sec >= m_loopB) {
+            if (m_loopWrapped) return false;  // 已绕回（防连发）
+            m_loopWrapped = true;
+            if (m_player) m_player->stopAll();
+            m_positionSec = m_loopA;
+            // 从 A 重新播放（截取窗口）
+            if (m_player->playSharedPcm(m_pcm, m_sampleRate, m_volume, m_loopA)) {
+                m_playStartSec = m_loopA;
+                m_playFrames0 = m_player->totalFramesRendered();
+                m_state = State::Playing;
+                return true;
+            }
+        } else {
+            m_loopWrapped = false;  // 越过 B 前复位
         }
-    } else {
-        m_loopWrapped = false;  // 越过 B 前复位
+        return false;
+    }
+    // 无循环（未设 A）：仅设 B = 停点 → 播放到 B 即暂停（用户 2026-09：无 A 则到 B 暂停）
+    if (m_loopA < 0.0 && m_loopB >= 0.0 && sec >= m_loopB) {
+        pause();
+        return true;
     }
     return false;
 }

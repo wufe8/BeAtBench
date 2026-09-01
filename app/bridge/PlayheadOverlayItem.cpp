@@ -59,13 +59,6 @@ void PlayheadOverlayItem::setTopHigh(bool v) {
     update();
 }
 
-void PlayheadOverlayItem::setPlayheadSec(double v) {
-    if (qFuzzyCompare(m_playheadSec, v)) return;
-    m_playheadSec = v;
-    emit playheadSecChanged();
-    update();
-}
-
 void PlayheadOverlayItem::setLoopASec(double v) {
     if (qFuzzyCompare(m_loopASec, v)) return;
     m_loopASec = v;
@@ -87,6 +80,13 @@ void PlayheadOverlayItem::setRulerWidth(qreal v) {
     update();
 }
 
+void PlayheadOverlayItem::setLeadMeasures(qreal v) {
+    if (qFuzzyCompare(m_leadMeasures, v)) return;
+    m_leadMeasures = v;
+    emit leadMeasuresChanged();
+    update();
+}
+
 ChartSession* PlayheadOverlayItem::sessionObj() const {
     return qobject_cast<ChartSession*>(m_session);
 }
@@ -98,7 +98,8 @@ qreal PlayheadOverlayItem::yForSec(double sec) const {
     if (!pos) return -1e9;
     const double mf = static_cast<double>(pos->measure) +
                       static_cast<double>(pos->pos.num) / static_cast<double>(pos->pos.den);
-    const qreal c = static_cast<qreal>(mf) * m_measureHeight;
+    // ⚠️ 与 ChartViewItem.yOf 同构：拍位 + 开头留白（否则 A/B 标记比实际早 m_leadMeasures 小节）
+    const qreal c = (static_cast<qreal>(mf) + m_leadMeasures) * m_measureHeight;
     return (m_topHigh ? (m_contentHeight - c) : c) - m_scrollY;
 }
 
@@ -107,7 +108,7 @@ void PlayheadOverlayItem::paint(QPainter* p) {
     const qreal h = height();
     if (w <= 0 || h <= 0) return;
 
-    // A/B 循环标记（虚线 + 左侧标签；先画（在红线下层））
+    // A/B 循环标记（虚线 + 左侧标签；**内容锚定**，随视口滚动——先画，在红线下层）
     {
         p->setFont(QFont(QStringLiteral("Consolas"), 10));
         const auto drawMark = [&](double sec, const QColor& color, const QString& label) {
@@ -125,19 +126,19 @@ void PlayheadOverlayItem::paint(QPainter* p) {
         drawMark(m_loopBSec, kLoopBColor, QStringLiteral("B"));
     }
 
-    // 播放头红线（当前时间点；贯穿编辑区）
-    if (m_playheadSec >= 0.0) {
-        const qreal py = yForSec(m_playheadSec);
-        if (py >= -1.0 && py <= h + 1.0) {
-            p->setPen(QPen(kPlayheadColor, 2.0));
-            p->drawLine(QPointF(0.0, py), QPointF(w, py));
-            // 左侧三角（方向指示）
-            QPolygonF tri;
-            tri << QPointF(0.0, py - 8.0) << QPointF(8.0, py) << QPointF(0.0, py + 8.0);
-            p->setBrush(kPlayheadColor);
-            p->setPen(Qt::NoPen);
-            p->drawPolygon(tri);
-        }
+    // M5.2 播放红线：**视口光标**（剪辑软件时序轴逻辑）——固定在视口底部 10%
+    // （y = h × 0.9），**不随内容滚动**；滚动视口时内容滚过红线，红线的时间读数 =
+    // 红线下方内容拍位（ChartViewItem::currentTimeSec 计算）。
+    // 播放中 followPlayheadTick 滚动内容让红线下方 = 播放时钟（红线看似"推进"）。
+    {
+        const qreal py = h * 0.90;
+        p->setPen(QPen(kPlayheadColor, 2.0));
+        p->drawLine(QPointF(0.0, py), QPointF(w, py));
+        QPolygonF tri;
+        tri << QPointF(0.0, py - 8.0) << QPointF(8.0, py) << QPointF(0.0, py + 8.0);
+        p->setBrush(kPlayheadColor);
+        p->setPen(Qt::NoPen);
+        p->drawPolygon(tri);
     }
 }
 

@@ -61,6 +61,10 @@ Item {
     property bool perfLog: false
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
     readonly property string hoverText: chartView ? chartView.hoverText : ""
+    /// M5.2 视口光标（红线）读数：秒 + 拍位文本（转发 ChartView；Main 状态栏用，
+    /// 红线=视口光标——滚动内容滚过红线，值随视口变；2026-09 用户）。
+    readonly property real cursorSec: chartView ? chartView.cursorSec : 0
+    readonly property string cursorPosText: chartView ? chartView.cursorPosText : ""
     /// 暴露采样面板（Main 在文件编辑后 scrollTo 定位，避免列表回到顶部）
     readonly property var samplePanelObj: samplePanel
     /// 暴露 BGA 面板（Main 打开谱面/编辑后调 reloadBga）

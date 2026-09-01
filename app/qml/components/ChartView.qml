@@ -44,6 +44,10 @@ Item {
     /// M5.2 播放头跟随（默认开——用户拍板；用户滚动自动置 false；工具条 checkbox 经
     /// EditPage.followPlayhead 绑定此属性）
     property bool followPlayhead: true
+    /// M5.2 视口光标（红线，固定底部10%）读数：秒 + 拍位文本（m·n/d）。转发 view，
+    /// 状态栏用它（红线=视口光标，滚动内容滚过红线→值随视口变）（2026-09 用户）。
+    readonly property real cursorSec: view.cursorSec
+    readonly property string cursorPosText: view.cursorPosText
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
@@ -93,8 +97,9 @@ Item {
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）
         showChannelIds: root.showChannelIds !== keyMonitor.ctrlHeld
         onChartChanged: {
-            // 谱面切换 → 定位到开头（hi-top 下小节 0 在视口底部）
-            view.scrollY = view.topHigh ? Math.max(0, view.contentHeight - view.height) : 0
+            // 谱面切换 → 定位到起点（小节 0 落在播放线/视口 90%——开头留白兜底，
+            // 避免「0-1 小节播放头锁不住 90% → 开始播放跳变」；2026-09 用户）
+            view.scrollToStart()
         }
     }
 
@@ -109,7 +114,7 @@ Item {
         contentHeight: view.contentHeight
         topHigh: view.topHigh
         rulerWidth: view.rulerWidth
-        playheadSec: -1
+        leadMeasures: view.leadMeasures
         loopASec: -1
         loopBSec: -1
         z: 10
@@ -162,15 +167,15 @@ Item {
     Connections {
         target: typeof audioEngine !== "undefined" ? audioEngine : null
         function onPlaybackChanged() {
-            // 位置（秒）→ 播放头（overlay 红线；暂停/停止 = 冻结位置；无 PCM = 隐藏）
+            // 红线 = 视口光标（固定，见 PlayheadOverlayItem）；这里只：
+            // ① view.playheadSec = 播放时钟（follow tick 让红线下方 = 时钟）
+            // ② 滚动内容让红线下方内容 = 播放时钟（播放中）
+            // ③ A/B 标记（内容锚定，随滚动）
+            // ④ 红线时间读数 → 状态栏
             if (typeof audioEngine !== "undefined" && audioEngine.hasPcm) {
-                const pos = audioEngine.positionSec
-                playheadOverlay.playheadSec = pos   // 叠层绘线（低成本）
+                view.playheadSec = audioEngine.positionSec
                 playheadOverlay.loopASec = audioEngine.loopA
                 playheadOverlay.loopBSec = audioEngine.loopB
-                view.playheadSec = pos               // 跟随 tick 数据源（ChartViewItem）
-                // 硬锁定跟随：**只在播放中**钉播放头在视口 90%（底部 10%）——
-                // 暂停/停止自由滚动（用户 2026-09「只要在播放期间锁定即可」）
                 if (view.followPlayhead && audioEngine.playing)
                     view.followPlayheadTick()
             }
@@ -594,7 +599,7 @@ Item {
         z: 2
         color: Theme.surface2
         visible: view.contentHeight > view.height + 1
-        readonly property real maxY: Math.max(1, view.contentHeight - view.height)
+        readonly property real maxY: Math.max(1, view.maxScrollY)
         readonly property real thumbH: Math.max(28, height * view.height / Math.max(1, view.contentHeight))
         Rectangle {
             id: vthumb
@@ -661,11 +666,10 @@ Item {
     }
 
     // ---- 编辑接线辅助 ----
-    /// 视口中心小节（粘贴 target_measure 用；topHigh 反向已处理）。
+    /// 视口中心小节（粘贴 target_measure 用；topHigh 反向已处理；含开头留白偏差——经
+    /// measureAtY 自动扣除，留白区夹到 0）。
     function centerMeasure() {
-        const h = view.height / 2
-        return view.topHigh ? (view.contentHeight - (view.scrollY + h)) / view.measureHeight
-                            : (view.scrollY + h) / view.measureHeight
+        return Math.max(0, view.measureAtY(view.height / 2))
     }
 
     /// 秒 → 视口滚动（波形总览 seekRequested / --seek 调试走同一路径）。

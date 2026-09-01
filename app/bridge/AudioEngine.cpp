@@ -425,20 +425,18 @@ void AudioEngine::setWaitRenderSetting(bool v) {
     emit waitRenderSettingChanged();
 }
 
-bool AudioEngine::setLoopA() {
-    const double cur = m_playback.currentSec();
-    // 同点再点 = 解除（当前 A == 位置 → -1）
+bool AudioEngine::setLoopA(double sec) {
+    // 同点再点 = 解除（当前 A == 传入位置 → -1）
     const double a = (m_playback.loopA() >= 0.0 &&
-                      std::abs(m_playback.loopA() - cur) < 0.01) ? -1.0 : cur;
+                      std::abs(m_playback.loopA() - sec) < 0.01) ? -1.0 : sec;
     m_playback.setLoopGap(a, m_playback.loopB());
     emit playbackChanged();
     return a >= 0.0;
 }
 
-bool AudioEngine::setLoopB() {
-    const double cur = m_playback.currentSec();
+bool AudioEngine::setLoopB(double sec) {
     const double b = (m_playback.loopB() >= 0.0 &&
-                      std::abs(m_playback.loopB() - cur) < 0.01) ? -1.0 : cur;
+                      std::abs(m_playback.loopB() - sec) < 0.01) ? -1.0 : sec;
     m_playback.setLoopGap(m_playback.loopA(), b);
     emit playbackChanged();
     return b >= 0.0;
