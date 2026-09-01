@@ -96,7 +96,7 @@ inline std::string format_num(double v) {
 struct RowCell {
     Rational pos;
     std::string text;
-    std::uint32_t bgm_line = 0;  // BGM 行序号（仅 ch01 有意义；非 BGM = 0）
+    std::uint32_t sub_line = 0;  // BGM 行序号（仅 ch01 有意义；非 BGM = 0）
 };
 
 // 事件 i 与 j 是否互为 LN 配对（互指下标）
@@ -330,9 +330,9 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
 
     const auto add_cell = [&](std::uint32_t measure, std::string_view channel,
                               const Rational& pos, std::string text,
-                              std::uint32_t bgm_line = 0) {
+                              std::uint32_t sub_line = 0) {
         auto& cells = rows[{measure, std::string(channel)}];
-        cells.push_back({pos, std::move(text), bgm_line});
+        cells.push_back({pos, std::move(text), sub_line});
     };
 
     // 3a. 头部元信息：LNTYPE 2 尾槽值需要 LNOBJ 文本
@@ -380,7 +380,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         } else {
             slot_text = fmt_id(chart, n.sample.id);
         }
-        add_cell(ev.measure, channel, ev.pos, std::move(slot_text), n.bgm_line);
+        add_cell(ev.measure, channel, ev.pos, std::move(slot_text), n.sub_line);
     }
 
     // 3c. BPM：按源通道语义输出（2026-09 用户修复：ch08 不得改写成 ch03）——
@@ -482,17 +482,25 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             if (have_last_measure && measure != last_measure) out.push_back('\n');
             last_measure = measure;
             have_last_measure = true;
-            // BGM（ch01）：按 bgm_line 分组写多行（保持解析时的行结构；空行也输出占位）。
-            // 组数 = max(bgm_line)+1；缺失组输出全 "00" 行（保留 bgm3/bgm4 空层，iBMSC 式）。
-            if (channel == "01") {
+            // 子行分组（2026-09 泛化）：通道 declaration 允许子行（ch01）**或**实际存在子行（>0）
+            // 时，按 sub_line 分组写多行（保持解析时的行结构；空行也输出占位）。
+            // 组数 = max(sub_line)+1；缺失组输出全 "00" 行（保留空层，iBMSC 式）。其余按 pos 冲突分组。
+            const bool group_sub_lines = [&] {
+                const auto r = bms_channel_rule(channel);
+                if (r && r->allow_sub_lines) return true;
+                for (const auto& c : cells)
+                    if (c.sub_line > 0) return true;  // 未声明但有子行 → 也原样保留
+                return false;
+            }();
+            if (group_sub_lines) {
                 std::uint32_t n_groups = 1;
                 for (const auto& c : cells)
-                    n_groups = std::max(n_groups, c.bgm_line + 1);
+                    n_groups = std::max(n_groups, c.sub_line + 1);
                 for (std::uint32_t g = 0; g < n_groups; ++g) {
-                    // 本组 cells（bgm_line == g）
+                    // 本组 cells（sub_line == g）
                     std::map<Rational, std::vector<std::string>> by_pos;
                     for (const auto& c : cells) {
-                        if (c.bgm_line != g) continue;
+                        if (c.sub_line != g) continue;
                         by_pos[c.pos].push_back(c.text);
                     }
                     std::int64_t n = 1;

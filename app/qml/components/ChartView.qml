@@ -312,7 +312,7 @@ Item {
     property real _moveDeltaF: 0    // 当前时间位移（拍位小数）
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
     property var _moveSourceLane: null  // 拖起的 note 所在轨（{player,kind,index}；跨通道多换轨判定用）
-    property int _moveSourceBgmLine: -1 // 拖起 note 的 BGM 子通道行号（相对平移对齐基准；非 BGM=-1）
+    property int _moveSourceSubLine: -1 // 拖起 note 的 BGM 子通道行号（相对平移对齐基准；非 BGM=-1）
     property var _pressedNoteRef: null  // press 命中的 note（有值 = 点击待确认；release 无拖译才播放）
 
     /// 平移判定：按下点在选中集内的某个 note 上？
@@ -325,7 +325,7 @@ Item {
                     s.lane.index === hit.lane.index &&
                     s.lane.player === hit.lane.player &&
                     s.pos.num === hit.pos.num && s.pos.den === hit.pos.den &&
-                    (s.bgm_line === undefined || s.bgm_line === hit.bgm_line))
+                    (s.sub_line === undefined || s.sub_line === hit.sub_line))
                 return true
         }
         return false
@@ -386,14 +386,14 @@ Item {
                 _moveDeltaF = 0
                 _moveTargetLane = null
                 _moveSourceLane = obj.lane   // 拖起 note 的轨（跨通道多选移动只动此轨，2026-09）
-                // ⚠️ BGM 虚拟子通道：源 note 的 bgm_line（相对平移对齐基准）。判别必须用
-                // lane.kind==="bgm"——noteAt/objectAt 对**非 BGM note 恒返回 bgm_line=0**，
+                // ⚠️ BGM 虚拟子通道：源 note 的 sub_line（相对平移对齐基准）。判别必须用
+                // lane.kind==="bgm"——noteAt/objectAt 对**非 BGM note 恒返回 sub_line=0**，
                 // 若只看 `!== undefined` 则玩乐 note 得 0（误判为 BGM；2026-09 多轨→BGM 挤成
                 // 一行的根因）。显式置 -1 代表非 BGM。
-                _moveSourceBgmLine = (obj.lane && obj.lane.kind === "bgm" &&
-                                      obj.bgm_line !== undefined) ? obj.bgm_line : -1
+                _moveSourceSubLine = (obj.lane && obj.lane.kind === "bgm" &&
+                                      obj.sub_line !== undefined) ? obj.sub_line : -1
                 view.moveSourceLane = obj.lane  // M6 预览：拖起 lane → ghost 跨列判断用
-                view.moveSourceBgmLine = _moveSourceBgmLine  // BGM 相对平移基准（ghost）
+                view.moveSourceSubLine = _moveSourceSubLine  // BGM 相对平移基准（ghost）
                 _moveStartF = view.measureAtY(y)
                 return
             }
@@ -424,11 +424,11 @@ Item {
                     view.movePreview = true
                     view.moveDeltaF = _moveDeltaF
                     // 目标列规范化为 {player,kind,index}（laneAtX 返回 lanePlayer/laneKind/laneIndex）；
-                    // 带 bgm_line：BGM 虚拟子通道目标（ghost 落对应 bgmN 列）
+                    // 带 sub_line：BGM 虚拟子通道目标（ghost 落对应 bgmN 列）
                     view.moveTargetLane = laneHit && laneHit.valid
                         ? { player: laneHit.lanePlayer, kind: laneHit.laneKind,
                             index: laneHit.laneIndex,
-                            bgm_line: laneHit.bgm_line }
+                            sub_line: laneHit.sub_line }
                         : ({})
                 }
             }
@@ -460,7 +460,7 @@ Item {
             view.movePreview = false  // M6 编辑预览：结束拖拽 → 关 ghost
             view.moveTargetLane = ({})
             view.moveSourceLane = ({})
-            view.moveSourceBgmLine = -1
+            view.moveSourceSubLine = -1
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             let deltaF = 0
             let targetLane = null
@@ -493,7 +493,7 @@ Item {
                     root.metaMoveRequested(root._moveKind, root._moveObj, deltaF, targetLane)
                 } else {
                     root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane,
-                                                root._moveSourceBgmLine)
+                                                root._moveSourceSubLine)
                 }
             }
             // 点击（按下→释放，无拖动）= 播放一次；拖动（移动 note）= 不播。

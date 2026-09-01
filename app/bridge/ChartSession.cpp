@@ -164,7 +164,7 @@ bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
 // —— M4.3c+ 后台异步渲染（多线程，UI 不卡；用户 2026-09 拍板） ——
 
 /// note 唯一键（measure|num|den|player|kind|index|sampleId——与 NoteRef 同构；
-/// 渲染快照 diff 用；不含 bgm_line（BGM 子轨行数变化少见，且带行号会误判脏）。
+/// 渲染快照 diff 用；不含 sub_line（BGM 子轨行数变化少见，且带行号会误判脏）。
 static QString noteSnapKey(const beatbench::Event<beatbench::Note>& n) {
     return QString::asprintf("%u|%lld|%lld|%d|%d|%d|%u", n.measure,
                              static_cast<long long>(n.pos.num),

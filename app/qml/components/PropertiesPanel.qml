@@ -362,8 +362,8 @@ ColumnLayout {
         if (l.kind === "scratch") return prefix + qsTr("皿")
         if (l.kind === "pedal") return prefix + qsTr("踏板")
         if (l.kind === "bgm")
-            return qsTr("BGM") + (ref.bgm_line !== undefined && ref.bgm_line >= 0
-                                  ? "·" + (ref.bgm_line + 1) : "")
+            return qsTr("BGM") + (ref.sub_line !== undefined && ref.sub_line >= 0
+                                  ? "·" + (ref.sub_line + 1) : "")
         return prefix + l.kind
     }
     function laneCh(ref) {

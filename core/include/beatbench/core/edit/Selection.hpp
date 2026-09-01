@@ -13,7 +13,7 @@ namespace beatbench::edit {
 /// note 值标识（选择集/剪贴板元素）：(measure, pos, lane, sample)。
 /// 用值而非容器下标：编辑（插入/删除/移动）会改变下标，值标识天然鲁棒——
 /// undo 后 note 回来了，selection 仍指向它（01 §5.6：选择是会话状态，不入 undo）。
-/// bgm_line：BGM 行序号（仅 lane.kind==Bgm 有意义）。BMS 同小节多行 ch01 的 note 在
+/// sub_line：BGM 行序号（仅 lane.kind==Bgm 有意义）。BMS 同小节多行 ch01 的 note 在
 /// (measure,pos,lane,sample) 上完全同值，**必须带行号消歧**（2026-09 用户反馈：多行 BGM
 /// note 无法精确定位/移动）。非 BGM note = 0（不参与匹配）。
 struct NoteRef {
@@ -21,18 +21,18 @@ struct NoteRef {
     Rational pos;
     Lane lane;
     std::uint32_t sample = 0;
-    std::uint32_t bgm_line = 0;  ///< BGM 行序号（消歧；非 Bgm = 0）
+    std::uint32_t sub_line = 0;  ///< BGM 行序号（消歧；非 Bgm = 0）
 
     friend bool operator<(const NoteRef& a, const NoteRef& b) {
         if (a.measure != b.measure) return a.measure < b.measure;
         if (a.pos != b.pos) return a.pos < b.pos;
         if (a.lane != b.lane) return a.lane < b.lane;
         if (a.sample != b.sample) return a.sample < b.sample;
-        return a.bgm_line < b.bgm_line;
+        return a.sub_line < b.sub_line;
     }
     friend bool operator==(const NoteRef& a, const NoteRef& b) {
         return a.measure == b.measure && a.pos == b.pos && a.lane == b.lane &&
-               a.sample == b.sample && a.bgm_line == b.bgm_line;
+               a.sample == b.sample && a.sub_line == b.sub_line;
     }
 };
 

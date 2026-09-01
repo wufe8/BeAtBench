@@ -32,11 +32,11 @@ struct Note {
     /// BGM 展开 = 按行序分列，非按 #WAV id；空行也占位）。展示辅助字段——不参与语义相等
     /// （多个同 (pos,lane,sample) 的 Bgm note 仅因行号不同应视为同对象），parser 填初始值，
     /// 移动/编辑后由命令层按新位置所在行更新；writer 按它分组写回保持原多行结构。
-    std::uint32_t bgm_line = 0;
+    std::uint32_t sub_line = 0;
 
     friend bool operator==(const Note& a, const Note& b) {
         return a.lane == b.lane && a.sample == b.sample && a.kind == b.kind &&
-               a.ln_pair == b.ln_pair;  // 排除 bgm_line / ln_channel（辅助、派生）
+               a.ln_pair == b.ln_pair;  // 排除 sub_line / ln_channel（辅助、派生）
     }
 };
 
@@ -56,7 +56,7 @@ struct Bpm {
     bool ch08 = false;
 
     friend bool operator==(const Bpm& a, const Bpm& b) {
-        return a.value == b.value;  // 排除 ref_id/ch08（与 Note.bgm_line 同理）
+        return a.value == b.value;  // 排除 ref_id/ch08（与 Note.sub_line 同理）
     }
     friend bool operator<(const Bpm& a, const Bpm& b) { return a.value < b.value; }
 };

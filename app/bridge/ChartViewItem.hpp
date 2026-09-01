@@ -95,8 +95,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(QVariantMap moveSourceLane READ moveSourceLane WRITE setMoveSourceLane NOTIFY moveSourceLaneChanged)
     Q_PROPERTY(QVariantMap moveTargetLane READ moveTargetLane WRITE setMoveTargetLane NOTIFY moveTargetLaneChanged)
     /// M6 编辑预览：拖起 note 的 BGM 子通道行号（-1=非 BGM）。BGM 虚拟子通道多选移动
-    /// **保持相对距离**（channelOffset 的 bgm_line 版）——ghost 各 note 落 line = 自身 + 偏移。
-    Q_PROPERTY(int moveSourceBgmLine READ moveSourceBgmLine WRITE setMoveSourceBgmLine NOTIFY moveSourceBgmLineChanged)
+    /// **保持相对距离**（channelOffset 的 sub_line 版）——ghost 各 note 落 line = 自身 + 偏移。
+    Q_PROPERTY(int moveSourceSubLine READ moveSourceSubLine WRITE setMoveSourceBgmLine NOTIFY moveSourceSubLineChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -151,7 +151,7 @@ public:
     void setMoveSourceLane(const QVariantMap& v);
     QVariantMap moveTargetLane() const { return m_moveTargetLane; }
     void setMoveTargetLane(const QVariantMap& v);
-    int moveSourceBgmLine() const { return m_moveSourceBgmLine; }
+    int moveSourceSubLine() const { return m_moveSourceSubLine; }
     void setMoveSourceBgmLine(int v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
@@ -232,15 +232,15 @@ public:
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
     /// 屏幕 x → 命中的可放置列（{valid, lanePlayer, laneKind, laneIndex}；横向改轨移动用）。
-    /// 扩展（2026-09 跨命名空间移动）：额外带 bgmLine（BGM 展开列行号；-1 非 BGM）、
+    /// 扩展（2026-09 跨命名空间移动）：额外带 subLine（BGM 展开列行号；-1 非 BGM）、
     /// bgaLayer（BGA 图层列 0..3；-1 非 BGA）、metaKind（"bpm"/"stop"；空 = 非元事件轨）。
     /// BPM/STOP 列不再拒绝（用户确认「格式可表示 id 就允许移动」——拖到该列 =
     /// note → timing 事件转换）；BGA 图层列同理（note → BGA 事件）。
     Q_INVOKABLE QVariantMap laneAtX(qreal x) const;
 
-    /// 给定 note 引用（{lane:{player,kind,index}, bgm_line?}）→ 该 note 当前**显示列下标**
-    /// （columnFor 封装：BGM 展开列按 bgm_line 精确匹配、玩乐列按 lane 匹配；-1 = 无对应列）。
-    /// BGM 跨通道相对间距（连续轨道平移）用同一列序自然表达——不再受「bgm_line 对玩乐
+    /// 给定 note 引用（{lane:{player,kind,index}, sub_line?}）→ 该 note 当前**显示列下标**
+    /// （columnFor 封装：BGM 展开列按 sub_line 精确匹配、玩乐列按 lane 匹配；-1 = 无对应列）。
+    /// BGM 跨通道相对间距（连续轨道平移）用同一列序自然表达——不再受「sub_line 对玩乐
     /// note 恒=0」的混淆影响（2026-09 用户：多轨拖进 BGM 应保持相对距离）。
     Q_INVOKABLE int columnIndexForRef(const QVariantMap& ref) const;
 
@@ -287,7 +287,7 @@ signals:
     void moveDeltaFChanged();
     void moveSourceLaneChanged();
     void moveTargetLaneChanged();
-    void moveSourceBgmLineChanged();
+    void moveSourceSubLineChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -302,8 +302,8 @@ private:
         QString label;
         bool bgm = false;            // 背景音轨列（ch01）
         bool p2 = false;             // 2P 列（浅主色底）
-        std::uint32_t bgmId = 0;     // 遗留：按 #WAV id 分列（0 = 聚合）——已被 bgmLine 取代
-        int bgmLine = -1;            // BGM 展开列行号（2026-09：按 ch01 行序分列，非按 id；
+        std::uint32_t bgmId = 0;     // 遗留：按 #WAV id 分列（0 = 聚合）——已被 subLine 取代
+        int subLine = -1;            // BGM 展开列行号（2026-09：按 ch01 行序分列，非按 id；
                                      // 0..N-1 = bgm1..bgmN；-1 = 聚合列/非 BGM）
         int bgaLayer = -1;           // BGA 图层列（0=base 1=poor 2=layer 3=layer2；-1 = 非 BGA）
         bool bpm = false;            // BPM 元事件轨（窄列，iBMSC 式；不随 scrollX 滚动）
@@ -319,14 +319,14 @@ private:
     void drawPreview(QPainter* p) const;
     /// 画一个半透明 ghost note（normal 矩形 / mine 菱形 / ln 有帽矩形）。
     void drawNoteGhost(QPainter* p, qreal measureFloat, const beatbench::Lane& lane,
-                       const QString& noteKind, std::uint32_t sample, int bgmLine) const;
+                       const QString& noteKind, std::uint32_t sample, int subLine) const;
     /// paint 前按当前 theme 刷新标尺/note 标签字体族（皮肤可换；避免硬编码 Consolas）。
     void applyThemeFonts(const ThemeManager* th);
-    /// NoteRef 语义键（measure|num|den|player|kind|index|sample|bgm_line）：选中判定用。
-    /// ⚠️ bgm_line 入键：BGM 同位置不同子通道行须彼此区分，否则选中会误高亮整组。
+    /// NoteRef 语义键（measure|num|den|player|kind|index|sample|sub_line）：选中判定用。
+    /// ⚠️ sub_line 入键：BGM 同位置不同子通道行须彼此区分，否则选中会误高亮整组。
     static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
                               const beatbench::Lane& lane, std::uint32_t sample = 0,
-                              std::uint32_t bgm_line = 0);
+                              std::uint32_t sub_line = 0);
 
     /// BGA/BPM/STOP 对象选中判定（按 kind/measure/pos/layer/sample 键；layer/sample -1 = n/a）。
     bool metaSelected(std::uint32_t measure, const beatbench::Rational& pos,
@@ -335,7 +335,7 @@ private:
     /// 轨道列重算（谱面切换/尺寸/展开状态变化时；按谱面实际出现的 Lane 数据驱动）。
     void rebuildColumns();
     int columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampleId = 0,
-                  int bgmLine = -1) const;
+                  int subLine = -1) const;
     /// BGA 事件 → 图层列（-1 = 无该层列，如 showExtras 关闭）。
     int columnForBga(int layer) const;
     void clampScrollX();
@@ -390,9 +390,9 @@ private:
     int m_snapNum = 1;   // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）
     int m_snapDen = 16;  // 吸附粒度分母
     bool m_bgmExpanded = false;
-    /// BGM 展开子通道高水位（本会话单调不减，2026-09）：列数 = max(m_bgmMaxLine, 实际行)+1+PAD；
-    /// 空白尾行保存时天然丢弃（bms_writer 按 max(bgm_line)+1 写），故只增不减安全，新谱面也能放。
-    std::uint32_t m_bgmMaxLine = 0;
+    /// BGM 展开子通道高水位（本会话单调不减，2026-09）：列数 = max(m_subMaxLine, 实际行)+1+PAD；
+    /// 空白尾行保存时天然丢弃（bms_writer 按 max(sub_line)+1 写），故只增不减安全，新谱面也能放。
+    std::uint32_t m_subMaxLine = 0;
     bool m_showChannelIds = false;
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
     bool m_lnSelectMode = false;  // LN 选取模式（默认关）：点 LN 任一段自动返回配对
@@ -454,7 +454,7 @@ private:
     qreal m_moveDeltaF = 0.0;    // 移动预览位移（拍位小数）
     QVariantMap m_moveSourceLane;  // 拖起 lane（{player,kind,index}）
     QVariantMap m_moveTargetLane;  // 目标 lane（跨通道移动）；空 = 不改列
-    int m_moveSourceBgmLine = -1;  // 拖起 note 的 BGM 子通道行号（-1=非 BGM；相对平移基准）
+    int m_moveSourceSubLine = -1;  // 拖起 note 的 BGM 子通道行号（-1=非 BGM；相对平移基准）
     QVariantList m_selection;  // 选中 note 集合（NoteRef 语义；绘制高亮用）
     QVariantList m_metaSelection;  // 选中 BGA/BPM/STOP 对象集合（绘制高亮用）
     int m_lastVisibleNotes = 0;  // 最近一次 paint 的可见 note 数（--perf-log）

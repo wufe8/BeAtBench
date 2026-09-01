@@ -269,9 +269,10 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
 
     auto& raw = chart.raw_lines;
     std::vector<NoteInfo> note_infos;
-    // BGM 行序号（2026-09 用户确认：ch01 同小节多行 = 独立背景音轨，编辑器按行序展开；
-    // 此处按 measure 记录「第几次读到 ch01」，note 带 bgm_line。空行也占位（字数递增）。
-    std::map<std::uint32_t, std::uint32_t> bgm_line_counts;
+    // 子行序号（2026-09 泛化：任意 Note 通道同小节多行 = 子行，按 (measure,channel) 记录「第几条
+    // 行」赋 sub_line（空行也占位，字数递增）。磁盘无"子通道"——子行就是同一通道的重复行，sub_line
+    // 是读侧行序。allow_sub_lines=false 的通道出现多行由 lint 软警告（chart_check）。
+    std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> sub_line_counts;
     bool in_block_comment = false;
 
     // ---- 预扫描 1：#LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
@@ -449,12 +450,11 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                             {Severity::Warning,
                              "数据行长度非偶数（忽略尾字符）: " + std::string(line), number});
                     }
-                    // BGM 行序号：ch01（rule->lane.kind==Bgm）按 measure 递增（空行也占位）
-                    const std::uint32_t bgm_line = [&] {
-                        if (rule->lane.kind == LaneKind::Bgm && channel == "01")
-                            return bgm_line_counts[measure]++;
-                        return 0u;
-                    }();
+                    // 子行序号（2026-09 泛化）：任意 Note 通道同小节多行 = 子行（原样保留结构），
+                    // 按 (measure,channel) FIFO 递增（空行也占位）。allow_sub_lines=false 的通道
+                    // 出现多行由 lint 软警告（见 chart_check 的 sub_lines_not_allowed）。
+                    const std::uint32_t sub_line = (rule->semantics == ChannelSemantics::Note)
+                        ? sub_line_counts[{measure, std::string(channel)}]++ : 0u;
                     const auto push_slot = [&](std::string_view slot, std::size_t i) {
                         const Rational pos(static_cast<std::int64_t>(i),
                                            static_cast<std::int64_t>(n_slots));
@@ -465,7 +465,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 note.lane = rule->lane;
                                 note.sample.id = id;
                                 note.kind = rule->note_kind;
-                                note.bgm_line = bgm_line;
+                                note.sub_line = sub_line;
                                 note.ln_channel = rule->ln_channel;  // 51-69（LNTYPE 1 通道）
                                 chart.notes.push_back({measure, pos, note});
                                 note_infos.push_back(

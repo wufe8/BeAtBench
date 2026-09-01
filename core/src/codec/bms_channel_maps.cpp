@@ -30,6 +30,7 @@ struct Rule {
     bool ln_channel = false;
     std::uint8_t player = 0;
     std::uint8_t bga_layer = 0;
+    bool allow_sub_lines = false;  // 该通道允许同小节多行 = 子行（仅 ch01 置 true）
 };
 
 // 槽位表（位序 0-8 ↔ 通道末位 1-9）：
@@ -58,8 +59,10 @@ struct Table {
     constexpr Table(const std::uint8_t (&key_index)[9], const LaneKind (&kinds)[9],
                     bool nineKey = false) {
         constexpr Rule specials[kSpecialCount] = {
-            // ch01 = 背景音/BGM：到达即自动播放，游戏不可见（BMS 笔记「通道」节）
-            {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm},
+            // ch01 = 背景音/BGM：到达即自动播放，游戏不可见（BMS 笔记「通道」节）。
+            // allow_sub_lines=true：同小节多行 = 多个背景音子行（sub_line 泛化，2026-09）。
+            {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm, 0, NoteKind::Normal,
+             false, 0, 0, true},
             {{'0', '2'}, ChannelSemantics::MeasureLen},
             {{'0', '3'}, ChannelSemantics::BpmInline},
             {{'0', '4'}, ChannelSemantics::Bga},
@@ -164,7 +167,8 @@ std::optional<BmsChannelRule> bms_channel_rule_for(std::string_view mode,
         if (r.ch[0] == up[0] && r.ch[1] == up[1]) {
             if (r.sem == ChannelSemantics::Note) {
                 return BmsChannelRule{ChannelSemantics::Note,
-                                      Lane{r.player, r.kind, r.index}, r.nk, r.ln_channel};
+                                      Lane{r.player, r.kind, r.index}, r.nk,
+                                      r.ln_channel, 0, r.allow_sub_lines};
             }
             return BmsChannelRule{r.sem, {}, NoteKind::Normal, false, r.bga_layer};
         }

@@ -66,12 +66,12 @@ std::size_t lower_bound_pos(const std::vector<Event<Note>>& notes, std::uint32_t
 // pos 升序（doc/04 §6 的「事件按 (measure,pos) 升序」约定未落实；2026-09 实测 Del 失效：
 // lower_bound 定位错位导致 1/4 之类 note 永远匹配不上）。改为 measure 段线性扫描
 // （行序 measure 单调递增 → 同 measure 连续段；命中率与代价可控）。
-// bgm_line：BGM 行序号消歧（同 (measure,pos,lane,sample) 的 Bgm note 靠它区分；
+// sub_line：BGM 行序号消歧（同 (measure,pos,lane,sample) 的 Bgm note 靠它区分；
 // 非 Bgm 传 0 且不参与匹配）。
 std::optional<std::size_t> find_note(const std::vector<Event<Note>>& notes,
                                      std::uint32_t measure, const Rational& pos,
                                      const Lane& lane, std::uint32_t sample,
-                                     std::uint32_t bgm_line = 0) {
+                                     std::uint32_t sub_line = 0) {
     auto it = std::lower_bound(notes.begin(), notes.end(), measure,
                                [](const Event<Note>& e, std::uint32_t m) {
                                    return e.measure < m;
@@ -79,7 +79,7 @@ std::optional<std::size_t> find_note(const std::vector<Event<Note>>& notes,
     for (; it != notes.end() && it->measure == measure; ++it) {
         const auto& n = it->value;
         if (it->pos == pos && n.lane == lane && n.sample.id == sample &&
-            (lane.kind != LaneKind::Bgm || n.bgm_line == bgm_line))
+            (lane.kind != LaneKind::Bgm || n.sub_line == sub_line))
             return static_cast<std::size_t>(it - notes.begin());
     }
     return std::nullopt;
@@ -335,9 +335,9 @@ std::string EditorSession::redo_label() const {
 
 PutNoteCommand::PutNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
                                std::uint32_t sample, bool ln_kind, NoteKind kind,
-                               std::uint32_t bgm_line)
+                               std::uint32_t sub_line)
     : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_ln_kind(ln_kind),
-      m_kind(kind), m_bgm_line(bgm_line) {}
+      m_kind(kind), m_sub_line(sub_line) {}
 
 void PutNoteCommand::apply(Chart& chart) {
     const std::size_t at = lower_bound_pos(chart.notes, m_measure, m_pos);
@@ -347,7 +347,7 @@ void PutNoteCommand::apply(Chart& chart) {
     ev.value.lane = m_lane;
     ev.value.sample.id = m_sample;
     ev.value.kind = m_kind;
-    ev.value.bgm_line = (m_lane.kind == LaneKind::Bgm) ? m_bgm_line : 0;
+    ev.value.sub_line = (m_lane.kind == LaneKind::Bgm) ? m_sub_line : 0;
     // LN 放置：note 数据落位后标记「位于 LN 通道」（51-69）——配对由 EditorSession
     // 的统一 rebuild 推导（2026-09 用户原则：ln_pair 是派生的，命令不维护）。
     ev.value.ln_channel = m_ln_kind && m_kind == NoteKind::Normal;
@@ -383,15 +383,15 @@ MoveNoteCommand::MoveNoteCommand(std::uint32_t from_measure, Rational from_pos, 
                                  std::uint32_t sample, std::uint32_t to_measure,
                                  Rational to_pos, bool move_ln_pair,
                                  std::optional<Lane> to_lane,
-                                 std::uint32_t from_bgm_line,
-                                 std::optional<std::uint32_t> to_bgm_line)
+                                 std::uint32_t from_sub_line,
+                                 std::optional<std::uint32_t> to_sub_line)
     : m_from_measure(from_measure), m_from_pos(from_pos), m_lane(lane), m_sample(sample),
       m_to_measure(to_measure), m_to_pos(to_pos), m_move_ln_pair(move_ln_pair),
-      m_to_lane(to_lane), m_from_bgm_line(from_bgm_line), m_to_bgm_line(to_bgm_line) {}
+      m_to_lane(to_lane), m_from_sub_line(from_sub_line), m_to_sub_line(to_sub_line) {}
 
 void MoveNoteCommand::apply(Chart& chart) {
     const auto idx = find_note(chart.notes, m_from_measure, m_from_pos, m_lane, m_sample,
-                               m_from_bgm_line);
+                               m_from_sub_line);
     if (!idx) return;  // 找不到 → 无操作
     m_moved = chart.notes[*idx];  // 快照（invert 恢复）
     m_partner.reset();
@@ -407,7 +407,7 @@ void MoveNoteCommand::apply(Chart& chart) {
     if (m_moved->value.ln_pair && *m_moved->value.ln_pair < chart.notes.size()) {
         const auto& p = chart.notes[*m_moved->value.ln_pair];
         partner_val = std::make_tuple(p.measure, p.pos, p.value.lane, p.value.sample.id,
-                                      p.value.bgm_line);
+                                      p.value.sub_line);
     }
 
     // 从容器取走主 note（只这一个；伙伴不动）
@@ -427,8 +427,8 @@ void MoveNoteCommand::apply(Chart& chart) {
     main_ev.pos = m_to_pos;
     if (m_to_lane) main_ev.value.lane = *m_to_lane;  // 跨通道：改到目标轨道
     if (main_ev.value.lane.kind == LaneKind::Bgm) {
-        if (m_to_bgm_line) {
-            main_ev.value.bgm_line = *m_to_bgm_line;
+        if (m_to_sub_line) {
+            main_ev.value.sub_line = *m_to_sub_line;
         } else {
             // 自动分配（2026-09 用户反馈问题1）：目标小节 ch01 行号 = FIFO 虚拟子通道。
             // 优先填目标小节中该 (pos) 未占用的最小行号；否则追加行尾（max+1）。
@@ -439,16 +439,16 @@ void MoveNoteCommand::apply(Chart& chart) {
             std::uint32_t max_line = 0;
             for (const auto& n : chart.notes) {
                 if (n.measure != m_to_measure || n.value.lane.kind != LaneKind::Bgm) continue;
-                max_line = std::max(max_line, n.value.bgm_line + 1);
-                if (n.value.bgm_line < 32 && n.pos == m_to_pos)
-                    used |= (1u << n.value.bgm_line);
+                max_line = std::max(max_line, n.value.sub_line + 1);
+                if (n.value.sub_line < 32 && n.pos == m_to_pos)
+                    used |= (1u << n.value.sub_line);
             }
             std::uint32_t line = 0;
             while (line < 32 && (used & (1u << line))) ++line;
-            main_ev.value.bgm_line = (line < 32) ? line : max_line;
+            main_ev.value.sub_line = (line < 32) ? line : max_line;
         }
     } else {
-        main_ev.value.bgm_line = 0;
+        main_ev.value.sub_line = 0;
     }
     // LN 通道标记（2026-09 用户验证）：
     // - **换轨移动**（cross_lane）→ 目标 = 普通游玩通道：本 note ln_channel=false，
@@ -499,25 +499,25 @@ void MoveNoteCommand::invert(Chart& chart) {
     // 反向：把 (m_to_measure, m_to_pos, 当前lane, sample) 移回 (m_from_measure, m_from_pos)
     // 当前 lane：跨通道后 note 在 to_lane；纯时间移动 = m_lane。
     const Lane cur_lane = m_to_lane.value_or(m_lane);
-    // 当前 BGM 行：apply 后的行号 = 显式 to_bgm_line 或 apply 自动分配。invert 时无法
+    // 当前 BGM 行：apply 后的行号 = 显式 to_sub_line 或 apply 自动分配。invert 时无法
     // 精确重建自动分配值 → 用「目标小节内同 (pos,lane,sample) 的 Bgm note」消歧：
-    // 遍历该 measure 的 Bgm note 找匹配的 bgm_line（通常唯一）。
-    std::uint32_t cur_bgm_line = 0;
+    // 遍历该 measure 的 Bgm note 找匹配的 sub_line（通常唯一）。
+    std::uint32_t cur_sub_line = 0;
     if (cur_lane.kind == LaneKind::Bgm) {
-        if (m_to_bgm_line) {
-            cur_bgm_line = *m_to_bgm_line;
+        if (m_to_sub_line) {
+            cur_sub_line = *m_to_sub_line;
         } else {
             for (const auto& n : chart.notes) {
                 if (n.measure == m_to_measure && n.value.lane == cur_lane &&
                     n.value.sample.id == m_sample && n.pos == m_to_pos) {
-                    cur_bgm_line = n.value.bgm_line;
+                    cur_sub_line = n.value.sub_line;
                     break;
                 }
             }
         }
     }
     const auto idx = find_note(chart.notes, m_to_measure, m_to_pos, cur_lane, m_sample,
-                               cur_bgm_line);
+                               cur_sub_line);
     if (!idx) return;
 
     // LN 语义（与 apply 对称）：只移回选中 note，保持与伙伴互指（按伙伴值重定位）。
@@ -528,7 +528,7 @@ void MoveNoteCommand::invert(Chart& chart) {
         *chart.notes[*idx].value.ln_pair < chart.notes.size()) {
         const auto& p = chart.notes[*chart.notes[*idx].value.ln_pair];
         partner_val = std::make_tuple(p.measure, p.pos, p.value.lane, p.value.sample.id,
-                                      p.value.bgm_line);
+                                      p.value.sub_line);
     }
 
     Event<Note> main_ev = std::move(chart.notes[*idx]);
@@ -546,8 +546,8 @@ void MoveNoteCommand::invert(Chart& chart) {
     main_ev.measure = m_from_measure;
     main_ev.pos = m_from_pos;
     if (m_to_lane) main_ev.value.lane = m_lane;
-    main_ev.value.bgm_line =
-        (main_ev.value.lane.kind == LaneKind::Bgm) ? m_from_bgm_line : 0;
+    main_ev.value.sub_line =
+        (main_ev.value.lane.kind == LaneKind::Bgm) ? m_from_sub_line : 0;
     main_ev.value.ln_channel = m_moved->value.ln_channel;  // undo 恢复原 LN 通道标记
     main_ev.value.ln_pair.reset();
     const std::size_t main_at = lower_bound_pos(chart.notes, m_from_measure, m_from_pos);
@@ -591,7 +591,7 @@ bool MoveNoteCommand::merge_with(const EditCommand& next) {
         m_to_measure = mv->m_to_measure;
         m_to_pos = mv->m_to_pos;
         m_to_lane = mv->m_to_lane;
-        m_to_bgm_line = mv->m_to_bgm_line;
+        m_to_sub_line = mv->m_to_sub_line;
         return true;
     }
     return false;
@@ -607,11 +607,11 @@ std::string MoveNoteCommand::describe() const {
 // ---------- ToggleLnCommand（单点 ↔ LN；只改 ln_channel，rebuild 接管配对） ----------
 
 ToggleLnCommand::ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane,
-                                 std::uint32_t sample, std::uint32_t bgm_line)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_bgm_line(bgm_line) {}
+                                 std::uint32_t sample, std::uint32_t sub_line)
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line) {}
 
 void ToggleLnCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line);
     if (!idx) return;
     // 2026-09 用户最终确认：T-Ln 工具 = **按当前 LNTYPE 切换选中 note 的通道**——
     //   LNTYPE 1：单点→LN = 通道 +40（11→51，模型 = ln_channel=true）；LN→单点 = -40。
@@ -635,7 +635,7 @@ void ToggleLnCommand::apply(Chart& chart) {
 
 void ToggleLnCommand::invert(Chart& chart) {
     if (!m_did_change) return;
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line);
     if (!idx) return;
     // 反向：只翻回本 note 的 ln_channel（原伙伴标记逻辑已去——与 apply 对称）
     chart.notes[*idx].value.ln_channel = m_was_ln;
@@ -651,14 +651,14 @@ std::string ToggleLnCommand::describe() const {
 // ---------- ConvertNoteCommand（note ↔ BGA/BPM/STOP 跨命名空间转换） ----------
 
 ConvertNoteCommand::ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
-                                       std::uint32_t sample, std::uint32_t bgm_line,
+                                       std::uint32_t sample, std::uint32_t sub_line,
                                        ConvertTarget target, std::uint32_t to_measure,
                                        Rational to_pos)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_bgm_line(bgm_line),
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line),
       m_target(target), m_to_measure(to_measure), m_to_pos(to_pos) {}
 
 void ConvertNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line);
     if (!idx) return;  // 找不到 → 无操作
     m_removed = chart.notes[*idx];
     m_partner.reset();
@@ -770,10 +770,10 @@ void ConvertNoteCommand::invert(Chart& chart) {
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(at), ev);
     shift_pairs_after(chart.notes, at, +1);
     if (m_partner) {
-        // 伙伴按快照值重定位（伙伴未移动；快照 (measure,pos,lane,sample,bgm_line) 可定位）
+        // 伙伴按快照值重定位（伙伴未移动；快照 (measure,pos,lane,sample,sub_line) 可定位）
         const auto pp = find_note(chart.notes, m_partner->measure, m_partner->pos,
                                   m_partner->value.lane, m_partner->value.sample.id,
-                                  m_partner->value.bgm_line);
+                                  m_partner->value.sub_line);
         if (pp && *pp != at && at < chart.notes.size()) {
             chart.notes[at].value.ln_pair = *pp;
             chart.notes[*pp].value.ln_pair = at;
@@ -803,11 +803,11 @@ std::string ConvertNoteCommand::describe() const {
 // ---------- DeleteNoteCommand ----------
 
 DeleteNoteCommand::DeleteNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
-                                     std::uint32_t sample, std::uint32_t bgm_line)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_bgm_line(bgm_line) {}
+                                     std::uint32_t sample, std::uint32_t sub_line)
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line) {}
 
 void DeleteNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line);
     if (!idx) return;
     m_removed = chart.notes[*idx];
     m_removed_index = *idx;
@@ -1259,7 +1259,7 @@ void ConvertMetaToNoteCommand::apply(Chart& chart) {
     ev.value.sample.id = m_sample;
     ev.value.kind = NoteKind::Normal;
     ev.value.ln_channel = false;
-    ev.value.bgm_line = 0;
+    ev.value.sub_line = 0;
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(at), ev);
     m_note_index = at;
     m_did = true;
@@ -1685,13 +1685,13 @@ std::string DeleteSampleCommand::describe() const {
 }
 
 SetNoteSampleCommand::SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane,
-                                           std::uint32_t sample, std::uint32_t bgm_line,
+                                           std::uint32_t sample, std::uint32_t sub_line,
                                            std::uint32_t to)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_bgm_line(bgm_line),
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line),
       m_to(to) {}
 
 void SetNoteSampleCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_bgm_line);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line);
     if (!idx) return;
     m_applied_index = idx;
     m_did_change = chart.notes[*idx].value.sample.id != m_to;

@@ -39,6 +39,10 @@ struct BmsChannelRule {
                                   ///< LNTYPE 1 = 同一通道内按时间序交替头尾；
                                   ///< LNTYPE 2 = 该通道不参与（头尾在普通通道，尾=#LNOBJ 值）
     std::uint8_t bga_layer = 0;   ///< Bga/BgaPoor 的层号（0=base 1=poor 2=layer 3=layer2）
+    /// 该通道是否允许「同小节多行 = 子行」（sub_line；2026-09 泛化）。默认 false = 不应有子行；
+    /// 仅 ch01（BGM 背景音）显式 true。驱动：解析（为重复行赋 FIFO 行号）/ 写回（分组多行）/
+    /// lint（多行是否合法）/ 编辑器（该通道可展开成子列）。⚠️ 磁盘上无"子通道"——就是重复行。
+    bool allow_sub_lines = false;
 };
 
 /// 内置 BMS 通道映射表（BMS 笔记「5/7key SP/DP 模式游玩轨」与 hitkey 通道表一致）：

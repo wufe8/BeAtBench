@@ -57,7 +57,7 @@ QtObject {
         var args = {
             measure: ref.measure, pos: ref.pos, lane: ref.lane, sample: ref.sample
         }
-        if (ref.bgm_line !== undefined) args.bgm_line = ref.bgm_line
+        if (ref.sub_line !== undefined) args.sub_line = ref.sub_line
         var r = sessionCmd("note.delete", args)
         if (r) setStatus(qsTr("已删除（可撤销）"))
     }
@@ -73,7 +73,7 @@ QtObject {
                 measure: refs[i].measure, pos: refs[i].pos,
                 lane: refs[i].lane, sample: refs[i].sample
             }
-            if (refs[i].bgm_line !== undefined) args.bgm_line = refs[i].bgm_line
+            if (refs[i].sub_line !== undefined) args.sub_line = refs[i].sub_line
             var r = dispatchCmd("note.delete", args)
             if (r) done++
         }
@@ -129,8 +129,8 @@ QtObject {
                 sample: hit.sampleHint,
                 kind: kind
             }
-            if (hit.bgm_line !== undefined && hit.bgm_line >= 0)
-                putArgs.bgm_line = hit.bgm_line
+            if (hit.sub_line !== undefined && hit.sub_line >= 0)
+                putArgs.sub_line = hit.sub_line
             var r0 = sessionCmd("note.put", putArgs)
             if (r0)
                 setStatus(kind === "ln"
@@ -149,8 +149,8 @@ QtObject {
             setStatus(qsTr("当前采样 #WAV%1 不在定义表中").arg(window.currentSampleId))
             return
         }
-        // ⚠️ 问题1（2026-09）：BGM 展开列（bgmLine>=0，无固定 sampleHint）放置必须传
-        // bgm_line——否则 note.put 默认 bgm_line=0 落到 bgm1（虚拟子通道行号丢失）。
+        // ⚠️ 问题1（2026-09）：BGM 展开列（subLine>=0，无固定 sampleHint）放置必须传
+        // sub_line——否则 note.put 默认 sub_line=0 落到 bgm1（虚拟子通道行号丢失）。
         var putArgs2 = {
             measure: hit.measure,
             pos: { num: hit.num, den: hit.den },
@@ -158,8 +158,8 @@ QtObject {
             sample: v,
             kind: kind
         }
-        if (hit.bgm_line !== undefined && hit.bgm_line >= 0)
-            putArgs2.bgm_line = hit.bgm_line
+        if (hit.sub_line !== undefined && hit.sub_line >= 0)
+            putArgs2.sub_line = hit.sub_line
         var r = sessionCmd("note.put", putArgs2)
         if (r) {
             var st = kind === "ln"
@@ -262,7 +262,7 @@ QtObject {
                a.lane.kind === b.lane.kind && a.lane.index === b.lane.index &&
                a.lane.player === b.lane.player &&
                a.pos.num === b.pos.num && a.pos.den === b.pos.den &&
-               (a.bgm_line === undefined || b.bgm_line === undefined || a.bgm_line === b.bgm_line)
+               (a.sub_line === undefined || b.sub_line === undefined || a.sub_line === b.sub_line)
     }
     function onNoteClicked(ref, ctrl) {
         // LN 选取模式（默认关）：点 LN 任一段 → 自动纳入配对段。ref 由 noteAt 返回，
@@ -500,19 +500,19 @@ QtObject {
         const keyToKey = sourceLane && sourceLane.kind === "key" &&
                          targetLane && targetLane.valid && targetLane.laneKind === "key"
         if (keyToKey) channelOffset = targetLane.laneIndex - sourceLane.index
-        // ⚠️ BGM 虚拟子通道（2026-09 重写）：判别必须是 lane.kind==="bgm" 而非 bgm_line>=0——后者
+        // ⚠️ BGM 虚拟子通道（2026-09 重写）：判别必须是 lane.kind==="bgm" 而非 sub_line>=0——后者
         // 对玩乐 note 恒=0（解析器非 ch01 一律写 0），会把「非 BGM」误判成「BGM」→ 先前
         // sourceBgmLine 恒取 0 → bgmOffset=targetBgmLine → 所有选中 note 挤进同一行（用户反复报告
-        // 的多轨→BGM 挤成一个通道）。现在统一用「显示列下标」做秩：BGM 展开列按 bgm_line、玩乐列
+        // 的多轨→BGM 挤成一个通道）。现在统一用「显示列下标」做秩：BGM 展开列按 sub_line、玩乐列
         // 按 lane，列序即 on-screen 连续序 → 跨通道拖拽 = 连续轨道平移，天然**保持相对距离**。
         const isBgmTarget = targetLane && targetLane.valid && targetLane.laneKind === "bgm"
         const cv = (root.editPage && root.editPage.locateChartView)
             ? root.editPage.locateChartView() : null
         let grabCol = -1
-        if (cv && sourceLane) grabCol = cv.columnIndexForRef({ lane: sourceLane, bgm_line: sourceBgmLine })
-        // BGM 基线：落展开 bgmN 列 → 该 line；落聚合列（bgm_line<0）→ 0（后端/相对秩兜底）。
-        const t0 = (isBgmTarget && targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
-            ? targetLane.bgm_line : 0
+        if (cv && sourceLane) grabCol = cv.columnIndexForRef({ lane: sourceLane, sub_line: sourceBgmLine })
+        // BGM 基线：落展开 bgmN 列 → 该 line；落聚合列（sub_line<0）→ 0（后端/相对秩兜底）。
+        const t0 = (isBgmTarget && targetLane.sub_line !== undefined && targetLane.sub_line >= 0)
+            ? targetLane.sub_line : 0
         const moves = []
         const newRefs = []
         for (let i = 0; i < refs.length; i++) {
@@ -537,7 +537,7 @@ QtObject {
                 // 各 note 落 line = max(0, t0 + gap)；grabCol 拖起 note 的列下标。
                 to.lane = { player: targetLane.lanePlayer, kind: "bgm",
                             index: targetLane.laneIndex }
-                to.bgm_line = Math.max(0, t0 + gap)
+                to.sub_line = Math.max(0, t0 + gap)
                 changedLane = true
             } else if (channelOffset !== 0 && ref.lane.kind === "key") {
                 // 同距离偏移（key 轨；钳到合法 key 范围 1..7）
@@ -560,16 +560,16 @@ QtObject {
                 changedLane = true
             }
             moves.push({ from: ref, to: to })
-            // 移动后保持选中：selectionRefs 更新到新位置（measure/pos/lane/bgm_line）
+            // 移动后保持选中：selectionRefs 更新到新位置（measure/pos/lane/sub_line）
             const nr = { measure: to.measure, pos: to.pos,
                          lane: changedLane ? to.lane : ref.lane,
                          sample: ref.sample }
             if (changedLane) {
-                // 换轨后按是否 BGM 定 bgm_line（与后端 MoveNoteCommand 一致，防选中判定残留旧行号）
-                nr.bgm_line = (to.lane && to.lane.kind === "bgm")
-                    ? (to.bgm_line !== undefined ? to.bgm_line : 0) : 0
-            } else if (ref.bgm_line !== undefined) {
-                nr.bgm_line = ref.bgm_line
+                // 换轨后按是否 BGM 定 sub_line（与后端 MoveNoteCommand 一致，防选中判定残留旧行号）
+                nr.sub_line = (to.lane && to.lane.kind === "bgm")
+                    ? (to.sub_line !== undefined ? to.sub_line : 0) : 0
+            } else if (ref.sub_line !== undefined) {
+                nr.sub_line = ref.sub_line
             }
             newRefs.push(nr)
         }
@@ -642,7 +642,7 @@ QtObject {
                 const g = gcd(nnum, nden)
                 return { measure: ref.measure, pos: { num: nnum / g, den: nden / g },
                          lane: ref.lane, sample: ref.sample,
-                         bgm_line: ref.bgm_line }
+                         sub_line: ref.sub_line }
             })
             setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(sn).arg(sd))
         }
@@ -666,7 +666,7 @@ QtObject {
                 const nidx = mirror ? (8 - idx) : (((idx - 1 + rotate) % 7 + 7) % 7 + 1)
                 return { measure: ref.measure, pos: ref.pos,
                          lane: { player: ref.lane.player, kind: "key", index: nidx },
-                         sample: ref.sample, bgm_line: ref.bgm_line }
+                         sample: ref.sample, sub_line: ref.sub_line }
             })
             setStatus(mirror ? qsTr("已镜像 %1 个 note").arg(r.notes)
                              : qsTr("已旋转 %1 个 note").arg(r.notes))

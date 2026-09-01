@@ -71,7 +71,7 @@ Json selection_json(const std::vector<NoteRef>& refs) {
         lane.set("index", static_cast<std::int64_t>(r.lane.index));
         item.set("lane", std::move(lane));
         item.set("sample", static_cast<std::int64_t>(r.sample));
-        if (r.bgm_line != 0) item.set("bgm_line", static_cast<std::int64_t>(r.bgm_line));
+        if (r.sub_line != 0) item.set("sub_line", static_cast<std::int64_t>(r.sub_line));
         arr.push_back(std::move(item));
     }
     return arr;

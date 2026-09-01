@@ -528,18 +528,18 @@ TEST(NoteMoveLane, ProtocolLegacyTopLevelFromTo) {
 
 // —— BGM 虚拟子通道多选全转（2026-09 用户：多选 note 拖进 BGM 应全部转 BGM） ——
 // 对应 QML moveSelection 的 isBgmTarget 分支：目标 laneKind=="bgm" 时每个选中 note
-// to.lane={0,Bgm,0}；落**聚合** BGM 列（无 to.bgm_line）→ 后端按 (measure,pos,sample)
-// 自动分配不冲突的虚拟子通道行；落**展开 bgmN 列**（to.bgm_line=N）→ 全部进该行。
+// to.lane={0,Bgm,0}；落**聚合** BGM 列（无 to.sub_line）→ 后端按 (measure,pos,sample)
+// 自动分配不冲突的虚拟子通道行；落**展开 bgmN 列**（to.sub_line=N）→ 全部进该行。
 // 此测试聚焦协议层 note.move（后端），确认跨通道+自动分配/显式行号往返正确。
 
-// BGM 行号归一化：把每个 Bgm note 的 (measure,pos,sample,bgm_line) 提出排序
-// （Bgm 消歧靠 bgm_line，故需含它；非 Bgm 不在此表）。
+// BGM 行号归一化：把每个 Bgm note 的 (measure,pos,sample,sub_line) 提出排序
+// （Bgm 消歧靠 sub_line，故需含它；非 Bgm 不在此表）。
 struct BgmRow { std::uint32_t measure; Rational pos; std::uint32_t sample; std::uint32_t line; };
 std::vector<BgmRow> bgm_rows(const std::vector<Event<Note>>& notes) {
     std::vector<BgmRow> out;
     for (const auto& e : notes) {
         if (e.value.lane.kind != LaneKind::Bgm) continue;
-        out.push_back({e.measure, e.pos, e.value.sample.id, e.value.bgm_line});
+        out.push_back({e.measure, e.pos, e.value.sample.id, e.value.sub_line});
     }
     std::sort(out.begin(), out.end(), [](const BgmRow& a, const BgmRow& b) {
         return std::tie(a.measure, a.pos, a.sample, a.line) <
@@ -556,7 +556,7 @@ TEST(NoteMoveLane, BgmMultiMoveAutoAssign) {
     auto& session = beatbench::edit::global_editor_session();
     session.load(make_chart());  // m1 key1 s1；m1 pos1/2 key2 s2；m2 key3 s3
 
-    // moves：3 个选中 note 全部转 BGM（无 to.bgm_line → 自动分配）。落到 m5 pos0（同位置不同采样）。
+    // moves：3 个选中 note 全部转 BGM（无 to.sub_line → 自动分配）。落到 m5 pos0（同位置不同采样）。
     Json req = Json::object();
     req.set("command", "note.move");
     Json args = Json::object();
@@ -624,14 +624,14 @@ TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
     auto& session = beatbench::edit::global_editor_session();
     session.load(make_chart());
 
-    // 落**展开 bgmN 列**：to.bgm_line=2 明确。两个 key note → 全部进该行（同位置不同采样）。
+    // 落**展开 bgmN 列**：to.sub_line=2 明确。两个 key note → 全部进该行（同位置不同采样）。
     Json req = Json::object();
     req.set("command", "note.move");
     Json args = Json::object();
     Json moves = Json::array();
     const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx,
                               std::uint32_t sample, std::uint32_t tm, int tn, int td,
-                              int bgm_line) -> Json {
+                              int sub_line) -> Json {
         Json m = Json::object();
         Json from = Json::object();
         from.set("measure", static_cast<std::int64_t>(fm));
@@ -657,7 +657,7 @@ TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
         tl.set("kind", "bgm");
         tl.set("index", 0);
         to.set("lane", std::move(tl));
-        to.set("bgm_line", bgm_line);
+        to.set("sub_line", sub_line);
         m.set("to", std::move(to));
         return m;
     };
@@ -685,13 +685,13 @@ TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
 }
 
 // —— BGM 相对距离保持（2026-09 用户：多选 BGM note 拖到另一 bgmN 列应整体平移，各 note 间距不变） ——
-// 对应 QML moveSelection 的 bgmOffset：每个选中 BGM note 的 to.bgm_line = 自身 bgm_line + offset，
-// 不再全部挤到目标行。此处验证协议层 note.move（moves[] 带各自 to.bgm_line）+ 后端落位。
+// 对应 QML moveSelection 的 bgmOffset：每个选中 BGM note 的 to.sub_line = 自身 sub_line + offset，
+// 不再全部挤到目标行。此处验证协议层 note.move（moves[] 带各自 to.sub_line）+ 后端落位。
 
 TEST(NoteMoveLane, BgmRelativeOffsetKeepsSpacing) {
     using beatbench::cmd::global_registry;
     auto& session = beatbench::edit::global_editor_session();
-    // 造一个含 3 个 BGM note（bgm_line 0/1/2，同 measure+pos 不同 line）的谱
+    // 造一个含 3 个 BGM note（sub_line 0/1/2，同 measure+pos 不同 line）的谱
     Chart c;
     c.meta["TITLE"] = "bgm-rel";
     c.meta["PLAYER"] = "1";
@@ -700,14 +700,14 @@ TEST(NoteMoveLane, BgmRelativeOffsetKeepsSpacing) {
         Event<Note> n{1, Rational(0, 1), {}};
         n.value.lane = {0, LaneKind::Bgm, 0};
         n.value.sample.id = static_cast<std::uint32_t>(10 + line);
-        n.value.bgm_line = static_cast<std::uint32_t>(line);
+        n.value.sub_line = static_cast<std::uint32_t>(line);
         c.notes.push_back(n);
     }
     session.load(c);
     const auto orig = bgm_rows(session.chart().notes);
     ASSERT_EQ(orig.size(), 3u);
 
-    // 3 个 BGM note 各自 to.bgm_line = 自身 + 2（相对偏移 +2；即拖起 line0 → 目标 line2）
+    // 3 个 BGM note 各自 to.sub_line = 自身 + 2（相对偏移 +2；即拖起 line0 → 目标 line2）
     Json req = Json::object();
     req.set("command", "note.move");
     Json args = Json::object();
@@ -726,7 +726,7 @@ TEST(NoteMoveLane, BgmRelativeOffsetKeepsSpacing) {
         fl.set("kind", "bgm");
         fl.set("index", 0);
         from.set("lane", std::move(fl));
-        from.set("bgm_line", line);
+        from.set("sub_line", line);
         m.set("from", std::move(from));
         Json to = Json::object();
         to.set("measure", 4);
@@ -739,7 +739,7 @@ TEST(NoteMoveLane, BgmRelativeOffsetKeepsSpacing) {
         tl.set("kind", "bgm");
         tl.set("index", 0);
         to.set("lane", std::move(tl));
-        to.set("bgm_line", line + 2);  // 相对 +2
+        to.set("sub_line", line + 2);  // 相对 +2
         m.set("to", std::move(to));
         moves.push_back(std::move(m));
     }

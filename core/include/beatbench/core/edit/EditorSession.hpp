@@ -115,7 +115,7 @@ class PutNoteCommand : public EditCommand {
 public:
     PutNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
                    bool ln_kind = false, NoteKind kind = NoteKind::Normal,
-                   std::uint32_t bgm_line = 0);
+                   std::uint32_t sub_line = 0);
     std::string name() const override { return "note.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -128,7 +128,7 @@ private:
     std::uint32_t m_sample;
     bool m_ln_kind;             ///< LN 放置（自动配对）
     NoteKind m_kind;            ///< Normal / Landmine
-    std::uint32_t m_bgm_line;   ///< BGM 行序号（放置到指定 ch01 行；非 BGM = 0）
+    std::uint32_t m_sub_line;   ///< BGM 行序号（放置到指定 ch01 行；非 BGM = 0）
     /// apply 实际插入的 note 下标（invert 用它精确删除；同 pos 冲突分裂等场景）
     std::optional<std::size_t> m_applied_index;
     /// apply 自动配对到的头下标（invert 恢复：解除该头配对）
@@ -154,8 +154,8 @@ public:
                     std::uint32_t sample, std::uint32_t to_measure, Rational to_pos,
                     bool move_ln_pair = false,
                     std::optional<Lane> to_lane = std::nullopt,
-                    std::uint32_t from_bgm_line = 0,
-                    std::optional<std::uint32_t> to_bgm_line = std::nullopt);
+                    std::uint32_t from_sub_line = 0,
+                    std::optional<std::uint32_t> to_sub_line = std::nullopt);
     std::string name() const override { return "note.move"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -173,9 +173,9 @@ private:
     /// 目标轨道（可选；nullopt = 纯时间移动，不换轨）
     std::optional<Lane> m_to_lane;
     /// 源 BGM 行序号（消歧：同 (measure,pos,lane,sample) 的 Bgm note 靠它定位）
-    std::uint32_t m_from_bgm_line = 0;
+    std::uint32_t m_from_sub_line = 0;
     /// 目标 BGM 行序号（nullopt = 不指定：按目标小节 ch01 行数自动分配；非 BGM 目标忽略）
-    std::optional<std::uint32_t> m_to_bgm_line;
+    std::optional<std::uint32_t> m_to_sub_line;
     /// apply 快照（invert 恢复；找不到 note 时为空）
     std::optional<Event<Note>> m_moved;
     std::optional<Event<Note>> m_partner;
@@ -192,7 +192,7 @@ private:
 class DeleteNoteCommand : public EditCommand {
 public:
     DeleteNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                      std::uint32_t bgm_line = 0);
+                      std::uint32_t sub_line = 0);
     std::string name() const override { return "note.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -203,7 +203,7 @@ private:
     Rational m_pos;
     Lane m_lane;
     std::uint32_t m_sample;
-    std::uint32_t m_bgm_line;  ///< BGM 行序号（消歧；非 Bgm = 0）
+    std::uint32_t m_sub_line;  ///< BGM 行序号（消歧；非 Bgm = 0）
     /// apply 删除的 note 的完整拷贝（invert 恢复；含 ln_pair 等）
     std::optional<Event<Note>> m_removed;
     /// 原容器位置（invert 尽量原位恢复；同 (measure,pos,lane) 冲突时退化为追加）

@@ -165,7 +165,7 @@ private:
 class ConvertNoteCommand : public EditCommand {
 public:
     ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                       std::uint32_t bgm_line, ConvertTarget target,
+                       std::uint32_t sub_line, ConvertTarget target,
                        std::uint32_t to_measure = 0, Rational to_pos = Rational(0, 1));
     std::string name() const override { return "note.convert"; }
     void apply(Chart& chart) override;
@@ -177,7 +177,7 @@ private:
     Rational m_pos;
     Lane m_lane;
     std::uint32_t m_sample;
-    std::uint32_t m_bgm_line;
+    std::uint32_t m_sub_line;
     ConvertTarget m_target;
     std::uint32_t m_to_measure;   ///< 目标位置（转换后事件落点；可同一 position）
     Rational m_to_pos;
@@ -206,7 +206,7 @@ private:
 class ToggleLnCommand : public EditCommand {
 public:
     ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                    std::uint32_t bgm_line = 0);
+                    std::uint32_t sub_line = 0);
     std::string name() const override { return "note.toggleLn"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -217,7 +217,7 @@ private:
     Rational m_pos;
     Lane m_lane;
     std::uint32_t m_sample;
-    std::uint32_t m_bgm_line;
+    std::uint32_t m_sub_line;
     /// apply 前本 note 是否在 LN 通道（invert 恢复原值）
     bool m_was_ln = false;
     /// 单点→LN 时被标记的伙伴下标（invert 清除标记）
@@ -304,13 +304,13 @@ private:
 };
 
 /// 修改某个 note 引用的采样 id（编辑区双击 note 改 #WAV id，note.setSample）。
-/// 语义：按 (measure, pos, lane, sample, bgm_line) 定位 note，把其 sample 引用改为 to。
+/// 语义：按 (measure, pos, lane, sample, sub_line) 定位 note，把其 sample 引用改为 to。
 /// 仅改这一条 note 的引用（不重命名定义表；音频文件不变）。找不到 → 无操作。
 /// 逆操作：恢复原 sample 引用。单个 undo 步。
 class SetNoteSampleCommand : public EditCommand {
 public:
     SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                         std::uint32_t bgm_line, std::uint32_t to);
+                         std::uint32_t sub_line, std::uint32_t to);
     std::string name() const override { return "note.setSample"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -321,7 +321,7 @@ private:
     Rational m_pos;
     Lane m_lane;
     std::uint32_t m_sample;
-    std::uint32_t m_bgm_line;
+    std::uint32_t m_sub_line;
     std::uint32_t m_to;
     std::optional<std::size_t> m_applied_index;  ///< 命中的 note 下标（invert 定位）
     bool m_did_change = false;

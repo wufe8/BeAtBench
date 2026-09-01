@@ -2,7 +2,9 @@
 // 事件统计 + 最小 lint（info/check 命令与 CLI 展示共用，避免两处逻辑漂移）。
 #include "beatbench/core/bms/ChartCheck.hpp"
 
+#include <set>
 #include <tuple>
+#include <utility>
 
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
@@ -266,6 +268,34 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
                         " 小节 " + std::to_string(ev.pos.num) + "/" +
                         std::to_string(ev.pos.den) + " 轨道 " + lane_text(ev.value.lane);
         issues.push_back(std::move(issue));
+    }
+    // 6) 子行检查（2026-09 泛化）：不应有子行的通道（allow_sub_lines=false，如游玩轨）若出现
+    //    sub_line>0（同小节多行），**软警告**（原样保留结构 + 提醒，不做硬限制——BMS 程序友好、
+    //    可直接编辑，内容基本只剩数据，行为取决于编辑器/播放器实现）。每 (measure, 通道) 只报一次。
+    {
+        std::set<std::pair<std::uint32_t, std::string>> flagged;
+        const std::string mode = chart.mode_id.value_or("sp7k");
+        for (const auto& ev : chart.notes) {
+            if (ev.value.sub_line == 0) continue;
+            const auto ch = bms_channel_for_mode(mode, ev.value.lane, ev.value.ln_channel,
+                                                 ev.value.kind);
+            if (ch.empty()) continue;
+            const auto rule = bms_channel_rule_for(mode, ch);
+            if (rule && rule->allow_sub_lines) continue;  // 允许子行的通道（ch01）不报
+            if (!flagged.insert({ev.measure, ch}).second) continue;
+            LintIssue issue;
+            issue.code = "sub_lines_not_allowed";
+            issue.severity = Severity::Info;  // 软提醒（BMS 无法做很严格的 lint 限制）
+            issue.measure = ev.measure;
+            issue.pos_num = ev.pos.num;
+            issue.pos_den = ev.pos.den;
+            issue.lane_player = ev.value.lane.player;
+            issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
+            issue.lane_index = ev.value.lane.index;
+            issue.message = "通道 " + ch + " 在 " + std::to_string(ev.measure) +
+                            " 小节有子行（同小节多行），该通道通常不允许：已原样保留。";
+            issues.push_back(std::move(issue));
+        }
     }
     return issues;
 }

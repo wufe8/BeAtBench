@@ -535,7 +535,7 @@ std::uint32_t u32_arg(const Json& args, const char* key) {
 
 // 解析 selection 数组（NoteRef 列表：{measure, pos, lane:{player,kind,index}, sample}）→
 // NoteRef 向量。空数组 / 非数组 → bad_args。lane 支持子对象优先 + 顶层平铺兼容。
-// bonus：可选 bgm_line（BGM 行序号，Bgm note 同值消歧；缺省 0）。
+// bonus：可选 sub_line（BGM 行序号，Bgm note 同值消歧；缺省 0）。
 std::vector<edit::NoteRef> selection_from_json(const Json& args) {
     const Json* sel = args.find("selection");
     if (!sel) throw CommandError("bad_args", "缺少 selection 数组");
@@ -552,9 +552,9 @@ std::vector<edit::NoteRef> selection_from_json(const Json& args) {
             ref.lane = lane_from_json(item);  // 顶层平铺兼容
         }
         ref.sample = u32_arg(item, "sample");
-        if (const Json* bl = item.find("bgm_line")) {
-            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
-            ref.bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        if (const Json* bl = item.find("sub_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
+            ref.sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
         refs.push_back(std::move(ref));
     }
@@ -1321,10 +1321,10 @@ public:
         }();
         const std::uint32_t sample = u32_arg(args, "sample");
         // BGM 行序号（放置到指定 ch01 行；非 BGM 忽略）
-        std::uint32_t bgm_line = 0;
-        if (const Json* bl = args.find("bgm_line")) {
-            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
-            bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        std::uint32_t sub_line = 0;
+        if (const Json* bl = args.find("sub_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
+            sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
         // kind 语义（2026-09，LN/地雷放置）：normal（默认）/ ln（LN 自动配对）/ mine（地雷）
         // 地雷：kind=Landmine（写出走 D1-D9/E1-E9 通道）；LN：配对逻辑在命令层
@@ -1351,7 +1351,7 @@ public:
                                "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
         }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
-            measure, pos, lane, sample, ln_kind, kind, bgm_line));
+            measure, pos, lane, sample, ln_kind, kind, sub_line));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", ln_kind ? "ln" : (kind == NoteKind::Landmine ? "mine" : "normal"));
@@ -1384,10 +1384,10 @@ public:
         }();
         const std::uint32_t sample = u32_arg(*from, "sample");
         // 源 BGM 行序号（消歧；非 Bgm = 0）
-        std::uint32_t from_bgm_line = 0;
-        if (const Json* bl = from->find("bgm_line")) {
-            if (!bl->is_int()) throw CommandError("bad_args", "from.bgm_line 应为整数");
-            from_bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        std::uint32_t from_sub_line = 0;
+        if (const Json* bl = from->find("sub_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "from.sub_line 应为整数");
+            from_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
         const Json* to = move.find("to");
         if (!to || !to->is_object()) throw CommandError("bad_args", "缺少 to 对象");
@@ -1401,15 +1401,15 @@ public:
             }
             to_lane = lane_from_json(*tl);
         }
-        // 可选 to.bgm_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 自动分配）
-        std::optional<std::uint32_t> to_bgm_line;
-        if (const Json* bl = to->find("bgm_line")) {
-            if (!bl->is_int()) throw CommandError("bad_args", "to.bgm_line 应为整数");
-            to_bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        // 可选 to.sub_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 自动分配）
+        std::optional<std::uint32_t> to_sub_line;
+        if (const Json* bl = to->find("sub_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
+            to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
         return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m,
-                                                       to_pos, false, to_lane, from_bgm_line,
-                                                       to_bgm_line);
+                                                       to_pos, false, to_lane, from_sub_line,
+                                                       to_sub_line);
     }
 
     Json run(const Json& args) const override {
@@ -1468,13 +1468,13 @@ public:
         }();
         const std::uint32_t sample = u32_arg(args, "sample");
         // BGM 行序号（消歧；非 Bgm = 0）
-        std::uint32_t bgm_line = 0;
-        if (const Json* bl = args.find("bgm_line")) {
-            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
-            bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        std::uint32_t sub_line = 0;
+        if (const Json* bl = args.find("sub_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
+            sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
         const bool ok = session.exec(
-            std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, bgm_line));
+            std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -1583,7 +1583,7 @@ public:
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
             comp->add(std::make_unique<edit::ToggleLnCommand>(
-                r.measure, r.pos, r.lane, r.sample, r.bgm_line));
+                r.measure, r.pos, r.lane, r.sample, r.sub_line));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -1657,7 +1657,7 @@ public:
                 tm = r.measure; tp = r.pos;
             }
             comp->add(std::make_unique<edit::ConvertNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, r.bgm_line, target, tm, tp));
+                r.measure, r.pos, r.lane, r.sample, r.sub_line, target, tm, tp));
         }
         if (comp->size() == 0) throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
         const bool ok = session.exec(std::move(comp));
@@ -1738,11 +1738,11 @@ public:
             if (!tl->is_object()) throw CommandError("bad_args", "to_lane 应为对象 {player,kind,index}");
             to_lane = lane_from_json(*tl);
         }
-        // 可选 to_bgm_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 按目标小节行数自动分配）
-        std::optional<std::uint32_t> to_bgm_line;
-        if (const Json* tl = args.find("to_bgm_line")) {
-            if (!tl->is_int()) throw CommandError("bad_args", "to_bgm_line 应为整数");
-            to_bgm_line = static_cast<std::uint32_t>(tl->as_i64());
+        // 可选 to_sub_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 按目标小节行数自动分配）
+        std::optional<std::uint32_t> to_sub_line;
+        if (const Json* tl = args.find("to_sub_line")) {
+            if (!tl->is_int()) throw CommandError("bad_args", "to_sub_line 应为整数");
+            to_sub_line = static_cast<std::uint32_t>(tl->as_i64());
         }
         // 可选 target（跨命名空间转换目标：bga_*/bpm/stop——整组 note → 同语义事件）；
         // 传了 = 替换 to_lane（note 不再是 note，无 lane 概念）
@@ -1775,13 +1775,13 @@ public:
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
                 comp->add(std::make_unique<edit::ConvertNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, r.bgm_line, *convert_target,
+                    r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
                     static_cast<std::uint32_t>(to_m), to_pos));
             } else {
                 comp->add(std::make_unique<edit::MoveNoteCommand>(
                     r.measure, r.pos, r.lane, r.sample,
                     static_cast<std::uint32_t>(to_m), to_pos, false, to_lane,
-                    r.bgm_line, to_bgm_line));
+                    r.sub_line, to_sub_line));
             }
         }
         if (comp->size() == 0) {
@@ -2027,7 +2027,7 @@ public:
 
 // —— 切音工作区手工版（2026-09）：给采样槽位绑定/改文件 + 给 note 改引用采样 id ——
 // sample.setFile：{id:"03", file:"kick.wav"} → samples[(Wav,id)].file 设置/创建（一个 undo 步）。
-// note.setSample：{measure, pos, lane, sample:<当前id>, to:"<新id文本>", bgm_line?} →
+// note.setSample：{measure, pos, lane, sample:<当前id>, to:"<新id文本>", sub_line?} →
 //   定位该 note，把其引用采样改为 to（一个 undo 步；仅改这一条 note）。
 
 class SampleSetFileCommand : public Command {
@@ -2119,10 +2119,10 @@ public:
         }();
         const std::uint32_t sample = u32_arg(args, "sample");
         const std::string& to = arg_str(args, "to");
-        std::uint32_t bgm_line = 0;
-        if (const Json* bl = args.find("bgm_line")) {
-            if (!bl->is_int()) throw CommandError("bad_args", "bgm_line 应为整数");
-            bgm_line = static_cast<std::uint32_t>(bl->as_i64());
+        std::uint32_t sub_line = 0;
+        if (const Json* bl = args.find("sub_line")) {
+            if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
+            sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
         const auto& chart = session.chart();
         const auto decode = [&chart](const std::string& s) {
@@ -2130,7 +2130,7 @@ public:
         };
         const std::uint32_t to_id = decode(to);
         const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(
-            measure, pos, lane, sample, bgm_line, to_id));
+            measure, pos, lane, sample, sub_line, to_id));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));

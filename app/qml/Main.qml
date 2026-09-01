@@ -1326,7 +1326,7 @@ ApplicationWindow {
                 sample: r.sample,
                 to: to
             }
-            if (r.bgm_line !== undefined) args.bgm_line = r.bgm_line
+            if (r.sub_line !== undefined) args.sub_line = r.sub_line
             const res = sessionCmd("note.setSample", args)
             if (res) setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
         }

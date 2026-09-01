@@ -280,6 +280,48 @@ TEST(BmsRoundTrip, Base62Stable) {
     EXPECT_EQ(write_bms(res2.chart), out);
 }
 
+TEST(BmsRoundTrip, Ch01SubLinesPreserved) {
+    // 2026-09 泛化：ch01 同小节多行 = 子行（sub_line）。读侧按 (measure,channel) FIFO 赋行号
+    // （空行也占位）；写回按 sub_line 分组还原多行（**中间**空行输出 "00" 占位；末尾空行纯排版、
+    // 无 note 即丢弃——用户：空行仅供前端排版，类似 CSV 空行）。验证用户示例结构往返稳定。
+    const std::string text = "*----- HEADER\n"
+                             "#BPM 130\n"
+                             "#WAV01 a.wav\n#WAV02 b.wav\n#WAV03 c.wav\n#WAV04 d.wav\n"
+                             "#WAV05 e.wav\n#WAV06 f.wav\n"
+                             "#00401:010203040506\n"  // 子行 0：6 采样
+                             "#00401:00\n"             // 子行 1：全空（中间占位）
+                             "#00401:010200\n"         // 子行 2：2 采样（第 3 槽空）
+                             "#00401:00\n";            // 子行 3：全空（末尾，写回丢弃）
+    const auto res = read_bms(text);
+    ASSERT_FALSE(has_error(res));
+    std::size_t bgm_count = 0;
+    std::uint32_t max_line = 0;
+    for (const auto& e : res.chart.notes) {
+        if (e.value.lane.kind != LaneKind::Bgm) continue;
+        ++bgm_count;
+        if (e.value.sub_line > max_line) max_line = e.value.sub_line;
+    }
+    EXPECT_EQ(bgm_count, 8u);   // 6 + 2 非空槽
+    EXPECT_EQ(max_line, 2u);    // 有 note 的最高子行 = 2（中间空行的 sub_line=1 占位）
+    const auto out = write_bms(res.chart);   // 应还原 3 行（子行 0/1/2；末尾空行丢弃）
+    EXPECT_NE(out.find("#00401:00\n"), std::string::npos);  // 中间空子行占位还原
+    const auto res2 = read_bms(out);
+    ASSERT_FALSE(has_error(res2));
+    EXPECT_EQ(write_bms(res2.chart), out);   // 幂等稳定
+}
+
+// ---------- 通道子行能力（sub_line 泛化，2026-09） ----------
+
+TEST(ChannelMap, AllowSubLinesFlag) {
+    // ch01（BGM 背景音）显式声明允许子行；其余通道（如游玩键 11）默认不应有子行。
+    const auto bgm = bms_channel_rule("01");
+    ASSERT_TRUE(bgm.has_value());
+    EXPECT_TRUE(bgm->allow_sub_lines);
+    const auto key = bms_channel_rule("11");
+    ASSERT_TRUE(key.has_value());
+    EXPECT_FALSE(key->allow_sub_lines);
+}
+
 // ---------- 定义表使用统计（采样面板） ----------
 
 TEST(ChartCheck, SampleUsageCounts) {
@@ -796,7 +838,7 @@ TEST(BmsRoundTrip, SamePosConflictSplitsRows) {
 }
 
 TEST(BmsRoundTrip, BgmMultiLineKeepsRows) {
-    // 2026-09 用户确认：BGM（ch01）同小节多行 = 独立背景音轨；解析记录 bgm_line（含空行占位），
+    // 2026-09 用户确认：BGM（ch01）同小节多行 = 独立背景音轨；解析记录 sub_line（含空行占位），
     // 写回按行序保持多行（字节级行结构无损）。
     const auto src =
         "#BPM 130\n#WAV01 a.wav\n#WAV03 b.wav\n#WAV32 c.wav\n"
@@ -806,14 +848,14 @@ TEST(BmsRoundTrip, BgmMultiLineKeepsRows) {
         "#00301:00\n"          // bgm4（行 3，空占位）
         "#00301:0032323232000000\n";  // bgm5（行 4）
     const auto r1 = read_bms(src);
-    // bgm_line 记录：行 0 的 note = 0，行 1 = 1，行 4 = 4（空行无 note 但计数保留）
+    // sub_line 记录：行 0 的 note = 0，行 1 = 1，行 4 = 4（空行无 note 但计数保留）
     std::uint32_t line0 = 99, line1 = 99, line4 = 99;
     for (const auto& e : r1.chart.notes) {
         if (e.value.lane.kind != LaneKind::Bgm) continue;
         if (e.measure == 3) {
-            if (e.value.sample.id == 1) line0 = e.value.bgm_line;
-            if (e.value.sample.id == 3) line1 = e.value.bgm_line;
-            if (e.value.sample.id == 110) line4 = e.value.bgm_line;  // base36 "32" = 110
+            if (e.value.sample.id == 1) line0 = e.value.sub_line;
+            if (e.value.sample.id == 3) line1 = e.value.sub_line;
+            if (e.value.sample.id == 110) line4 = e.value.sub_line;  // base36 "32" = 110
         }
     }
     EXPECT_EQ(line0, 0u);

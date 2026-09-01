@@ -156,18 +156,58 @@ TEST(MetaLint, LintBgmOverlapAllowed) {
     c.meta["TITLE"] = "bgm 重叠";
     c.meta["RANK"] = "3";
     c.meta["TOTAL"] = "100";
-    // 同 (measure,pos) 两个 BGM note（不同 bgm_line 子轨）——不算问题
+    // 同 (measure,pos) 两个 BGM note（不同 sub_line 子轨）——不算问题
     for (std::uint32_t line = 0; line < 2; ++line) {
         Event<Note> n{1, Rational(0, 1), {}};
         n.value.lane = {0, LaneKind::Bgm, 0};
         n.value.sample.id = 1 + line;
-        n.value.bgm_line = line;
+        n.value.sub_line = line;
         c.notes.push_back(n);
     }
     const auto issues = bms::lint_chart(c, std::filesystem::path());
     for (const auto& issue : issues) {
         EXPECT_NE(issue.code, "overlapping_notes") << issue.message;
     }
+}
+
+// —— 子行（sub_line 泛化，2026-09）：允许子行的通道（ch01/Bgm）不报；不该有的通道报软警告 ——
+
+TEST(MetaLint, LintSubLinesAllowedForBgm) {
+    // ch01（Bgm）有 sub_line>0 的子行 → 不应报 sub_lines_not_allowed（allow_sub_lines=true）。
+    // lint 用 bms_channel_for_mode 反查通道；Bgm lane → "01"，rule.allow_sub_lines=true → 跳过。
+    Chart c;
+    c.meta["TITLE"] = "bgm 子行";
+    c.meta["RANK"] = "3";
+    c.meta["TOTAL"] = "100";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Bgm, 0};
+    n.value.sample.id = 1;
+    n.value.sub_line = 5;  // 子行 > 0（ch01 允许）
+    c.notes.push_back(n);
+    const auto issues = bms::lint_chart(c, std::filesystem::path());
+    for (const auto& issue : issues) EXPECT_NE(issue.code, "sub_lines_not_allowed") << issue.message;
+}
+
+TEST(MetaLint, LintSubLinesNotAllowedForPlay) {
+    // 游玩轨（Key ch11）出现 sub_line>0（同小节多行）→ 软警告 sub_lines_not_allowed（Info）。
+    Chart c;
+    c.meta["TITLE"] = "游玩子行";
+    c.meta["RANK"] = "3";
+    c.meta["TOTAL"] = "100";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Key, 1};
+    n.value.sample.id = 1;
+    n.value.sub_line = 1;  // 游玩轨子行 > 0 → 应软警告
+    c.notes.push_back(n);
+    const auto issues = bms::lint_chart(c, std::filesystem::path());
+    bool found = false;
+    for (const auto& issue : issues) {
+        if (issue.code == "sub_lines_not_allowed") {
+            found = true;
+            EXPECT_EQ(issue.severity, bms::Severity::Info);  // 软提醒（BMS 无法硬限制）
+        }
+    }
+    EXPECT_TRUE(found);
 }
 
 // —— 扩展名不符：信息级（非阻塞）；缺失才 warning ——
