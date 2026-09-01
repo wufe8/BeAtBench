@@ -683,3 +683,84 @@ TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
     ASSERT_TRUE(resp2.at("ok").as_bool()) << resp2.dump();
     EXPECT_EQ(norm_notes(session.chart().notes), norm_notes(make_chart().notes));
 }
+
+// —— BGM 相对距离保持（2026-09 用户：多选 BGM note 拖到另一 bgmN 列应整体平移，各 note 间距不变） ——
+// 对应 QML moveSelection 的 bgmOffset：每个选中 BGM note 的 to.bgm_line = 自身 bgm_line + offset，
+// 不再全部挤到目标行。此处验证协议层 note.move（moves[] 带各自 to.bgm_line）+ 后端落位。
+
+TEST(NoteMoveLane, BgmRelativeOffsetKeepsSpacing) {
+    using beatbench::cmd::global_registry;
+    auto& session = beatbench::edit::global_editor_session();
+    // 造一个含 3 个 BGM note（bgm_line 0/1/2，同 measure+pos 不同 line）的谱
+    Chart c;
+    c.meta["TITLE"] = "bgm-rel";
+    c.meta["PLAYER"] = "1";
+    c.meta["BPM"] = "130";
+    for (int line = 0; line < 3; ++line) {
+        Event<Note> n{1, Rational(0, 1), {}};
+        n.value.lane = {0, LaneKind::Bgm, 0};
+        n.value.sample.id = static_cast<std::uint32_t>(10 + line);
+        n.value.bgm_line = static_cast<std::uint32_t>(line);
+        c.notes.push_back(n);
+    }
+    session.load(c);
+    const auto orig = bgm_rows(session.chart().notes);
+    ASSERT_EQ(orig.size(), 3u);
+
+    // 3 个 BGM note 各自 to.bgm_line = 自身 + 2（相对偏移 +2；即拖起 line0 → 目标 line2）
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    Json moves = Json::array();
+    for (int line = 0; line < 3; ++line) {
+        Json m = Json::object();
+        Json from = Json::object();
+        from.set("measure", 1);
+        Json p0 = Json::object();
+        p0.set("num", 0);
+        p0.set("den", 1);
+        from.set("pos", std::move(p0));
+        from.set("sample", 10 + line);
+        Json fl = Json::object();
+        fl.set("player", 0);
+        fl.set("kind", "bgm");
+        fl.set("index", 0);
+        from.set("lane", std::move(fl));
+        from.set("bgm_line", line);
+        m.set("from", std::move(from));
+        Json to = Json::object();
+        to.set("measure", 4);
+        Json p1 = Json::object();
+        p1.set("num", 0);
+        p1.set("den", 1);
+        to.set("pos", std::move(p1));
+        Json tl = Json::object();
+        tl.set("player", 0);
+        tl.set("kind", "bgm");
+        tl.set("index", 0);
+        to.set("lane", std::move(tl));
+        to.set("bgm_line", line + 2);  // 相对 +2
+        m.set("to", std::move(to));
+        moves.push_back(std::move(m));
+    }
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("result").at("moved").as_i64(), 3);
+
+    // 3 个 BGM note 应在 m4 pos0，line = 2/3/4（原 0/1/2 整体 +2），间距保持
+    const auto rows = bgm_rows(session.chart().notes);
+    ASSERT_EQ(rows.size(), 3u);
+    EXPECT_TRUE(rows[0].measure == 4 && rows[0].pos == Rational(0, 1) && rows[0].line == 2);
+    EXPECT_TRUE(rows[1].measure == 4 && rows[1].pos == Rational(0, 1) && rows[1].line == 3);
+    EXPECT_TRUE(rows[2].measure == 4 && rows[2].pos == Rational(0, 1) && rows[2].line == 4);
+
+    // undo → 精确还原
+    Json req2 = Json::object();
+    req2.set("command", "session.undo");
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp2.at("ok").as_bool()) << resp2.dump();
+    EXPECT_EQ(bgm_rows(session.chart().notes), orig);
+}

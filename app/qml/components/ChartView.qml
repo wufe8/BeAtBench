@@ -63,7 +63,9 @@ Item {
     // 平移：deltaF = 时间轴位移（拍位小数，0=不动）；targetLane = 横向移动目标列
     // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）；
     // sourceLane = 拖起的 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note，2026-09）
-    signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
+    // sourceLane = 拖起的 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note，2026-09）；
+    // sourceBgmLine = 拖起 note 的 BGM 子通道行号（-1=非 BGM；BGM 相对平移对齐基准）
+    signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane, int sourceBgmLine)
     // BGA/BPM/STOP 对象（2026-09）：点选（选中 + 可移动）
     signal metaObjectClicked(var obj, bool ctrl)
     // BGA/BPM/STOP 移动：kind + 对象 + 时间位移 + 横向目标列（bga 跨图层）
@@ -140,6 +142,9 @@ Item {
         orientation: 1             // 垂直（右侧条；时间轴方向与视口一致 topHigh 感知）
         visible: false              // 有波形时显示（renderFinished 后置 true）
         width: 60
+        // ⚠️ z 必须高于编辑区 MouseArea（后者默认 z:0 且声明在后 → 叠上层抢走点击，
+        //   波形条点不动/拖动变成框选；2026-09 用户）。提 z 让波形条自收鼠标（点击/拖动 seek）。
+        z: 5
         session: typeof chartSession !== "undefined" ? chartSession : null
         theme: Theme
         // 视口状态绑定（换算可见窗口指示）
@@ -148,6 +153,7 @@ Item {
         contentHeight: view.contentHeight
         topHigh: root.topHigh
         viewportHeight: view.height
+        leadMeasures: view.leadMeasures
         onSeekRequested: (sec) => root.seekTo(sec)
     }
 
@@ -306,6 +312,7 @@ Item {
     property real _moveDeltaF: 0    // 当前时间位移（拍位小数）
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
     property var _moveSourceLane: null  // 拖起的 note 所在轨（{player,kind,index}；跨通道多换轨判定用）
+    property int _moveSourceBgmLine: -1 // 拖起 note 的 BGM 子通道行号（相对平移对齐基准；非 BGM=-1）
     property var _pressedNoteRef: null  // press 命中的 note（有值 = 点击待确认；release 无拖译才播放）
 
     /// 平移判定：按下点在选中集内的某个 note 上？
@@ -379,7 +386,14 @@ Item {
                 _moveDeltaF = 0
                 _moveTargetLane = null
                 _moveSourceLane = obj.lane   // 拖起 note 的轨（跨通道多选移动只动此轨，2026-09）
+                // ⚠️ BGM 虚拟子通道：源 note 的 bgm_line（相对平移对齐基准）。判别必须用
+                // lane.kind==="bgm"——noteAt/objectAt 对**非 BGM note 恒返回 bgm_line=0**，
+                // 若只看 `!== undefined` 则玩乐 note 得 0（误判为 BGM；2026-09 多轨→BGM 挤成
+                // 一行的根因）。显式置 -1 代表非 BGM。
+                _moveSourceBgmLine = (obj.lane && obj.lane.kind === "bgm" &&
+                                      obj.bgm_line !== undefined) ? obj.bgm_line : -1
                 view.moveSourceLane = obj.lane  // M6 预览：拖起 lane → ghost 跨列判断用
+                view.moveSourceBgmLine = _moveSourceBgmLine  // BGM 相对平移基准（ghost）
                 _moveStartF = view.measureAtY(y)
                 return
             }
@@ -446,6 +460,7 @@ Item {
             view.movePreview = false  // M6 编辑预览：结束拖拽 → 关 ghost
             view.moveTargetLane = ({})
             view.moveSourceLane = ({})
+            view.moveSourceBgmLine = -1
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             let deltaF = 0
             let targetLane = null
@@ -477,7 +492,8 @@ Item {
                 if (root._moveKind !== "") {
                     root.metaMoveRequested(root._moveKind, root._moveObj, deltaF, targetLane)
                 } else {
-                    root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane)
+                    root.moveSelectionRequested(deltaF, targetLane, root._moveSourceLane,
+                                                root._moveSourceBgmLine)
                 }
             }
             // 点击（按下→释放，无拖动）= 播放一次；拖动（移动 note）= 不播。
@@ -720,6 +736,13 @@ Item {
         if (typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
             audioEngine.seekSeconds(sec)
         if (view) view.scrollCursorToSec(sec)
+    }
+
+    /// note 引用 → 显示列下标（转发 ChartViewItem.columnIndexForRef；会话层拿连续列秩，
+    /// 用于 BGM 跨通道「保持相对距离」的移动变换——按列序做连续轨道平移）。
+    function columnIndexForRef(ref) {
+        if (!view) return -1
+        return view.columnIndexForRef(ref)
     }
 
     // 状态栏用：鼠标位置 + note 信息（hoverText 由 ChartViewItem 计算）

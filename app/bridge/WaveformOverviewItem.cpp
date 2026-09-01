@@ -99,6 +99,13 @@ void WaveformOverviewItem::setViewportHeight(qreal v) {
     update();
 }
 
+void WaveformOverviewItem::setLeadMeasures(qreal v) {
+    if (qFuzzyCompare(m_leadMeasures, v)) return;
+    m_leadMeasures = v;
+    emit leadMeasuresChanged();
+    update();
+}
+
 QString WaveformOverviewItem::formatTime(double sec) {
     if (sec < 0.0) sec = 0.0;
     const int total = static_cast<int>(std::lround(sec));
@@ -112,12 +119,14 @@ WaveformOverviewItem::ViewWindow WaveformOverviewItem::viewWindow() const {
     const ChartSession* cs = sessionObj();
     if (!cs || !cs->timing() || !cs->chart()) return w;
     if (m_contentHeight <= 0.0 || m_measureHeight <= 0.0) return w;
-    // 内容坐标（拍位）：topHigh 下内容自下而上 → 视口上下缘对应内容坐标区间
+    // 内容坐标（拍位）：topHigh 下内容自下而上 → 视口上下缘对应内容坐标区间。
+    // ✂️ M5.2 开头留白：contentCoord → 拍位须扣 lead（contentHeight 已含 lead；
+    //    与 ChartViewItem::measureAt 同构）。未扣则视口窗整体偏往未来（用顶/底基准都不准）。
     const qreal cLo = m_topHigh ? (m_contentHeight - (m_scrollY + m_viewportHeight))
                                 : m_scrollY;
     const qreal cHi = m_topHigh ? (m_contentHeight - m_scrollY) : (m_scrollY + m_viewportHeight);
-    const qreal mfLo = cLo / m_measureHeight;
-    const qreal mfHi = cHi / m_measureHeight;
+    const qreal mfLo = cLo / m_measureHeight - m_leadMeasures;
+    const qreal mfHi = cHi / m_measureHeight - m_leadMeasures;
     // 拍位 → 秒：TimingEngine::time_us(Position{m, pos})（pos = 小节内分数，微小节精度）
     const auto toSec = [&](qreal mf) -> double {
         if (mf < 0.0) mf = 0.0;
@@ -152,6 +161,9 @@ void WaveformOverviewItem::requestSeek(qreal x) {
 
 void WaveformOverviewItem::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        // ⚠️ 必须 accept 以拿到鼠标捕获：否则按下后 move/release 不会派发给本 item
+        // （编辑器 MouseArea 在下方 z:0，会在拖动过程中接走事件）→ 点击能跳但拖动不生效。
+        event->accept();
         const QPointF p = event->position();
         requestSeek(m_orientation == 1 ? p.y() : p.x());
     }
@@ -160,6 +172,7 @@ void WaveformOverviewItem::mousePressEvent(QMouseEvent* event) {
 
 void WaveformOverviewItem::mouseMoveEvent(QMouseEvent* event) {
     if (event->buttons() & Qt::LeftButton) {
+        event->accept();
         const QPointF p = event->position();
         requestSeek(m_orientation == 1 ? p.y() : p.x());
     }

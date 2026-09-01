@@ -33,6 +33,9 @@ class WaveformOverviewItem : public QQuickPaintedItem {
     Q_PROPERTY(qreal contentHeight READ contentHeight WRITE setContentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
     Q_PROPERTY(qreal viewportHeight READ viewportHeight WRITE setViewportHeight NOTIFY viewportHeightChanged)
+    /// 开头留白小节数（M5.2；数值方向与 ChartView 同源）。内容坐标换算拍位须扣它，
+    /// 否则视口窗整体往未来偏移（用视口顶/底基准都不准；2026-09 用户）。
+    Q_PROPERTY(qreal leadMeasures READ leadMeasures WRITE setLeadMeasures NOTIFY leadMeasuresChanged)
 
 public:
     explicit WaveformOverviewItem(QQuickItem* parent = nullptr);
@@ -55,6 +58,8 @@ public:
     void setTopHigh(bool v);
     qreal viewportHeight() const { return m_viewportHeight; }
     void setViewportHeight(qreal v);
+    qreal leadMeasures() const { return m_leadMeasures; }
+    void setLeadMeasures(qreal v);
 
     /// 视口窗（秒，可能 topHigh 逆序 → 归一 [t0, t1]）。
     struct ViewWindow { double t0 = 0.0, t1 = 0.0; };
@@ -68,6 +73,7 @@ signals:
     void contentHeightChanged();
     void topHighChanged();
     void viewportHeightChanged();
+    void leadMeasuresChanged();
     /// 点击/拖动总览条 → 目标时间（秒）→ QML 滚动视口（ChartView.scrollToTime）。
     void seekRequested(double seconds);
 
@@ -92,6 +98,7 @@ private:
     qreal m_contentHeight = 0.0;
     bool m_topHigh = true;
     qreal m_viewportHeight = 0.0;
+    qreal m_leadMeasures = 0.0;
 };
 
 }  // namespace beatbench::app

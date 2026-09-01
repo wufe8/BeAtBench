@@ -674,7 +674,7 @@ ApplicationWindow {
                 onCanvasClicked: () => window.onCanvasClicked()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onNoteEditRequested: (ref) => editNoteSample(ref)
-                onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => moveSelection(deltaF, targetLane, sourceLane)
+                onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => moveSelection(deltaF, targetLane, sourceLane, sourceBgmLine)
                 onMetaObjectClicked: (obj, ctrl) => onMetaClicked(obj, ctrl)
                 onMetaMoveRequested: (kind, obj, deltaF, targetLane) => moveMetaObject(kind, obj, deltaF, targetLane)
                 onMetaRightDeleted: (obj) => deleteMetaObject(obj)
@@ -1118,7 +1118,7 @@ ApplicationWindow {
     function metaKey(o) { return session.metaKey(o) }
     function metaTargetPos(measure, p, delta) { return session.metaTargetPos(measure, p, delta) }
     function moveMetaObject(kind, obj, deltaF, targetLane) { return session.moveMetaObject(kind, obj, deltaF, targetLane) }
-    function moveSelection(deltaF, targetLane, sourceLane) { return session.moveSelection(deltaF, targetLane, sourceLane) }
+    function moveSelection(deltaF, targetLane, sourceLane, sourceBgmLine) { return session.moveSelection(deltaF, targetLane, sourceLane, sourceBgmLine) }
     function onCanvasClicked() { return session.onCanvasClicked() }
     function onMetaClicked(obj, ctrl) { return session.onMetaClicked(obj, ctrl) }
     function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }

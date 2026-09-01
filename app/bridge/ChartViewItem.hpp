@@ -94,6 +94,9 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 命中 sourceLane 的 note 用 targetLane 画 ghost；其余只按时间位移。
     Q_PROPERTY(QVariantMap moveSourceLane READ moveSourceLane WRITE setMoveSourceLane NOTIFY moveSourceLaneChanged)
     Q_PROPERTY(QVariantMap moveTargetLane READ moveTargetLane WRITE setMoveTargetLane NOTIFY moveTargetLaneChanged)
+    /// M6 编辑预览：拖起 note 的 BGM 子通道行号（-1=非 BGM）。BGM 虚拟子通道多选移动
+    /// **保持相对距离**（channelOffset 的 bgm_line 版）——ghost 各 note 落 line = 自身 + 偏移。
+    Q_PROPERTY(int moveSourceBgmLine READ moveSourceBgmLine WRITE setMoveSourceBgmLine NOTIFY moveSourceBgmLineChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -148,6 +151,8 @@ public:
     void setMoveSourceLane(const QVariantMap& v);
     QVariantMap moveTargetLane() const { return m_moveTargetLane; }
     void setMoveTargetLane(const QVariantMap& v);
+    int moveSourceBgmLine() const { return m_moveSourceBgmLine; }
+    void setMoveSourceBgmLine(int v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
     qreal contentHeight() const;
@@ -233,6 +238,12 @@ public:
     /// note → timing 事件转换）；BGA 图层列同理（note → BGA 事件）。
     Q_INVOKABLE QVariantMap laneAtX(qreal x) const;
 
+    /// 给定 note 引用（{lane:{player,kind,index}, bgm_line?}）→ 该 note 当前**显示列下标**
+    /// （columnFor 封装：BGM 展开列按 bgm_line 精确匹配、玩乐列按 lane 匹配；-1 = 无对应列）。
+    /// BGM 跨通道相对间距（连续轨道平移）用同一列序自然表达——不再受「bgm_line 对玩乐
+    /// note 恒=0」的混淆影响（2026-09 用户：多轨拖进 BGM 应保持相对距离）。
+    Q_INVOKABLE int columnIndexForRef(const QVariantMap& ref) const;
+
     /// 诊断探针（--probe <x> <y>，调试）：返回 noteAt / laneAtX / hitTest 的合成结果，
     /// 用于定位选中/移动/放置的命中问题（如 BGM 背景轨内移动失败）。不含逻辑，仅诊断输出。
     Q_INVOKABLE QVariantMap probe(qreal x, qreal y) const;
@@ -276,6 +287,7 @@ signals:
     void moveDeltaFChanged();
     void moveSourceLaneChanged();
     void moveTargetLaneChanged();
+    void moveSourceBgmLineChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -310,9 +322,11 @@ private:
                        const QString& noteKind, std::uint32_t sample, int bgmLine) const;
     /// paint 前按当前 theme 刷新标尺/note 标签字体族（皮肤可换；避免硬编码 Consolas）。
     void applyThemeFonts(const ThemeManager* th);
-    /// NoteRef 语义键（measure|num|den|player|kind|index|sample）：选中判定用。
+    /// NoteRef 语义键（measure|num|den|player|kind|index|sample|bgm_line）：选中判定用。
+    /// ⚠️ bgm_line 入键：BGM 同位置不同子通道行须彼此区分，否则选中会误高亮整组。
     static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
-                              const beatbench::Lane& lane, std::uint32_t sample = 0);
+                              const beatbench::Lane& lane, std::uint32_t sample = 0,
+                              std::uint32_t bgm_line = 0);
 
     /// BGA/BPM/STOP 对象选中判定（按 kind/measure/pos/layer/sample 键；layer/sample -1 = n/a）。
     bool metaSelected(std::uint32_t measure, const beatbench::Rational& pos,
@@ -440,6 +454,7 @@ private:
     qreal m_moveDeltaF = 0.0;    // 移动预览位移（拍位小数）
     QVariantMap m_moveSourceLane;  // 拖起 lane（{player,kind,index}）
     QVariantMap m_moveTargetLane;  // 目标 lane（跨通道移动）；空 = 不改列
+    int m_moveSourceBgmLine = -1;  // 拖起 note 的 BGM 子通道行号（-1=非 BGM；相对平移基准）
     QVariantList m_selection;  // 选中 note 集合（NoteRef 语义；绘制高亮用）
     QVariantList m_metaSelection;  // 选中 BGA/BPM/STOP 对象集合（绘制高亮用）
     int m_lastVisibleNotes = 0;  // 最近一次 paint 的可见 note 数（--perf-log）

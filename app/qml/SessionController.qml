@@ -448,11 +448,12 @@ QtObject {
     /// BGA 图层列（bgaLayer >= 0）→ note.convert（bga_*）；其余 = note.moveRegion。
     /// 移动选中 note（统一位移：拖拽/框选整段/多选）。
     /// deltaF = 连续拍位位移（可负可跨小节）；targetLane = 横向目标列（laneAtX；null=纯时间）；
-    /// sourceLane = 拖起 note 所在轨（{player,kind,index}）。跨命名空间（BPM/STOP/BGA）→ note.convert；
+    /// sourceLane = 拖起 note 所在轨（{player,kind,index}）；sourceBgmLine = 拖起 note 的 BGM 子通道行号
+    /// （-1=非 BGM）。跨命名空间（BPM/STOP/BGA）→ note.convert；
     /// 普通轨 → note.move（moves 数组，**跨通道只把「拖起轨 sourceLane 的 note」改到目标轨**，
     /// 其余 note 仅时间移动、保持原轨道——修复 2026-09 多选跨通道全部挤到松开通道的 bug）。
     /// ⚠️ note.move = CompositeCommand 一个 undo 步。移动后**保持选中**（selectionRefs 更新到新位置）。
-    function moveSelection(deltaF, targetLane, sourceLane) {
+    function moveSelection(deltaF, targetLane, sourceLane, sourceBgmLine) {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（选择工具点击/框选）再移动"))
             return
@@ -499,12 +500,19 @@ QtObject {
         const keyToKey = sourceLane && sourceLane.kind === "key" &&
                          targetLane && targetLane.valid && targetLane.laneKind === "key"
         if (keyToKey) channelOffset = targetLane.laneIndex - sourceLane.index
-        // ⚠️ BGM 虚拟子通道（2026-09）：BGM(ch01) 可容纳多个并列子行（bgm_line），多选/框选
-        // 整组拖进 BGM 应**全部**转成 BGM——与游玩通道「整组平移到一个通道」一致。不再只转
-        // sourceLane 那一个 note（那修复的是「多选跨通道全部挤到松开通道」，对单通道 kind
-        // 成立；但 BGM 是容器，落到 bgmN 列=全进该行，落聚合列则交给后端 MoveNoteCommand
-        // 按 (measure,pos,sample) 自动分配不冲突的子行）。
+        // ⚠️ BGM 虚拟子通道（2026-09 重写）：判别必须是 lane.kind==="bgm" 而非 bgm_line>=0——后者
+        // 对玩乐 note 恒=0（解析器非 ch01 一律写 0），会把「非 BGM」误判成「BGM」→ 先前
+        // sourceBgmLine 恒取 0 → bgmOffset=targetBgmLine → 所有选中 note 挤进同一行（用户反复报告
+        // 的多轨→BGM 挤成一个通道）。现在统一用「显示列下标」做秩：BGM 展开列按 bgm_line、玩乐列
+        // 按 lane，列序即 on-screen 连续序 → 跨通道拖拽 = 连续轨道平移，天然**保持相对距离**。
         const isBgmTarget = targetLane && targetLane.valid && targetLane.laneKind === "bgm"
+        const cv = (root.editPage && root.editPage.locateChartView)
+            ? root.editPage.locateChartView() : null
+        let grabCol = -1
+        if (cv && sourceLane) grabCol = cv.columnIndexForRef({ lane: sourceLane, bgm_line: sourceBgmLine })
+        // BGM 基线：落展开 bgmN 列 → 该 line；落聚合列（bgm_line<0）→ 0（后端/相对秩兜底）。
+        const t0 = (isBgmTarget && targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
+            ? targetLane.bgm_line : 0
         const moves = []
         const newRefs = []
         for (let i = 0; i < refs.length; i++) {
@@ -519,13 +527,17 @@ QtObject {
             const delta = { measure: dm, pos: { num: Math.round((d - dm) * den), den: den } }
             const to = addPosDelta(ref, delta)
             let changedLane = false
+            // 连续轨道列秩间距：noteCol = 该 note 源列下标；gap = 相对拖起列的列间距。
+            // 用于 key→key / play→bgm / bgm→key 任一跨族平移——同一变换，天然保相对间距。
+            const noteCol = (cv && targetLane && targetLane.valid)
+                ? cv.columnIndexForRef(ref) : -1
+            const gap = (grabCol >= 0 && noteCol >= 0) ? noteCol - grabCol : 0
             if (isBgmTarget) {
-                // BGM 目标（最高优先）：所有选中 note 转成 BGM；落展开 bgmN 列 → 全部进该行，
-                // 落聚合列（bgm_line<0）→ 不传 bgm_line（后端按 (measure,pos,sample) 自动分配）。
+                // BGM 目标（最高优先）：所有选中 note 转成 BGM；保持相对子通道距离 = 连续轨道平移。
+                // 各 note 落 line = max(0, t0 + gap)；grabCol 拖起 note 的列下标。
                 to.lane = { player: targetLane.lanePlayer, kind: "bgm",
                             index: targetLane.laneIndex }
-                if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
-                    to.bgm_line = targetLane.bgm_line
+                to.bgm_line = Math.max(0, t0 + gap)
                 changedLane = true
             } else if (channelOffset !== 0 && ref.lane.kind === "key") {
                 // 同距离偏移（key 轨；钳到合法 key 范围 1..7）
@@ -537,11 +549,14 @@ QtObject {
             } else if (targetLane && targetLane.valid && sourceLane &&
                     laneEquals(ref.lane, sourceLane.kind, sourceLane.index, sourceLane.player) &&
                     !laneEquals(ref.lane, targetLane.laneKind, targetLane.laneIndex, targetLane.lanePlayer)) {
-                // 跨 kind 兜底：拖起轨 note 改到目标 kind（其余 keep）
+                // 跨 kind 兜底（2026-09 三修）：拖起轨 note 组改成目标 kind，且**保持相对距离**
+                // （连续轨道同款：目标族序 = 族序基数 + gap）。key 目标按间距铺（bgm0+bgm2→key1+key3，
+                // 不再挤到 key1）；scratch/pedal 单列无展开度 → 全部落该列。其余 note（非拖起族）只动时间。
                 to.lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
                             index: targetLane.laneIndex }
-                if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
-                    to.bgm_line = targetLane.bgm_line
+                if (targetLane.laneKind === "key") {
+                    to.lane.index = Math.max(1, Math.min(7, targetLane.laneIndex + gap))
+                }
                 changedLane = true
             }
             moves.push({ from: ref, to: to })
@@ -549,8 +564,13 @@ QtObject {
             const nr = { measure: to.measure, pos: to.pos,
                          lane: changedLane ? to.lane : ref.lane,
                          sample: ref.sample }
-            if (to.bgm_line !== undefined) nr.bgm_line = to.bgm_line
-            else if (ref.bgm_line !== undefined) nr.bgm_line = ref.bgm_line
+            if (changedLane) {
+                // 换轨后按是否 BGM 定 bgm_line（与后端 MoveNoteCommand 一致，防选中判定残留旧行号）
+                nr.bgm_line = (to.lane && to.lane.kind === "bgm")
+                    ? (to.bgm_line !== undefined ? to.bgm_line : 0) : 0
+            } else if (ref.bgm_line !== undefined) {
+                nr.bgm_line = ref.bgm_line
+            }
             newRefs.push(nr)
         }
         const r = sessionCmd("note.move", { moves: moves })

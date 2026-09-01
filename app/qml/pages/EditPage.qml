@@ -97,8 +97,9 @@ Item {
     signal timingDefAddRequested(string kind, string id, string value)
     signal timingDefDeleteRequested(string kind, string id)
     /// 平移：deltaF = 时间轴位移（拍位小数）；targetLane = 横向目标列（laneAtX；null=纯时间）；
-    /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）
-    signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane)
+    /// sourceLane = 拖起 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note）；
+    /// sourceBgmLine = 拖起 note 的 BGM 子通道行号（-1=非 BGM；BGM 相对平移对齐基准）
+    signal moveSelectionRequested(real deltaF, var targetLane, var sourceLane, int sourceBgmLine)
     /// BGA/BPM/STOP 点选（选中 + 可移动）
     signal metaObjectClicked(var obj, bool ctrl)
     /// BGA/BPM/STOP 移动（kind + 对象 + 时间位移 + 横向目标列）
@@ -362,7 +363,7 @@ Item {
                     onCanvasClicked: () => root.canvasClicked()
                     onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
                     onNoteEditRequested: (ref) => root.noteEditRequested(ref)
-                    onMoveSelectionRequested: (deltaF, targetLane, sourceLane) => root.moveSelectionRequested(deltaF, targetLane, sourceLane)
+                    onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => root.moveSelectionRequested(deltaF, targetLane, sourceLane, sourceBgmLine)
                     onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
                     onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
                         root.metaMoveRequested(kind, obj, deltaF, targetLane)
