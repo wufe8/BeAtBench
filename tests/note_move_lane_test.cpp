@@ -525,3 +525,161 @@ TEST(NoteMoveLane, ProtocolLegacyTopLevelFromTo) {
     ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
     EXPECT_EQ(resp.at("result").at("moved").as_i64(), 1);
 }
+
+// —— BGM 虚拟子通道多选全转（2026-09 用户：多选 note 拖进 BGM 应全部转 BGM） ——
+// 对应 QML moveSelection 的 isBgmTarget 分支：目标 laneKind=="bgm" 时每个选中 note
+// to.lane={0,Bgm,0}；落**聚合** BGM 列（无 to.bgm_line）→ 后端按 (measure,pos,sample)
+// 自动分配不冲突的虚拟子通道行；落**展开 bgmN 列**（to.bgm_line=N）→ 全部进该行。
+// 此测试聚焦协议层 note.move（后端），确认跨通道+自动分配/显式行号往返正确。
+
+// BGM 行号归一化：把每个 Bgm note 的 (measure,pos,sample,bgm_line) 提出排序
+// （Bgm 消歧靠 bgm_line，故需含它；非 Bgm 不在此表）。
+struct BgmRow { std::uint32_t measure; Rational pos; std::uint32_t sample; std::uint32_t line; };
+std::vector<BgmRow> bgm_rows(const std::vector<Event<Note>>& notes) {
+    std::vector<BgmRow> out;
+    for (const auto& e : notes) {
+        if (e.value.lane.kind != LaneKind::Bgm) continue;
+        out.push_back({e.measure, e.pos, e.value.sample.id, e.value.bgm_line});
+    }
+    std::sort(out.begin(), out.end(), [](const BgmRow& a, const BgmRow& b) {
+        return std::tie(a.measure, a.pos, a.sample, a.line) <
+               std::tie(b.measure, b.pos, b.sample, b.line);
+    });
+    return out;
+}
+bool operator==(const BgmRow& a, const BgmRow& b) {
+    return a.measure == b.measure && a.pos == b.pos && a.sample == b.sample && a.line == b.line;
+}
+
+TEST(NoteMoveLane, BgmMultiMoveAutoAssign) {
+    using beatbench::cmd::global_registry;
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());  // m1 key1 s1；m1 pos1/2 key2 s2；m2 key3 s3
+
+    // moves：3 个选中 note 全部转 BGM（无 to.bgm_line → 自动分配）。落到 m5 pos0（同位置不同采样）。
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    Json moves = Json::array();
+    const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx,
+                              std::uint32_t sample, std::uint32_t tm, int tn, int td) -> Json {
+        Json m = Json::object();
+        Json from = Json::object();
+        from.set("measure", static_cast<std::int64_t>(fm));
+        Json p0 = Json::object();
+        p0.set("num", fn);
+        p0.set("den", fd);
+        from.set("pos", std::move(p0));
+        from.set("sample", static_cast<std::int64_t>(sample));
+        Json fl = Json::object();
+        fl.set("player", 0);
+        fl.set("kind", "key");
+        fl.set("index", kind_idx);
+        from.set("lane", std::move(fl));
+        m.set("from", std::move(from));
+        Json to = Json::object();
+        to.set("measure", static_cast<std::int64_t>(tm));
+        Json p1 = Json::object();
+        p1.set("num", tn);
+        p1.set("den", td);
+        to.set("pos", std::move(p1));
+        Json tl = Json::object();
+        tl.set("player", 0);
+        tl.set("kind", "bgm");
+        tl.set("index", 0);
+        to.set("lane", std::move(tl));
+        m.set("to", std::move(to));
+        return m;
+    };
+    moves.push_back(make_move(1, 0, 1, 1, 1, 5, 3, 4));   // key1 s1 → BGM m5 3/4
+    moves.push_back(make_move(1, 1, 2, 2, 2, 5, 3, 4));   // key2 s2 → BGM m5 3/4
+    moves.push_back(make_move(2, 0, 1, 3, 3, 5, 3, 4));   // key3 s3 → BGM m5 3/4
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("result").at("moved").as_i64(), 3);
+
+    // 三个 Bgm note 都应在 m5 3/4，行号互不相同（自动分配不冲突）
+    const auto rows = bgm_rows(session.chart().notes);
+    ASSERT_EQ(rows.size(), 3u);
+    EXPECT_TRUE(rows[0].measure == 5 && rows[0].pos == Rational(3, 4));
+    EXPECT_TRUE(rows[1].measure == 5 && rows[1].pos == Rational(3, 4));
+    EXPECT_TRUE(rows[2].measure == 5 && rows[2].pos == Rational(3, 4));
+    EXPECT_NE(rows[0].line, rows[1].line);
+    EXPECT_NE(rows[1].line, rows[2].line);
+    EXPECT_NE(rows[0].line, rows[2].line);
+
+    // undo → 精确还原（Bgm 行号经 apply 自动分配，invert 按目标小节同(pos,lane,sample) 消歧）
+    Json req2 = Json::object();
+    req2.set("command", "session.undo");
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp2.at("ok").as_bool()) << resp2.dump();
+    EXPECT_EQ(norm_notes(session.chart().notes), norm_notes(make_chart().notes));
+}
+
+TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
+    using beatbench::cmd::global_registry;
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+
+    // 落**展开 bgmN 列**：to.bgm_line=2 明确。两个 key note → 全部进该行（同位置不同采样）。
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    Json moves = Json::array();
+    const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx,
+                              std::uint32_t sample, std::uint32_t tm, int tn, int td,
+                              int bgm_line) -> Json {
+        Json m = Json::object();
+        Json from = Json::object();
+        from.set("measure", static_cast<std::int64_t>(fm));
+        Json p0 = Json::object();
+        p0.set("num", fn);
+        p0.set("den", fd);
+        from.set("pos", std::move(p0));
+        from.set("sample", static_cast<std::int64_t>(sample));
+        Json fl = Json::object();
+        fl.set("player", 0);
+        fl.set("kind", "key");
+        fl.set("index", kind_idx);
+        from.set("lane", std::move(fl));
+        m.set("from", std::move(from));
+        Json to = Json::object();
+        to.set("measure", static_cast<std::int64_t>(tm));
+        Json p1 = Json::object();
+        p1.set("num", tn);
+        p1.set("den", td);
+        to.set("pos", std::move(p1));
+        Json tl = Json::object();
+        tl.set("player", 0);
+        tl.set("kind", "bgm");
+        tl.set("index", 0);
+        to.set("lane", std::move(tl));
+        to.set("bgm_line", bgm_line);
+        m.set("to", std::move(to));
+        return m;
+    };
+    moves.push_back(make_move(1, 0, 1, 1, 1, 5, 1, 4, 2));   // key1 s1 → BGM m5 1/4 line2
+    moves.push_back(make_move(1, 1, 2, 2, 2, 5, 3, 4, 2));   // key2 s2 → BGM m5 3/4 line2
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("result").at("moved").as_i64(), 2);
+
+    const auto rows = bgm_rows(session.chart().notes);
+    ASSERT_EQ(rows.size(), 2u);
+    // 都在 line=2（显式；位置不同不冲突，允许同行）
+    EXPECT_TRUE(rows[0].measure == 5 && rows[0].line == 2);
+    EXPECT_TRUE(rows[1].measure == 5 && rows[1].line == 2);
+
+    // undo → 还原
+    Json req2 = Json::object();
+    req2.set("command", "session.undo");
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp2.at("ok").as_bool()) << resp2.dump();
+    EXPECT_EQ(norm_notes(session.chart().notes), norm_notes(make_chart().notes));
+}

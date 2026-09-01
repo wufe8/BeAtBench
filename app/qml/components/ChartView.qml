@@ -48,6 +48,9 @@ Item {
     /// 状态栏用它（红线=视口光标，滚动内容滚过红线→值随视口变）（2026-09 用户）。
     readonly property real cursorSec: view.cursorSec
     readonly property string cursorPosText: view.cursorPosText
+    /// M4.3c：波形条首次渲染后置 true（此后恒真）——内容变化隐藏波形条（stale）时
+    /// **保留**右侧预留宽度，视口宽度不变 → 列不重排（用户 2026-09 移动 note 会跳位）。
+    property bool waveformShown: false
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
@@ -76,7 +79,9 @@ Item {
         id: view
         anchors.fill: parent
         anchors.bottomMargin: 12   // 底部水平滚动条区域
-        anchors.rightMargin: waveform.visible ? (waveform.width + 12) : 12  // 右侧波形条 + 垂直滚动条区域
+        anchors.rightMargin: (waveformShown ? (waveform.width + 12) : 12)  // 右侧波形条 + 垂直滚动条区域
+        // ⚠️ 用 waveformShown（首次渲染后恒真）而非 waveform.visible：内容变化隐藏波形条
+        // （stale）时保持视口宽度不变 → 列不再重排（用户 2026-09：移动 note 后所有 note 跳位）。
         session: typeof chartSession !== "undefined" ? chartSession : null
         theme: Theme
         measureHeight: root.measureHeight
@@ -96,6 +101,10 @@ Item {
         followPlayhead: root.followPlayhead
         // Ctrl 按住临时切换（C++ KeyMonitor 应用级事件过滤；QML Keys 收不到独立修饰键）
         showChannelIds: root.showChannelIds !== keyMonitor.ctrlHeld
+        // M6 编辑预览：放置工具 → ghost note 类型（note/ln/mine）；其它工具 = 关
+        previewNoteKind: root.editorTool === "note" ? "normal"
+                       : root.editorTool === "ln" ? "ln"
+                       : root.editorTool === "mine" ? "mine" : ""
         onChartChanged: {
             // 谱面切换 → 定位到起点（小节 0 落在播放线/视口 90%——开头留白兜底，
             // 避免「0-1 小节播放头锁不住 90% → 开始播放跳变」；2026-09 用户）
@@ -139,13 +148,16 @@ Item {
         contentHeight: view.contentHeight
         topHigh: root.topHigh
         viewportHeight: view.height
-        onSeekRequested: (sec) => view.scrollToTime(sec)
+        onSeekRequested: (sec) => root.seekTo(sec)
     }
 
     // 渲染完成 → 显示波形总览；文档/内容变化 → 隐藏（等下一次渲染）
+    // ⚠️ onRenderFinished 置 waveformShown=true（此后恒真）：内容变化隐藏波形条时视口宽度
+    // 不变（仅波形内容变 blank）→ 列不重排。onDocumentChanged 重置 false（新谱面未渲染）。
     Connections {
         target: typeof chartSession !== "undefined" ? chartSession : null
         function onRenderFinished(ok, outPath, durationSec) {
+            waveformShown = true
             waveform.visible = ok
         }
     }
@@ -153,6 +165,7 @@ Item {
         target: typeof chartSession !== "undefined" ? chartSession : null
         function onDocumentChanged() {
             waveform.visible = false
+            waveformShown = false
             view.playheadSec = -1  // 谱面切换：隐藏播放头（等新渲染/播放）
         }
         function onContentChanged() {
@@ -322,6 +335,12 @@ Item {
         _pressY = y
         _dragged = false
         _ctrlHeld = ctrl
+        // M5 seek 交互：点秒标尺列（x<rulerWidth、y>头部）→ 设播放位置（seek + 滚到红线）。
+        // 与 note/框选/放置解耦；只响应单点（拖动不触发，保持标尺纯跳转语义）。
+        if (x < view.rulerWidth && y > 18) {
+            root.seekTo(view.timeAtY(y))
+            return
+        }
         // 编辑工具（V 选择 / N 放置 / L LN / M 地雷）命中 note → 选中并进入移动准备。
         // 拖动 note = 移动（任何编辑工具，设计确认 2026-09）；点击（无位移）→ release 时
         // 走工具语义（放置或选中）。pan（H 拖拽=纯滚动）永不进入移动。
@@ -360,6 +379,7 @@ Item {
                 _moveDeltaF = 0
                 _moveTargetLane = null
                 _moveSourceLane = obj.lane   // 拖起 note 的轨（跨通道多选移动只动此轨，2026-09）
+                view.moveSourceLane = obj.lane  // M6 预览：拖起 lane → ghost 跨列判断用
                 _moveStartF = view.measureAtY(y)
                 return
             }
@@ -385,6 +405,18 @@ Item {
                 // 横向目标列（沿列头 y 带命中；无 2 轴联动时不该用到）
                 const laneHit = view.laneAtX(x)
                 _moveTargetLane = laneHit && laneHit.valid ? laneHit : null
+                // M6 编辑预览：note 移动 → ghost（原始+delta；meta 对象沿用旧行为）
+                if (_moveKind === "") {
+                    view.movePreview = true
+                    view.moveDeltaF = _moveDeltaF
+                    // 目标列规范化为 {player,kind,index}（laneAtX 返回 lanePlayer/laneKind/laneIndex）；
+                    // 带 bgm_line：BGM 虚拟子通道目标（ghost 落对应 bgmN 列）
+                    view.moveTargetLane = laneHit && laneHit.valid
+                        ? { player: laneHit.lanePlayer, kind: laneHit.laneKind,
+                            index: laneHit.laneIndex,
+                            bgm_line: laneHit.bgm_line }
+                        : ({})
+                }
             }
             _lastY = y
             _lastX = x
@@ -411,6 +443,9 @@ Item {
         _lastY = -1
         if (_moving) {
             _moving = false
+            view.movePreview = false  // M6 编辑预览：结束拖拽 → 关 ghost
+            view.moveTargetLane = ({})
+            view.moveSourceLane = ({})
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             let deltaF = 0
             let targetLane = null
@@ -594,7 +629,7 @@ Item {
         id: vbar
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: waveform.visible ? waveform.left : parent.right
+        anchors.right: waveformShown ? waveform.left : parent.right
         width: 12
         z: 2
         color: Theme.surface2
@@ -675,6 +710,16 @@ Item {
     /// 秒 → 视口滚动（波形总览 seekRequested / --seek 调试走同一路径）。
     function seekToSeconds(sec) {
         view.scrollToTime(sec)
+    }
+
+    /// M5 seek 交互：设播放位置 + 滚到红线（视口光标）。
+    /// ① 音频时钟 seek（有 PCM 才生效，否则安全 no-op）→ 播放头红线跟进；
+    /// ② 视口滚到「该时间落红线(90%)」→ 红线读数 = 目标时间（非播放时红线显示就位）。
+    /// 点秒标尺 / 波形条点击 / 波形条拖动（DAW 式 scrub）共用此路径。
+    function seekTo(sec) {
+        if (typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
+            audioEngine.seekSeconds(sec)
+        if (view) view.scrollCursorToSec(sec)
     }
 
     // 状态栏用：鼠标位置 + note 信息（hoverText 由 ChartViewItem 计算）

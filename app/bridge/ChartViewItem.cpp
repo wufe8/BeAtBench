@@ -211,6 +211,31 @@ void ChartViewItem::scrollToStart() {
     m_startPending = false;
 }
 
+double ChartViewItem::timeAtY(qreal y) const {
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->timing() || m_measureHeight <= 0.0) return 0.0;
+    const qreal mf = measureAt(y);
+    if (mf < 0.0) return 0.0;  // 开头留白区 → 评分起点
+    const int measure = static_cast<int>(std::floor(mf));
+    const double frac = mf - static_cast<qreal>(measure);
+    // frac → Rational（量化到 1e9，构造即约分；与 cursorPosition 同量化粒度）
+    const qint64 num = static_cast<qint64>(std::llround(frac * 1e9));
+    const beatbench::Position p{static_cast<std::uint32_t>(measure),
+                                beatbench::Rational(num, 1000000000LL)};
+    return static_cast<double>(cs->timing()->time_us(p)) / 1e6;
+}
+
+void ChartViewItem::scrollCursorToSec(double seconds) {
+    const ChartSession* cs = sessionObj();
+    if (!cs || !cs->timing() || seconds < 0.0 || height() <= 0.0) return;
+    const auto pos = cs->timing()->position_at(static_cast<std::int64_t>(seconds * 1e6));
+    if (!pos) return;
+    const qreal mf = pos->measure + posDouble(pos->pos);
+    // 目标拍位落到**红线（视口 90%）**下方（与 scrollToStart 同构；playhead 光标模型）
+    const qreal target = contentPosOf(mf) - height() * 0.90;
+    setScrollY(std::clamp(target, 0.0, maxScrollY()));
+}
+
 void ChartViewItem::setRulerWidth(qreal v) {
     if (qFuzzyCompare(m_rulerWidth, v)) return;
     m_rulerWidth = v;
@@ -741,6 +766,39 @@ void ChartViewItem::setLoopBSec(double v) {
     update();
 }
 
+void ChartViewItem::setPreviewNoteKind(const QString& v) {
+    if (m_previewNoteKind == v) return;
+    m_previewNoteKind = v;
+    emit previewNoteKindChanged();
+    update();
+}
+
+void ChartViewItem::setMovePreview(bool v) {
+    if (m_movePreview == v) return;
+    m_movePreview = v;
+    emit movePreviewChanged();
+    update();
+}
+
+void ChartViewItem::setMoveDeltaF(qreal v) {
+    if (qFuzzyCompare(m_moveDeltaF, v)) return;
+    m_moveDeltaF = v;
+    emit moveDeltaFChanged();
+    if (m_movePreview) update();  // 拖拽位移变化 → ghost 刷新
+}
+
+void ChartViewItem::setMoveSourceLane(const QVariantMap& v) {
+    m_moveSourceLane = v;
+    emit moveSourceLaneChanged();
+    if (m_movePreview) update();
+}
+
+void ChartViewItem::setMoveTargetLane(const QVariantMap& v) {
+    m_moveTargetLane = v;
+    emit moveTargetLaneChanged();
+    if (m_movePreview) update();
+}
+
 bool ChartViewItem::followPlayheadTick() {
     if (!m_followPlayhead || m_playheadSec < 0.0) return false;
     const ChartSession* cs = sessionObj();
@@ -973,10 +1031,12 @@ void ChartViewItem::updateHover(const QPointF& pos) {
             }
         }
     }
-    if (text != m_hoverText || measure != m_hoverMeasure || m_hoverY != pos.y()) {
+    if (text != m_hoverText || measure != m_hoverMeasure || m_hoverY != pos.y() || 
+        m_hoverX != pos.x()) {
         m_hoverText = text;
         m_hoverMeasure = measure;
         m_hoverY = pos.y();
+        m_hoverX = pos.x();
         emit hoverChanged();
         update();
     }
@@ -1023,6 +1083,143 @@ qreal ChartViewItem::posDouble(const beatbench::Rational& r) const {
 
 qreal ChartViewItem::noteHeight() const {
     return std::clamp(m_measureHeight * kNoteHeightScale, kNoteHeightMin, kNoteHeightMax);
+}
+
+qreal ChartViewItem::snapMf(qreal mf) const {
+    const int nslots = std::max(1, m_snapDen / m_snapNum);  // 每小节槽数 = snapDen/snapNum（⚠️ 勿用 slots——Qt 宏）
+    return std::round(mf * nslots) / nslots;
+}
+
+/// 把 hitTest/selection 里的 lane kind 字符串 → LaneKind（"key"/"scratch"/"pedal"/"bgm"）。
+static beatbench::LaneKind laneKindFromString(const QString& s) {
+    if (s == QLatin1String("scratch")) return beatbench::LaneKind::Scratch;
+    if (s == QLatin1String("pedal")) return beatbench::LaneKind::Pedal;
+    if (s == QLatin1String("bgm")) return beatbench::LaneKind::Bgm;
+    return beatbench::LaneKind::Key;
+}
+
+// ---- M6 编辑预览：放置 + 移动 ghost（用户 2026-09：操作前先看到落点） ----
+void ChartViewItem::drawNoteGhost(QPainter* p, qreal measureFloat,
+                                  const beatbench::Lane& lane, const QString& noteKind,
+                                  std::uint32_t sample, int bgmLine) const {
+    const ThemeManager* th = themeObj();
+    if (!th) return;
+    const int col = columnFor(lane, sample, bgmLine);
+    if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) return;
+    const QRectF& r = m_colRects[static_cast<std::size_t>(col)];
+    const qreal y = yOf(measureFloat);
+    const qreal noteH = noteHeight();
+    if (noteKind == QLatin1String("mine")) {
+        QPainterPath path;
+        const qreal s = 5.0;
+        path.moveTo(r.center().x(), y - 2.0 * s);
+        path.lineTo(r.center().x() + s, y - s);
+        path.lineTo(r.center().x(), y);
+        path.lineTo(r.center().x() - s, y - s);
+        path.closeSubpath();
+        QColor c = th->mine(); c.setAlpha(130);
+        p->fillPath(path, c);
+        QColor ex = th->accent(); ex.setAlpha(230);
+        p->setPen(QPen(ex, 1.2));
+        p->setBrush(Qt::NoBrush);
+        p->drawPath(path);
+        return;
+    }
+    // normal / ln（有帽矩形近似头）：note 色半透明填充 + 亮 accent 描边（白 note 上也可见）
+    QColor c = noteColor(lane);
+    c.setAlpha(90);
+    const QRectF rect(r.x() + kNoteHMargin, y - noteH,
+                      r.width() - 2.0 * kNoteHMargin, noteH);
+    p->fillRect(rect, c);
+    QColor edge = th->accent(); edge.setAlpha(230);
+    p->setPen(QPen(edge, 1.5));
+    p->setBrush(Qt::NoBrush);
+    p->drawRect(rect.adjusted(-1.5, 0.0, 1.5, 0.0));
+}
+
+void ChartViewItem::drawPreview(QPainter* p) const {
+    if (m_movePreview) {
+        // 移动预览：选中 note 各画 ghost @ 原始 + delta。跨通道移动（targetLane 有效）时，
+        // 命中 sourceLane 的 note 用 targetLane 画（ghost 落目标列），其余只按时间位移。
+        if (qFuzzyIsNull(m_moveDeltaF)) return;  // 原位（无位移）不画，等于无预览
+        auto laneMatches = [this](const QVariantMap& a, const QVariantMap& b) {
+            if (a.isEmpty() || b.isEmpty()) return false;
+            return a.value(QStringLiteral("player")).toInt() ==
+                       b.value(QStringLiteral("player")).toInt() &&
+                   a.value(QStringLiteral("kind")).toString() ==
+                       b.value(QStringLiteral("kind")).toString() &&
+                   a.value(QStringLiteral("index")).toInt() ==
+                       b.value(QStringLiteral("index")).toInt();
+        };
+        // 与实际 moveSelection 的通道逻辑一致：
+        //  BGM 目标（虚拟子通道容器）：所有选中 note 转成 BGM（落具体 bgmN 列 → 该行，
+        //    聚合列 → bgm_line=-1 由后端自动分配）；注：ghost 不申请分配，用目标 bgm_line 显示；
+        //  key→key（源/目标都是 key）：所有 key note 按 channelOffset 平移（钳 1..7）；
+        //  key→非key（跨 kind）：仅源 lane note 改用目标 kind/index/player。
+        const QString srcKind = m_moveSourceLane.value(QStringLiteral("kind")).toString();
+        const QString tgtKind = m_moveTargetLane.value(QStringLiteral("kind")).toString();
+        const bool bgmTarget = (tgtKind == QLatin1String("bgm"));
+        const bool keyToKey = (srcKind == QLatin1String("key") &&
+                               tgtKind == QLatin1String("key"));
+        const int channelOffset =
+            keyToKey ? (m_moveTargetLane.value(QStringLiteral("index")).toInt() -
+                        m_moveSourceLane.value(QStringLiteral("index")).toInt())
+                     : 0;
+        for (const auto& v : m_selection) {
+            const QVariantMap m = v.toMap();
+            if (m.isEmpty()) continue;
+            const int measure = m.value(QStringLiteral("measure")).toInt();
+            const QVariantMap posM = m.value(QStringLiteral("pos")).toMap();
+            const QVariantMap laneM = m.value(QStringLiteral("lane")).toMap();
+            const double pn = posM.value(QStringLiteral("num")).toDouble();
+            const double pd = posM.value(QStringLiteral("den")).toDouble();
+            beatbench::Lane lane;
+            lane.player = static_cast<std::uint8_t>(laneM.value(QStringLiteral("player")).toInt());
+            lane.kind = laneKindFromString(laneM.value(QStringLiteral("kind")).toString());
+            lane.index = static_cast<std::uint8_t>(laneM.value(QStringLiteral("index")).toInt());
+            int ghostBgmLine = m.value(QStringLiteral("bgm_line"), -1).toInt();
+            if (bgmTarget) {
+                // BGM 目标：整组转 BGM（数字通道 ch01），落地列 = 目标 bgm_line（聚合=-1）
+                const QVariantMap t = m_moveTargetLane;
+                lane.player = static_cast<std::uint8_t>(t.value(QStringLiteral("player")).toInt());
+                lane.kind = beatbench::LaneKind::Bgm;
+                lane.index = static_cast<std::uint8_t>(t.value(QStringLiteral("index")).toInt());
+                ghostBgmLine = t.value(QStringLiteral("bgm_line"), -1).toInt();
+            } else if (keyToKey && lane.kind == beatbench::LaneKind::Key) {
+                // key→key：整组 key note 平移同距（多选/框选拖动的实际落点）
+                const int ni = std::clamp(static_cast<int>(lane.index) + channelOffset, 1, 7);
+                if (ni != static_cast<int>(lane.index)) lane.index = static_cast<std::uint8_t>(ni);
+            } else if (!m_moveTargetLane.isEmpty() && laneMatches(laneM, m_moveSourceLane)) {
+                // 跨 kind：源 lane note 改用目标列
+                const QVariantMap t = m_moveTargetLane;
+                lane.player = static_cast<std::uint8_t>(t.value(QStringLiteral("player")).toInt());
+                lane.kind = laneKindFromString(t.value(QStringLiteral("kind")).toString());
+                lane.index = static_cast<std::uint8_t>(t.value(QStringLiteral("index")).toInt());
+            }
+            const int sample = m.value(QStringLiteral("sample")).toInt();
+            // ghost 落点 = 绝对目标（原始 + delta）**吸附到 snap 网格**——否则偏移偏移量
+            // 相对吸附（如 1/8 音符在 1/4 snap 下仍停在 1/8+k/4）与松开后的落点不符（用户 2026-09）。
+            const qreal mf = snapMf(static_cast<qreal>(measure) + (pd > 0 ? pn / pd : 0.0) + m_moveDeltaF);
+            drawNoteGhost(p, mf, lane, QStringLiteral("normal"),
+                          static_cast<std::uint32_t>(sample), ghostBgmLine);
+        }
+        return;
+    }
+    // 放置预览：工具下鼠标悬浮 → hitTest 得吸附位 → ghost
+    if (m_previewNoteKind.isEmpty() || m_hoverX < 0.0 || m_hoverY < 0.0) return;
+    const QVariantMap hit = hitTest(m_hoverX, m_hoverY);
+    if (!hit.value(QStringLiteral("valid")).toBool()) return;
+    if (hit.contains(QStringLiteral("metaKind"))) return;  // BPM/STOP 列 = 时序事件，非 note
+    beatbench::Lane lane;
+    lane.player = static_cast<std::uint8_t>(hit.value(QStringLiteral("lanePlayer")).toInt());
+    lane.kind = laneKindFromString(hit.value(QStringLiteral("laneKind")).toString());
+    lane.index = static_cast<std::uint8_t>(hit.value(QStringLiteral("laneIndex")).toInt());
+    const int measure = hit.value(QStringLiteral("measure")).toInt();
+    const int num = hit.value(QStringLiteral("num")).toInt();
+    const int den = hit.value(QStringLiteral("den")).toInt();
+    const qreal mf = static_cast<qreal>(measure) + (den > 0 ? static_cast<qreal>(num) / den : 0.0);
+    drawNoteGhost(p, mf, lane, m_previewNoteKind, 0,
+                  hit.value(QStringLiteral("bgm_line")).toInt());
 }
 
 QColor ChartViewItem::noteColor(const beatbench::Lane& lane) const {
@@ -1085,6 +1282,10 @@ int ChartViewItem::columnFor(const beatbench::Lane& lane, std::uint32_t bgmSampl
     for (std::size_t i = 0; i < m_columns.size(); ++i) {
         const auto& c = m_columns[i];
         if (c.bgaLayer >= 0) continue;  // BGA 图层列不匹配 note
+        // BPM/STOP 元事件列（lane 用 {0,Pedal,0} 占位）不匹配 note——否则踏板 note
+        // 会映射到 BPM 列渲染（用户 2026-09：点 P 列放置显示在 BPM 通道）。元事件由
+        // paint 的 drawBpm/drawStop 单独在对应列画。
+        if (c.bpm || c.stop) continue;
         if (c.lane != lane) continue;
         if (c.bgm) {
             // 聚合列（bgmLine==-1）：命中所有 Bgm note；展开列（bgmLine>=0）：按行号匹配
@@ -1205,10 +1406,7 @@ void ChartViewItem::rebuildColumns() {
                                         static_cast<std::uint8_t>(k)};
                 add(l, columnLabel(l, QString::number(k)));
             }
-            if (pedal1) {
-                const beatbench::Lane l{0, beatbench::LaneKind::Pedal, 0};
-                add(l, columnLabel(l, QStringLiteral("P")));
-            }
+            // ⚠️ 踏板（ch17）已弃用：不进默认车道——挪到「更多轨道」(showExtras) 显示（用户 2026-09）。
             if (scratch2 || maxKey2 > 0 || pedal2) {
                 // 2P 布局（2026-09 用户：1P 皿在左、2P 皿在右——中间 key 不做对称，只调转盘顺序）
                 // 顺序 = 2P 键 1..max → 2P 皿（S，右移到键后）→ 2P 踏板（最右）。
@@ -1220,10 +1418,6 @@ void ChartViewItem::rebuildColumns() {
                 if (scratch2) {
                     const beatbench::Lane l{1, beatbench::LaneKind::Scratch, 0};
                     add(l, columnLabel(l, QStringLiteral("2P·S")), false, true);
-                }
-                if (pedal2) {
-                    const beatbench::Lane l{1, beatbench::LaneKind::Pedal, 0};
-                    add(l, columnLabel(l, QStringLiteral("2P·P")), false, true);
                 }
             }
             if (m_showExtras) {
@@ -1238,6 +1432,15 @@ void ChartViewItem::rebuildColumns() {
                         m_showChannelIds ? QString::fromLatin1(kCh[layer])
                                          : QString::fromLatin1(kName[layer]);
                     add({0, beatbench::LaneKind::Bgm, 0}, label, false, false, 0, layer);
+                }
+                // 踏板（ch17，已弃用）——仅「更多轨道」显示（用户 2026-09：默认车道不放 P）。
+                if (pedal1) {
+                    const beatbench::Lane l{0, beatbench::LaneKind::Pedal, 0};
+                    add(l, columnLabel(l, QStringLiteral("P")));
+                }
+                if (pedal2) {
+                    const beatbench::Lane l{1, beatbench::LaneKind::Pedal, 0};
+                    add(l, columnLabel(l, QStringLiteral("2P·P")), false, true);
                 }
             }
             if (!bgmIds.empty() || m_bgmExpanded) {
@@ -1353,6 +1556,7 @@ void ChartViewItem::rebuildBgTile(const beatbench::Chart* chart,
     m_bgTileMeasureH = m_measureHeight;
     m_bgTileSnapNum = m_snapNum;
     m_bgTileSnapDen = m_snapDen;
+    m_bgTileScrollX = m_scrollX;
     m_bgTileDirty = false;
 }
 
@@ -1423,12 +1627,13 @@ void ChartViewItem::paint(QPainter* p) {
     }
 
     // ---- M7 性能：背景 tile 平铺（底纹/列底/网格——滚动只 blit，不逐线画） ----
-    // tile 无效化条件：theme/缩放/snap/列布局/宽度/方向变化（setter 置 m_bgTileDirty）。
+    // tile 无效化条件：theme/缩放/snap/列布局/宽度/方向/水平滚动变化（setter 置 m_bgTileDirty）。
     {
         const bool needRebuild = m_bgTileDirty || m_bgTile.isNull() ||
             !qFuzzyCompare(m_bgTileW, w) ||
             !qFuzzyCompare(m_bgTileMeasureH, m_measureHeight) ||
-            m_bgTileSnapNum != m_snapNum || m_bgTileSnapDen != m_snapDen;
+            m_bgTileSnapNum != m_snapNum || m_bgTileSnapDen != m_snapDen ||
+            !qFuzzyCompare(m_bgTileScrollX, m_scrollX);  // 水平滚动列位变 → 列底色须重排（2026-09）
         if (needRebuild) {
             rebuildBgTile(&chart, th, w, h, metaRight);
         }
@@ -1439,7 +1644,11 @@ void ChartViewItem::paint(QPainter* p) {
             const int halfH = static_cast<int>(std::round(m_measureHeight));
             const int tileH = m_bgTile.height();
             for (int m = first; m <= last; ++m) {
-                const qreal y0 = yOf(m);
+                // ⚠️ 内容坐标对 topHigh 是「measure m 自成一格」，但 measure m 屏幕区 =
+                // [yOf(m+1), yOf(m)]（topHigh 下 yOf(m+1) 在上）。若在 yOf(m) 往下画，
+                // tile 内容落到 m-1 的格 → 底纹/列底错位（用户 2026-09 背景被剔）。
+                // 修正：topHigh 以 yOf(m)-mh（=yOf(m+1)）为顶部往下画 mh。
+                const qreal y0 = m_topHigh ? (yOf(m) - m_measureHeight) : yOf(m);
                 const int sub = m & 1;
                 QRectF dst(0, y0, w, m_measureHeight);
                 QRect src(0, sub == 0 ? 0 : halfH, static_cast<int>(std::ceil(w)), halfH);
@@ -1869,6 +2078,9 @@ void ChartViewItem::paint(QPainter* p) {
         p->drawText(QRectF(m_colRects[i].x(), 0, m_colRects[i].width(), 18), Qt::AlignCenter,
                     col.label);
     }
+
+    // ---- M6 编辑预览：放置 / 移动 ghost note（画在最上层，操作前可见落点） ----
+    drawPreview(p);
 
     // ---- 性能采样（--perf-log；每帧一条落到 Qt 消息日志，无交互时帧少不丢数据） ----
     if (m_perfLog && perfTimer.isValid()) {

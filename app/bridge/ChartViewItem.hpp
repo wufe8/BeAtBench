@@ -84,6 +84,16 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 红线 → 值随视口变；播放中跟随滚动内容 → 值自然前进。状态栏显示用（2026-09 用户）。
     Q_PROPERTY(qreal cursorSec READ cursorSec NOTIFY cursorChanged)
     Q_PROPERTY(QString cursorPosText READ cursorPosText NOTIFY cursorChanged)
+    /// M6 编辑预览：放置工具（note/ln/mine）下鼠标悬浮 → 画 ghost note（"normal"/"ln"/"mine"；
+    /// 空 = 关闭）。用户 2026-09：操作前先看到落点。
+    Q_PROPERTY(QString previewNoteKind READ previewNoteKind WRITE setPreviewNoteKind NOTIFY previewNoteKindChanged)
+    /// M6 编辑预览：拖拽移动选中 note → 各画 ghost @ 原始+moveDeltaF（位移拍位小数）。
+    Q_PROPERTY(bool movePreview READ movePreview WRITE setMovePreview NOTIFY movePreviewChanged)
+    Q_PROPERTY(qreal moveDeltaF READ moveDeltaF WRITE setMoveDeltaF NOTIFY moveDeltaFChanged)
+    /// M6 编辑预览：拖拽起点/目标 lane（{player,kind,index}；跨通道移动时 ghost 落到目标列）。
+    /// 命中 sourceLane 的 note 用 targetLane 画 ghost；其余只按时间位移。
+    Q_PROPERTY(QVariantMap moveSourceLane READ moveSourceLane WRITE setMoveSourceLane NOTIFY moveSourceLaneChanged)
+    Q_PROPERTY(QVariantMap moveTargetLane READ moveTargetLane WRITE setMoveTargetLane NOTIFY moveTargetLaneChanged)
 
 public:
     explicit ChartViewItem(QQuickItem* parent = nullptr);
@@ -128,6 +138,16 @@ public:
     /// 红线下方内容所在**小节号**文本（整数；节内拍位为连续量，精确约分分母太夸张，
     /// 用户「不想跳变或近似」→ 只给精确小节号 + 精确秒；无图/无 timing → 空）。
     QString cursorPosText() const;
+    QString previewNoteKind() const { return m_previewNoteKind; }
+    void setPreviewNoteKind(const QString& v);
+    bool movePreview() const { return m_movePreview; }
+    void setMovePreview(bool v);
+    qreal moveDeltaF() const { return m_moveDeltaF; }
+    void setMoveDeltaF(qreal v);
+    QVariantMap moveSourceLane() const { return m_moveSourceLane; }
+    void setMoveSourceLane(const QVariantMap& v);
+    QVariantMap moveTargetLane() const { return m_moveTargetLane; }
+    void setMoveTargetLane(const QVariantMap& v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
     qreal contentHeight() const;
@@ -181,6 +201,14 @@ public:
     /// 开头留白让小节 0 可落到 90% —— 打开谱面/跳转起点用它，避免「播放线在 0-1 小节时
     /// 播放头锁不住 90% → 开始播放跳变」（用户 2026-09）。
     Q_INVOKABLE void scrollToStart();
+
+    /// M5 seek 交互：屏幕 y → 秒（秒标尺/波形条点击定位用）。measureAt(y) → Position →
+    /// timing()->time_us / 1e6；无 timing / 留白区（拍位<0）→ 0。与cursorPosition 同源换算。
+    Q_INVOKABLE double timeAtY(qreal y) const;
+
+    /// M5 seek 交互：把秒对应的拍位滚到**红线（视口 90%）**下方（=scrollToStart 的任意拍位版）。
+    /// 与红线=视口光标模型一致：seek 后红线读数 = 该时间。无 timing / 负秒 → no-op。
+    Q_INVOKABLE void scrollCursorToSec(double seconds);
 
     /// 屏幕矩形内 note 枚举（clipboard.copy 的 selection 数组：{measure, pos:{num,den},
     /// lane:{player,kind,index}, sample}；按 (measure,pos) 稳定升序）。
@@ -243,6 +271,11 @@ signals:
     void cursorChanged();
     /// 滚动上限变化（height/contentHeight/topHigh/measureHeight 任一变化）。
     void maxScrollYChanged();
+    void previewNoteKindChanged();
+    void movePreviewChanged();
+    void moveDeltaFChanged();
+    void moveSourceLaneChanged();
+    void moveTargetLaneChanged();
     /// 谱面切换（ChartSession.chartChanged 转发；QML 据此重定位滚动）。
     void chartChanged();
 
@@ -270,6 +303,11 @@ private:
     void updateHover(const QPointF& pos);
     ChartSession* sessionObj() const;
     ThemeManager* themeObj() const;
+    /// M6 预览：paint 尾部绘制 ghost note（放置 + 移动预览共用）。
+    void drawPreview(QPainter* p) const;
+    /// 画一个半透明 ghost note（normal 矩形 / mine 菱形 / ln 有帽矩形）。
+    void drawNoteGhost(QPainter* p, qreal measureFloat, const beatbench::Lane& lane,
+                       const QString& noteKind, std::uint32_t sample, int bgmLine) const;
     /// paint 前按当前 theme 刷新标尺/note 标签字体族（皮肤可换；避免硬编码 Consolas）。
     void applyThemeFonts(const ThemeManager* th);
     /// NoteRef 语义键（measure|num|den|player|kind|index|sample）：选中判定用。
@@ -311,6 +349,8 @@ private:
     /// note 高度：随缩放浮动但带上下限（clamp(measureHeight * scale, min, max)）。
     /// 小 = 不随放大无界膨胀；下限保证 100% 缩放下 1/16 相邻 note 可分。hit/paint/hover 共用。
     qreal noteHeight() const;
+    /// 拍位 → snap 网格吸附（绝对目标；移动 ghost 预览用——未来落点对齐网格）。
+    qreal snapMf(qreal mf) const;
 
     QColor noteColor(const beatbench::Lane& lane) const;
     /// LN note 专用色（2026-09 用户：位于 LN 轨的 note 加深，直接分辨单点/LN）。
@@ -358,6 +398,7 @@ private:
     double m_bgTileMeasureH = -1.0;
     int m_bgTileSnapNum = -1;
     int m_bgTileSnapDen = -1;
+    qreal m_bgTileScrollX = 0.0;  // 缓存时 scrollX（水平滚动列位变 → 列底色错位；2026-09 用户）
     bool m_bgTileDirty = true;    // 需求有效化（theme/列/缩放变化置位）
     void invalidateBgTile() { m_bgTileDirty = true; }
     void rebuildBgTile(const beatbench::Chart* chart, const ThemeManager* th,
@@ -392,6 +433,13 @@ private:
     QString m_hoverText;   // 鼠标位置 + note 信息（状态栏）
     int m_hoverMeasure = -1;
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
+    qreal m_hoverX = -1.0;  // 悬停 x（M6 预览：列命中用；-1 = 无）
+    // —— M6 编辑预览（用户 2026-09）——
+    QString m_previewNoteKind;  // 放置工具 ghost 类型（"normal"/"ln"/"mine"；空 = 关）
+    bool m_movePreview = false;  // 移动预览总开关（拖拽时 QML 置 true）
+    qreal m_moveDeltaF = 0.0;    // 移动预览位移（拍位小数）
+    QVariantMap m_moveSourceLane;  // 拖起 lane（{player,kind,index}）
+    QVariantMap m_moveTargetLane;  // 目标 lane（跨通道移动）；空 = 不改列
     QVariantList m_selection;  // 选中 note 集合（NoteRef 语义；绘制高亮用）
     QVariantList m_metaSelection;  // 选中 BGA/BPM/STOP 对象集合（绘制高亮用）
     int m_lastVisibleNotes = 0;  // 最近一次 paint 的可见 note 数（--perf-log）

@@ -99,7 +99,7 @@ ApplicationWindow {
         interval: 400
         onTriggered: {
             if (typeof editPage !== "undefined" && editPage && editPage.locateChartView())
-                editPage.locateChartView().seekToSeconds(debugSeekSeconds)
+                editPage.locateChartView().seekTo(debugSeekSeconds)
         }
     }
     // --delete-selection：点击后自动 Del（验收删除链）

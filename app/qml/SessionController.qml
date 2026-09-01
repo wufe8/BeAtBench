@@ -499,13 +499,35 @@ QtObject {
         const keyToKey = sourceLane && sourceLane.kind === "key" &&
                          targetLane && targetLane.valid && targetLane.laneKind === "key"
         if (keyToKey) channelOffset = targetLane.laneIndex - sourceLane.index
+        // ⚠️ BGM 虚拟子通道（2026-09）：BGM(ch01) 可容纳多个并列子行（bgm_line），多选/框选
+        // 整组拖进 BGM 应**全部**转成 BGM——与游玩通道「整组平移到一个通道」一致。不再只转
+        // sourceLane 那一个 note（那修复的是「多选跨通道全部挤到松开通道」，对单通道 kind
+        // 成立；但 BGM 是容器，落到 bgmN 列=全进该行，落聚合列则交给后端 MoveNoteCommand
+        // 按 (measure,pos,sample) 自动分配不冲突的子行）。
+        const isBgmTarget = targetLane && targetLane.valid && targetLane.laneKind === "bgm"
         const moves = []
         const newRefs = []
         for (let i = 0; i < refs.length; i++) {
             const ref = refs[i]
+            // ⚠️ 绝对目标吸附（用户 2026-09）：落点 = 源 + delta 后**整体吸附到网格**，
+            // 不是只吸附位移 delta——否则 1/8 音符在 1/4 snap 下仍停在 1/8+k/4（不量化到通道）。
+            // 期望：1/8 note 在 1/4 snap 下只能到 0/4,1/4,2/4,3/4。网格对齐 note 保持「同距离」。
+            const origMf = ref.measure + ref.pos.num / ref.pos.den
+            const snappedTarget = Math.round((origMf + deltaF) * slots) / slots
+            const d = snappedTarget - origMf
+            const dm = Math.floor(d)
+            const delta = { measure: dm, pos: { num: Math.round((d - dm) * den), den: den } }
             const to = addPosDelta(ref, delta)
             let changedLane = false
-            if (channelOffset !== 0 && ref.lane.kind === "key") {
+            if (isBgmTarget) {
+                // BGM 目标（最高优先）：所有选中 note 转成 BGM；落展开 bgmN 列 → 全部进该行，
+                // 落聚合列（bgm_line<0）→ 不传 bgm_line（后端按 (measure,pos,sample) 自动分配）。
+                to.lane = { player: targetLane.lanePlayer, kind: "bgm",
+                            index: targetLane.laneIndex }
+                if (targetLane.bgm_line !== undefined && targetLane.bgm_line >= 0)
+                    to.bgm_line = targetLane.bgm_line
+                changedLane = true
+            } else if (channelOffset !== 0 && ref.lane.kind === "key") {
                 // 同距离偏移（key 轨；钳到合法 key 范围 1..7）
                 const ni = Math.max(1, Math.min(7, ref.lane.index + channelOffset))
                 if (ni !== ref.lane.index) {
