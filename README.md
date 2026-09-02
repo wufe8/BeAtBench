@@ -1,8 +1,12 @@
 # BeAtBench
 
-面向 BMS（Be-Music Source）谱师的**新一代开源跨平台谱面编辑器**，替代 BMSE / iBMSC 谱系。
+提前须知: 本项目依赖vibecoding运行 代码审查几乎全靠ai和git diff
 
-技术栈：C++20 + **Qt 6 Quick/QML** + CMake；音频阶段（Phase B）引入 PortAudio（beatoraja 同款，支持 ASIO）。
+面向BMS的新一代开源跨平台谱面编辑器
+
+技术栈: C++20 + Qt 6 Quick/QML + PortAudio + CMake
+
+目前还没支持ASIO
 
 **许可：GPL-3.0**（见 `LICENSE`）。
 
@@ -69,21 +73,28 @@ set BB_SKIP_REAL=1
 build\tests\Debug\beatbench_tests.exe
 ```
 
-### GUI（MinGW + Qt 6.11）
+### GUI（MinGW + Qt 6）
+
+> 需自备 Qt 6（含 Quick/QuickControls2）与匹配的 MinGW 编译器。下面的 `QT_PREFIX`/
+> `MINGW_BIN` 是**你自己的安装路径**，换成你的实际位置即可（示例值来自本机，仅作格式参考）。
 
 ```bash
-# 配置（需指定 Qt 路径和 MinGW 编译器）
+# 改为你自己的路径（Windows 下可用 /c/... 或 C:/... 写法）
+export QT_PREFIX=/c/Qt/6.8.0/mingw_64
+export MINGW_BIN=/c/Qt/Tools/mingw1310_64/bin
+
+# 配置（Git Bash；用 `-G "MinGW Makefiles"` 或 Ninja 均可）
 cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_PREFIX_PATH="G:/Qt/6.11.1/mingw_64" \
-  -DCMAKE_CXX_COMPILER="G:/Qt/Tools/mingw1310_64/bin/g++.exe" \
-  -DCMAKE_MAKE_PROGRAM="G:/Qt/Tools/Ninja/ninja.exe" \
+  -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+  -DCMAKE_CXX_COMPILER="$MINGW_BIN/g++.exe" \
+  -DCMAKE_MAKE_PROGRAM="$MINGW_BIN/ninja.exe" \
   -DBEATBENCH_BUILD_TESTS=OFF
 
 # 构建
 cmake --build build-gui --target beatbench
 
-# 部署 Qt DLL
-/G/Qt/6.11.1/mingw_64/bin/windeployqt.exe --qmldir app/qml build-gui/app/beatbench.exe
+# 部署 Qt DLL 到 exe 旁（--qmldir 必须指向 QML 源码，否则缺 QuickControls 插件）
+"$QT_PREFIX/bin/windeployqt.exe" --qmldir app/qml build-gui/app/beatbench.exe
 
 # 运行
 build-gui/app/beatbench.exe
