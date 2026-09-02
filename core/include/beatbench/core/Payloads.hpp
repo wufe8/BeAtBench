@@ -28,9 +28,10 @@ struct Note {
     /// ln_pair 是「自下而上：文件数据 → 解析 → 效果呈现」的派生，不是编辑真相源）。
     /// 前端用它：① LN note 深色 ② 未配对时 lint 提示。
     bool ln_channel = false;
-    /// BGM 行序号（仅 LaneKind::Bgm 有意义）：该小节内第几次读到 ch01（2026-09 用户确认：
-    /// BGM 展开 = 按行序分列，非按 #WAV id；空行也占位）。展示辅助字段——不参与语义相等
-    /// （多个同 (pos,lane,sample) 的 Bgm note 仅因行号不同应视为同对象），parser 填初始值，
+    /// 子行序号（2026-09 泛化，原 bgm_line）：该 note 在其所在通道同小节内的行序（读侧 FIFO，
+    /// 任意 Note 通道（含 ch01）同小节多行 = 子行；空行也占位）。允许多子行的通道由
+    /// BmsChannelRule::allow_sub_lines 声明（ch01 true，其余 false）。展示辅助字段——不参与
+    /// 语义相等（多个同 (pos,lane,sample) 的子行仅行号不同应视为同对象），parser 填初始值，
     /// 移动/编辑后由命令层按新位置所在行更新；writer 按它分组写回保持原多行结构。
     std::uint32_t sub_line = 0;
 

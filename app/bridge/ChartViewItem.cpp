@@ -98,7 +98,9 @@ void ChartViewItem::setTheme(QObject* theme) {
 
 void ChartViewItem::onSessionChartChanged() {
     m_subMaxLine = 0;  // 新文档：BGM 展开高水位重置（按新谱面实际行 + PAD）
+    m_editableMeasures = 0;  // 2026-09 新文档：编辑 floor 复位（真实小节数驱动；新建谱面再 seed）
     rebuildColumns();
+    rebuildMeasureHeights();  // 02 通道：小节长度改 → 每小节高度缓存重建
     emit contentHeightChanged();
     emit cursorChanged();  // M5.2 视口光标读数
     emit maxScrollYChanged();
@@ -112,9 +114,11 @@ void ChartViewItem::onSessionContentChanged() {
     // 滚动位置不重置（rebuildColumns 不动 scrollX/Y；列宽变化时 contentWidth 由 clamp 兜底）。
     // 注：删光某列唯一 note → 该列消失（数据驱动列的固有行为，合乎 iBMSC 惯例）。
     rebuildColumns();
+    rebuildMeasureHeights();  // 02 通道：编辑同步进 measure_events（timing.edit）→ 高度缓存重建
     emit contentHeightChanged();
     emit cursorChanged();  // M5.2 视口光标读数（内容变化可能改 contentHeight）
     emit maxScrollYChanged();
+    setScrollY(m_scrollY);  // 变拍高改 contentHeight → 重新 clamp 滚动（内容变矮时防滚出）
     update();
 }
 
@@ -160,6 +164,7 @@ void ChartViewItem::setMeasureHeight(qreal v) {
     const qreal centerMf = measureAt(height() / 2.0);
     m_measureHeight = v;
     invalidateBgTile();  // M7 性能：tile 依赖缩放
+    rebuildMeasureHeights();  // 02 通道：base 变 → 每小节高度等比重建（centerMf 拍位不变）
     const qreal centerContent = contentPosOf(centerMf);
     setScrollY(centerContent - height() / 2.0);
     emit measureHeightChanged();
@@ -175,6 +180,7 @@ void ChartViewItem::zoomAt(qreal screenY, qreal factor) {
     const qreal newH = qBound(24.0, m_measureHeight * factor, 480.0);
     if (qFuzzyCompare(m_measureHeight, newH)) return;
     m_measureHeight = newH;
+    rebuildMeasureHeights();  // 02 通道：base 变 → 每小节高度等比重建（否则缓存仍是旧高 → 缩放无效）
     const qreal anchorContent = contentPosOf(anchorMf);
     setScrollY(anchorContent - screenY);
     emit measureHeightChanged();
@@ -261,16 +267,137 @@ void ChartViewItem::setScrollY(qreal v) {
 }
 
 qreal ChartViewItem::contentHeight() const {
-    const ChartSession* cs = sessionObj();
     // 开头 m_leadMeasures 小节纯留白（评分起点 0 前）：给「硬锁定 90%」在 0 小节留出下落空间，
     // 否则播放头在 0-1 小节（视口底部）时锁不住 → 跳变（用户 2026-09）。
-    return (cs ? cs->measureCount() : 0) * m_measureHeight + m_leadMeasures * m_measureHeight;
+    // 2026-09（02 通道）：小节高度按拍数等比 → 内容高 = 留白 + 各小节高之和。
+    // 2026-09 结尾红线钳制：再加尾部留白（tailMeasures），让红线(90%)能滚到「最后小节结尾」。
+    return m_leadMeasures * m_measureHeight + (m_measureCacheValid ? m_measureSum : 0.0) +
+           tailMeasures() * m_measureHeight;
 }
 
 /// 内容坐标（不含 scrollY）中某拍位的位置；topHigh 感知（含开头留白偏移）。
 qreal ChartViewItem::contentPosOf(qreal measureFloat) const {
-    const qreal c = (measureFloat + m_leadMeasures) * m_measureHeight;
+    const qreal c = linearPosOf(measureFloat);
     return (m_topHigh ? (contentHeight() - c) : c);
+}
+
+/// 每小节高度（按拍数等比：scale = beats/4，4/4=1；越界小节回退 base）。
+qreal ChartViewItem::measureHeightAt(int measure) const {
+    if (m_measureCacheValid && measure >= 0 &&
+        static_cast<std::size_t>(measure) < m_measureH.size())
+        return m_measureH[static_cast<std::size_t>(measure)];
+    return m_measureHeight;
+}
+
+/// 线性内容坐标（自顶向下）中某拍位的位置（含开头留白；topHigh 不在此处理）。
+/// 留白区（measureFloat<=0）：按 base 线性；真实小节：各小节按自身高度累计 + 节内分数×小节高；
+/// 尾部留白（measureFloat>measureCount）：末小节后再按 base 线性（红线 90% 滚动余量）。
+qreal ChartViewItem::linearPosOf(qreal measureFloat) const {
+    const qreal lead = m_leadMeasures * m_measureHeight;
+    const int n = static_cast<int>(m_measureH.size());
+    if (measureFloat <= 0.0) return (measureFloat + m_leadMeasures) * m_measureHeight;
+    // 尾部留白区：末小节结尾之后再按 base 线性（measureCount..measureCount+tail）
+    if (n > 0 && measureFloat >= static_cast<qreal>(n)) {
+        return lead + (m_measureCacheValid ? m_measureSum : 0.0) +
+               (measureFloat - static_cast<qreal>(n)) * m_measureHeight;
+    }
+    const int me = static_cast<int>(std::floor(measureFloat));
+    const double frac = measureFloat - static_cast<double>(me);
+    // 前 me 小节高度和（me 越界 → clamp 到末尾；前缀坐标 = contentHeight 起点）
+    const int cut = std::clamp(me, 0, n);
+    const qreal base = lead + (m_measureCacheValid && cut >= 1 && cut <= n
+                               ? m_measureCum[static_cast<std::size_t>(cut)] : 0.0);
+    const qreal h = measureHeightAt(me);
+    return base + static_cast<qreal>(frac) * h;
+}
+
+/// linearPosOf 的逆（lin 内容坐标 → 拍位；留白区返回负拍位）。
+qreal ChartViewItem::inverseLinearPos(qreal lin) const {
+    const qreal lead = m_leadMeasures * m_measureHeight;
+    if (m_measureHeight <= 0.0) return -m_leadMeasures;
+    if (lin <= lead) return lin / m_measureHeight - m_leadMeasures;  // 开头留白区：base 线性
+    const int n = static_cast<int>(m_measureH.size());
+    if (m_measureCacheValid && n > 0) {
+        // 尾部留白区：末小节结尾之后再按 base 线性
+        if (lin >= lead + m_measureSum) {
+            return static_cast<qreal>(n) + (lin - lead - m_measureSum) / m_measureHeight;
+        }
+        const qreal rem = lin - lead;
+        // 首个前缀和 > rem 的索引 → me = 该索引-1（m_measureCum[me] <= rem < cum[me+1]）
+        const auto it = std::upper_bound(m_measureCum.begin(), m_measureCum.end(), rem);
+        const int me = std::clamp(static_cast<int>(it - m_measureCum.begin()) - 1, 0, n - 1);
+        const qreal off = rem - m_measureCum[static_cast<std::size_t>(me)];
+        const qreal mh = m_measureH[static_cast<std::size_t>(me)];
+        const qreal frac = (mh > 0.0) ? (off / mh) : 0.0;
+        return static_cast<qreal>(me) + frac;
+    }
+    // 兜底：按 base 线性（理论上不应到——缓存随谱面/缩放重建）
+    return lin / m_measureHeight - m_leadMeasures;
+}
+
+/// 有效小节数：max(编辑 floor, 真实小节数)。「加一小节」抬升 floor；放进 note 长真实小节数。
+int ChartViewItem::effectiveCount() const {
+    const ChartSession* cs = sessionObj();
+    const int real = (cs && cs->chart()) ? static_cast<int>(cs->measureCount()) : 0;
+    return std::max(m_editableMeasures, real);
+}
+
+void ChartViewItem::setEditableMeasures(int n) {
+    if (m_editableMeasures == std::max(0, n)) return;
+    m_editableMeasures = std::max(0, n);
+    rebuildMeasureHeights();
+    emit contentHeightChanged();
+    emit cursorChanged();
+    emit maxScrollYChanged();
+    setScrollY(m_scrollY);  // 内容高变（新 floor）→ 重新 clamp
+    update();
+}
+
+void ChartViewItem::extendMeasures() {
+    // ⚠️ 必须基于 effectiveCount（=max(floor, 真实小节数)）+1：真实小节数常远大于 floor，
+    // 若只对 floor +1，effectiveCount 恒等于真实小节数 → 按钮看起来没加（2026-09 踩坑）。
+    setEditableMeasures(effectiveCount() + 1);
+}
+
+/// 重建每小节高度缓存（02 通道：按 ch02 拍数等比；缺省 4 拍）。有效小节数 = effectiveCount。
+/// 真实小节取 ch02 拍数；「加一小节」产生的尾部虚拟小节用默认 4/4（base 高）。
+void ChartViewItem::rebuildMeasureHeights() {
+    const ChartSession* cs = sessionObj();
+    const int real = (cs && cs->chart()) ? static_cast<int>(cs->measureCount()) : 0;
+    const int n = effectiveCount();
+    m_measureH.assign(static_cast<std::size_t>(n), m_measureHeight);
+    m_measureCum.assign(static_cast<std::size_t>(n) + 1, 0.0);
+    m_measureSum = 0.0;
+    if (n > 0) {
+        // beats 数组（ch02 每小节拍数，缺省 4/4；真实小节覆盖，虚拟小节保持 4）
+        std::vector<double> beats(static_cast<std::size_t>(n), 4.0);
+        if (cs && cs->chart()) {
+            for (const auto& ev : cs->chart()->measure_events) {
+                if (ev.measure < static_cast<std::uint32_t>(n))
+                    beats[static_cast<std::size_t>(ev.measure)] = ev.value.beats;
+            }
+        }
+        // clamp scale，避免 0 拍塌缩 / 超长小节顶到天（视觉等比上限）
+        constexpr double kMinScale = 0.25, kMaxScale = 8.0;
+        for (int i = 0; i < n; ++i) {
+            const double scale = std::clamp(beats[static_cast<std::size_t>(i)] / 4.0, kMinScale, kMaxScale);
+            m_measureH[static_cast<std::size_t>(i)] = m_measureHeight * static_cast<qreal>(scale);
+            m_measureCum[static_cast<std::size_t>(i) + 1] =
+                m_measureCum[static_cast<std::size_t>(i)] + m_measureH[static_cast<std::size_t>(i)];
+        }
+        m_measureSum = m_measureCum[static_cast<std::size_t>(n)];
+    }
+    m_measureCacheValid = true;
+}
+
+qreal ChartViewItem::tailMeasures() const {
+    // 结尾红线钳制（2026-09）：topHigh 下播放头越接近末小节，剩余内容越少；
+    // 当「末小节往上」高度 < 0.9·视口高时 newScroll 被 clamp 到 0 → 红线冻在末小节前。
+    // 尾部留白把坐标空间向上延，让红线(90%)始终能滚到「最后小节结尾」。
+    // 高度 = max(2, ceil(0.9·h / base))·base ≈ 0.9·视口高（纯视口偏移，不改时序/渲染）。
+    if (m_measureHeight <= 0.0) return 2.0;
+    const qreal need = 0.9 * height() / m_measureHeight;
+    return std::max(2.0, std::ceil(need));
 }
 
 qreal ChartViewItem::maxScrollY() const {
@@ -370,7 +497,7 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     // 下 = 放置一个带当前值的 timing 事件（timing.put；metakind 标记给前端分发）。BGA 图层列
     // 与 BGM 列亦可放（note.convert / note.put，sampleHint）。
     const qreal mf = measureAt(y);
-    if (mf < 0.0 || mf >= cs->measureCount()) return res;
+    if (mf < 0.0 || mf >= static_cast<qreal>(effectiveCount())) return res;
     const int measure = static_cast<int>(std::floor(mf));
     qreal frac = mf - measure;
     // 吸附：粒度 = snapNum/snapDen 小节。槽位坐标 = frac × (snapDen/snapNum)，
@@ -410,7 +537,7 @@ qreal ChartViewItem::measureAtY(qreal y) const {
     const ChartSession* cs = sessionObj();
     if (!cs || !cs->chart() || m_measureHeight <= 0.0) return -1.0;
     const qreal mf = measureAt(y);
-    return (mf < 0.0 || mf >= cs->measureCount()) ? -1.0 : mf;
+    return (mf < 0.0 || mf >= static_cast<qreal>(effectiveCount())) ? -1.0 : mf;
 }
 
 QVariantMap ChartViewItem::laneAtX(qreal x) const {
@@ -483,7 +610,7 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
     const beatbench::Chart& chart = *cs->chart();
     const qreal noteH = noteHeight();
     const int measure = static_cast<int>(std::floor(measureAt(y)));
-    if (measure < 0 || measure >= cs->measureCount()) return res;
+    if (measure < 0 || measure >= effectiveCount()) return res;
     for (const auto& ev : chart.notes) {
         if (static_cast<int>(ev.measure) < measure - 1 ||
             static_cast<int>(ev.measure) > measure + 1)
@@ -556,7 +683,7 @@ QVariantMap ChartViewItem::objectAt(qreal x, qreal y) const {
     const beatbench::Chart& chart = *cs->chart();
     const qreal noteH = noteHeight();
     const int measure = static_cast<int>(std::floor(measureAt(y)));
-    if (measure < 0 || measure >= cs->measureCount()) return res;
+    if (measure < 0 || measure >= effectiveCount()) return res;
 
     // BGA 图层列（更多轨道）；命中盒 = 与渲染一致（r.x()+3, y-noteH, r.width()-6, noteH）
     for (const auto& ev : chart.bga_events) {
@@ -645,7 +772,7 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
     const qreal mfLo = std::min(measureAt(sel.top()), measureAt(sel.bottom()));
     const qreal mfHi = std::max(measureAt(sel.top()), measureAt(sel.bottom()));
     const int m0 = std::max(0, static_cast<int>(std::floor(mfLo)) - 1);
-    const int m1 = std::min(cs->measureCount() - 1,
+    const int m1 = std::min(effectiveCount() - 1,
                             static_cast<int>(std::ceil(mfHi)) + 1);
     const beatbench::Chart& chart = *cs->chart();
     const qreal noteH = noteHeight();
@@ -924,7 +1051,7 @@ void ChartViewItem::updateHover(const QPointF& pos) {
     const ChartSession* cs = sessionObj();
     if (cs && cs->chart() && m_measureHeight > 0 && pos.y() >= 0) {
         const qreal mf = measureAt(pos.y());
-        if (mf >= 0 && mf < cs->measureCount()) {
+        if (mf >= 0 && mf < static_cast<qreal>(effectiveCount())) {
             measure = static_cast<int>(std::floor(mf));
             text = QString::asprintf("%03d:%.2f", measure, mf - measure);
             // 命中 note → 追加 轨道 + 采样（只查相邻小节，控制开销）
@@ -1063,6 +1190,7 @@ void ChartViewItem::geometryChange(const QRectF& newGeometry, const QRectF& oldG
         if (m_startPending && newGeometry.height() > 0.0) scrollToStart();
         emit cursorChanged();  // M5.2 视口光标读数：height 变 → 0.9h 线位置变 → 下方拍位变
         emit maxScrollYChanged();  // height 变 → 滚动上限变
+        emit contentHeightChanged();  // 2026-09 尾部留白随 height 变 → 内容高变（滚动条 max）
         update();
     }
     if (!qFuzzyCompare(newGeometry.width(), oldGeometry.width())) clampScrollX();
@@ -1082,9 +1210,9 @@ qreal ChartViewItem::yOf(qreal measureFloat) const {
 
 qreal ChartViewItem::measureAt(qreal screenY) const {
     const qreal c = screenY + m_scrollY;  // 屏幕 → 内容坐标
-    // 名义拍位（含开头留白偏移）：留白区 mf < 0
-    return (m_topHigh ? (contentHeight() - c) / m_measureHeight
-                      : c / m_measureHeight) - m_leadMeasures;
+    // 转成线性（自顶向下）内容坐标：topHigh 下内容坐标翻转（0 小节在底）→ 取反
+    const qreal lin = m_topHigh ? (contentHeight() - c) : c;
+    return inverseLinearPos(lin);
 }
 
 qreal ChartViewItem::posDouble(const beatbench::Rational& r) const {
@@ -1626,12 +1754,13 @@ void ChartViewItem::paint(QPainter* p) {
     p->fillRect(QRectF(0, 0, w, h), th ? th->bg() : QColor(QStringLiteral("#0b0d10")));
 
     const ChartSession* cs = sessionObj();
-    if (!cs || !cs->chart() || cs->measureCount() <= 0) {
+    // 有效小节数（含「加一小节」的编辑 floor）；空谱面但 seeded（新建 → 1）也能画小节 0。
+    if (!cs || !cs->chart() || effectiveCount() <= 0) {
         drawHint(p, QStringLiteral("打开谱面开始编辑（Ctrl+O）"));
         return;
     }
     const beatbench::Chart& chart = *cs->chart();
-    const int mCount = cs->measureCount();
+    const int mCount = effectiveCount();
     const qreal rulerW = m_rulerWidth;
 
     // ---- 轨道列布局（左侧标尺 + BPM/STOP 固定窄轨 + 车道区；超宽时水平滚动 scrollX） ----
@@ -1672,35 +1801,44 @@ void ChartViewItem::paint(QPainter* p) {
         if (first > last) return;  // 视口在谱面末之后（空窗口）
     }
 
-    // ---- M7 性能：背景 tile 平铺（底纹/列底/网格——滚动只 blit，不逐线画） ----
-    // tile 无效化条件：theme/缩放/snap/列布局/宽度/方向/水平滚动变化（setter 置 m_bgTileDirty）。
+    // ---- 背景（底纹/列底/列分隔）：按可见小节实时画——支持 02 通道变拍高（每小节不等高）。
+    // M7 曾用 2 小节位图 tile 平铺优化；变拍高后 tile 无法表达不等高小节，改为逐可见小节画。
+    // 可见小节数 ~几十，量级可接受；网格线（槽位弱线/小节强线）在下方统一重画。
     {
-        const bool needRebuild = m_bgTileDirty || m_bgTile.isNull() ||
-            !qFuzzyCompare(m_bgTileW, w) ||
-            !qFuzzyCompare(m_bgTileMeasureH, m_measureHeight) ||
-            m_bgTileSnapNum != m_snapNum || m_bgTileSnapDen != m_snapDen ||
-            !qFuzzyCompare(m_bgTileScrollX, m_scrollX);  // 水平滚动列位变 → 列底色须重排（2026-09）
-        if (needRebuild) {
-            rebuildBgTile(&chart, th, w, h, metaRight);
-        }
-        if (!m_bgTile.isNull()) {
-            // M7 性能：逐小节 blit tile 的对应半节行（每可见小节一次 drawImage——替代几百
-            // drawLine/fillRect）。tile 高 = 2×measureHeight（sub0=偶数小节内容, sub1=奇数）。
-            // ⚠️ 相位不搞 drawTiledPixmap（顶/底镜像易错）——逐小节对应子节最直白。
-            const int halfH = static_cast<int>(std::round(m_measureHeight));
-            const int tileH = m_bgTile.height();
-            for (int m = first; m <= last; ++m) {
-                // ⚠️ 内容坐标对 topHigh 是「measure m 自成一格」，但 measure m 屏幕区 =
-                // [yOf(m+1), yOf(m)]（topHigh 下 yOf(m+1) 在上）。若在 yOf(m) 往下画，
-                // tile 内容落到 m-1 的格 → 底纹/列底错位（用户 2026-09 背景被剔）。
-                // 修正：topHigh 以 yOf(m)-mh（=yOf(m+1)）为顶部往下画 mh。
-                const qreal y0 = m_topHigh ? (yOf(m) - m_measureHeight) : yOf(m);
-                const int sub = m & 1;
-                QRectF dst(0, y0, w, m_measureHeight);
-                QRect src(0, sub == 0 ? 0 : halfH, static_cast<int>(std::ceil(w)), halfH);
-                // 夹逼（视口边缘小节只画可见部分也可——blit 超界安全：QRectF 与 QRect
-                // 混合会被裁剪，直接画）
-                p->drawImage(dst, m_bgTile, src);
+        p->fillRect(QRectF(0, 0, w, h), th->bg());
+        QColor alt = th->surface();
+        alt.setAlpha(70);  // 奇数小节底纹
+        QPen colPen(th->border(), 1.0);
+        for (int m = first; m <= last; ++m) {
+            const qreal mh = measureHeightAt(m);
+            if (mh <= 0.0) continue;
+            // topHigh：小节区 = [yOf(m+1), yOf(m)]（yOf(m+1) 在上）→ 顶 = yOf(m)-mh；
+            // 非 topHigh：顶 = yOf(m)。
+            const qreal y0 = m_topHigh ? (yOf(m) - mh) : yOf(m);
+            if (m & 1) p->fillRect(QRectF(0, y0, w, mh), alt);
+            for (std::size_t i = 0; i < m_columns.size(); ++i) {
+                const QRectF r = m_colRects[i];  // 列 x/宽（不随 y）
+                QColor tint = Qt::transparent;
+                const Column& col = m_columns[i];
+                if (col.bgm) {
+                    tint = th->wave();
+                    if (col.bgmId != 0) tint.setAlpha(18);
+                } else if (col.lane.kind == beatbench::LaneKind::Scratch) {
+                    tint = th->accent();
+                    tint.setAlpha(26);
+                } else if (col.lane.kind == beatbench::LaneKind::Key && th->keyLaneTintAlpha() > 0) {
+                    tint = noteColor(col.lane);
+                    tint.setAlpha(static_cast<int>(th->keyLaneTintAlpha()));
+                } else if (col.p2) {
+                    tint = th->primary();
+                    tint.setAlpha(13);
+                } else if (col.bgaLayer >= 0) {
+                    tint = th->primarySoft();
+                    tint.setAlpha(22);
+                }
+                if (tint.alpha() > 0) p->fillRect(QRectF(r.x(), y0, r.width(), mh), tint);
+                p->setPen(colPen);
+                p->drawLine(QPointF(r.x(), y0), QPointF(r.x(), y0 + mh));
             }
         }
     }
@@ -1745,6 +1883,15 @@ void ChartViewItem::paint(QPainter* p) {
         p->setPen(th->textMuted());
         const QRectF box(3, y0 + 1, rulerW - 6, 13);
         p->drawText(box, Qt::AlignLeft | Qt::AlignTop, QString::asprintf("%03d", m));
+        // 02 通道小节长度：非 4/4 小节在标尺右侧标「×N」（N=相对 4/4 倍数），不用播放即可看出变拍。
+        {
+            const double bts = beatsOf(chart, m);
+            if (!qFuzzyCompare(bts, 4.0) && m_measureHeight >= 24.0) {
+                p->setPen(th->accent());
+                p->drawText(QRectF(3, y0 + 1, rulerW - 12, 13), Qt::AlignRight | Qt::AlignTop,
+                            QString::asprintf("×%g", bts / 4.0));
+            }
+        }
         if (showSec && timing) {
             // 该小节起点秒（m:ss.cc；STOP 间隙向下取整——起点本身不受 STOP 影响）
             const double sec = static_cast<double>(timing->time_us(

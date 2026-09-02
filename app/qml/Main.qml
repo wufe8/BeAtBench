@@ -136,6 +136,8 @@ ApplicationWindow {
     // 时间轴事件（timing.list 结果；打开谱面/编辑后 refreshTiming 重取，供右 Dock 时间轴面板）
     property var timingBpm: []
     property var timingStop: []
+    /// 02 通道小节长度（timing.list kind="measure" 结果：{measure,pos:{num,den},value(拍数)}）。
+    property var timingMeasure: []
     // 时间轴定义表（session.samples 的 bpm/stop；供「#BPM/#STOP 定义」区）
     property var timingBpmDefs: []
     property var timingStopDefs: []
@@ -647,6 +649,7 @@ ApplicationWindow {
                 metaSelection: window.metaSelection
                 timingBpm: window.timingBpm
                 timingStop: window.timingStop
+                timingMeasure: window.timingMeasure
                 timingBpmDefs: window.timingBpmDefs
                 timingStopDefs: window.timingStopDefs
                 snapNum: window.snapNum
@@ -1111,6 +1114,34 @@ ApplicationWindow {
     function dispatchCmd(name, args) { return session.dispatchCmd(name, args) }
     function editBga(layer, measure, num, den, bmpId) { return session.editBga(layer, measure, num, den, bmpId) }
     function editTiming(kind, measure, num, den, value, ref) { return session.editTiming(kind, measure, num, den, value, ref) }
+    /// 2026-09「加一小节」：编辑态有效小节数下限 +1（可放内容的新小节；用不到的保存时被 BMS 丢弃）。
+    function addMeasure() { editPage.extendMeasures(); setStatus(qsTr("已加一小节（保存时未用到的空小节会被舍弃）")) }
+    /// 2026-09 新建空谱面：chartSession.newChart() → 重置编辑器状态 + seed 编辑 floor=1（可放小节 0）。
+    function newChart() {
+        if (!chartSession.newChart()) {
+            setStatus(qsTr("新建空谱面失败：%1").arg(chartSession.errorMessage()))
+            statusClearTimer.restart()
+            return
+        }
+        window.chartPath = ""
+        window.chartFormat = "bms"
+        window.chartMode = "sp7k"
+        window.chartEncoding = "utf8"
+        window.chartMeta = null
+        window.currentBpmValue = 130
+        window.pendingLnHead = null
+        window.selectionRefs = []
+        window.metaSelection = []
+        refreshTiming()
+        if (typeof editPage !== "undefined" && editPage) {
+            editPage.reloadMeta()
+            editPage.reloadBga()
+        }
+        editPage.setEditableMeasures(1)  // seed：渲染/可放小节 0（放进 note 即长真实小节数）
+        if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.setChartPath("")
+        window.statusText = qsTr("已新建空谱面（Ctrl+S 另存为）")
+        statusClearTimer.restart()
+    }
     function timingDefAdd(kind, id, value) { return session.timingDefAdd(kind, id, value) }
     function timingDefDelete(kind, id) { return session.timingDefDelete(kind, id) }
     function gcd(a, b) { return session.gcd(a, b) }
@@ -1271,7 +1302,7 @@ ApplicationWindow {
         ColumnLayout {
             anchors.fill: parent
             spacing: 6
-            Label { text: "BeAtBench " + qsTr("0.1.0-alpha（M3）"); font.bold: true }
+            Label { text: "BeAtBench " + beatbench.versionString(); font.bold: true }
             Label { text: qsTr("BMS 谱面编辑器 · Qt Quick/QML · GPL-3.0") }
             Label { text: qsTr("协议：命令即接口（doc/06 §3）"); color: Theme.textMuted }
         }

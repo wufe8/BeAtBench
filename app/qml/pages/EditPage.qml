@@ -50,6 +50,8 @@ Item {
     /// 时间轴事件（timing.list 结果；Main 在打开谱面/编辑后重取回填，供右 Dock 时间轴面板）
     property var timingBpm: []
     property var timingStop: []
+    /// 02 通道小节长度事件（timing.list kind="measure"）。
+    property var timingMeasure: []
     property var timingBpmDefs: []
     property var timingStopDefs: []
     /// 吸附粒度（放置用：snapNum/snapDen 槽/小节；Main snap 分子分母）
@@ -200,6 +202,16 @@ Item {
     /// 缩放重置（工具条「缩放」按钮）。
     function resetZoom() {
         if (chartView) chartView.resetZoom()
+    }
+
+    /// 2026-09「加一小节」：透传到 ChartView → ChartViewItem.extendMeasures()。
+    function extendMeasures() {
+        if (chartView) chartView.extendMeasures()
+    }
+
+    /// 2026-09 新建谱面：设置编辑态有效小节数下限（seed 到 ChartView → ChartViewItem）。
+    function setEditableMeasures(n) {
+        if (chartView) chartView.setEditableMeasures(n)
     }
 
     /// 当前缩放百分比（工具条显示）。
@@ -411,6 +423,7 @@ Item {
                         id: timelinePanel
                         bpmEvents: root.timingBpm
                         stopEvents: root.timingStop
+                        measureEvents: root.timingMeasure
                         bpmDefs: root.timingBpmDefs
                         stopDefs: root.timingStopDefs
                         stopUnit: root.stopUnit

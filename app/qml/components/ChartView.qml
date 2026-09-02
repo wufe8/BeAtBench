@@ -723,6 +723,16 @@ Item {
         return Math.max(0, view.measureAtY(view.height / 2))
     }
 
+    /// 2026-09「加一小节」：编辑态有效小节数下限 +1（可放内容的新小节；用不到的保存时丢弃）。
+    function extendMeasures() {
+        view.extendMeasures()
+    }
+
+    /// 2026-09 新建谱面：设置编辑态有效小节数下限（seed 1 = 渲染/可放小节 0）。
+    function setEditableMeasures(n) {
+        view.setEditableMeasures(n)
+    }
+
     /// 秒 → 视口滚动（波形总览 seekRequested / --seek 调试走同一路径）。
     function seekToSeconds(sec) {
         view.scrollToTime(sec)

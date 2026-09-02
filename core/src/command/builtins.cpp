@@ -1134,6 +1134,26 @@ public:
     }
 };
 
+// session.new：新建空谱面（2026-09）。创建 0 小节的空 Chart 载入会话；前端把编辑 floor seed 到
+// 1（渲染/可放小节 0）。放进 note 即长真实小节数；空小节保存时被 BMS 丢弃。路径空 → 保存走另存为。
+class SessionNewCommand : public Command {
+public:
+    std::string_view name() const override { return "session.new"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        beatbench::Chart chart;  // 空谱面（0 小节）
+        session.load(std::move(chart), "");
+        // 注入 BMS 持久化钩子（另存为/自动保存用）
+        if (const Codec* bms = global_codec_registry().by_id("bms"))
+            session.set_persist_hook(make_persist_hook(bms));
+        Json out = Json::object();
+        out.set("loaded", true);
+        out.set("path", "");
+        out.set("format", "bms");
+        return out;
+    }
+};
+
 class SessionSaveCommand : public Command {
 public:
     std::string_view name() const override { return "session.save"; }
@@ -2147,6 +2167,7 @@ void register_builtin_commands(Registry& registry) {
     registry.add(std::make_unique<ConvertCommand>());
     // M3 编辑命令（追加；会话命令，作用在 args.session_id 或活动会话）
     registry.add(std::make_unique<SessionLoadCommand>());
+    registry.add(std::make_unique<SessionNewCommand>());  // 新建空谱面（2026-09 编辑态小节数）
     registry.add(std::make_unique<SessionSaveCommand>());
     registry.add(std::make_unique<NotePutCommand>());
     registry.add(std::make_unique<NoteMoveCommand>());

@@ -207,6 +207,12 @@ public:
     /// 播放头锁不住 90% → 开始播放跳变」（用户 2026-09）。
     Q_INVOKABLE void scrollToStart();
 
+    /// 2026-09「加一小节」：编辑态有效小节数下限 +1（可放内容的新小节；用不到的保存时丢弃）。
+    /// 纯视口/编辑态，不改 chart 数据、不需要 undo；放进 note 才长真实小节数。
+    Q_INVOKABLE void extendMeasures();
+    /// 用于「新建谱面」初始 floor（至少 1 个小节可放）。qml("newChart") 后复位为 0。
+    Q_INVOKABLE void setEditableMeasures(int n);
+
     /// M5 seek 交互：屏幕 y → 秒（秒标尺/波形条点击定位用）。measureAt(y) → Position →
     /// timing()->time_us / 1e6；无 timing / 留白区（拍位<0）→ 0。与cursorPosition 同源换算。
     Q_INVOKABLE double timeAtY(qreal y) const;
@@ -372,12 +378,38 @@ private:
     QColor noteColor(const beatbench::Lane& lane, const beatbench::Note& note) const;
     double bpmAt(const beatbench::Chart& chart, int measure) const;
     double beatsOf(const beatbench::Chart& chart, int measure) const;
+    /// 2026-09（02 通道小节长度）：每小节高度按拍数等比（base=4/4）。
+    /// 小节拍数由 chart.measure_events（ch02）决定，缺省 4 拍 → scale=1。
+    /// 缓存：m_measureH/m_measureCum/m_measureSum，随谱面变化/缩放变化重建。
+    /// 有效小节数（2026-09 谱面从头/末尾追加）：max(编辑 floor, 真实小节数)。
+    /// floor = m_editableMeasures（「加一小节」抬升）；真实小节数 = session.measureCount()。
+    int effectiveCount() const;
+    qreal measureHeightAt(int measure) const;
+    /// 内容坐标（不含 scrollY，自顶向下）中某拍位的线性位置（含开头留白；topHigh 感知交 contentPosOf）。
+    qreal linearPosOf(qreal measureFloat) const;
+    /// linearPosOf 的逆（内容 lin 坐标 → 拍位；留白区返回负拍位）。
+    qreal inverseLinearPos(qreal lin) const;
+    /// 重建每小节高度缓存（谱面/内容/缩放变化时；O(有效小节数+measure_events)）。
+    void rebuildMeasureHeights();
+    /// 尾部留白小节数（2026-09 结尾红线钳制修复）：保证红线(90%)能滚到「最后小节结尾」。
+    /// = max(2, ceil(0.9·height()/measureHeight))，使尾部高度 ≈ 0.9·视口高（纯视口偏移，不改时序/渲染）。
+    qreal tailMeasures() const;
 
     void drawHint(QPainter* p, const QString& text);
 
     QObject* m_session = nullptr;
     QObject* m_theme = nullptr;
     qreal m_measureHeight = 96.0;
+    // —— 02 通道小节长度：每小节高度按拍数等比（base=4/4；变拍/长小节视觉可见） ——
+    // 缓存：m_measureH[i]=小节 i 高度；m_measureCum[i]=∑ h[0..i-1]；m_measureSum=∑ h 总。
+    // 谱面/内容/缩放变化时 rebuildMeasureHeights()（onSessionChart/ContentChanged、setMeasureHeight）。
+    std::vector<qreal> m_measureH;
+    std::vector<qreal> m_measureCum;  // 长度 = 有效小节数+1；[i]=前 i 小节高度和
+    qreal m_measureSum = 0.0;
+    bool m_measureCacheValid = false;
+    /// 编辑态「有效小节数」下限（2026-09 尾部/空谱面追加）：「加一小节」抬升 +1；
+    /// 实际有效 = max(此值, 真实小节数)。放进 note 即长真实小节数；空的小节保存时被 BMS 丢弃。
+    int m_editableMeasures = 0;
     qreal m_rulerWidth = 56.0;  // 左列：小节号 + 秒标尺（m:ss；2026-09 回收窄——双行字号 11px 够）
     qreal m_laneWidth = 38.0;
     qreal m_metaTrackWidth = 48.0;  // BPM/STOP 元事件轨宽（2026-09 36→48：BPM 线秒行 m:ss.cc 显示）

@@ -34,6 +34,9 @@ public:
     /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/06 §3.6）。
     /// 存在 Error 级诊断 → 失败并记录 errorMessage（协议语义：read_failed）。
     Q_INVOKABLE bool openChart(const QString& path);
+    /// 2026-09 新建空谱面：走协议 session.new（空 chart 载入活动会话）；返回成功后 QML 重置
+    /// 编辑器状态 + seed 编辑 floor（渲染/可放小节 0）。路径空 → 保存走另存为。
+    Q_INVOKABLE bool newChart();
 
     /// 编辑命令 / 会话切换后由 QML 调用：检测「文档切换」（documentChanged，视图应重置
     /// 滚动）或「内容变化」（contentChanged，视图保持滚动），必要时重建 TimingEngine。

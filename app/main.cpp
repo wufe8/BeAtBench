@@ -161,7 +161,7 @@ int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("BeAtBench"));
     app.setApplicationName(QStringLiteral("BeAtBench"));
-    app.setApplicationVersion(QStringLiteral("0.1.0"));
+    app.setApplicationVersion(QStringLiteral("0.2.0"));
     qInstallMessageHandler(messageToLog);  // 调试期：Qt 消息落盘（GUI 无控制台）
 
     // 全局深色基线（doc/08 §2）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；
@@ -270,6 +270,7 @@ int main(int argc, char** argv) {
             });
         };
         // 文件动作（label 用 QCoreApplication::tr，因为 main 函数不是 QObject）
+        uiActions.add(UiActionDef{"file.new", QCoreApplication::tr("新建谱面"), "Ctrl+N", "file", nullptr, qml("newChart")});
         uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file", nullptr, qml("uiActionOpen")});
         uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, qml("saveChart")});
         uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, qml("uiActionSaveAs")});
@@ -297,6 +298,7 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, qml("quantizeSelection"), false, false, false, "transform", "button", QCoreApplication::tr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")});
         uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, qml("uiActionMirror"), false, false, false, "transform", "button", QCoreApplication::tr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")});
         uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, qml("uiActionRotate"), false, false, false, "transform", "button", QCoreApplication::tr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")});
+        uiActions.add(UiActionDef{"tool.addMeasure", QCoreApplication::tr("加一小节"), "", "tool", nullptr, qml("addMeasure"), false, false, false, "transform", "button", QCoreApplication::tr("在末尾追加一个可编辑小节（未用到的小节保存时被 BMS 舍弃）")});
         // tool.toggleLn：编辑工具条专属（单点↔LN 转换），保持硬编码渲染；不并入 transform 组。
         uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, qml("toggleLnSelection")});
         // 页面切换动作

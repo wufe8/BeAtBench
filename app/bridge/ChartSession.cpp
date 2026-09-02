@@ -69,6 +69,34 @@ bool ChartSession::openChart(const QString& path) {
     return true;
 }
 
+bool ChartSession::newChart() {
+    m_error.clear();
+    Json req = Json::object();
+    req.set("command", "session.new");
+    Json args = Json::object();
+    req.set("args", std::move(args));
+    const Json res = beatbench::cmd::global_registry().dispatch(req);
+    const Json* okp = res.find("ok");
+    if (!okp || !okp->is_bool() || !okp->as_bool()) {
+        const Json* e = res.find("error");
+        m_error = QStringLiteral("new_failed");
+        if (e) {
+            if (const Json* code = e->find("code"))
+                m_error = QString::fromStdString(code->as_str());
+            if (const Json* msg = e->find("message"))
+                m_error += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
+        }
+        attachActive(true);
+        emit documentChanged();
+        emit chartChanged();
+        return false;
+    }
+    attachActive(true);
+    emit documentChanged();
+    emit chartChanged();
+    return true;
+}
+
 void ChartSession::refresh() {
     auto& reg = beatbench::edit::session_registry();
     auto& s = reg.active();

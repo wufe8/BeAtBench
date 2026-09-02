@@ -16,14 +16,16 @@ ColumnLayout {
     /// stop=原始计数 n（1/192 全音符单位，BMS #STOPxx 原义；毫秒仅是显示换算）。
     property var bpmEvents: []
     property var stopEvents: []
+    /// 02 通道小节长度事件（timing.list kind="measure"：{measure,pos:{num,den},value(拍数)}）。
+    property var measureEvents: []
     /// BPM/STOP 定义表（session.samples 的 bpm/stop；[{id(文本), value, refs}]）。
     property var bpmDefs: []
     property var stopDefs: []
-    readonly property var defs: kind === "bpm" ? bpmDefs : stopDefs
+    readonly property var defs: kind === "bpm" ? bpmDefs : (kind === "stop" ? stopDefs : [])
     /// 定义表折叠区是否展开。
     property bool expandDefs: false
     /// 编辑（添加/改值）→ Main 走 timing.put。pos 以 num/den 分开传（避免对象绑定歧义）。
-    /// ref = 手动绑定的 #BPMxx/#STOPxx id 文本（空 = codec 自动派生）。
+    /// ref = 手动绑定的 #BPMxx/#STOPxx id 文本（空 = codec 自动派生；小节长度无 ref）。
     signal timingEditRequested(string kind, int measure, int num, int den, double value, string ref)
     /// 删除 → Main 走 timing.delete。
     signal timingDeleteRequested(string kind, int measure, int num, int den)
@@ -32,8 +34,8 @@ ColumnLayout {
     /// 删除一个 BPM/STOP 定义 → Main 走 sample.delete(kind)。
     signal timingDefDeleteRequested(string kind, string id)
 
-    property string kind: "bpm"   // bpm / stop
-    readonly property var events: kind === "bpm" ? bpmEvents : stopEvents
+    property string kind: "bpm"   // bpm / stop / measure
+    readonly property var events: kind === "bpm" ? bpmEvents : (kind === "stop" ? stopEvents : measureEvents)
     /// STOP 值显示/填入单位：0 = 1/192 全音符（BMS 默认）；1 = 毫秒。值与 Main.window.stopUnit 同步。
     property int stopUnit: 0
     /// 毫秒换算参考 BPM（时间轴事件所属小节生效的 BPM；Main 由 TimingEngine 提供）。
@@ -62,9 +64,9 @@ ColumnLayout {
             id: kindTabs
             Layout.fillWidth: true
             Layout.preferredHeight: 28
-            model: [qsTr("BPM"), qsTr("STOP")]
-            currentIndex: root.kind === "stop" ? 1 : 0
-            onIndexRequested: (i) => root.kind = i === 0 ? "bpm" : "stop"
+            model: [qsTr("BPM"), qsTr("STOP"), qsTr("小节长")]
+            currentIndex: root.kind === "stop" ? 1 : (root.kind === "measure" ? 2 : 0)
+            onIndexRequested: (i) => root.kind = i === 0 ? "bpm" : (i === 1 ? "stop" : "measure")
         }
         BbToolButton {
             text: qsTr("+")
@@ -89,7 +91,8 @@ ColumnLayout {
             anchors.right: parent.right
             text: root.kind === "bpm"
                   ? qsTr("无 BPM 变化事件（初始 BPM 在元信息）")
-                  : qsTr("无 STOP 事件")
+                  : (root.kind === "stop" ? qsTr("无 STOP 事件")
+                                           : qsTr("无小节长度变化（默认 4/4，可在小节线上改）"))
             color: Theme.textFaint
             font.pixelSize: Theme.fsTiny
         }
@@ -125,8 +128,11 @@ ColumnLayout {
                     Label {
                         text: root.kind === "bpm"
                               ? qsTr("%1").arg(row.modelData.value)
-                              : root.stopToDisplay(row.modelData.value)
-                        color: root.kind === "bpm" ? Theme.accent : Theme.warning
+                              : (root.kind === "stop"
+                                 ? root.stopToDisplay(row.modelData.value)
+                                 : qsTr("%1 拍").arg(row.modelData.value))
+                        color: root.kind === "bpm" ? Theme.accent
+                               : (root.kind === "stop" ? Theme.warning : Theme.primary)
                         font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall
                     }
@@ -179,12 +185,13 @@ ColumnLayout {
     }
 
     // ---- #BPM/#STOP 定义表（折叠；镜像左 Dock BGA 面板：明确区分「创建 id+绑定值」与「时间轴使用 id」） ----
-    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border; visible: root.kind !== "measure" }
     BbToolButton {
         text: (root.expandDefs ? "▾ " : "▸ ") + qsTr("#%1 定义（%2）")
               .arg(root.kind === "stop" ? "STOP" : "BPM").arg(root.defs.length)
         flatStyle: true
         active: root.expandDefs
+        visible: root.kind !== "measure"
         onClicked: root.expandDefs = !root.expandDefs
         font.pixelSize: Theme.fsSmall
         Layout.fillWidth: true
@@ -193,7 +200,7 @@ ColumnLayout {
                       .arg(root.kind === "stop" ? "STOP" : "BPM").arg(root.kind === "stop" ? "STOP" : "BPM")
     }
     ColumnLayout {
-        visible: root.expandDefs
+        visible: root.expandDefs && root.kind !== "measure"
         Layout.fillWidth: true
         spacing: 4
 
@@ -375,7 +382,7 @@ ColumnLayout {
             baseMeasure = 0
             baseNum = 0
             baseDen = 1
-            baseValue = (k === "bpm") ? 130 : stopFromDisplay("96")  // STOP 默认 96
+            baseValue = (k === "bpm") ? 130 : (k === "stop" ? stopFromDisplay("96") : 4)  // 小节长度默认 4 拍
             baseRef = ""
             applyFields()
             open()
@@ -398,7 +405,8 @@ ColumnLayout {
             denSpin.value = Math.max(1, baseDen)
             // 编辑模式：值字段留空（不填 = 维持原值）；添加模式：填默认值
             valueField.text = editing ? "" : (dialog.kind === "bpm" ? String(baseValue)
-                                                                    : stopToDisplay(baseValue))
+                                                                    : (dialog.kind === "stop" ? stopToDisplay(baseValue)
+                                                                                              : String(baseValue)))
             refField.text = baseRef
         }
 
@@ -430,7 +438,8 @@ ColumnLayout {
                 spacing: 4
                 Layout.fillWidth: true
                 Label {
-                    text: dialog.kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
+                    text: dialog.kind === "bpm" ? qsTr("值(BPM)")
+                          : (dialog.kind === "stop" ? qsTr("值(%1)").arg(stopUnitLabel()) : qsTr("值(拍数)"))
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny
                 }
                 BbTextField {
@@ -447,10 +456,11 @@ ColumnLayout {
                 }
                 Item { Layout.fillWidth: true }
             }
-            // 绑定的 #BPMxx/#STOPxx id（可手动修改）
+            // 绑定的 #BPMxx/#STOPxx id（可手动修改；小节长度无 id）
             RowLayout {
                 spacing: 4
                 Layout.fillWidth: true
+                visible: dialog.kind !== "measure"
                 Label {
                     text: "#" + (dialog.kind === "bpm" ? "BPM" : "STOP") + " id"
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny
@@ -468,6 +478,7 @@ ColumnLayout {
                 Item { Layout.fillWidth: true }
             }
             Label {
+                visible: dialog.kind !== "measure"
                 text: dialog.kind === "bpm"
                       ? (refField.text.trim() === "" ? qsTr("值自动派生 #BPMxx") : qsTr("绑定 #%1xx").arg("BPM"))
                       : (refField.text.trim() === ""
@@ -489,15 +500,16 @@ ColumnLayout {
                     if (newDef) {
                         // 新 id 已有定义：保持其原值
                         value = root.kind === "bpm" ? parseFloat(newDef.value)
-                                                    : root.stopFromDisplay(newDef.value)
+                                                    : (root.kind === "stop" ? root.stopFromDisplay(newDef.value)
+                                                                             : parseFloat(newDef.value))
                     }
                     // 新 id 无定义：保持原值（baseValue）
                 }
                 // ref 未变或为空：保持原值
             } else {
-                // 用户填了值：用新值
-                value = root.kind === "bpm" ? parseFloat(valueText)
-                                            : root.stopFromDisplay(valueText)
+                // 用户填了值：用新值（小节长度 = 直接拍数，不做 STOP 单位换算）
+                value = root.kind === "stop" ? root.stopFromDisplay(valueText)
+                                             : parseFloat(valueText)
             }
             if (!isFinite(value)) value = baseValue
             root.timingEditRequested(dialog.kind, measureSpin.value,

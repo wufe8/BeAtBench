@@ -752,9 +752,9 @@ QtObject {
 
     /// 编辑区双击 note → 改其引用采样 id（切音手工版）。弹出对话框，收新 #WAV id → note.setSample。
 
-    /// 时间轴事件（BPM/STOP）列表重取（timing.list）→ 回填右 Dock 时间轴面板。
+    /// 时间轴事件（BPM/STOP/小节长度）列表重取（timing.list）→ 回填右 Dock 时间轴面板。
     function refreshTiming() {
-        var bpm = [], stop = []
+        var bpm = [], stop = [], measure = []
         var rb = beatbench.dispatch(JSON.stringify({ command: "timing.list", args: { kind: "bpm" } }))
         if (rb) {
             var rbp = JSON.parse(rb)
@@ -765,8 +765,14 @@ QtObject {
             var rsp = JSON.parse(rs)
             if (rsp.ok) stop = rsp.result.events || []
         }
+        var rm = beatbench.dispatch(JSON.stringify({ command: "timing.list", args: { kind: "measure" } }))
+        if (rm) {
+            var rmp = JSON.parse(rm)
+            if (rmp.ok) measure = rmp.result.events || []
+        }
         window.timingBpm = bpm
         window.timingStop = stop
+        window.timingMeasure = measure
         // 定义表（#BPM/#STOP 定义区数据源：session.samples 的 bpm/stop）
         var sb = beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} }))
         if (sb) {
