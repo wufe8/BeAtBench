@@ -101,7 +101,7 @@ TEST(Command, DispatchOkAndIdEcho) {
     EXPECT_TRUE(resp.is_object());
     EXPECT_TRUE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("id").as_i64(), 7);
-    EXPECT_EQ(resp.at("result").at("version").as_str(), "0.1.0");
+    EXPECT_EQ(resp.at("result").at("version").as_str(), "0.2.0");
     EXPECT_EQ(resp.at("result").at("api").as_i64(), 1);
 }
 

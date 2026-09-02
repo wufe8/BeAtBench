@@ -46,11 +46,13 @@ echo "==> Qt:   $QT_ROOT"
 # ---- 1. 配置（首次）+ 构建 ----
 if [ ! -f "$BUILD/CMakeCache.txt" ]; then
   echo "==> 配置 $BUILD (Release/Ninja)"
+  # CMake >= 4.0 移除 <3.5 兼容；portaudio(FetchContent).CMakeLists 仍写 VERSION 2.8，需显式放行。
   cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$QT_ROOT" \
     -DCMAKE_CXX_COMPILER="$CXX_BIN" \
     -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
-    -DBEATBENCH_BUILD_TESTS=OFF
+    -DBEATBENCH_BUILD_TESTS=OFF \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 fi
 echo "==> 构建 beatbench / beatbench-cli"
 cmake --build "$BUILD" --target beatbench beatbench-cli --parallel
@@ -86,6 +88,9 @@ echo "==> 拷贝应用 QML 模块（BeatBench/）
    （qmldir + 类型注册 + qml/ 源码）在构建目录里，必须手动拷贝，否则引擎
    回退到资源 stub 报 \"Module 'BeatBench' contains no type named 'Main'\"。"
 [ -d "$BUILD/app/BeatBench" ] || { echo "错误: $BUILD/app/BeatBench 不存在（构建未产出 QML 模块）" >&2; exit 1; }
+# windeployqt 偶发把同名 BeatBench 留成 exe **文件**（见上）；cp -r 目标必须是目录，
+# 此处再清理一次（文件/目录都 rm -rf），避免 "cannot overwrite non-directory"。
+rm -rf "$STAGE/BeatBench"
 cp -r "$BUILD/app/BeatBench" "$STAGE/BeatBench"
 
 echo "==> MinGW 运行库（libgcc/libstdc++/libwinpthread）"
@@ -107,7 +112,7 @@ rm -rf "$STAGE/qmltooling"
 
 echo "==> README.txt / LICENSE"
 cat > "$STAGE/README.txt" <<EOF
-BeAtBench v$VER (M1-M3)
+BeAtBench v$VER (M1-M5)
 ========================
 
 一个基于 Qt 6 / QML 的 BMS 谱面编辑器（Windows 64 位，免安装）。
@@ -123,9 +128,10 @@ BeAtBench v$VER (M1-M3)
 --------
 1. 双击 beatbench.exe 启动图形界面：
    - 打开谱面：菜单"文件 -> 打开"（或 Ctrl+O）
-   - 编辑谱面：放置/选择/删除 note、LN、地雷，量化、镜像、旋转、复制粘贴
+   - 编辑谱面：放置/选择/删除 note、LN、地雷，量化、镜像、旋转、复制粘贴（放置/移动有鼠标预览 ghost）
    - 时间轴：BPM / STOP 调整（右侧"时间轴"标签页）
    - 元信息、采样、BGA、lint 检查：左侧各标签页
+   - 播放/试听：Space 播放/暂停，Ctrl+R 手动渲染；播放头红线 + A/B 循环 + 点秒标尺/右侧波形条 seek
 2. 命令行工具（在资源管理器中打开本文件夹，再用终端运行）：
      beatbench-cli.exe info <谱面文件>
      beatbench-cli.exe check <谱面文件>
@@ -138,9 +144,10 @@ BeAtBench v$VER (M1-M3)
 
 已知限制（详见项目 doc/04）
 --------------------------
-  - 暂不支持音频波形显示/试听（M4 计划中）
-  - #RANDOM/#IF 块内容保存后不保证数据一致（M3 后按需立项）
-  - 暂不支持打开音频打包格式（bmson 等）
+  - 音频波形需先渲染（Space / 载入自动渲染）一次才显示；编辑 note 会增量自动更新。
+  - 切音工作台（M6）尚未实现；实时 keysound 调度（试玩）为后续 Phase D。
+  - #RANDOM/#IF 块内容保存后不保证数据一致（已知限制，按需立项）。
+  - 暂不支持打开音频打包格式（bmson 等）。
 
 许可
 ----
@@ -152,6 +159,9 @@ cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 # ---- 3. 冒烟（staging 内自检）----
 if [ "$SMOKE" = 1 ]; then
   echo "==> 冒烟：GUI 截图自检 + CLI version"
+  # 冒烟前**无条件回拷**主 exe：windeployqt 多次偶发把 beatbench.exe 改名/移走成
+  # BeatBench 文件；此处兜底保证 staging 与最终 zip 都有名副其实的 beatbench.exe。
+  cp -f "$BUILD/app/beatbench.exe" "$STAGE/beatbench.exe"
   [ -x "$STAGE/beatbench.exe" ] || { echo "错误: staging 缺少可执行 beatbench.exe" >&2; exit 1; }
   ( cd "$STAGE" && ./beatbench.exe --screenshot "$OUT/.bb-smoke.png" \
       ${BB_SMOKE_OPEN:+--open "$BB_SMOKE_OPEN"} ) || {

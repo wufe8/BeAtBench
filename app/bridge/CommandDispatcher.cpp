@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bridge/CommandDispatcher.hpp"
 
+#include "beatbench/core/Version.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/json/Json.hpp"
 
@@ -38,6 +39,11 @@ QString CommandDispatcher::version() const {
     Json req = Json::object();
     req.set("command", "version");
     return dispatch(QString::fromUtf8(req.dump().c_str()));
+}
+
+QString CommandDispatcher::versionString() const {
+    return QString::fromUtf8(beatbench::kVersion.data(),
+                             static_cast<int>(beatbench::kVersion.size()));
 }
 
 }  // namespace beatbench::app

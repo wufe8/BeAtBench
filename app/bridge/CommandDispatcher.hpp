@@ -19,6 +19,9 @@ public:
 
     /// 便捷：版本信息信封（菜单「关于」用）。
     Q_INVOKABLE QString version() const;
+
+    /// 便捷：纯净版本字符串（Version.hpp 单一来源；"关于"用，避免与核心 kVersion 漂移）。
+    Q_INVOKABLE QString versionString() const;
 };
 
 }  // namespace beatbench::app
