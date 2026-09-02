@@ -195,9 +195,57 @@ BeAtBench (GPL-3.0, C++20, CMake)
 
 ### 7.1 切音工作台（Phase C；优先级高于试玩模式）
 
-**定位：工作区/模式切换。** 与编辑模式（时间轴/轨道）平级的顶层工作区（Slice Workspace），共享同一文档与音频引擎——进入切音模式 = 切换视图/工具栏，不是另起工具；「把外部切音工具内化为编辑器的一个模式」正是你提的视图/模式切换思路。
+**定位：工作区/模式切换。** 与编辑模式（时间轴/轨道）平级的顶层工作区（Slice Workspace），共享同一文档与音频引擎——进入切音模式 = 切换视图/工具栏，不是另起工具；「把外部切音工具内化为编辑器的一个模式」正是你提的视图/模式切换思路。**外壳已就绪**：`SlicePage.qml` 占位 + `PageSwitcher` + "切音"菜单 + `currentPage=1`。
 
-stem 导入 → offset 对齐 → 网格/瞬态检测切分 → 36 进制 ID 分配（冲突检测 + 占用视图）→ ch01 一键铺放 → solo/mute 校验回放；中间产物约定（bmson 骨架 / CSV 时标表）保证与 DAW 脚本生态互操作。
+#### a) 设计定稿（2026-09 与用户多轮收敛——**务必保留**；M6 未动工，先记录）
+
+**核心管线**：
+```
+DAW 导出：stem.wav + notes.mid
+   ↓ 导入工作台（M6.1）
+解码波形 + 预览   +   MIDI 解析（note on/off, 时间, 音高）
+   ↓ offset 对齐（MIDI ↔ audio 的 delay 校准）
+切片位置来源（可切换）：
+   ├── MIDI notes（推荐，最"音乐"，边界=note on/off）
+   ├── 网格（BPM/拍/细分，规则、可测）
+   └── 瞬态检测（增强，后置；需 DSP）
+   ↓
+切片 → 分片文件落盘（边界 fade 防爆音）+ #WAV 36进制 ID 分配（冲突检测+占用视图）
+   ↓
+ch01 一键铺放（note.put + sub_line，按拍位）   或   只入库（独立采样库）
+   ↓
+solo/mute 校验回放 + 精修（nudge 边界 / 合并/删除切片）
+```
+
+**关键决策（用户已拍板）**：
+1. **切分算法**：**网格切分**先行（BPM/拍/细分，确定性、可单测）；**MIDI 驱动**作为**推荐**的音乐切分源；
+   瞬态检测作 M6.x 增强。
+2. **与谱面关系**：**两者兼顾**——独立采样库（只切分+导出+建 #WAV）+ 可选"对齐谱面"（按拍铺进 ch01）。
+3. **产物**：**真分片文件**（每片落盘为独立 .wav，BMS 原生可播放）+ 附带 **CSV 时标表**（切片起始→文件/拍位）。
+4. **MIDI 一把驱动双件事**：MIDI note 事件天然给出**切分边界**（note on/off）**和铺放位置**（拍位，
+   若与谱面 BPM/offset 对齐）——**同时解决"切哪"和"放哪"**，省掉 onset 检测。参考 woslicer 思路：
+   [Mid2BMS Wiki 的 woslicer 条目](https://wiki.mid2bms.net/他ツール/woslicer)、
+   [Qiita 的 woslicer III 爆音解析](https://qiita.com/yuinore/items/79db943d2e3447adee71)
+   （边界 fade 防 pop）。
+
+**复用点（少造轮子）**：波形显示/视口 = `WaveformOverviewItem`/波形金字塔（M4）；切片/整源预览 =
+`audioEngine`（voice 池）+ seek；ch01 铺放 = `note.put`/`note.move` + `sub_line` 子行；36 进制 id =
+`idTextOf`/`sampleValueOf` + 现有采样管理；时间↔拍位 = timing 引擎（`position_at`）；可测性 = 新增
+`slice.detect`/`slice.export`/`slice.place` 命令（CLI 直接跑）。
+
+**需要新增组件**：**MIDI 解析器**（`Standard MIDI File`：header + track + MTrk 事件，抽 note on/off
+与时间）。不大、格式成熟，做成 core 模块 + `midi.parse` 命令（headless 可测），沿用"core=命令对象、
+CLI=批处理"架构。
+
+**分阶段（每阶段可测可交付）**：
+- **M6.1 工作台 + 导入**：外部音频解码（→ 波形+时长+采样率）+ MIDI 解析 + 波形/MIDI 预览 + 播放/seek + offset 微调。
+- **M6.2 切分**：切片位置源（**MIDI 优先** + 网格可切换）+ 波形上画切分线（吸附 note/拍）+ 切片列表（id/时长/位置/放置开关）。
+- **M6.3 导出 + 铺放**：分片落盘（fade 边界）+ `#WAV` 分配 + 一键 ch01 铺放（note.put + sub_line）+ 占用视图。
+- **M6.4 校验回放**：solo/mute + 整段试听 + 边界精修。
+- （延后）瞬态检测、CSV 时标表 / bmson 骨架互操作。
+
+**风险/边界**：通用音频解码（dr_libs 链）+ PCM WAV 写出；分片多则磁盘/命名策略（`stem_NNN.wav` 前缀、
+去重）；BPM/offset 误差累积漂移 → 需"首拍对齐 + 手动微调"；长音频全解码大 → 沿用 M4.3 LRU + 波形金字塔。
 
 ---
 
