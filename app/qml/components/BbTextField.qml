@@ -21,6 +21,11 @@ TextField {
     /// 再释放焦点（无副作用，对话框已关闭）。MetaPanel 等非对话框字段保持 null → 默认行为不变。
     property var escapeHandler: null
 
+    /// 2026-09：超长文本在放不下时**显示前半段**而非后半段。QML TextField 绑定长 `text`（如谱面
+    /// TITLE=Doppelganger[ANOTHER]）会把光标放末尾 → 字段滚到显示结尾（"…ganger[ANOTHER]"）。
+    /// 非聚焦（外部赋值）时把光标归 0 → 从头显示；聚焦编辑时光标跟随用户输入。
+    onTextChanged: if (!root.activeFocus) root.cursorPosition = 0
+
     background: Rectangle {
         radius: Theme.boxRadius
         border.width: 1

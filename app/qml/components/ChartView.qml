@@ -175,8 +175,9 @@ Item {
             view.playheadSec = -1  // 谱面切换：隐藏播放头（等新渲染/播放）
         }
         function onContentChanged() {
-            waveform.visible = false
-            // 编辑即停（AudioEngine 已停）；播放头保留当前时间点（暂停态位置）
+            // 2026-09 波形消失根因：此前隐藏波形 → 若紧随的重渲染未触发/未完成（timing 编辑不触发）
+            // 就永久消失直到 Ctrl+R。修：内容变化不隐藏波形（背景异步渲染完成会更新它）；
+            // 编辑即停（AudioEngine 已停）仍由音频层处理；播放头保留当前时间点（暂停态位置）。
         }
     }
 
@@ -421,15 +422,28 @@ Item {
                 _moveTargetLane = laneHit && laneHit.valid ? laneHit : null
                 // M6 编辑预览：note 移动 → ghost（原始+delta；meta 对象沿用旧行为）
                 if (_moveKind === "") {
-                    view.movePreview = true
-                    view.moveDeltaF = _moveDeltaF
                     // 目标列规范化为 {player,kind,index}（laneAtX 返回 lanePlayer/laneKind/laneIndex）；
                     // 带 sub_line：BGM 虚拟子通道目标（ghost 落对应 bgmN 列）
-                    view.moveTargetLane = laneHit && laneHit.valid
+                    let gDeltaF = _moveDeltaF
+                    let gTargetLane = laneHit && laneHit.valid
                         ? { player: laneHit.lanePlayer, kind: laneHit.laneKind,
                             index: laneHit.laneIndex,
                             sub_line: laneHit.sub_line }
                         : ({})
+                    // 2026-09 平移钳制：ghost 与实际释放逻辑同源（moveMode 单轴）——否则预览
+                    // 显示自由 2D 落点、松开却只走单轴，虚影与实际脱节。
+                    if (root.moveMode) {
+                        const gdx = x - _pressX
+                        const gdy = y - _pressY
+                        if (Math.abs(gdx) > Math.abs(gdy)) {
+                            gDeltaF = 0            // 横向：只改通道，时间不变
+                        } else {
+                            gTargetLane = {}       // 纵向：只改时间，通道不变
+                        }
+                    }
+                    view.movePreview = true
+                    view.moveDeltaF = gDeltaF
+                    view.moveTargetLane = gTargetLane
                 }
             }
             _lastY = y

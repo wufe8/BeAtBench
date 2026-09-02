@@ -147,6 +147,14 @@ void SampleListModel::loadFromInfo(const QString& infoJson) {
     rebuild();
 }
 
+void SampleListModel::clear() {
+    beginResetModel();
+    m_all.clear();
+    m_rows.clear();
+    endResetModel();
+    emit countChanged(0);
+}
+
 void SampleListModel::loadFromCheck(const QString& checkJson) {
     QStringList missing;
     QStringList extMismatch;

@@ -52,6 +52,8 @@ public:
     Q_INVOKABLE void loadFromInfo(const QString& infoJson);
     /// 装载 check 命令的响应信封（missing_wav + wav_ext_mismatch → 状态标记）。
     Q_INVOKABLE void loadFromCheck(const QString& checkJson);
+    /// 2026-09 新建谱面：清空采样列表（不保留上一谱面的数据）。
+    Q_INVOKABLE void clear();
 
     QString filterText() const { return m_filterText; }
     void setFilterText(const QString& text);

@@ -1127,12 +1127,17 @@ ApplicationWindow {
         window.chartFormat = "bms"
         window.chartMode = "sp7k"
         window.chartEncoding = "utf8"
-        window.chartMeta = null
+        // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）
+        window.chartMeta = { "TITLE": "", "ARTIST": "", "GENRE": "", "SUBTITLE": "",
+                             "BPM": "130", "PLAYER": "1", "PLAYLEVEL": "", "RANK": "",
+                             "TOTAL": "", "DIFFICULTY": "" }
         window.currentBpmValue = 130
         window.pendingLnHead = null
         window.selectionRefs = []
         window.metaSelection = []
         refreshTiming()
+        // 清空上一谱面的采样（新建空谱面无采样；lint 面板对空谱面显空/占位，暂不额外清）
+        sampleModel.clear()
         if (typeof editPage !== "undefined" && editPage) {
             editPage.reloadMeta()
             editPage.reloadBga()
@@ -1164,7 +1169,11 @@ ApplicationWindow {
     function refreshLint() { return session.refreshLint() }
     function refreshSamples() { return session.refreshSamples() }
     function refreshTiming() { return session.refreshTiming() }
-    function saveChart() { return session.saveChart() }
+    function saveChart() {
+        // 新建谱面（path 空）Ctrl+S → 路由到「另存为」（否则 session.save 无 path 报错，2026-09）
+        if (window.chartPath === "") { saveAsDialog.open(); return true }
+        return session.saveChart()
+    }
     function saveChartAs(path) { return session.saveChartAs(path) }
     function saveMetaEdits() { return session.saveMetaEdits() }
     function setModeMeta(key, value) { return session.setModeMeta(key, value) }

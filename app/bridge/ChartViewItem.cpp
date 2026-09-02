@@ -1279,7 +1279,10 @@ void ChartViewItem::drawPreview(QPainter* p) const {
     if (m_movePreview) {
         // 移动预览：选中 note 各画 ghost @ 原始 + delta。跨通道移动（targetLane 有效）时，
         // 命中 sourceLane 的 note 用 targetLane 画（ghost 落目标列），其余只按时间位移。
-        if (qFuzzyIsNull(m_moveDeltaF)) return;  // 原位（无位移）不画，等于无预览
+        // ⚠️ 2026-09：平移单轴钳制下横向拖动 deltaF=0（只改通道/目标列），此处不能因 deltaF 归零
+        // 就直接 return——否则纯横向 ghost 不画（只剩纵向看得到，与"无论怎么拖都是纵向"一致）。
+        // 应：无位移**且**无目标列（纯原地）才不画；deltaF=0 + 有目标列 = 横向 ghost（同时间+目标列）。
+        if (qFuzzyIsNull(m_moveDeltaF) && m_moveTargetLane.isEmpty()) return;
         auto laneMatches = [this](const QVariantMap& a, const QVariantMap& b) {
             if (a.isEmpty() || b.isEmpty()) return false;
             return a.value(QStringLiteral("player")).toInt() ==
@@ -1359,7 +1362,10 @@ void ChartViewItem::drawPreview(QPainter* p) const {
             const int sample = m.value(QStringLiteral("sample")).toInt();
             // ghost 落点 = 绝对目标（原始 + delta）**吸附到 snap 网格**——否则偏移偏移量
             // 相对吸附（如 1/8 音符在 1/4 snap 下仍停在 1/8+k/4）与松开后的落点不符（用户 2026-09）。
-            const qreal mf = snapMf(static_cast<qreal>(measure) + (pd > 0 ? pn / pd : 0.0) + m_moveDeltaF);
+            const qreal tBase = static_cast<qreal>(measure) + (pd > 0 ? pn / pd : 0.0);
+            // 纯横向（deltaF=0，只改通道/目标列）：时间保持**原始**（不 snap，否则离网 note 被挪位）；
+            // 有位移才 snap 目标（吸附 snapNum/snapDen，与松开后 moveSelection 的吸附一致）。
+            const qreal mf = qFuzzyIsNull(m_moveDeltaF) ? tBase : snapMf(tBase + m_moveDeltaF);
             drawNoteGhost(p, mf, lane, QStringLiteral("normal"),
                           static_cast<std::uint32_t>(sample), ghostBgmLine);
         }

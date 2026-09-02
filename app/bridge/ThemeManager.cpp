@@ -286,6 +286,10 @@ int ThemeManager::applySkinByName(const QString& name) {
     const QString theme = QDir(resolvedDir).filePath(QStringLiteral("theme.json"));
     // ⚠️ 不经过 applyTheme（它会先把 activeSkin 设成绝对路径并发 tokensChanged → QML 绑定
     // 按绝对路径求值 ≠ 任何 skinDir，菜单勾选对不上；这里由本函数统一设置相对目录并**只发一次**）。
+    // 2026-09 皮肤残留：Win10(直角 boxRadius=0) → Aurora/Linear 仍直角——因为 loadTheme 只在
+    // 旧值之上覆写 token，未指定 boxRadius 的皮肤不会恢复默认。先 resetDefault() 回到基准，
+    // 再叠加该皮肤自己的 token（部分皮肤只改颜色/字体，圆角等回默认）。
+    resetDefault();
     QString err;
     const int n = loadTheme(theme, &err);
     if (n < 0) {

@@ -122,11 +122,13 @@ void ChartSession::refresh() {
         // M4.3c 增量：timing 变化（BPM/STOP/节拍）→ 下次渲染**全量**（正确性优先）；
         // 否则（note 编辑/采样变更）→ 已有渲染结果时自动补增量（m_pendingIncremental）。
         m_timingDirty = timingChanged;
-        if (!timingChanged && m_rendered && !m_renderInFlight.load()) {
-            // 有渲染结果且空闲 → 立即后台增量（避免 M5 每次按空格等 1-2s）
+        // 2026-09 波形消失根因：timing 变化（BPM/STOP/小节长/节拍）此前只置 m_timingDirty 不触发渲染，
+        // 而前端 onContentChanged 会隐藏波形 → 没有 renderFinished 恢复（直到 Ctrl+R/Space）。
+        // 修：任何内容变化（含 timing）都触发后台渲染（renderAsync 内部按 m_timingDirty 定全量/增量）。
+        if (m_rendered && !m_renderInFlight.load()) {
             const double sr = m_rendered->sampleRate;
             renderAsync(sr > 0.0 ? sr : 44100.0);
-        } else if (!timingChanged && m_rendered) {
+        } else if (m_rendered) {
             m_pendingIncremental = true;  // 渲染中 → 完成后补一次
         }
         emit contentChanged();
