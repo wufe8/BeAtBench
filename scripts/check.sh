@@ -61,6 +61,9 @@ fi
 if [ "$CORE_ONLY" -eq 0 ]; then
   { [ -n "${QT_PREFIX:-}" ] && [ -d "$QT_PREFIX" ]; } ||
     fail "找不到 Qt 6.11+：设 QT_PREFIX=<Qt 安装目录> 再跑，或改用 --core（无 Qt 路径）"
+  # Windows：Qt 桥层测试与 GUI 的可执行文件要能找到 Qt DLL（否则 ctest 报 0xc0000135）；
+  # Linux/macOS 靠 rpath 即可，这里加进去也无害。
+  export PATH="$QT_PREFIX/bin:$PATH"
 fi
 
 # GCC 版本下限（C++20）：Git for Windows 自带的 6.3 会以晦涩错误失败，这里提前拦
