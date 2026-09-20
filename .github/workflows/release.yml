@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# 发布流水线：打 tag → 构建 + 单测 + 版本一致性检查 + 打包 → 建 GitHub Release。
+#
+# 设计要点：
+# - **只有一个打包实现**：调 scripts/package-release.sh（与本地 scripts/release.sh 同一条路径），
+#   避免 CI 与本地各有一套打包逻辑而悄悄分叉。
+# - Qt 钉 6.11.1 = 发布包内嵌版本（CI 回归用的是 6.11.2，见 ci.yml；这个差异写进 release notes）。
+# - 版本一致性检查（scripts/check-version.sh --strict）放在打包**之前**：
+#   CMakeLists / CHANGELOG / README 下载名 任一处漏改就直接失败，不给「发完再补 commit」的机会。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的已有 tag（如 v0.3.1）'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: '6.11.1'
+
+jobs:
+  windows-release:
+    name: windows-release
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0            # check-version 用 git grep，且需要 tag 信息
+
+      - name: Install Qt ${{ env.QT_VERSION }} (win64_mingw) + MinGW/Ninja
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_mingw
+          # ⚠️ 与 ci.yml 同一处临时项：Qt 6.11 改了 Windows 仓库布局，aqt 3.3.0（PyPI 最新）不认，
+          #    暂用上游 master 的 commit 钉。aqt 3.4.0 发布后两处一起收回为版本钉。
+          aqtsource: 'aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659'
+          tools: 'tools_mingw1310 tools_ninja'
+          add-tools-to-path: true
+
+      - name: 版本一致性检查
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          scripts/check-version.sh "$TAG" --strict --qt-version 6.11
+
+      - name: 回归（Release 构建 + 全部单测）
+        shell: bash
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+
+      - name: 打包（scripts/package-release.sh，含 staging 冒烟）
+        shell: bash
+        run: |
+          to_win_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
+          export QT_ROOT="$QT_ROOT_DIR"
+          export CXX_BIN="$(to_win_path "$(command -v g++)")"
+          export NINJA_BIN="$(to_win_path "$(command -v ninja)")"
+          scripts/package-release.sh
+
+      - name: 写发布说明（CHANGELOG 段落 + 构建环境）
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          mkdir -p local/tmp
+          NOTES=local/tmp/release-notes.md
+          {
+            scripts/check-version.sh "$TAG" --print-notes
+            echo
+            echo "---"
+            echo
+            echo "### 构建环境（可复现性）"
+            echo
+            echo "- Qt: \`$QT_VERSION\`（win64_mingw，windeployqt 部署）"
+            echo "- 编译器: \`$(g++ --version | head -1)\`"
+            echo "- CMake: \`$(cmake --version | head -1)\`"
+            echo "- Runner: \`${{ runner.os }}-${{ runner.arch }}\`"
+            echo "- 完整变更: https://github.com/${{ github.repository }}/compare/${{ github.ref_name }}...HEAD"
+          } > "$NOTES"
+          cat "$NOTES"
+
+      - name: 创建 / 更新 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          ZIP="out/beatbench-${TAG#v}-win64.zip"
+          SHA="$ZIP.sha256"
+          ls -l "$ZIP" "$SHA"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" "$SHA" --clobber
+          else
+            # 想先审一遍再公开：给下面这行加 --draft，再手动点发布
+            gh release create "$TAG" "$ZIP" "$SHA" \
+              --title "BeAtBench $TAG" \
+              --notes-file local/tmp/release-notes.md \
+              --verify-tag
+          fi
