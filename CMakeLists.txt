@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 cmake_minimum_required(VERSION 3.24)
+
+# CMake 4.x 移除了对 cmake_minimum_required(<3.5) 的兼容；PortAudio v19.7.0（FetchContent
+# 嵌入）自声明 2.8，会让 4.x 直接配置失败。此变量把下游项目声明的最小版本锧到 3.5；
+# 在 CMake 3.x 下它只是普通变量，无副作用。已验证：CMake 4.4.3 无 -D 旗标可直接配置。
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 # LANGUAGES 含 C：audio 内嵌 PortAudio（FetchContent）在**子项目模式**下 upstream 会跳过
 # 自己的 PROJECT()（见 portaudio CMakeLists 的 IF(CMAKE_SOURCE_DIR STREQUAL ...) 分支），
 # 于是没有语言被启用 → C 目标报 "cannot determine linker language"。在父项目启用 C 即可

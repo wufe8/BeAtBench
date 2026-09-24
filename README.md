@@ -1,5 +1,7 @@
 # BeAtBench
 
+[![CI](https://github.com/wufe8/BeAtBench/actions/workflows/ci.yml/badge.svg)](https://github.com/wufe8/BeAtBench/actions/workflows/ci.yml)
+
 面向 BMS 的开源谱面编辑器
 
 > 技术栈: C++20 + Qt 6 Quick/QML + PortAudio + CMake  
@@ -40,12 +42,19 @@
 
 | 平台 | 状态 |
 |---|---|
-| Windows 10/11 64 位 |  当前发布平台，提供预编译 zip（本仓库唯一验证过的发布路径） |
-| Linux |  源码可构建（core/CLI 优先）；无预编译包，打包脚本与音频后端未验证 |
-| macOS |  同上；另需 `.app` 打包、代码签名与公证 |
+| Windows 10/11 64 位 |  当前发布平台，提供预编译 zip；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
+| Linux x86_64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（GCC，Qt 6.11.2）；无预编译包，实时音频输出未人工验证 |
+| macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2，非阻塞门禁）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
-守卫），但**当前只发布并验证 Windows**。跨平台 CI 列在 `doc/04` §7 的 M8（core/cli 优先）。
+守卫）。三平台的「能编译、测得过、GUI 能起画」由 CI 持续钉住
+（`.github/workflows/ci.yml`，详见 `doc/04` §4）；但**当前只发布 Windows 预编译包**，
+Linux/macOS 发布产物与实时音频输出的人工验证未排期。
+
+当前边界（两句）：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
+`.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
+macOS 打包范畴；② GUI 的悬停 / 拖拽等交互行为在 Linux/macOS **未人工验证**
+（CI 只做无头冒烟）。
 
 ## 文档导航
 
@@ -64,29 +73,64 @@
 
 ## 快速构建
 
-### CLI + 测试（MSVC）
+> GUI 需要 Qt **6.11+**（CI 验证版本 6.11.2；发布包内嵌 6.11.1）。
 
-```powershell
-# 配置 + 构建（需联网拉 GoogleTest）
+### CLI + 测试
+
+Linux / macOS（GCC / Clang，单配置）：
+
+```bash
+# 配置 + 构建（需联网拉 GoogleTest/PortAudio）
 cmake -S . -B build -DBEATBENCH_BUILD_TESTS=ON
-cmake --build build --config Debug --parallel
+cmake --build build --parallel
 
 # 运行测试
+ctest --test-dir build --output-on-failure
+
+# 快速回归（跳过真实谱面测试，<1s）
+BB_SKIP_REAL=1 ./build/tests/beatbench_tests
+```
+
+Windows（MSVC，默认多配置生成器）——`ctest` 不带 `-C` 会全部
+`***Not Run: Test not available without configuration`，务必带 `-C Debug`：
+
+```powershell
+cmake -S . -B build -DBEATBENCH_BUILD_TESTS=ON
+cmake --build build --config Debug --parallel
 ctest --test-dir build -C Debug --output-on-failure
 
 # 快速回归（跳过真实谱面测试，<1s）
-set BB_SKIP_REAL=1
+$env:BB_SKIP_REAL=1
 build\tests\Debug\beatbench_tests.exe
 ```
 
-### GUI（MinGW + Qt 6）
+### GUI（Linux / macOS，Qt 6.11+）
 
-> 需自备 Qt 6（含 Quick/QuickControls2）与匹配的 MinGW 编译器。下面的 `QT_PREFIX`/
-> `MINGW_BIN` 是**你自己的安装路径**，换成你的实际位置即可（示例值来自本机，仅作格式参考）。
+```bash
+# QT_PREFIX 换成你的 Qt 6.11 安装位置（发行版包或 aqt 均可）
+cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+  -DBEATBENCH_BUILD_TESTS=OFF
+cmake --build build-gui --parallel
+
+# 无头冒烟（CI 同款；offscreen + 软件渲染）
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+QML2_IMPORT_PATH="$PWD/build-gui/app" \
+  ./build-gui/app/beatbench --screenshot smoke.png --apply-skin Aurora
+```
+
+macOS 产物是 `.app` 包（`build-gui/app/beatbench.app`，可执行文件在 `Contents/MacOS/`）；
+exe 同级没有 `BeatBench/` QML 模块目录，运行时需 `QML2_IMPORT_PATH` 指向
+`build-gui/app`（上面命令已带）。
+
+### GUI（Windows MinGW）
+
+> 需自备 Qt 6.11+（含 Quick/QuickControls2）与匹配的 MinGW 编译器。下面的 `QT_PREFIX`/
+> `MINGW_BIN` 是**你自己的安装路径**，换成你的实际位置即可（示例值仅作格式参考）。
 
 ```bash
 # 改为你自己的路径（Windows 下可用 /c/... 或 C:/... 写法）
-export QT_PREFIX=/c/Qt/6.8.0/mingw_64
+export QT_PREFIX=/c/Qt/6.11.1/mingw_64
 export MINGW_BIN=/c/Qt/Tools/mingw1310_64/bin
 
 # 配置（Git Bash；用 `-G "MinGW Makefiles"` 或 Ninja 均可）

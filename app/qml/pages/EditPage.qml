@@ -268,12 +268,18 @@ Item {
         orientation: Qt.Horizontal
 
         // 分隔条（拖拽调宽；hover 高亮提示可拖）
+        // ⚠️ handle 悬停态用 SplitHandle.hovered（官方只读附加属性）；
+        // SplitView.hovered 非官方 API，Qt 6.11 起“attached properties must be accessed
+        // through a direct child”告警且高亮不生效。
+        // ⚠️ 附加属性绑定到「声明它的对象」：嵌套子 Rectangle 裸写拿到的是子对象自己的
+        // SplitHandle 实例（Qt 只更新 handle 那个，高亮不生效）——必须用 handle id 限定。
         handle: Rectangle {
+            id: handleItem
             color: Theme.border
             implicitWidth: 4
             Rectangle {
                 anchors.fill: parent
-                color: SplitView.hovered ? Theme.accent : "transparent"
+                color: handleItem.SplitHandle.hovered ? Theme.accent : "transparent"
                 opacity: 0.35
             }
         }

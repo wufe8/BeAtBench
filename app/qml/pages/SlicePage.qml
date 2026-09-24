@@ -568,9 +568,11 @@ Item {
             Layout.fillHeight: true
             spacing: 6
 
+            // handle 悬停态用 SplitHandle.hovered（SplitView.hovered 非官方 API，
+            // Qt 6.11 起告警且高亮不生效；同 EditPage 的 handle 注释）
             handle: Rectangle {
                 implicitWidth: 4
-                color: SplitView.hovered ? Theme.accent : Theme.border
+                color: SplitHandle.hovered ? Theme.accent : Theme.border
             }
 
             // ================= 左 dock =================

@@ -97,7 +97,9 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
             // 纯渲染场景（无点击）count ≥ 1 即可（增量不会发生）。
             static QTimer poll;
             poll.setInterval(300);
-            QObject::connect(&poll, &QTimer::timeout, &poll, [win, outPath, &poll, expectIncremental, playDuration] {
+            // ⚠️ poll 是 static（无自动存储期）：lambda 按标准禁止按引用捕获它，
+            // clang 直接报错（GCC/MSVC 放行）。static 不需要捕获，体内直呼即可。
+            QObject::connect(&poll, &QTimer::timeout, &poll, [win, outPath, expectIncremental, playDuration] {
                 const bool done = win->property("debugRenderDone").toBool();
                 const int cnt = win->property("debugRenderCount").toInt();
                 if (!done) return;

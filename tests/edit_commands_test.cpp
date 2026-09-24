@@ -4,6 +4,7 @@
 // 全部合成 Chart，不依赖 local/。
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>

@@ -134,7 +134,9 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate,
         if (srcPos < 0.0) continue;
         const std::uint64_t fi = static_cast<std::uint64_t>(srcPos);
         if (fi >= sample.frameCount()) break;
-        const std::uint64_t i1 = std::min(fi + 1, sample.frameCount() - 1);
+        // ⚠️ 显式钉 min 实参：fi 是 uint64_t，frameCount() 是 size_t；Apple 平台两型不同
+        // （同 sample_player.cpp 的注释）。
+        const std::uint64_t i1 = std::min<std::uint64_t>(fi + 1, sample.frameCount() - 1);
         const float fracV = static_cast<float>(srcPos - static_cast<double>(fi));
         const float l = sample.interleavedStereo[fi * 2] * (1.0f - fracV) +
                         sample.interleavedStereo[i1 * 2] * fracV;

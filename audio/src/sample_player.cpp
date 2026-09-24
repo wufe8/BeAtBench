@@ -218,7 +218,9 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
         for (int o = 0; o < frames; ++o) {
             const std::uint64_t fi = v.framePos;
             if (fi >= srcFrames) { finished = true; break; }
-            const std::uint64_t i1 = std::min(fi + 1, srcFrames - 1);
+            // ⚠️ 显式钉 min 实参：fi 是 uint64_t，srcFrames 是 size_t；Apple 平台
+            // uint64_t=unsigned long long ≠ size_t（unsigned long），模板推导冲突。
+            const std::uint64_t i1 = std::min<std::uint64_t>(fi + 1, srcFrames - 1);
             const float fracV = static_cast<float>(v.frac);
             const float l = pcm[fi * 2] * (1.0f - fracV) + pcm[i1 * 2] * fracV;
             const float rgt = pcm[fi * 2 + 1] * (1.0f - fracV) + pcm[i1 * 2 + 1] * fracV;

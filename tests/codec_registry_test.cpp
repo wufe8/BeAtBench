@@ -3,6 +3,7 @@
 // 全部用临时文件与合成谱面，不依赖 local/ 资产。
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>

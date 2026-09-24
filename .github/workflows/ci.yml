@@ -1,0 +1,238 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# CI：三平台构建 + 测试 + GUI 无头冒烟（doc/04 §4 构建、M8「跨平台 CI」落地）。
+#
+# 设计决策（为什么长这样）：
+# - Qt 统一 6.11.2：CI 是回归门禁不是发布流水线；发布包内嵌 6.11.1 由打包脚本自控。
+# - 五个 job：linux-core / windows-msvc-core 无 Qt（core/cli/audio/tests + ctest），
+#   linux-full / macos-full / windows-mingw-full 带 Qt（桥层单测 + GUI 构建 + offscreen 冒烟）。
+# - Windows 用 MinGW 全量钉住发布链路（Qt 官方 Windows 默认 kit 即 MinGW，与
+#   scripts/package-release.sh 同源），另设 MSVC 无 Qt job 守护 MSVC 兼容性。
+# - macOS continue-on-error：macOS 侧从未人工验证过，首跑风险隔离；其余 job 阻塞。
+# - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
+#   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
+# - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2），Qt 走 action 缓存。
+name: CI
+
+on:
+  push:
+    # 仅 master：同仓库 PR 会 push + PR 双跑（每遍携 ~32 分钟的 macOS job），
+    # 分支上的验证靠 PR 事件 / 手动 dispatch。
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: '6.11.2'
+
+jobs:
+  # ---------- 无 Qt：core/cli/audio + 全部单测（app 自动跳过） ----------
+  linux-core:
+    name: linux-core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=OFF
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows-msvc-core:
+    name: windows-msvc-core
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=OFF
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # ---------- 带 Qt：全量 + GUI 无头冒烟 ----------
+  linux-full:
+    name: linux-full
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: linux_gcc_64
+          cache: true
+          cache-key-prefix: install-qt-linux
+      # 冒烟截图防豆腐块：runner 默认无 CJK 字体
+      - name: Install CJK fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: GUI smoke
+        run: |
+          export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+          ./build/app/beatbench --screenshot smoke-linux.png --apply-skin Aurora || true
+          # 失败诊断先于断言：QML 错误都在这个日志里
+          echo "=== beatbench-qml-errors.log ==="; cat beatbench-qml-errors.log 2>/dev/null || echo "(无日志)"
+          test -f smoke-linux.png
+          # 断言拆两条：事件存在 + 皮肤名（路径不写死——解析结果随环境可能是相对/绝对路径）
+          grep -q "皮肤已运行时切换：" beatbench-qml-errors.log
+          grep -q "已运行时切换：.*Aurora" beatbench-qml-errors.log
+          rm -f beatbench-qml-errors.log
+      - name: Upload smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-linux
+          # 失败时日志是唯一现场线索（成功路径已被 rm，不会重复上传）
+          path: |
+            smoke-linux.png
+            beatbench-qml-errors.log
+          if-no-files-found: ignore
+
+  macos-full:
+    name: macos-full
+    # macOS 侧从未人工验证过，风险隔离；其实际结论由 summary job 经 API 翻出
+    continue-on-error: true
+    runs-on: macos-15
+    # 实测 Qt 缓存 miss 时 Build 独占 ~31 分钟（Linux 同款 2 分钟），45 分钟贴近撞限
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: clang_64
+          cache: true
+          cache-key-prefix: install-qt-macos
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: GUI smoke
+        run: |
+          export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+          # MACOSX_BUNDLE 使 exe 在 beatbench.app/Contents/MacOS/，exe 同级没有
+          # BeatBench QML 模块目录（Linux/Windows 是 build/app/BeatBench 紧邻 exe，
+          # 引擎靠 exe 目录导入）——显式把模块父目录给引擎，对齐另两个平台的解析。
+          export QML2_IMPORT_PATH="$PWD/build/app"
+          ./build/app/beatbench.app/Contents/MacOS/beatbench --screenshot smoke-macos.png --apply-skin Aurora || true
+          # 失败诊断先于断言：QML 错误都在这个日志里
+          echo "=== beatbench-qml-errors.log ==="; cat beatbench-qml-errors.log 2>/dev/null || echo "(无日志)"
+          test -f smoke-macos.png
+          # 断言拆两条：事件存在 + 皮肤名（路径不写死，同 linux-full 注释）
+          grep -q "皮肤已运行时切换：" beatbench-qml-errors.log
+          grep -q "已运行时切换：.*Aurora" beatbench-qml-errors.log
+          rm -f beatbench-qml-errors.log
+      - name: Upload smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-macos
+          # 失败时日志是唯一现场线索（成功路径已被 rm，不会重复上传）
+          path: |
+            smoke-macos.png
+            beatbench-qml-errors.log
+          if-no-files-found: ignore
+
+  windows-mingw-full:
+    name: windows-mingw-full
+    # 发布链路（scripts/package-release.sh = MinGW + Qt；Qt 官方 Windows 默认 kit 即 MinGW）
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Qt (win64_mingw) + MinGW/Ninja toolchain
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_mingw
+          # Qt 6.11 改了 Windows 仓库布局：砍掉基础包目录 qt6_6112/qt6_6112/，架构目录去
+          # win64_ 前缀。aqt 3.3.0（PyPI 最新，2025-06）不认 → "Failed to locate XML data"。
+          # 暂用上游 master（已适配；钉死 commit 保确定性），aqt 3.4.0 发布后收回为版本钉。
+          aqtsource: 'aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659'
+          tools: 'tools_mingw1310 tools_ninja'
+          add-tools-to-path: true
+          cache: true
+          cache-key-prefix: install-qt-windows-mingw
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: GUI smoke
+        shell: bash
+        run: |
+          export PATH="$QT_ROOT_DIR/bin:$PATH"
+          export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+          ./build/app/beatbench.exe --screenshot smoke-windows.png --apply-skin Aurora || true
+          # 失败诊断先于断言：QML 错误都在这个日志里
+          echo "=== beatbench-qml-errors.log ==="; cat beatbench-qml-errors.log 2>/dev/null || echo "(无日志)"
+          test -f smoke-windows.png
+          # 断言拆两条：事件存在 + 皮肤名（路径不写死，同 linux-full 注释）
+          grep -q "皮肤已运行时切换：" beatbench-qml-errors.log
+          grep -q "已运行时切换：.*Aurora" beatbench-qml-errors.log
+          rm -f beatbench-qml-errors.log
+      - name: Upload smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-windows
+          # 失败时日志是唯一现场线索（成功路径已被 rm，不会重复上传）
+          path: |
+            smoke-windows.png
+            beatbench-qml-errors.log
+          if-no-files-found: ignore
+
+  # ---------- 汇总：把被 continue-on-error 洗掉的 macOS 真实结论翻出来 ----------
+  # needs.<job>.result 在 continue-on-error 下恒为 success，故经 API 取实际 conclusion：
+  # 阻塞四 job 任一失败 → 本 job 红；macOS 失败 → warning 标注（run 绿灯不含 macOS）。
+  summary:
+    name: ci-summary
+    needs: [linux-core, linux-full, macos-full, windows-msvc-core, windows-mingw-full]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: 汇总各 job 实际结论
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '.jobs | map({(.name): .conclusion}) | add' > jobs.json
+          cat jobs.json
+          fail=""
+          for j in linux-core linux-full windows-msvc-core windows-mingw-full; do
+            c=$(jq -r --arg j "$j" '.[$j]' jobs.json)
+            if [ "$c" != "success" ]; then echo "::error::阻塞 job 失败：$j = $c"; fail=1; fi
+          done
+          m=$(jq -r '.["macos-full"]' jobs.json)
+          if [ "$m" != "success" ]; then
+            echo "::warning::macos-full 实际结论：$m（非阻塞门禁——本 run 绿灯不含 macOS）"
+          fi
+          [ -z "$fail" ]

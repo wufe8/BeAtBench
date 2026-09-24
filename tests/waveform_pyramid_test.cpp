@@ -3,6 +3,8 @@
 // 纯内存合成数据，无磁盘/设备依赖，全确定性。
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "beatbench/audio/WaveformPyramid.hpp"
 
 using beatbench::audio::WaveformPyramid;
