@@ -60,7 +60,15 @@ jobs:
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build build --parallel
-          ctest --test-dir build --output-on-failure
+          # 与其它带 Qt 的 job 同口径：runner 无交互桌面，Qt 桥层测试要无头跑；
+          # 未导出 offscreen 时 slice_workspace_test 会在启动阶段挂到 ctest 超时
+          # （2026-10 首次真跑 v0.3.2 时踩到：Debug 的 windows-mingw-full 无此步骤差异，
+          #   而本 job 是 Release；两者都补上 offscreen 以消除环境差异）。
+          export QT_ROOT_DIR
+          export PATH="$QT_ROOT_DIR/bin:$PATH"
+          export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+          # 超时放宽：Release 首次运行 + 冷缓存下 20s（tests/CMakeLists 的 TIMEOUT）余量不足
+          ctest --test-dir build --output-on-failure --timeout 120
 
       - name: 打包（scripts/package-release.sh，含 staging 冒烟）
         shell: bash
