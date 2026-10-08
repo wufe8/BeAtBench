@@ -41,6 +41,11 @@
 - `check-version.sh` 新增 `--qt-floor`：文档同时宣传「CI/打包 Qt minor」与「代码 Qt 下限」
   时两者都算有效，否则 Qt 6.4 下限表述会被 `--strict` 判为过期而**阻塞发版**。
 - 去掉 `package.yml` 中与 `release.yml` 重复的 Windows 打包作业（同一 tag 不再构建两遍）。
+- **Qt 6.12 上无法构建**：Qt 6.12.0 的 `qmlcachegen` 在编译本模块时会确定性 SIGSEGV
+  （解析模块自生成的 `.qmltypes` 时崩溃，且无任何错误输出），使 Arch（系统 Qt 6.12）
+  的包与源码构建都失败。现在 Qt 6.12.x 上跳过 QML 字节码预编译（`NO_CACHEGEN`，
+  功能等价，仅损失一点首屏编译开销），绕过该上游缺陷；其余 Qt 版本行为不变。
+  详见 `doc/11` §2。
 
 ## [0.3.1] - 2026-09-20
 
