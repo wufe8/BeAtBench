@@ -7,13 +7,13 @@
 ### 新增
 
 - **Linux 发行版包与发布流水线**：新增 `package.yml`（tag `v*` / 手动触发）在 CI 产出
-  deb / rpm / arch 包与 Windows zip；每个 Linux 包在目标发行版容器内做安装冒烟
+  deb / rpm / arch 包；每个 Linux 包在目标发行版容器内做安装冒烟
   （Debian 12/13、Ubuntu 24.04/26.04、Fedora 43/44、Arch）。安装布局遵循发行版惯例
   （QML 模块进 Qt 导入目录、皮肤进 `/usr/share/beatbench/skins`），并随包提供
   `.desktop`、hicolor 图标与 AppStream 元数据。详见 `doc/11`。
-- **Windows 发布包 CI 化**：`release.yml`（发布线）与 `package.yml` 的 `windows-package`
-  job 都调用 `scripts/package-release.sh` 产出 zip 与 sha256，不再依赖本地 Windows 环境；
-  GitHub Release 资产由 `release.yml` 挂载。打包与发布包 Qt 统一 6.11.2。
+- **Windows 发布包 CI 化**：`release.yml`（发布线，tag 触发）跑完整回归后调
+  `scripts/package-release.sh` 产出 zip 与 sha256 并挂到 GitHub Release，不再依赖
+  本地 Windows 环境；回归/打包/发布包 Qt 统一 6.11.2。
 
 ### 变更
 

@@ -48,8 +48,8 @@
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
 守卫）。三平台的「能编译、测得过、GUI 能起画」由 CI 持续钉住
-（`.github/workflows/ci.yml`，详见 `doc/04` §4）；发布产物（Windows zip 与 Linux deb/rpm/arch）
-已由独立的 `package.yml` 在 CI 产出（见 `doc/11`），macOS 发布产物与实时音频输出的人工验证未排期。
+（`.github/workflows/ci.yml`，详见 `doc/04` §4）；Linux deb/rpm/arch 由 `package.yml`
+产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/11`），macOS 发布产物与实时音频输出的人工验证未排期。
 
 当前边界（两句）：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
 `.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
