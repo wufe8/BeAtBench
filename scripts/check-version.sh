@@ -24,8 +24,12 @@ cd "$(dirname "$0")/.."
 
 STRICT=0
 PRINT_NOTES=0
-QT_MINOR="6.11"
-QT_FLOOR=""
+# Qt 版本矩阵的**单一来源**（文档里出现这些版本都算有效，其它 Qt 6.x 判为过期示例）：
+#   6.11 = CI/打包所用 minor；6.12 = 有意记录的上游缺陷绕过说明；
+#   6.4  = 代码/发行版宣传的 Qt 下限。
+# 矩阵变化时只改这两行；pre-push 钩子与 release.yml 都用默认值，避免多处漂移。
+QT_MINOR="6.11,6.12"
+QT_FLOOR="6.4"
 ARG=""
 
 while [ $# -gt 0 ]; do
