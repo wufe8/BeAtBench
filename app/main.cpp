@@ -24,6 +24,8 @@
 #include <QTranslator>
 #include <QUrl>
 #include <QVariant>
+
+#include "beatbench/core/Version.hpp"
 #include <cstring>
 
 #ifdef _WIN32
@@ -202,7 +204,9 @@ int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("BeAtBench"));
     app.setApplicationName(QStringLiteral("BeAtBench"));
-    app.setApplicationVersion(QStringLiteral("0.3.1"));
+    // GUI 版本串同样取自单一来源 kVersion（QApplication::applicationVersion、关于页）
+    app.setApplicationVersion(QString::fromUtf8(beatbench::kVersion.data(),
+                                                 static_cast<int>(beatbench::kVersion.size())));
     qInstallMessageHandler(messageToLog);  // 调试期：Qt 消息落盘（GUI 无控制台）
 
     // 全局深色基线（doc/08 §2）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；

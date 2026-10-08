@@ -46,6 +46,10 @@
   的包与源码构建都失败。现在 Qt 6.12.x 上跳过 QML 字节码预编译（`NO_CACHEGEN`，
   功能等价，仅损失一点首屏编译开销），绕过该上游缺陷；其余 Qt 版本行为不变。
   详见 `doc/11` §2。
+- **版本一致性门禁补两块**：`check-version.sh` 新增硬性检查「`Version.hpp` 的 `kVersion`
+  必须与 CMakeLists 一致」（它是 CLI `version`、JSON 协议、GUI「关于」的版本来源，
+  与 CMakeLists 各写一份），`package-release.sh` 另断言包自报版本等于打包版本——
+  两层把「包名是 X 而二进制自报 Y」挡在打包/发版阶段。
 
 ## [0.3.1] - 2026-09-20
 

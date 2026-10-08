@@ -15,9 +15,11 @@
 #   1. CMakeLists.txt 的 project(... VERSION x.y.z) 与目标版本一致
 #   2. CHANGELOG.md 有 "## [x.y.z]" 小节，且小节里至少有一条内容
 #   3. README.md 里出现的发行物名 beatbench-vX.Y.Z-win64 必须与目标版本一致
+#   4. core/.../Version.hpp 的 kVersion 与 CMakeLists 版本一致
+#      （CLI `version`、JSON 协议 version、GUI「关于」都读它；v0.3.2 首发漏改过它）
 # 警告（--strict 时视为失败）:
-#   4. 被跟踪文档里的 Qt 版本示例与当前 Qt minor 不一致（如残留 /c/Qt/6.8.0）
-#   5. CHANGELOG 之外的文档里残留其它版本的发行物名
+#   5. 被跟踪文档里的 Qt 版本示例与当前 Qt minor 不一致（如残留 /c/Qt/6.8.0）
+#   6. CHANGELOG 之外的文档里残留其它版本的发行物名
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -101,6 +103,18 @@ if [ "${#readme_assets[@]}" -gt 0 ]; then
   else
     fail "README.md 里的发行物名是 ${readme_assets[*]}，与目标 v$VER 不一致（下载链接要跟着改）"
   fi
+fi
+
+# ---- 4. Version.hpp 的 kVersion（CLI/JSON/关于页的版本来源） ----
+VERSION_HPP="core/include/beatbench/core/Version.hpp"
+hpp_ver="$(grep -m1 -oE 'kVersion = "[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_HPP" 2>/dev/null |
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+if [ -z "$hpp_ver" ]; then
+  fail "读不到 $VERSION_HPP 的 kVersion"
+elif [ "$hpp_ver" != "${CMAKE_VER:-$VER}" ]; then
+  fail "Version.hpp 的 kVersion 是 $hpp_ver，与 CMakeLists 的 ${CMAKE_VER:-$VER} 不一致（包自报版本会错！）"
+else
+  echo "  ✓ Version.hpp: $hpp_ver"
 fi
 
 # ---- 4. Qt 版本示例残留（警告）----

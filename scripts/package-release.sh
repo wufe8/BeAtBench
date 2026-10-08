@@ -201,7 +201,15 @@ if [ "$SMOKE" = 1 ]; then
   grep -q "皮肤已运行时切换：skins/Aurora" "$STAGE/beatbench-qml-errors.log" 2>/dev/null || {
     echo "错误: 内置皮肤未生效（skins/ 未随包或路径解析失败）；日志尾部：" >&2
     tail -5 "$STAGE/beatbench-qml-errors.log" 2>/dev/null >&2; exit 1; }
-  ( cd "$STAGE" && ./beatbench-cli.exe version ) || { echo "错误: CLI 冒烟失败" >&2; exit 1; }
+  # CLI 版本断言：Version.hpp 的 kVersion 是 CLI/JSON/关于页的**版本来源**，与 CMakeLists
+  # 各写一份——v0.3.2 首次发布时就漏改了它，包名/metadata 是 0.3.2 而二进制自报 0.3.1。
+  # 这里把「包自报版本 == 打包版本」钉死在打包阶段（配合 check-version.sh 的硬性检查）。
+  cli_ver="$( cd "$STAGE" && ./beatbench-cli.exe version )" || { echo "错误: CLI 冒烟失败" >&2; exit 1; }
+  echo "    $cli_ver"
+  case "$cli_ver" in
+    *"$VER"*) ;;
+    *) echo "错误: 包自报版本不是 $VER（实际：$cli_ver）；Version.hpp 的 kVersion 漏改？" >&2; exit 1 ;;
+  esac
   rm -f "$OUT/.bb-smoke.png" "$STAGE/beatbench-qml-errors.log"
 else
   echo "==> 跳过冒烟（--skip-smoke）"
