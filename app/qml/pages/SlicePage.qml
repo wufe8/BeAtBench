@@ -568,9 +568,8 @@ Item {
             Layout.fillHeight: true
             spacing: 6
 
-            // 悬停态用 HoverHandler（Qt 6.0+ 被动处理器，不消费事件、不干扰拖拽）。
-            // 不用 SplitHandle.hovered（Qt 6.5 才引入，本包系统 Qt 下限是 6.4）；
-            // 同 EditPage 的 handle 注释。
+            // 悬停态用 HoverHandler（Qt 6.0+ 被动处理器，不消费事件、不干扰拖拽）；
+            // 避开 SplitHandle.hovered 的附加属性作用域坑（详见 EditPage handle 注释）。
             handle: Rectangle {
                 implicitWidth: 4
                 HoverHandler { id: sliceHandleHover }

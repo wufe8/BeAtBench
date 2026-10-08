@@ -101,7 +101,7 @@ cmake --build build-gui --parallel
   改跨平台相关代码先在本地用 GCC/Clang 过一遍。
 - **打包流水线**（`.github/workflows/package.yml`，独立于回归门禁）：tag `v*` 或手动
   dispatch 时产出 deb/rpm/arch 与 Windows zip（各发行版容器内安装冒烟 + Qt 6.4 探针），
-  详见 `doc/10`。
+  详见 `doc/11`。
 
 - ⚠️ **「无 Qt」≠「可离线」**：`audio/CMakeLists.txt` 无条件 FetchContent 拉 PortAudio；
   离线干净构建需 `-DFETCHCONTENT_SOURCE_DIR_PORTAUDIO=<已有源码>`（googletest 同理）。

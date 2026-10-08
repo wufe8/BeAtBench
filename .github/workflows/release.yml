@@ -4,7 +4,7 @@
 # 设计要点：
 # - **只有一个打包实现**：调 scripts/package-release.sh（与本地 scripts/release.sh 同一条路径），
 #   避免 CI 与本地各有一套打包逻辑而悄悄分叉。
-# - Qt 钉 6.11.1 = 发布包内嵌版本（CI 回归用的是 6.11.2，见 ci.yml；这个差异写进 release notes）。
+# - Qt 统一 6.11.2 = 回归 / 打包 / 发布包同一版本（见 ci.yml、package.yml）；内嵌版本写进 release notes。
 # - 版本一致性检查（scripts/check-version.sh --strict）放在打包**之前**：
 #   CMakeLists / CHANGELOG / README 下载名 任一处漏改就直接失败，不给「发完再补 commit」的机会。
 name: Release
@@ -22,7 +22,7 @@ permissions:
   contents: write
 
 env:
-  QT_VERSION: '6.11.1'
+  QT_VERSION: '6.11.2'
 
 jobs:
   windows-release:
@@ -98,8 +98,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
-          ZIP="out/beatbench-${TAG#v}-win64.zip"
+          # 产物名由 scripts/package-release.sh 决定（beatbench-v<VER>-win64.zip，带 v）
+          ZIP="out/beatbench-v${TAG#v}-win64.zip"
           SHA="$ZIP.sha256"
+          [ -f "$ZIP" ] || { echo "::error::找不到打包产物 $ZIP（package-release.sh 命名变了？）"; ls -l out; exit 1; }
+          [ -f "$SHA" ] || { echo "::error::找不到校验文件 $SHA"; exit 1; }
           ls -l "$ZIP" "$SHA"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ZIP" "$SHA" --clobber
