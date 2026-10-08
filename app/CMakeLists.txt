@@ -88,3 +88,48 @@ set_target_properties(beatbench PROPERTIES
   WIN32_EXECUTABLE TRUE   # Windows 下不弹控制台
   MACOSX_BUNDLE TRUE
 )
+
+# 发行版安装的皮肤数据目录（ThemeManager 兜底搜索基准；与安装规则同一事实来源）
+target_compile_definitions(beatbench PRIVATE
+  BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+
+# ---------- Linux 安装规则（发行版打包；doc/04 §4） ----------
+# 布局遵循各发行版惯例：可执行进 bin；QML 模块进构建所用 Qt 的 QML 导入目录；皮肤进
+# <datadir>/beatbench/skins；desktop/图标/metainfo 进标准位置。打包脚本用
+# `DESTDIR=<pkgroot> cmake --install` 复用本规则，包格式（deb/rpm/arch）只加元数据。
+# Windows 发布包由 scripts/package-release.sh 组装；macOS 为 .app，均不经本块。
+if(UNIX AND NOT APPLE)
+  install(TARGETS beatbench RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+  # QML 模块目录（qmldir + qml/ + qmltypes）：引擎按导入路径找 qmldir；类型文件由 qmldir 的
+  # prefer :/BeatBench/ 指向可执行内嵌资源（与磁盘副本同源）。构建期 dir_map.qrc 含绝对
+  # 路径、仅供 qmlcachegen 使用，不安装。
+  if(NOT DEFINED BEATBENCH_QML_IMPORT_DIR)
+    if(DEFINED QT6_INSTALL_PREFIX AND DEFINED QT6_INSTALL_QML)
+      # Qt6 安装信息（QtInstallPaths.cmake）：Debian 系 /usr/lib/<triplet>/qt6/qml、
+      # Fedora /usr/lib64/qt6/qml、Arch /usr/lib/qt6/qml；QT6_INSTALL_QML 为相对路径。
+      set(BEATBENCH_QML_IMPORT_DIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_QML}")
+    else()
+      set(BEATBENCH_QML_IMPORT_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/qt6/qml")
+    endif()
+  endif()
+  message(STATUS "QML 模块安装目录: ${BEATBENCH_QML_IMPORT_DIR}")
+  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/BeatBench/"
+          DESTINATION "${BEATBENCH_QML_IMPORT_DIR}/BeatBench"
+          PATTERN "beatbench_qml_module_dir_map.qrc" EXCLUDE)
+
+  # 内置皮肤与桌面集成素材
+  install(DIRECTORY "${CMAKE_SOURCE_DIR}/skins/" DESTINATION "${CMAKE_INSTALL_DATADIR}/beatbench/skins")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/beatbench.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.wufe8.BeAtBench.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+  foreach(size IN ITEMS 16 24 32 48 64 128 256 512)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/icons/beatbench-${size}.png"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps"
+            RENAME beatbench.png)
+  endforeach()
+
+  # 许可与文档（Arch/Fedora 惯例用 share/licenses；deb 打包脚本另补 copyright）
+  install(FILES "${CMAKE_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/beatbench")
+  install(FILES "${CMAKE_SOURCE_DIR}/README.md" "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/beatbench")
+endif()

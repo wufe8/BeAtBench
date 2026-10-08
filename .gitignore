@@ -7,6 +7,7 @@ local/
 /build-uitest/
 /cmake-build-*/
 /out/
+/out-linux/
 *.user
 
 # vcpkg

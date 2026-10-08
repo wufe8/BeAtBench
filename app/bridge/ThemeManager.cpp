@@ -263,7 +263,12 @@ QString ThemeManager::skinDirResolved(const QString& name) const {
 //   2. exe 目录  —— 发布包中 skins/ 与 beatbench.exe 同级；快捷方式/其他启动器不保证 cwd
 //   3. exe 上级  —— 开发期 exe 在 build-*/app/，皮肤在仓库根
 //   4. "..", "../..", "../../.." —— 开发期相对回退（cwd 在 build-*/app/ 等子目录）
+//   5. 数据目录  —— 发行版安装：<dataDir>/skins（/usr/share/beatbench），最后的兜底
 QStringList ThemeManager::skinSearchBases() {
+    return skinSearchBases(QString::fromUtf8(BEATBENCH_DATA_DIR));
+}
+
+QStringList ThemeManager::skinSearchBases(const QString& dataDir) {
     QStringList bases;
     bases << QStringLiteral(".");
     if (QCoreApplication::instance()) {
@@ -275,6 +280,7 @@ QStringList ThemeManager::skinSearchBases() {
         }
     }
     bases << QStringLiteral("..") << QStringLiteral("../..") << QStringLiteral("../../..");
+    if (!dataDir.isEmpty()) bases << dataDir;
     return bases;
 }
 

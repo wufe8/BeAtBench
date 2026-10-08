@@ -179,7 +179,7 @@ BeAtBench v$VER (M1-M6)
 许可
 ----
   GPL-3.0（本程序源码见项目仓库 LICENSE 文件）。
-  内置 Qt 6.11.1 运行时按 LGPL-3.0 分发（https://www.qt.io/licensing）。
+  内置 Qt 6 运行时按 LGPL-3.0 分发（版本随构建所用 Qt；https://www.qt.io/licensing）。
 EOF
 cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 

@@ -7,6 +7,9 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# 禁止 googletest 注册安装规则：`cmake --install` 会执行第三方子项目的 install()，
+# 会把 gtest/gmock 头与库装进系统（且按需构建的目标不存在时直接失败）——打包必须干净。
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.cpp
@@ -177,6 +180,9 @@ if (Qt6Core_FOUND)
             beatbench_core Qt6::Gui Qt6::Core GTest::gtest_main)
         # ThemeManager 是 Q_OBJECT：需 AUTOMOC 生成 staticMetaObject。
         set_target_properties(theme_manager_test PROPERTIES AUTOMOC ON)
+        # 发行版数据目录兜底基准与 app 目标同值（保证单测与安装布局一致）
+        target_compile_definitions(theme_manager_test PRIVATE
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
         beatbench_set_warnings(theme_manager_test)
         add_test(NAME theme_manager_tests COMMAND theme_manager_test)
     endif()

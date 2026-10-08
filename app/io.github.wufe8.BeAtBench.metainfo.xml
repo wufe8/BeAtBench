@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- 发行版软件中心元数据（AppStream）。ID 取上游仓库标识（github.com/wufe8/BeAtBench）。
+     版本/发布日期不在此处硬编码（避免与 CMakeLists 双写）；如后续需要 release notes，
+     由打包脚本从 CHANGELOG 生成。 -->
+<component type="desktop-application">
+  <id>io.github.wufe8.BeAtBench</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+
+  <name>BeAtBench</name>
+  <developer id="io.github.wufe8">
+    <name>wufe8</name>
+  </developer>
+  <summary>BMS chart editor</summary>
+  <summary xml:lang="zh-CN">BMS 谱面编辑器</summary>
+
+  <description>
+    <p>
+      BeAtBench is a cross-platform BMS chart editor. It supports editing notes,
+      long notes and mines, timing (BPM/STOP), meta information, samples, BGA,
+      slice/keysound workflows, audio preview, and lint checks.
+    </p>
+    <p xml:lang="zh-CN">
+      BeAtBench 是一个跨平台 BMS 谱面编辑器，支持 note、长音、地雷编辑，
+      时间轴（BPM/STOP）、元信息、采样、BGA、切音工作台、试听与 lint 检查。
+    </p>
+  </description>
+
+  <launchable type="desktop-id">beatbench.desktop</launchable>
+  <url type="homepage">https://github.com/wufe8/BeAtBench</url>
+  <url type="bugtracker">https://github.com/wufe8/BeAtBench/issues</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://raw.githubusercontent.com/wufe8/BeAtBench/master/demo.png</image>
+      <caption>Edit page</caption>
+    </screenshot>
+  </screenshots>
+</component>

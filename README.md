@@ -42,14 +42,14 @@
 
 | 平台 | 状态 |
 |---|---|
-| Windows 10/11 64 位 |  当前发布平台，提供预编译 zip；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
-| Linux x86_64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（GCC，Qt 6.11.2）；无预编译包，实时音频输出未人工验证 |
+| Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/10`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
+| Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出未人工验证 |
 | macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2，非阻塞门禁）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
 守卫）。三平台的「能编译、测得过、GUI 能起画」由 CI 持续钉住
-（`.github/workflows/ci.yml`，详见 `doc/04` §4）；但**当前只发布 Windows 预编译包**，
-Linux/macOS 发布产物与实时音频输出的人工验证未排期。
+（`.github/workflows/ci.yml`，详见 `doc/04` §4）；发布产物（Windows zip 与 Linux deb/rpm/arch）
+已由独立的 `package.yml` 在 CI 产出（见 `doc/10`），macOS 发布产物与实时音频输出的人工验证未排期。
 
 当前边界（两句）：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
 `.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
@@ -67,13 +67,15 @@ macOS 打包范畴；② GUI 的悬停 / 拖拽等交互行为在 Linux/macOS **
 | [`doc/07-M7项目化工作流设计.md`](doc/07-M7项目化工作流设计.md) | **M7 设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
 | [`doc/08-QML技术选型与皮肤系统设计.md`](doc/08-QML技术选型与皮肤系统设计.md) | GUI 栈决策（Qt Quick/QML）+ 分层皮肤系统（L1/L2/L3） |
 | [`doc/09-操作注册设计.md`](doc/09-操作注册设计.md) | UI 动作注册表（换肤/快捷键前置） |
+| [`doc/10-打包与发布.md`](doc/10-打包与发布.md) | **打包/发布**：CI 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布放行流程 |
 | [`doc/05-前端界面设计构思.md`](doc/05-前端界面设计构思.md) | 页面式信息架构、区域设计、设计 token、术语 |
 | [`doc/BMS文件分析笔记.md`](doc/BMS文件分析笔记.md) | BMS 格式逆向笔记 |
 
 
 ## 快速构建
 
-> GUI 需要 Qt **6.11+**（CI 验证版本 6.11.2；发布包内嵌 6.11.1）。
+> GUI 需要 Qt **6.4+**（Linux 系统 Qt 下限，CI 的 `probe-qt64` 持续验证；CI 另在 6.11.2 上跑全量；
+> Windows 发布包内嵌 CI 所用 Qt 版本 6.11.2）。
 
 ### CLI + 测试
 
@@ -104,10 +106,10 @@ $env:BB_SKIP_REAL=1
 build\tests\Debug\beatbench_tests.exe
 ```
 
-### GUI（Linux / macOS，Qt 6.11+）
+### GUI（Linux / macOS，Qt 6.4+）
 
 ```bash
-# QT_PREFIX 换成你的 Qt 6.11 安装位置（发行版包或 aqt 均可）
+# QT_PREFIX 换成你的 Qt 6.4+ 安装位置（发行版包或 aqt 均可）
 cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
   -DBEATBENCH_BUILD_TESTS=OFF
@@ -125,12 +127,12 @@ exe 同级没有 `BeatBench/` QML 模块目录，运行时需 `QML2_IMPORT_PATH`
 
 ### GUI（Windows MinGW）
 
-> 需自备 Qt 6.11+（含 Quick/QuickControls2）与匹配的 MinGW 编译器。下面的 `QT_PREFIX`/
+> 需自备 Qt 6.4+（含 Quick/QuickControls2）与匹配的 MinGW 编译器。下面的 `QT_PREFIX`/
 > `MINGW_BIN` 是**你自己的安装路径**，换成你的实际位置即可（示例值仅作格式参考）。
 
 ```bash
-# 改为你自己的路径（Windows 下可用 /c/... 或 C:/... 写法）
-export QT_PREFIX=/c/Qt/6.11.1/mingw_64
+# 改为你自己的路径（Windows 下可用 /c/... 或 C:/... 写法；CI 打包用 6.11.2）
+export QT_PREFIX=/c/Qt/6.11.2/mingw_64
 export MINGW_BIN=/c/Qt/Tools/mingw1310_64/bin
 
 # 配置（Git Bash；用 `-G "MinGW Makefiles"` 或 Ninja 均可）

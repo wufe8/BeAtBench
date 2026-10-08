@@ -1,0 +1,267 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# 打包流水线（Package）：发布级产物与兼容探针，独立于 ci.yml 的回归门禁。
+#
+# 设计决策（为什么长这样）：
+# - 职责分离：ci.yml 守每次 push/PR 的回归；本 workflow 只在需要产物时跑（tag / 手动）。
+# - Qt 策略是系统 Qt：deb 面向 Debian 12+ 与 Ubuntu 24.04 LTS+，rpm 面向 Fedora 43+，
+#   arch 面向 Arch，故最低 Qt 口径为 6.4。probe-qt64 在 ubuntu:24.04（Qt 6.4.2）容器里
+#   构建 + 全量单测 + GUI 冒烟，防止代码悄悄用上 6.5+ API 而破坏已宣传的发行版覆盖。
+# - 容器构建用 docker run 而非 container job：最小发行版镜像里 JS action 可能缺 node；
+#   checkout 在宿主机完成，源码只读挂载，构建/冒烟产物经 /out 卷带回宿主机。
+# - 触发：tag v*（发布）与手动 dispatch（演练/重跑）；tag 与 CMakeLists 版本的
+#   一致性由 version-check job 校验，防止产物版本与标签脱节。
+name: Package
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Linux 系统 Qt 下限（Ubuntu 24.04 LTS 的 Qt 主次版本）；探针容器漂移会被断言拦下。
+  QT_FLOOR: '6.4'
+  # Windows 发布链 Qt（与 ci.yml 同版本；CI 打包产物内嵌该版本运行时）
+  QT_VERSION: '6.11.2'
+
+jobs:
+  # ---------- 版本一致性：tag 必须等于 v<CMakeLists 版本>（产物与标签一一对应） ----------
+  version-check:
+    name: version-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: tag 与 CMakeLists 版本一致性
+        run: |
+          set -euo pipefail
+          ver="$(grep -m1 -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | cut -d' ' -f2)"
+          [ -n "$ver" ] || { echo "::error::无法从 CMakeLists.txt 读取版本号"; exit 1; }
+          echo "CMakeLists 版本: $ver；ref: ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${ver}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 CMakeLists 版本 v${ver} 不一致；先推进版本再打 tag"
+            exit 1
+          fi
+
+  # ---------- 兼容探针：发行版系统 Qt 下限（Ubuntu 24.04 = Qt 6.4.2） ----------
+  probe-qt64:
+    name: probe-qt64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build + tests + GUI smoke in ubuntu:24.04 (system Qt 6.4)
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/probe-out"; mkdir -p "$OUT"
+          docker run --rm \
+            -e QT_FLOOR="${QT_FLOOR}" \
+            -v "$PWD:/src:ro" \
+            -v "$OUT:/out" \
+            ubuntu:24.04 bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends \
+                build-essential cmake ninja-build git ca-certificates \
+                qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+                qml6-module-qtqml qml6-module-qtqml-workerscript \
+                qml6-module-qtquick qml6-module-qtquick-controls \
+                qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+                qml6-module-qtquick-window qml6-module-qtquick-dialogs \
+                libasound2-dev
+              qt_ver=$(dpkg-query -W -f "\${Version}" qt6-base-dev)
+              echo "== probe: system Qt $qt_ver"
+              echo "$qt_ver" | grep -q "^${QT_FLOOR}\." || {
+                echo "错误: 探针容器 Qt 不再是 ${QT_FLOOR}.x，下限口径漂移，需重盘目标矩阵" >&2
+                exit 1
+              }
+              cmake -S /src -B /tmp/build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+                -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+              cmake --build /tmp/build --parallel
+              ctest --test-dir /tmp/build --output-on-failure
+              mkdir -p /tmp/work && cp -r /src/skins /tmp/work/
+              cd /tmp/work
+              QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+                /tmp/build/app/beatbench --screenshot smoke.png --apply-skin Aurora || true
+              # 失败诊断先于断言：QML 错误都在这个日志里；先带回宿主机再断言
+              cp -f smoke.png beatbench-qml-errors.log /out/ 2>/dev/null || true
+              echo "=== beatbench-qml-errors.log ==="
+              cat beatbench-qml-errors.log 2>/dev/null || echo "(无日志)"
+              test -f smoke.png
+              grep -q "皮肤已运行时切换：" beatbench-qml-errors.log
+              grep -q "已运行时切换：.*Aurora" beatbench-qml-errors.log
+            '
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-qt64
+          path: ${{ runner.temp }}/probe-out
+          if-no-files-found: ignore
+
+  # ---------- Linux 发行版包（系统 Qt；各发行版容器内构建 + 目标发行版安装冒烟） ----------
+  linux-deb:
+    name: linux-deb
+    needs: version-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build deb (baseline Debian 12 / Qt 6.4)
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-deb"; mkdir -p "$OUT"
+          docker run --rm -e OUT=/out \
+            -v "$PWD:/src:ro" -v "$OUT:/out" debian:12 \
+            bash /src/scripts/package-linux.sh deb
+      # 单份 deb 要同时覆盖 Debian 12+ 与 Ubuntu 24.04+（含 t64 改名）；每个目标发行版
+      # 都要在干净容器里实际安装 + 跑 GUI 无头冒烟，依赖名/符号缺口只有这样才会暴露。
+      - name: Install smoke on target distros
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-deb"
+          for img in debian:12 debian:13 ubuntu:24.04 ubuntu:26.04; do
+            echo "== 安装冒烟: $img"
+            docker run --rm -v "$OUT:/pkgs:ro" -v "$PWD:/src:ro" "$img" \
+              bash /src/scripts/verify-linux-package.sh deb /pkgs
+          done
+      - name: Upload deb packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: beatbench-linux-deb
+          path: ${{ runner.temp }}/pkg-deb
+          if-no-files-found: error
+
+  linux-rpm:
+    name: linux-rpm
+    needs: version-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build rpm (baseline Fedora 43)
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-rpm"; mkdir -p "$OUT"
+          docker run --rm -e OUT=/out \
+            -v "$PWD:/src:ro" -v "$OUT:/out" fedora:43 \
+            bash /src/scripts/package-linux.sh rpm
+      - name: Install smoke on target distros
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-rpm"
+          for img in fedora:43 fedora:44; do
+            echo "== 安装冒烟: $img"
+            docker run --rm -v "$OUT:/pkgs:ro" -v "$PWD:/src:ro" "$img" \
+              bash /src/scripts/verify-linux-package.sh rpm /pkgs
+          done
+      - name: Upload rpm packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: beatbench-linux-rpm
+          path: ${{ runner.temp }}/pkg-rpm
+          if-no-files-found: error
+
+  linux-arch:
+    name: linux-arch
+    needs: version-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build arch package (rolling)
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-arch"; mkdir -p "$OUT"
+          docker run --rm -e OUT=/out \
+            -v "$PWD:/src:ro" -v "$OUT:/out" archlinux:base-devel \
+            bash /src/scripts/package-linux.sh arch
+      - name: Install smoke on Arch
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-arch"
+          docker run --rm -v "$OUT:/pkgs:ro" -v "$PWD:/src:ro" archlinux:base-devel \
+            bash /src/scripts/verify-linux-package.sh arch /pkgs
+      - name: Upload arch packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: beatbench-linux-arch
+          path: ${{ runner.temp }}/pkg-arch
+          if-no-files-found: error
+
+  # ---------- Windows 发布包（复用 scripts/package-release.sh，MinGW + windeployqt） ----------
+  windows-package:
+    name: windows-package
+    needs: version-check
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Qt (win64_mingw) + MinGW/Ninja toolchain
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_mingw
+          # Qt 6.11 新仓库布局需要 aqt master（同 ci.yml），钉 commit 保确定性
+          aqtsource: 'aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659'
+          tools: 'tools_mingw1310 tools_ninja'
+          add-tools-to-path: true
+          cache: true
+          cache-key-prefix: install-qt-windows-mingw
+      - name: Package (Release + windeployqt + smoke)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export QT_ROOT="$QT_ROOT_DIR"
+          # Git Bash 的 command -v 返回不带扩展名的路径；CMake 需要真实存在的 .exe
+          CXX_BIN="$(command -v g++)"
+          if [ -x "${CXX_BIN}.exe" ]; then CXX_BIN="${CXX_BIN}.exe"; fi
+          export CXX_BIN
+          NINJA_BIN="$(command -v ninja)"
+          if [ -x "${NINJA_BIN}.exe" ]; then NINJA_BIN="${NINJA_BIN}.exe"; fi
+          export NINJA_BIN
+          # 7-Zip 兜底（脚本按 zip → 7z 顺序选；Git Bash 无 zip）
+          export PATH="$PATH:/c/Program Files/7-Zip"
+          # 无头冒烟：Windows runner 无交互桌面，offscreen 渲染（与 ci.yml 同口径）
+          export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+          bash scripts/package-release.sh
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: beatbench-windows
+          path: |
+            out/*.zip
+            out/*.zip.sha256
+          if-no-files-found: error
+
+  # ---------- 汇总：一屏看全各 job 结论（artifact 明细在各自 job） ----------
+  summary:
+    name: package-summary
+    needs: [version-check, probe-qt64, linux-deb, linux-rpm, linux-arch, windows-package]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      R_VERSION: ${{ needs.version-check.result }}
+      R_PROBE: ${{ needs.probe-qt64.result }}
+      R_DEB: ${{ needs.linux-deb.result }}
+      R_RPM: ${{ needs.linux-rpm.result }}
+      R_ARCH: ${{ needs.linux-arch.result }}
+      R_WIN: ${{ needs.windows-package.result }}
+    steps:
+      - name: 汇总各 job 结论
+        run: |
+          set -euo pipefail
+          ok=1
+          for pair in "version-check:$R_VERSION" "probe-qt64:$R_PROBE" "linux-deb:$R_DEB" "linux-rpm:$R_RPM" "linux-arch:$R_ARCH" "windows-package:$R_WIN"; do
+            name="${pair%%:*}"; result="${pair#*:}"
+            echo "- $name: $result"
+            [ "$result" = "success" ] || ok=0
+          done
+          [ "$ok" = 1 ] || { echo "::error::打包流水线存在非 success 的 job"; exit 1; }

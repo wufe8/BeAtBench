@@ -2,6 +2,24 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [Unreleased]
+
+### 新增
+
+- **Linux 发行版包与发布流水线**：新增 `package.yml`（tag `v*` / 手动触发）在 CI 产出
+  deb / rpm / arch 包与 Windows zip；每个 Linux 包在目标发行版容器内做安装冒烟
+  （Debian 12/13、Ubuntu 24.04/26.04、Fedora 43/44、Arch）。安装布局遵循发行版惯例
+  （QML 模块进 Qt 导入目录、皮肤进 `/usr/share/beatbench/skins`），并随包提供
+  `.desktop`、hicolor 图标与 AppStream 元数据。详见 `doc/10`。
+- **Windows 发布包 CI 化**：`windows-package` job 调用 `scripts/package-release.sh`
+  产出 zip 与 sha256，不再依赖本地 Windows 环境。
+
+### 变更
+
+- **GUI 的 Qt 支持面扩大为 6.4+**：QML 入口加载与分隔条悬停高亮改用 Qt 6.4 可用写法；
+  CI 新增 `probe-qt64`（Ubuntu 24.04 系统 Qt 6.4.2）持续钉住下限。原口径
+  “Qt 6.11+”更新为“6.4+（CI 另在 6.11.2 上跑全量）”。
+
 ## [0.3.1] - 2026-09-20
 
 > 补丁版：修复 v0.1.0–v0.3.0 三版发布包**未随包分发内置皮肤**（`skins/`）的问题，并加入
