@@ -36,9 +36,25 @@ add_executable(beatbench
 target_link_libraries(beatbench PRIVATE beatbench_core beatbench_audio Qt6::Quick Qt6::QuickControls2)
 beatbench_set_warnings(beatbench)
 
+# ⚠️ Qt 6.12.0 的 qmlcachegen 在本模块上**确定性 SIGSEGV**（已知上游问题，2026-10 实测）：
+#   构建过程中 qmltyperegistrar 生成 BeatBench/beatbench.qmltypes 之后，编译
+#   qml/components/ChartView.qml 的 qmlcachegen 必然崩溃（rc=139 / SIGSEGV，si_addr=0xb8，
+#   stderr 全空）——表现为难以定位的「静默失败」，Arch（系统 Qt 6.12）会直接构建不出来。
+#   复现要点：单独喂任一 Component 块或去掉全部 Property 都不崩，多组件带属性才崩（疑为聚合/
+#   规模触发的空指针）；移走 qmltypes 或换成空 qmltypes 则编译成功。
+#   因此这里在 6.12.x 上**跳过 QML 字节码预编译**（NO_CACHEGEN）：QML 仍在资源里、运行时编译，
+#   功能等价，只损失一点首屏编译开销；Qt 修复该 bug 后即可删除本绕过。
+#   依据：doc/11-打包与发布.md §2；Qt 文档 qt_add_qml_module 的 NO_CACHEGEN 选项。
+set(BEATBENCH_QML_NO_CACHEGEN "")
+if(Qt6_VERSION VERSION_GREATER_EQUAL 6.12 AND Qt6_VERSION VERSION_LESS 6.13)
+  message(STATUS "Qt ${Qt6_VERSION}：跳过 QML 字节码预编译（qmlcachegen 在本模块上崩溃，见 app/CMakeLists 注释）")
+  set(BEATBENCH_QML_NO_CACHEGEN NO_CACHEGEN)
+endif()
+
 qt_add_qml_module(beatbench
     URI BeatBench
     VERSION 1.0
+    ${BEATBENCH_QML_NO_CACHEGEN}
     QML_FILES
         qml/Main.qml
         qml/SessionController.qml
