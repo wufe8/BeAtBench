@@ -13,12 +13,28 @@
 
 [GitHub Releases](https://github.com/wufe8/BeAtBench/releases)：
 
-1. 下载 `beatbench-v0.3.1-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
+**Windows 10/11 64 位（免安装）**
+
+1. 下载 `beatbench-v0.3.2-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
 2. 双击 `beatbench.exe` 启动图形界面，或运行 `beatbench-cli.exe` 使用命令行；
-3. Windows 10/11 64 位，无需安装运行库，Qt 运行时已内置。
+3. 无需安装运行库，Qt 运行时（6.11.2）已内置。
 
 >  请整目录保留解压结果：`skins/`（内置皮肤）、`BeatBench/`（QML 模块）与 Qt DLL 必须与
 > `beatbench.exe` 保持同级，单独拷贝 exe 会缺少皮肤与界面资源。
+
+**Linux x86_64（deb / rpm / arch）**
+
+发行版包使用**系统 Qt**（需 Qt 6.4+），GUI 与 CLI 同包安装到 `/usr/bin`：
+
+```bash
+sudo apt install ./beatbench_0.3.2-1_amd64.deb      # Debian 12+ / Ubuntu 24.04+
+sudo dnf install ./beatbench-0.3.2-1.fc43.x86_64.rpm # Fedora 43+
+sudo pacman -U ./beatbench-0.3.2-1-x86_64.pkg.tar.zst # Arch
+```
+
+装好后直接运行 `beatbench`（或 `beatbench-cli`）；皮肤在 `/usr/share/beatbench/skins`，
+桌面图标与 start 菜单项随包提供。若界面中文显示为方块，安装一套 CJK 字体
+（如 `fonts-noto-cjk` / `noto-fonts-cjk`）。
 
 **打开文件**：菜单「文件 → 打开」（Ctrl+O）；也可以把谱面 / 音频 / MIDI 文件
 **拖进窗口**、**拖到 `beatbench.exe` 图标**，或双击已关联的文件——谱面进编辑页，

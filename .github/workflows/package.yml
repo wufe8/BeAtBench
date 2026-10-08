@@ -12,6 +12,8 @@
 #   一致性由 version-check job 校验，防止产物版本与标签脱节。
 # - **Windows 发布包不在这里**：由 `.github/workflows/release.yml`（发布线）跑完整回归后
 #   调同一个 scripts/package-release.sh 并挂到 GitHub Release（避免同一 tag 构建两遍）。
+# - 本流水线的产物在 tag 触发时由 attach-to-release 作业挂到 release.yml 建好的同一个
+#   Release（只附加产物，不写标题/说明，避免两处都可写 Release）。
 name: Package
 
 on:
@@ -195,10 +197,53 @@ jobs:
           path: ${{ runner.temp }}/pkg-arch
           if-no-files-found: error
 
+  # ---------- 挂载到 Release：把 Linux 包附到 release.yml 建好的同一个 Release ----------
+  # 为什么是「等」而不是「建」：Release 的标题/说明由 release.yml 单一维护（CHANGELOG 段落 +
+  # 构建环境），这里只负责把包附上去，避免两处都可写 Release 而打架。release.yml 要先跑完整
+  # 回归才建 Release（可能 20~40 分钟），故轮询等待；探测不到就明确失败，不静默丢产物。
+  attach-to-release:
+    name: attach-to-release
+    needs: [version-check, linux-deb, linux-rpm, linux-arch]
+    if: github.ref_type == 'tag'          # 手动 dispatch 到分支时不挂（没有对应 Release）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write                     # 覆盖 workflow 级 contents: read，仅本作业需要
+    steps:
+      - name: 汇总三个格式的产物
+        uses: actions/download-artifact@v8
+        with:
+          pattern: beatbench-linux-*
+          path: dist
+          merge-multiple: true
+      - name: 等 release.yml 建好 Release 后上传
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "== 待上传产物 =="
+          ls -l dist
+          [ -n "$(ls -A dist)" ] || { echo "::error::没有可上传的产物"; exit 1; }
+          # 轮询上限 ~50 分钟（release.yml 全量回归 + 打包 + 建 Release）
+          for i in $(seq 1 100); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "== Release $TAG 已就绪（第 $i 次探测，约 $(( i * 30 / 60 )) 分钟）=="
+              gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+              echo "== 挂载完成 =="
+              gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+                --jq '.assets[].name'
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::等待 $TAG 的 Release 超时（release.yml 失败？）——包已在上方 artifact 里，可手动上传"
+          exit 1
+
   # ---------- 汇总：一屏看全各 job 结论（artifact 明细在各自 job） ----------
   summary:
     name: package-summary
-    needs: [version-check, probe-qt64, linux-deb, linux-rpm, linux-arch]
+    needs: [version-check, probe-qt64, linux-deb, linux-rpm, linux-arch, attach-to-release]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -208,14 +253,20 @@ jobs:
       R_DEB: ${{ needs.linux-deb.result }}
       R_RPM: ${{ needs.linux-rpm.result }}
       R_ARCH: ${{ needs.linux-arch.result }}
+      R_ATTACH: ${{ needs.attach-to-release.result }}
     steps:
       - name: 汇总各 job 结论
         run: |
           set -euo pipefail
           ok=1
-          for pair in "version-check:$R_VERSION" "probe-qt64:$R_PROBE" "linux-deb:$R_DEB" "linux-rpm:$R_RPM" "linux-arch:$R_ARCH"; do
+          # attach-to-release 在非 tag 触发时是 skipped，属预期，不算失败
+          for pair in "version-check:$R_VERSION" "probe-qt64:$R_PROBE" "linux-deb:$R_DEB" "linux-rpm:$R_RPM" "linux-arch:$R_ARCH" "attach-to-release:$R_ATTACH"; do
             name="${pair%%:*}"; result="${pair#*:}"
             echo "- $name: $result"
-            [ "$result" = "success" ] || ok=0
+            case "$result" in
+              success) ;;
+              skipped) [ "$name" = "attach-to-release" ] || ok=0 ;;
+              *) ok=0 ;;
+            esac
           done
           [ "$ok" = 1 ] || { echo "::error::打包流水线存在非 success 的 job"; exit 1; }

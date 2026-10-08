@@ -11,7 +11,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # 于是没有语言被启用 → C 目标报 "cannot determine linker language"。在父项目启用 C 即可
 # 全局覆盖，且**跨平台通用**（原先靠 audio/patch_portaudio.ps1 往 upstream 首行插
 # ENABLE_LANGUAGE(C)，那既依赖 PowerShell，也与平台无关地必要——2026-09 改为本方案）。
-project(beatbench VERSION 0.3.1 LANGUAGES C CXX)
+project(beatbench VERSION 0.3.2 LANGUAGES C CXX)
 
 # 安装路径变量（GNUInstallDirs：CMAKE_INSTALL_BINDIR/DATADIR/FULL_DATADIR 等）。
 # 供 app/cli 的 Linux 安装规则使用（发行版打包，见 app/CMakeLists 末尾）。
