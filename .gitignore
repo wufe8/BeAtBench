@@ -3,6 +3,8 @@ local/
 # 构建产物
 /build/
 /build-gui/
+/build-check/
+/build-msvc/
 /build-release/
 /build-uitest/
 /cmake-build-*/

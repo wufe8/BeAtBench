@@ -269,8 +269,10 @@ Item {
 
         // 分隔条（拖拽调宽；hover 高亮提示可拖）
         // 悬停态用 HoverHandler（Qt 6.0+ 被动处理器：不消费鼠标事件、不干扰 SplitView 拖拽）。
-        // 不用 SplitHandle.hovered——它 Qt 6.5 才引入，本包系统 Qt 下限是 6.4；
-        // 也不用 SplitView.hovered（非官方附加属性，Qt 6.11 起告警且高亮不生效）。
+        // 不用 SplitHandle.hovered：它是**附加属性**，绑定到「声明它的对象」——嵌套子 Rectangle
+        // 裸写会拿到自己的实例（高亮不生效），Qt 6.11 起还有附加属性访问告警；
+        // 也不用非官方的 SplitView.hovered。HoverHandler 用 id 引用，没有这个作用域坑。
+        // ⚠️ 悬停高亮无法由 CI 无头冒烟覆盖，改动后需人工确认（Qt 6.11 + 发行版 Qt 各一次）。
         handle: Rectangle {
             id: handleItem
             color: Theme.border

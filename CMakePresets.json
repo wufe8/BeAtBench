@@ -1,0 +1,65 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "core",
+      "displayName": "core + CLI + audio（无 Qt，Ninja）",
+      "description": "无 Qt 的回归路径。CI 的 linux-core / windows-msvc-core 同款。Windows 下需 MinGW（或 VS 开发者命令行）的编译器已在 PATH。",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BEATBENCH_BUILD_TESTS": "ON",
+        "BEATBENCH_BUILD_APP": "OFF",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      }
+    },
+    {
+      "name": "gui",
+      "displayName": "全量 + GUI（Ninja，Qt 6.11+）",
+      "description": "全量回归路径。需要 QT_PREFIX 指向 Qt 6.11+ 安装目录，或把 Qt 的 bin 放进 PATH。",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-gui",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BEATBENCH_BUILD_TESTS": "ON",
+        "BEATBENCH_BUILD_APP": "ON",
+        "CMAKE_PREFIX_PATH": "$env{QT_PREFIX}",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      }
+    },
+    {
+      "name": "check",
+      "displayName": "本地门禁（scripts/check.sh 用）",
+      "description": "独立构建目录，避免和日常 build/ 或 build-gui/ 互相干扰。",
+      "inherits": "gui",
+      "binaryDir": "${sourceDir}/build-check"
+    }
+  ],
+  "buildPresets": [
+    { "name": "core", "configurePreset": "core" },
+    { "name": "gui", "configurePreset": "gui" },
+    { "name": "check", "configurePreset": "check" }
+  ],
+  "testPresets": [
+    {
+      "name": "core",
+      "configurePreset": "core",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "gui",
+      "configurePreset": "gui",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "check",
+      "configurePreset": "check",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    }
+  ]
+}

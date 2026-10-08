@@ -13,12 +13,28 @@
 
 [GitHub Releases](https://github.com/wufe8/BeAtBench/releases)：
 
-1. 下载 `beatbench-v0.3.1-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
+**Windows 10/11 64 位（免安装）**
+
+1. 下载 `beatbench-v0.3.2-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
 2. 双击 `beatbench.exe` 启动图形界面，或运行 `beatbench-cli.exe` 使用命令行；
-3. Windows 10/11 64 位，无需安装运行库，Qt 运行时已内置。
+3. 无需安装运行库，Qt 运行时（6.11.2）已内置。
 
 >  请整目录保留解压结果：`skins/`（内置皮肤）、`BeatBench/`（QML 模块）与 Qt DLL 必须与
 > `beatbench.exe` 保持同级，单独拷贝 exe 会缺少皮肤与界面资源。
+
+**Linux x86_64（deb / rpm / arch）**
+
+发行版包使用**系统 Qt**（需 Qt 6.4+），GUI 与 CLI 同包安装到 `/usr/bin`：
+
+```bash
+sudo apt install ./beatbench_0.3.2-1_amd64.deb      # Debian 12+ / Ubuntu 24.04+
+sudo dnf install ./beatbench-0.3.2-1.fc43.x86_64.rpm # Fedora 43+
+sudo pacman -U ./beatbench-0.3.2-1-x86_64.pkg.tar.zst # Arch
+```
+
+装好后直接运行 `beatbench`（或 `beatbench-cli`）；皮肤在 `/usr/share/beatbench/skins`，
+桌面图标与 start 菜单项随包提供。若界面中文显示为方块，安装一套 CJK 字体
+（如 `fonts-noto-cjk` / `noto-fonts-cjk`）。
 
 **打开文件**：菜单「文件 → 打开」（Ctrl+O）；也可以把谱面 / 音频 / MIDI 文件
 **拖进窗口**、**拖到 `beatbench.exe` 图标**，或双击已关联的文件——谱面进编辑页，
@@ -42,14 +58,14 @@
 
 | 平台 | 状态 |
 |---|---|
-| Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/10`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
+| Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/11`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
 | Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出未人工验证 |
 | macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2，非阻塞门禁）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
 守卫）。三平台的「能编译、测得过、GUI 能起画」由 CI 持续钉住
-（`.github/workflows/ci.yml`，详见 `doc/04` §4）；发布产物（Windows zip 与 Linux deb/rpm/arch）
-已由独立的 `package.yml` 在 CI 产出（见 `doc/10`），macOS 发布产物与实时音频输出的人工验证未排期。
+（`.github/workflows/ci.yml`，详见 `doc/04` §4）；Linux deb/rpm/arch 由 `package.yml`
+产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/11`），macOS 发布产物与实时音频输出的人工验证未排期。
 
 当前边界（两句）：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
 `.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
@@ -67,7 +83,8 @@ macOS 打包范畴；② GUI 的悬停 / 拖拽等交互行为在 Linux/macOS **
 | [`doc/07-M7项目化工作流设计.md`](doc/07-M7项目化工作流设计.md) | **M7 设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
 | [`doc/08-QML技术选型与皮肤系统设计.md`](doc/08-QML技术选型与皮肤系统设计.md) | GUI 栈决策（Qt Quick/QML）+ 分层皮肤系统（L1/L2/L3） |
 | [`doc/09-操作注册设计.md`](doc/09-操作注册设计.md) | UI 动作注册表（换肤/快捷键前置） |
-| [`doc/10-打包与发布.md`](doc/10-打包与发布.md) | **打包/发布**：CI 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布放行流程 |
+| [`doc/10-开发工作流.md`](doc/10-开发工作流.md) | **开发工作流**：分支模型、日常门禁、tag→发布放行、备份 |
+| [`doc/11-打包与发布.md`](doc/11-打包与发布.md) | **打包/发布**：CI 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布放行流程 |
 | [`doc/05-前端界面设计构思.md`](doc/05-前端界面设计构思.md) | 页面式信息架构、区域设计、设计 token、术语 |
 | [`doc/BMS文件分析笔记.md`](doc/BMS文件分析笔记.md) | BMS 格式逆向笔记 |
 

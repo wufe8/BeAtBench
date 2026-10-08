@@ -2,23 +2,50 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
-## [Unreleased]
+## [0.3.2] - 2026-10-08
+
+> 打包版：**谱面编辑功能与 0.3.1 完全一致**，本版把发布面铺开——新增 Linux 发行版包
+> （deb / rpm / arch），GUI 的 Qt 支持面从 6.11+ 下调到 6.4+，发布流程全 CI 化（含
+> Linux 包构建 + 目标发行版安装冒烟 + 自动挂载 Release）。
 
 ### 新增
 
-- **Linux 发行版包与发布流水线**：新增 `package.yml`（tag `v*` / 手动触发）在 CI 产出
-  deb / rpm / arch 包与 Windows zip；每个 Linux 包在目标发行版容器内做安装冒烟
-  （Debian 12/13、Ubuntu 24.04/26.04、Fedora 43/44、Arch）。安装布局遵循发行版惯例
-  （QML 模块进 Qt 导入目录、皮肤进 `/usr/share/beatbench/skins`），并随包提供
-  `.desktop`、hicolor 图标与 AppStream 元数据。详见 `doc/10`。
-- **Windows 发布包 CI 化**：`windows-package` job 调用 `scripts/package-release.sh`
-  产出 zip 与 sha256，不再依赖本地 Windows 环境。
+- **Linux 发行版包（首次发布）**：提供 deb / rpm / arch 三种包，使用**发行版系统 Qt**
+  （不捆绑运行时，Qt 6.4+）：
+  - `beatbench_<ver>-1_amd64.deb`（基线 Debian 12，一份覆盖 Debian 12+ 与 Ubuntu 24.04+，含
+    time_t 迁移改名的 `t64` 备选依赖）；
+  - `beatbench-<ver>-1.fc43.x86_64.rpm`（基线 Fedora 43，覆盖 Fedora 43+）；
+  - `beatbench-<ver>-1-x86_64.pkg.tar.zst`（Arch 滚动版）。
+  每个包都在目标发行版容器内**实际安装并冒烟**（Debian 12/13、Ubuntu 24.04/26.04、
+  Fedora 43/44、Arch）：跑 `beatbench-cli version`，并在空目录里离屏启动 GUI、断言
+  截图与皮肤切换日志。安装布局遵循发行版惯例（QML 模块进 Qt 导入目录、皮肤进
+  `/usr/share/beatbench/skins`），随包提供 `.desktop`、hicolor 多尺寸图标与 AppStream
+  元数据。详见 `doc/11`。
+- **发布流水线全 CI 化**：推 `v*` tag 即产出全部平台产物——`release.yml` 跑完整回归后
+  产 Windows zip 并建 GitHub Release；`package.yml` 产 Linux 三格式并**自动挂到同一个
+  Release**。不再依赖本地 Windows/Linux 环境打包。
 
 ### 变更
 
-- **GUI 的 Qt 支持面扩大为 6.4+**：QML 入口加载与分隔条悬停高亮改用 Qt 6.4 可用写法；
-  CI 新增 `probe-qt64`（Ubuntu 24.04 系统 Qt 6.4.2）持续钉住下限。原口径
-  “Qt 6.11+”更新为“6.4+（CI 另在 6.11.2 上跑全量）”。
+- **GUI 的 Qt 支持面扩大为 6.4+**：QML 入口加载改用 6.4 可用写法（`loadFromModule`
+  是 Qt 6.5+ API，6.4 回退到资源路径导入）。CI 新增 `probe-qt64`（Ubuntu 24.04 系统
+  Qt 6.4.2）持续钉住下限，防止新代码悄悄用上 6.5+ API 而破坏发行版覆盖。
+  原口径「Qt 6.11+」更新为「6.4+（CI 另在 6.11.2 上跑全量；Windows 包内嵌 6.11.2）」。
+- **分隔条悬停高亮**改用 `HoverHandler`（手测确认生效），避开附加属性的作用域坑与
+  非官方的 `SplitView.hovered`。
+
+### 修复（发布基础设施，不影响编辑功能）
+
+- `release.yml` 挂 Release 时找的 zip 名少一个 `v`（脚本实产 `beatbench-v<ver>-win64.zip`），
+  真实发版会直接失败——已修正并加产物存在性断言。
+- `check-version.sh` 新增 `--qt-floor`：文档同时宣传「CI/打包 Qt minor」与「代码 Qt 下限」
+  时两者都算有效，否则 Qt 6.4 下限表述会被 `--strict` 判为过期而**阻塞发版**。
+- 去掉 `package.yml` 中与 `release.yml` 重复的 Windows 打包作业（同一 tag 不再构建两遍）。
+- **Qt 6.12 上无法构建**：Qt 6.12.0 的 `qmlcachegen` 在编译本模块时会确定性 SIGSEGV
+  （解析模块自生成的 `.qmltypes` 时崩溃，且无任何错误输出），使 Arch（系统 Qt 6.12）
+  的包与源码构建都失败。现在 Qt 6.12.x 上跳过 QML 字节码预编译（`NO_CACHEGEN`，
+  功能等价，仅损失一点首屏编译开销），绕过该上游缺陷；其余 Qt 版本行为不变。
+  详见 `doc/11` §2。
 
 ## [0.3.1] - 2026-09-20
 

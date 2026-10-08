@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# pre-push 门禁（安装：git config core.hooksPath .githooks）
+#
+#   - 推 tag（refs/tags/v*）时：先跑版本一致性检查（scripts/check-version.sh --strict）
+#   - 其余情况：跑快速门禁（scripts/check.sh --quick）
+#   - 赶时间可临时跳过：SKIP_CHECK=1 git push ...
+set -euo pipefail
+
+if [ "${SKIP_CHECK:-0}" = "1" ]; then
+  echo "[pre-push] SKIP_CHECK=1，跳过本地门禁"
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+tags=()
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "${remote_ref:-}" in
+    refs/tags/v*) tags+=("${remote_ref#refs/tags/}") ;;
+  esac
+done
+
+if [ "${#tags[@]}" -gt 0 ]; then
+  for t in "${tags[@]}"; do
+    echo "[pre-push] 发布 tag：$t → 先做版本一致性检查"
+    scripts/check-version.sh "$t" --strict || {
+      echo "[pre-push] ❌ 版本一致性检查未通过：补 CHANGELOG/README/CMakeLists 后再推 tag" >&2
+      exit 1
+    }
+  done
+fi
+
+echo "[pre-push] 本地门禁（快速档；跳过用 SKIP_CHECK=1）"
+exec scripts/check.sh --quick

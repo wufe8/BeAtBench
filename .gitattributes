@@ -1,0 +1,8 @@
+# 行尾约定（core.autocrlf=true 的机器上，Windows 检出会把文本转成 CRLF；
+# 但 Shell / Git hook / workflow 必须是 LF，否则 bash 在 Linux/macOS/Git Bash 下会因
+# 行尾的 \r 报错，CI 上直接跑不起来）。
+*.sh           text eol=lf
+.githooks/**   text eol=lf
+*.yml          text eol=lf
+
+# 其余源文件沿用仓库既有风格（不做全局 text=auto，避免一次巨大的重写 diff）。
