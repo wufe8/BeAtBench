@@ -33,7 +33,8 @@ TEST(CommandDispatcher, VersionEnvelopeMatchesProtocol) {
     EXPECT_TRUE(resp.at("ok").as_bool());
     const auto& result = resp.at("result");
     EXPECT_EQ(result.at("name").as_str(), "beatbench");
-    EXPECT_EQ(result.at("version").as_str(), "0.3.1");
+    // 版本从单一来源 kVersion 派生（CLI↔GUI 信封一致性：两边都不硬编码）
+    EXPECT_EQ(result.at("version").as_str(), std::string(beatbench::kVersion));
     EXPECT_EQ(result.at("api").as_i64(), 1);
     EXPECT_EQ(result.at("license").as_str(), "GPL-3.0-only");
 }

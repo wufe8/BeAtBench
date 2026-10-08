@@ -12,6 +12,7 @@
 
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Builtins.hpp"
+#include "beatbench/core/Version.hpp"
 #include "beatbench/core/command/Command.hpp"
 
 using beatbench::cmd::CommandError;
@@ -105,7 +106,8 @@ TEST(Command, DispatchOkAndIdEcho) {
     // version 契约：name / version / api / license 四字段齐全（doc/06 §3.5）。
     const auto& result = resp.at("result");
     EXPECT_EQ(result.at("name").as_str(), "beatbench");
-    EXPECT_EQ(result.at("version").as_str(), "0.3.1");
+    // 版本从单一来源 kVersion 派生：避免测试硬编码版本号（推进版本时漏改）
+    EXPECT_EQ(result.at("version").as_str(), std::string(beatbench::kVersion));
     EXPECT_EQ(result.at("api").as_i64(), 1);
     EXPECT_EQ(result.at("license").as_str(), "GPL-3.0-only");
     // 成功响应不带 error 键。
