@@ -7,7 +7,8 @@
 #   scripts/check-version.sh v0.3.2                  # 检查某个 tag/版本
 #   scripts/check-version.sh 0.3.2 --strict          # 警告也算失败（release 流水线用）
 #   scripts/check-version.sh v0.3.2 --print-notes    # 只输出该版本的 CHANGELOG 段落
-#   scripts/check-version.sh v0.3.2 --qt-version 6.11
+#   scripts/check-version.sh v0.3.2 --qt-version 6.11            # CI/打包所用 Qt minor
+#   scripts/check-version.sh v0.3.2 --qt-version 6.11 --qt-floor 6.4   # 文档同时宣传的 Qt 下限
 #
 # 硬性检查（失败即退出 1）:
 #   1. CMakeLists.txt 的 project(... VERSION x.y.z) 与目标版本一致
@@ -23,6 +24,7 @@ cd "$(dirname "$0")/.."
 STRICT=0
 PRINT_NOTES=0
 QT_MINOR="6.11"
+QT_FLOOR=""
 ARG=""
 
 while [ $# -gt 0 ]; do
@@ -31,6 +33,8 @@ while [ $# -gt 0 ]; do
     --print-notes) PRINT_NOTES=1 ;;
     --qt-version) shift; QT_MINOR="${1:-}" ;;
     --qt-version=*) QT_MINOR="${1#*=}" ;;
+    --qt-floor) shift; QT_FLOOR="${1:-}" ;;
+    --qt-floor=*) QT_FLOOR="${1#*=}" ;;
     -h | --help) sed -n '4,18p' "$0"; exit 0 ;;
     -*) echo "未知参数: $1（--help 看用法）" >&2; exit 2 ;;
     *) ARG="$1" ;;
@@ -63,7 +67,7 @@ WARN=0
 fail() { echo "  ❌ $*"; FAIL=$((FAIL + 1)); }
 warn() { echo "  ⚠️  $*"; WARN=$((WARN + 1)); }
 
-echo "==> 版本一致性检查：v$VER（Qt minor $QT_MINOR）"
+echo "==> 版本一致性检查：v$VER（Qt minor $QT_MINOR$([ -n "$QT_FLOOR" ] && echo "，下限 $QT_FLOOR")）"
 
 # ---- 1. CMakeLists 版本 ----
 CMAKE_VER="$(grep -m1 -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $2}' || true)"
@@ -95,11 +99,18 @@ if [ "${#readme_assets[@]}" -gt 0 ]; then
 fi
 
 # ---- 4. Qt 版本示例残留（警告）----
+# 文档会同时出现「CI/打包所用 minor」与「宣传的 Qt 下限」，两者都算有效；
+# 只有既不匹配 minor 也不匹配下限的 Qt 6.x 才判为过期（如残留 /c/Qt/6.8.0）。
+qt_version_ok() {
+  case "$1" in *"$QT_MINOR"*) return 0 ;; esac
+  if [ -n "$QT_FLOOR" ]; then
+    case "$1" in *"$QT_FLOOR"*) return 0 ;; esac
+  fi
+  return 1
+}
 while IFS= read -r line; do
   [ -n "$line" ] || continue
-  case "$line" in
-    *"$QT_MINOR"*) continue ;;
-  esac
+  qt_version_ok "$line" && continue
   warn "Qt 版本示例可能过期：$line"
 done < <(git grep -nE '(/c/Qt|/g/Qt|C:/Qt|G:/Qt)/6\.[0-9]+|Qt 6\.[0-9]+' -- '*.md' || true)
 

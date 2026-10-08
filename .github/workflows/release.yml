@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
-          scripts/check-version.sh "$TAG" --strict --qt-version 6.11
+          scripts/check-version.sh "$TAG" --strict --qt-version 6.11 --qt-floor 6.4
 
       - name: 回归（Release 构建 + 全部单测）
         shell: bash
