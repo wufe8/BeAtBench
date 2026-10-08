@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[Desktop Entry]
+Type=Application
+Name=BeAtBench
+GenericName=BMS Chart Editor
+GenericName[zh_CN]=BMS 谱面编辑器
+Comment=Edit BMS charts: notes, timing, samples, BGA
+Comment[zh_CN]=编辑 BMS 谱面：note、时间轴、采样、BGA
+Exec=beatbench %F
+Icon=beatbench
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=BMS;chart;editor;music;
+StartupNotify=true

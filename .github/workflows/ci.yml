@@ -11,6 +11,7 @@
 # - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
 #   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
 # - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2），Qt 走 action 缓存。
+# - 发布打包不在这里：独立 package.yml（tag/手动触发，见 doc/10）。
 name: CI
 
 on:

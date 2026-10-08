@@ -10,6 +10,12 @@
 #include <QObject>
 #include <QString>
 
+// 发行版安装的皮肤数据根目录（skins 位于 <dir>/skins，见 app/CMakeLists 安装规则）。
+// CMake 为 app/单测目标注入 BEATBENCH_DATA_DIR；未注入的构建用发行版默认前缀兜底。
+#ifndef BEATBENCH_DATA_DIR
+#define BEATBENCH_DATA_DIR "/usr/share/beatbench"
+#endif
+
 namespace beatbench::app {
 
 class ThemeManager : public QObject {
@@ -113,9 +119,12 @@ public:
     Q_INVOKABLE QString skinDirResolved(const QString& name) const;
     /// 同上，但在**显式给定的基准目录列表**中查找 name/theme.json（纯函数，供单测/诊断）。
     QString skinDirResolvedIn(const QString& name, const QStringList& bases) const;
-    /// 皮肤目录搜索基准（诊断/单测可见）："." → 可执行文件目录(+上级) → "..", "../..", "../../.."。
-    /// exe 目录排在前：双击/快捷方式启动不保证工作目录 = exe 目录；发布包中 skins/ 与 exe 同级。
+    /// 皮肤目录搜索基准（诊断/单测可见）："." → 可执行文件目录(+上级) → "..", "../..", "../../.."
+    /// → 发行版数据目录（兜底）。exe 目录排在前：双击/快捷方式启动不保证工作目录 = exe 目录；
+    /// 发布包中 skins/ 与 exe 同级；发行版安装则位于 <数据目录>/skins（/usr/share/beatbench）。
     static QStringList skinSearchBases();
+    /// 同上，但数据目录可注入（单测/诊断用）。
+    static QStringList skinSearchBases(const QString& dataDir);
     /// 按名字应用皮肤（"默认"→resetDefault；否则 resolve 目录 applyTheme）。返回覆写数；-1 失败。
     Q_INVOKABLE int applySkinByName(const QString& name);
 

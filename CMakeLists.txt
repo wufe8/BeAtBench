@@ -13,6 +13,10 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # ENABLE_LANGUAGE(C)，那既依赖 PowerShell，也与平台无关地必要——2026-09 改为本方案）。
 project(beatbench VERSION 0.3.1 LANGUAGES C CXX)
 
+# 安装路径变量（GNUInstallDirs：CMAKE_INSTALL_BINDIR/DATADIR/FULL_DATADIR 等）。
+# 供 app/cli 的 Linux 安装规则使用（发行版打包，见 app/CMakeLists 末尾）。
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

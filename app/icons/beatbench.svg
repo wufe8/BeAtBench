@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- BeAtBench 占位图标（可替换）：暗底 + 三根谱面条，颜色取自内置 Aurora 皮肤。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect x="40" y="40" width="432" height="432" rx="104" fill="#16121f"/>
+  <rect x="46" y="46" width="420" height="420" rx="98" fill="none" stroke="#2e2540" stroke-width="12"/>
+  <rect x="112" y="240" width="80" height="184" rx="28" fill="#f59e0b"/>
+  <rect x="216" y="152" width="80" height="272" rx="28" fill="#fbbf24"/>
+  <rect x="320" y="104" width="80" height="320" rx="28" fill="#fb7185"/>
+  <circle cx="152" cy="212" r="30" fill="#f0e6ff"/>
+  <circle cx="256" cy="124" r="30" fill="#f0e6ff"/>
+  <circle cx="360" cy="76" r="30" fill="#f0e6ff"/>
+</svg>

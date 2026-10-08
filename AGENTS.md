@@ -86,7 +86,7 @@ ctest --test-dir build -C Debug --output-on-failure
 # 快速回归：$env:BB_SKIP_REAL=1; build\tests\Debug\beatbench_tests.exe
 ```
 
-# GUI（Qt 6.11+；Windows MinGW 加 -DCMAKE_CXX_COMPILER/-DCMAKE_MAKE_PROGRAM 参数）
+# GUI（Qt 6.4+；Windows MinGW 加 -DCMAKE_CXX_COMPILER/-DCMAKE_MAKE_PROGRAM 参数）
 cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DBEATBENCH_BUILD_TESTS=OFF
 cmake --build build-gui --parallel
@@ -97,12 +97,15 @@ cmake --build build-gui --parallel
 
 - **CI**（`.github/workflows/ci.yml`）：push（master）/ PR（目标 master）/ 手动触发；
   五 job = linux-core、windows-msvc-core（无 Qt）、linux-full、macos-full（非阻塞，
-  summary job 翻出其实际结论）、windows-mingw-full（发布链路）。
+  summary job 翻出其实际结论）、windows-mingw-full（回归）。
   改跨平台相关代码先在本地用 GCC/Clang 过一遍。
+- **打包流水线**（`.github/workflows/package.yml`，独立于回归门禁）：tag `v*` 或手动
+  dispatch 时产出 deb/rpm/arch 与 Windows zip（各发行版容器内安装冒烟 + Qt 6.4 探针），
+  详见 `doc/10`。
 
 - ⚠️ **「无 Qt」≠「可离线」**：`audio/CMakeLists.txt` 无条件 FetchContent 拉 PortAudio；
   离线干净构建需 `-DFETCHCONTENT_SOURCE_DIR_PORTAUDIO=<已有源码>`（googletest 同理）。
-- 测试基线（源码 `TEST()` 计数，0.3.1）：core **317**（快速 315 过 / 2 SKIP）+ Qt 桥层 **57**。
+- 测试基线（源码 `TEST()` 计数，0.3.1）：core **317**（快速 315 过 / 2 SKIP）+ Qt 桥层 **58**。
   真实谱面集缺失时部分用例 SKIP，**不要把某一天的 PASS 数写死**。
 
 ## 6. 找不到文件时

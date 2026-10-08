@@ -22,6 +22,7 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QTranslator>
+#include <QUrl>
 #include <QVariant>
 #include <cstring>
 
@@ -453,10 +454,19 @@ int main(int argc, char** argv) {
         uiActions.loadUserKeymap();
     }
 
+    // QML 入口加载：Qt 6.5+ 用 loadFromModule；6.4（Ubuntu 24.04 LTS 系统 Qt 下限）没有
+    // 该 API，改走模块资源路径——qt_add_qml_module 旧默认前缀为 "/"，qmldir 与 qml 文件都
+    // 编进可执行资源（见构建目录 .qt/rcc/*.qrc）；把资源根加入导入路径，Main.qml 里的
+    // `import BeatBench` 才能在 6.4 上解析。资源与磁盘模块目录同源，行为等价。
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     engine.loadFromModule(QStringLiteral("BeatBench"), QStringLiteral("Main"));
+#else
+    engine.addImportPath(QStringLiteral("qrc:/"));
+    engine.load(QUrl(QStringLiteral("qrc:/BeatBench/qml/Main.qml")));
+#endif
 
     // ⚠️ Windows 平台主题会在窗口创建时覆盖启动时设置的 QPalette，导致 Fusion 默认控件
-    // （菜单/组合框 popup 等）首帧用平台浅色——loadFromModule 后重刷一次（值来自 Theme token，
+    // （菜单/组合框 popup 等）首帧用平台浅色——QML 加载后重刷一次（值来自 Theme token，
     // 与上方 pal 同源；运行时换肤走 rebuildPalette lambda）。注：窗口底色/菜单栏改由 QML
     // 显式绑 Theme token（`ApplicationWindow.color` / `MenuBar.background`），不依赖 palette 继承。
     app.setPalette(pal);

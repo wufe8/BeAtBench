@@ -200,6 +200,34 @@ TEST(ThemeManager, SkinSearchBasesPrefersCwdThenExeDir) {
         EXPECT_TRUE(bases.contains(appDir));
         EXPECT_LT(bases.indexOf(QStringLiteral(".")), bases.indexOf(appDir));
     }
+
+    // 发行版数据目录兜底：显式注入时排在最后；默认重载用编译期 BEATBENCH_DATA_DIR
+    const QStringList withData = ThemeManager::skinSearchBases(QStringLiteral("/tmp/bb-data"));
+    EXPECT_EQ(withData.last(), QStringLiteral("/tmp/bb-data"));
+    const QStringList defaults = ThemeManager::skinSearchBases();
+    EXPECT_TRUE(defaults.contains(QString::fromUtf8(BEATBENCH_DATA_DIR)));
+}
+
+TEST(ThemeManager, SkinDirResolvedFromDataDir) {
+    // 发行版安装布局：<datadir>/skins/<Name>/theme.json 经搜索基准兜底命中
+    QTemporaryDir data;
+    ASSERT_TRUE(data.isValid());
+    const QString skinRel = QStringLiteral("skins/Aurora");
+    ASSERT_TRUE(QDir(data.path()).mkpath(skinRel));
+    {
+        QFile f(QDir(data.path()).filePath(skinRel + QStringLiteral("/theme.json")));
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(R"({"bg": "#040506"})");
+    }
+    ThemeManager th;
+    // 只用数据目录基准解析（搜索列表最后一项；避开 cwd 里真实 skins/ 的干扰）
+    const QStringList dataBases = ThemeManager::skinSearchBases(data.path());
+    ASSERT_FALSE(dataBases.isEmpty());
+    EXPECT_EQ(dataBases.last(), data.path());
+    const QString found = th.skinDirResolvedIn(QStringLiteral("Aurora"), {dataBases.last()});
+    ASSERT_FALSE(found.isEmpty());
+    EXPECT_EQ(QDir(found).canonicalPath(),
+              QDir(QDir(data.path()).filePath(skinRel)).canonicalPath());
 }
 
 TEST(ThemeManager, ResetDefaultRestoresAllTokens) {
