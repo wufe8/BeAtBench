@@ -8,6 +8,7 @@
 #   scripts/check-version.sh 0.3.2 --strict          # 警告也算失败（release 流水线用）
 #   scripts/check-version.sh v0.3.2 --print-notes    # 只输出该版本的 CHANGELOG 段落
 #   scripts/check-version.sh v0.3.2 --qt-version 6.11            # CI/打包所用 Qt minor
+#   scripts/check-version.sh v0.3.2 --qt-version 6.11,6.12       # 允许多个 minor（逗号分隔）
 #   scripts/check-version.sh v0.3.2 --qt-version 6.11 --qt-floor 6.4   # 文档同时宣传的 Qt 下限
 #
 # 硬性检查（失败即退出 1）:
@@ -99,13 +100,15 @@ if [ "${#readme_assets[@]}" -gt 0 ]; then
 fi
 
 # ---- 4. Qt 版本示例残留（警告）----
-# 文档会同时出现「CI/打包所用 minor」与「宣传的 Qt 下限」，两者都算有效；
-# 只有既不匹配 minor 也不匹配下限的 Qt 6.x 才判为过期（如残留 /c/Qt/6.8.0）。
+# 文档会同时出现「CI/打包所用 minor」「宣传的 Qt 下限」，以及**有意记录**的其它版本
+# （如绕开 Qt 6.12 缺陷的说明）；这些都应算有效。--qt-version 接受逗号分隔的多个 minor。
+# 只有全都不匹配的 Qt 6.x 才判为过期（如残留示例路径 /c/Qt/6.8.0）。
 qt_version_ok() {
-  case "$1" in *"$QT_MINOR"*) return 0 ;; esac
-  if [ -n "$QT_FLOOR" ]; then
-    case "$1" in *"$QT_FLOOR"*) return 0 ;; esac
-  fi
+  local v
+  for v in ${QT_MINOR//,/ } $QT_FLOOR; do
+    [ -n "$v" ] || continue
+    case "$1" in *"$v"*) return 0 ;; esac
+  done
   return 1
 }
 while IFS= read -r line; do
