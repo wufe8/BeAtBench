@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# 版本发布自动化：依据 Conventional Commits 维护 release PR（chore: release vX.Y.Z）。
+# PR 内自动联动四处版本号（CMakeLists project VERSION / Version.hpp kVersion /
+# README 下载安装名 / CHANGELOG 版本小节，靠文件内 x-release-please 标记定位），
+# 合并后自动打 tag vX.Y.Z 并建 GitHub Release。
+#
+# ⚠️ 下游衔接：合并 release PR 后的 tag 必须能触发 release.yml / package.yml，而
+# GITHUB_TOKEN 产生的事件不会触发其它 workflow（GitHub 防递归）。因此仓库需配置
+# secret RELEASE_PLEASE_TOKEN（classic PAT 带 repo，或 fine-grained 的
+# Contents: RW + Pull requests: RW）。未配置时表达式降级为 GITHUB_TOKEN，发版会停在
+# 「tag 已打、产物不构建」，需手动 dispatch release.yml（输入 tag）与 package.yml 补跑。
+#
+# 操作约定（配合 doc/11 §5）：
+# - 变更只写 Conventional Commits：feat → 次版本，fix → 修订版，
+#   `!` + `BREAKING CHANGE:` 脚注 → 主版本；ci/docs/chore 等不进 CHANGELOG；
+# - 不再手工改 CHANGELOG 版本小节、不再手工打发布 tag；
+# - release PR 由 release-please 持续并入新提交，合并即发版。
+name: Release Please
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
