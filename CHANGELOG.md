@@ -2,6 +2,19 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [未发布]
+
+### 修复（发布基础设施）
+
+- **arch 包的维护者字段是 `Unknown Packager`**：`makepkg` 只从环境变量 / `makepkg.conf` 读
+  `$PACKAGER`，**不读** PKGBUILD 里的变量，而 `scripts/package-linux.sh` 生成的 PKGBUILD 里只有
+  `# Maintainer:` 注释、CI 容器也没设该变量 → 三个包里只有 arch 缺维护者信息（v0.3.2 的 arch 包
+  即如此）。现改为 `env PACKAGER="$MAINTAINER"` 调用 `makepkg`，与 deb / rpm 一致。
+- **`scripts/verify-linux-package.sh` 在滚动发行版实机上是部分升级反模式**：arch 分支原来无条件
+  `pacman -Sy` + `pacman -U`。CI 容器里 `-Sy` 是必需的（`archlinux:base-devel` 没有 Qt），但实机上
+  「刷新数据库后只升级一个包」是 classic partial upgrade，可能危害系统。现按 `/.dockerenv` /
+  `/run/.containerenv` 分流：容器内保持原行为，实机只 `pacman -U`（缺依赖时明确报错）。
+
 ## [0.3.2] - 2026-10-08
 
 > 打包版：**谱面编辑功能与 0.3.1 完全一致**，本版把发布面铺开——新增 Linux 发行版包
