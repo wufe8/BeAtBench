@@ -142,6 +142,7 @@ Item {
     }
     // ---- 调试（main.cpp --slice-detect/--slice-export 同路径）----
     /// 切换切片源 UI（MIDI/网格；连带 MIDI 线默认态），供 --slice-detect 注入。
+    /// 瞬态检测（audio）不进调试注入：异步完成时序会破坏 --slice-detect 的同步断言。
     function debugSetSource(source) {
         sliceSourceBox.currentIndex = (source === "midi") ? 1 : 0
     }
@@ -179,11 +180,19 @@ Item {
         case "copyPoints": sliceWorkspace.copyManualPoints(); break
         case "pastePoints": sliceWorkspace.pasteManualPoints(); break
         case "detect":
-            if (sliceWorkspace.detectSlices(
-                    sliceSourceBox.currentIndex === 0 ? "grid" : "midi",
-                    bpmBox.value, subBox.value, sliceWorkspace.audioDurationSec,
-                    root.midiExtendNext))
-                root.dockTab = 0
+            var ok
+            if (sliceSourceBox.currentIndex === 2) {
+                // M6.5 瞬态检测（audio 源）：异步，检出点落手动点集合
+                ok = sliceWorkspace.detectOnsetSlices(
+                        onsetSensBox.value, onsetGapBox.value / 1000.0,
+                        onsetAppendBox.checked)
+            } else {
+                ok = sliceWorkspace.detectSlices(
+                        sliceSourceBox.currentIndex === 0 ? "grid" : "midi",
+                        bpmBox.value, subBox.value, sliceWorkspace.audioDurationSec,
+                        root.midiExtendNext)
+            }
+            if (ok) root.dockTab = 0
             break
         case "clearSlices": sliceWorkspace.clearSlices(); break
         case "export": root.doExport(); break
@@ -487,7 +496,7 @@ Item {
             Label { text: qsTr("切片源"); color: Theme.textMuted }
             BbComboBox {
                 id: sliceSourceBox
-                model: [qsTr("网格"), qsTr("MIDI")]
+                model: [qsTr("网格"), qsTr("MIDI"), qsTr("瞬态")]
                 implicitWidth: 84
                 onCurrentIndexChanged: root.midiLinesOn = (currentIndex === 1)
             }
@@ -528,6 +537,46 @@ Item {
                 ToolTip.text: qsTr("MIDI 切片右边界 = 下一起始/音频末尾（与手动切片一致，"
                                    + "和弦自动合并）；关闭 = 按音符结束切分")
                 onToggled: root.midiExtendNext = checked
+            }
+            // ---- M6.5 瞬态检测参数（audio 源）----
+            Label {
+                text: qsTr("敏感度")
+                color: Theme.textMuted
+                visible: sliceSourceBox.currentIndex === 2
+            }
+            BbSpinBox {
+                id: onsetSensBox
+                from: 1
+                to: 10
+                value: 5
+                editable: true
+                visible: sliceSourceBox.currentIndex === 2
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("瞬态检测敏感度（1-10，越大越敏感；"
+                                   + "检出过少调高，误检过多调低）")
+            }
+            Label {
+                text: qsTr("最小间隔 ms")
+                color: Theme.textMuted
+                visible: sliceSourceBox.currentIndex === 2
+            }
+            BbSpinBox {
+                id: onsetGapBox
+                from: 20
+                to: 500
+                value: 60
+                editable: true
+                visible: sliceSourceBox.currentIndex === 2
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("相邻切点最小间隔（毫秒）；同一次打击多检出的合并阈值")
+            }
+            BbCheckBox {
+                id: onsetAppendBox
+                text: qsTr("追加")
+                visible: sliceSourceBox.currentIndex === 2
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("检出点追加到现有切分点（10ms 内去重）；"
+                                   + "默认替换式：清空后按检出点重建（可撤销）")
             }
             BbToolButton {
                 text: qsTr("生成切片")
