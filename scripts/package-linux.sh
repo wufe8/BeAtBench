@@ -245,7 +245,10 @@ EOF
     chown -R builder:builder "$work"
     runner=(runuser -u builder --)
   fi
-  (cd "$work" && "${runner[@]}" makepkg --noconfirm --force)
+  # PACKAGER 必须走环境变量：makepkg 只从 $PACKAGER（env / makepkg.conf）取值写进 .PKGINFO，
+  # **不读** PKGBUILD 里的变量（makepkg: PACKAGER=${PACKAGER:-"Unknown Packager"}）。
+  # 不设时 arch 包的维护者字段是 "Unknown Packager"，而 deb/rpm 都带 $MAINTAINER。
+  (cd "$work" && "${runner[@]}" env PACKAGER="$MAINTAINER" makepkg --noconfirm --force)
 
   local pkgfile
   pkgfile="$(find "$work" -maxdepth 1 -name '*.pkg.tar.zst' | head -1)"
