@@ -15,7 +15,9 @@
 
 **Windows 10/11 64 位（免安装）**
 
+<!-- x-release-please-start-version -->
 1. 下载 `beatbench-v0.3.2-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
+<!-- x-release-please-end -->
 2. 双击 `beatbench.exe` 启动图形界面，或运行 `beatbench-cli.exe` 使用命令行；
 3. 无需安装运行库，Qt 运行时（6.11.2）已内置。
 
@@ -26,11 +28,13 @@
 
 发行版包使用**系统 Qt**（需 Qt 6.4+），GUI 与 CLI 同包安装到 `/usr/bin`：
 
+<!-- x-release-please-start-version -->
 ```bash
-sudo apt install ./beatbench_0.3.2-1_amd64.deb      # Debian 12+ / Ubuntu 24.04+
-sudo dnf install ./beatbench-0.3.2-1.fc43.x86_64.rpm # Fedora 43+
-sudo pacman -U ./beatbench-0.3.2-1-x86_64.pkg.tar.zst # Arch
+sudo apt install ./beatbench-v0.3.2-1-amd64.deb       # Debian 12+ / Ubuntu 24.04+
+sudo dnf install ./beatbench-v0.3.2-1.fc43.x86_64.rpm # Fedora 43+
+sudo pacman -U ./beatbench-v0.3.2-1-x86_64.pkg.tar.zst # Arch
 ```
+<!-- x-release-please-end -->
 
 装好后直接运行 `beatbench`（或 `beatbench-cli`）；皮肤在 `/usr/share/beatbench/skins`，
 桌面图标与 start 菜单项随包提供。若界面中文显示为方块，安装一套 CJK 字体
