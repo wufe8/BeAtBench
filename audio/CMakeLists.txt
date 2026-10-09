@@ -33,6 +33,7 @@ add_library(beatbench_audio STATIC
   src/pcm_playback.cpp
   src/playback_plan.cpp
   src/reference_track.cpp
+  src/onset_detector.cpp
 )
 target_include_directories(beatbench_audio
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/core/include
