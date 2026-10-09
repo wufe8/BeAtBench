@@ -272,7 +272,8 @@ Item {
         // 不用 SplitHandle.hovered：它是**附加属性**，绑定到「声明它的对象」——嵌套子 Rectangle
         // 裸写会拿到自己的实例（高亮不生效），Qt 6.11 起还有附加属性访问告警；
         // 也不用非官方的 SplitView.hovered。HoverHandler 用 id 引用，没有这个作用域坑。
-        // ⚠️ 悬停高亮无法由 CI 无头冒烟覆盖，改动后需人工确认（Qt 6.11 + 发行版 Qt 各一次）。
+        // ⚠️ 悬停高亮无法由无头冒烟覆盖（offscreen 没有真实指针）；真实 X11 可做指针注入自动化，
+        //    2026-10-09 已在 Manjaro（发行版 Qt 6.11.2 + 安装包）实测通过。改动后仍建议各看一次。
         handle: Rectangle {
             id: handleItem
             color: Theme.border
