@@ -124,10 +124,23 @@ jobs:
           arch: clang_64
           cache: true
           cache-key-prefix: install-qt-macos
+      # 一次性诊断：-ftime-trace 给每个 TU 生成时间线 json（落在 .o 旁），VERBOSE=1 拿完整编译命令行
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_CXX_FLAGS_DEBUG="-g -ftime-trace"
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel --verbose
+      - name: Pack ftime-trace
+        if: always()
+        run: |
+          find build -name '*.json' -path '*CMakeFiles*' -print0 | xargs -0 tar -czf macos-ftime-trace.tar.gz
+          ls -lh macos-ftime-trace.tar.gz
+      - name: Upload ftime-trace artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-ftime-trace
+          path: macos-ftime-trace.tar.gz
+          retention-days: 7
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke
