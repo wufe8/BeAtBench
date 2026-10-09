@@ -27,9 +27,9 @@
 发行版包使用**系统 Qt**（需 Qt 6.4+），GUI 与 CLI 同包安装到 `/usr/bin`：
 
 ```bash
-sudo apt install ./beatbench_0.3.2-1_amd64.deb      # Debian 12+ / Ubuntu 24.04+
-sudo dnf install ./beatbench-0.3.2-1.fc43.x86_64.rpm # Fedora 43+
-sudo pacman -U ./beatbench-0.3.2-1-x86_64.pkg.tar.zst # Arch
+sudo apt install ./beatbench-v0.3.2-1-amd64.deb       # Debian 12+ / Ubuntu 24.04+
+sudo dnf install ./beatbench-v0.3.2-1.fc43.x86_64.rpm # Fedora 43+
+sudo pacman -U ./beatbench-v0.3.2-1-x86_64.pkg.tar.zst # Arch
 ```
 
 装好后直接运行 `beatbench`（或 `beatbench-cli`）；皮肤在 `/usr/share/beatbench/skins`，
