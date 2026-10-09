@@ -14,6 +14,12 @@
   `pacman -Sy` + `pacman -U`。CI 容器里 `-Sy` 是必需的（`archlinux:base-devel` 没有 Qt），但实机上
   「刷新数据库后只升级一个包」是 classic partial upgrade，可能危害系统。现按 `/.dockerenv` /
   `/run/.containerenv` 分流：容器内保持原行为，实机只 `pacman -U`（缺依赖时明确报错）。
+- **Linux 包产物文件名统一为 `beatbench-v<版本>-...`（连字符分隔，带 `v` 前缀）**：
+  `beatbench-v<ver>-1-amd64.deb` / `beatbench-v<ver>-1.fc43.x86_64.rpm` /
+  `beatbench-v<ver>-1-x86_64.pkg.tar.zst`，与 Windows zip（`beatbench-v<ver>-win64.zip`）
+  和 tag（`v<ver>`）一致，分隔符不再用 `_`。包内元数据版本仍为发行版原生格式（不带 v），
+  `dpkg -i` / `apt install ./` / `dnf install ./` / `pacman -U` 均按包内元数据安装，不受
+  文件名影响；已发布的 v0.3.2 asset 维持旧文件名。
 
 ## [0.3.2] - 2026-10-08
 
