@@ -10,7 +10,8 @@
 # - macOS continue-on-error：macOS 侧从未人工验证过，首跑风险隔离；其余 job 阻塞。
 # - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
 #   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
-# - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2），Qt 走 action 缓存。
+# - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2）；Qt 装机走 action 缓存，
+#   编译走钉版 ccache（三 Qt job 共用；macOS 的 AppleClang 编译长尾是 CI 总时长瓶颈）。
 # - 发布打包不在这里：独立 package.yml（tag/手动触发，见 doc/11）。
 name: CI
 
@@ -80,10 +81,23 @@ jobs:
       # 冒烟截图防豆腐块：runner 默认无 CJK 字体
       - name: Install CJK fonts
         run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-qt6112-${{ runner.os }}-
+      - name: Install ccache (pinned 4.14.1)
+        shell: bash
+        run: ./.github/workflows/scripts/setup-ccache.sh
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: cmake --build build --parallel
+      - name: ccache stats
+        if: always()
+        shell: bash
+        run: ./.github/workflows/scripts/ccache-summary.sh
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke
@@ -124,10 +138,23 @@ jobs:
           arch: clang_64
           cache: true
           cache-key-prefix: install-qt-macos
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-qt6112-${{ runner.os }}-
+      - name: Install ccache (pinned 4.14.1)
+        shell: bash
+        run: ./.github/workflows/scripts/setup-ccache.sh
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: cmake --build build --parallel
+      - name: ccache stats
+        if: always()
+        shell: bash
+        run: ./.github/workflows/scripts/ccache-summary.sh
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke
@@ -176,14 +203,28 @@ jobs:
           add-tools-to-path: true
           cache: true
           cache-key-prefix: install-qt-windows-mingw
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/ccache
+          key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-qt6112-${{ runner.os }}-
+      - name: Install ccache (pinned 4.14.1)
+        shell: bash
+        run: ./.github/workflows/scripts/setup-ccache.sh
       - name: Configure
         shell: bash
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON \
-            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: cmake --build build --parallel
+      - name: ccache stats
+        if: always()
+        shell: bash
+        run: ./.github/workflows/scripts/ccache-summary.sh
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke
