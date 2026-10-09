@@ -29,6 +29,13 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - name: 检查 RELEASE_PLEASE_TOKEN 已配置
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_PLEASE_TOKEN" ]; then
+            echo "::warning::未配置 secret RELEASE_PLEASE_TOKEN：本次降级用 GITHUB_TOKEN，其打的 tag 不会触发 release.yml / package.yml（GitHub 防递归），发版会停在「tag 已打、产物不构建」，需手动 dispatch 两条流水线补跑。配置步骤见 doc/11 §5。"
+          fi
       - uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
