@@ -6,7 +6,7 @@ if ! command -v ccache >/dev/null 2>&1; then
   exit 0
 fi
 {
-  echo "### ccache（$RUNNER_OS）"
+  echo "### ccache（${RUNNER_OS}）"
   echo ''
   echo '```'
   ccache --show-stats

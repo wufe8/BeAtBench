@@ -8,7 +8,7 @@ case "$RUNNER_OS" in
   Linux)   asset="ccache-${CCACHE_VERSION}-linux-x86_64-glibc.tar.xz"; sum="ad63d19f5d09ea13f749651653a561c98a59994e673504a4266617b8754218f7" ;;
   macOS)   asset="ccache-${CCACHE_VERSION}-darwin.tar.gz";             sum="c279fa81e2e806b4d9e64d4a06cb569a84ef54151feef796e5d4f4e95a464563" ;;
   Windows) asset="ccache-${CCACHE_VERSION}-windows-x86_64.zip";        sum="6219f3865ca59aec41ee4b678df171d5d35855ecb2b6dbbbd20690b3a68af7b4" ;;
-  *) echo "未知 RUNNER_OS：$RUNNER_OS" >&2; exit 1 ;;
+  *) echo "未知 RUNNER_OS：${RUNNER_OS}" >&2; exit 1 ;;
 esac
 
 tmp="$(mktemp -d)"
@@ -20,7 +20,7 @@ case "$RUNNER_OS" in
   *)     actual="$(sha256sum "$tmp/asset" | awk '{print $1}')" ;;
 esac
 if [ "$actual" != "$sum" ]; then
-  echo "sha256 不匹配：期望 $sum，实际 $actual" >&2
+  echo "sha256 不匹配：期望 ${sum}，实际 ${actual}" >&2
   exit 1
 fi
 
