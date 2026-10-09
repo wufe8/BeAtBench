@@ -11,7 +11,7 @@
 # - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
 #   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
 # - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2）；Qt 装机走 action 缓存，
-#   编译走钉版 ccache（三 Qt job 共用；macOS 的 AppleClang 编译长尾是 CI 总时长瓶颈）。
+#   编译走钉版 ccache（三 Qt job 共用；macOS 的 make -j 无限并发曾是 CI 总时长瓶颈）。
 # - 发布打包不在这里：独立 package.yml（tag/手动触发，见 doc/11）。
 name: CI
 
@@ -128,9 +128,9 @@ jobs:
     # macOS 侧从未人工验证过，风险隔离；其实际结论由 summary job 经 API 翻出
     continue-on-error: true
     runs-on: macos-15
-    # 实测：Build 稳定 18–35 分钟且与 Qt 缓存状态无关（冷装仅 54s，冷缓存 run 的 Build 同量
-    # 级）；瓶颈是 AppleClang/M1（3 vCPU）对 Qt 重模板 TU 的病态编译（单 TU 可达 350s，
-    # Linux 同款数秒）。ccache 冷启动首跑仍全 miss，timeout 须覆盖无缓存场景
+    # 历史教训：make -j 无限并发曾把全量构建拖到 18–35 分钟（147 个编译单元同起跑，
+    # 3 vCPU/7GB 被调度与换页压垮）；--parallel 3 后冷构建实测 116s。timeout 90 为
+    # 排队与缓存缺失留余量
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
@@ -144,7 +144,8 @@ jobs:
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ccache
+          # ccache 4.x 在 macOS 默认写 ~/Library/Caches/ccache（Apple 惯例），非 XDG
+          path: ~/Library/Caches/ccache
           key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
           restore-keys: ccache-qt6112-${{ runner.os }}-
       - name: Install ccache (pinned 4.14.1)
@@ -153,9 +154,8 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
-        # --parallel 不带值会向 make 传裸 -j（无限并发）：3 vCPU 上十余个 clang 相互
-        # 饿死，单 TU 墙钟膨胀 3–4 倍（ftime-trace 诊断：单 TU 跨度 42 分钟、各 TU
-        # 跨度和远超核时预算），按 GitHub macos-15 规格固定 3
+        # --parallel 不带值会向 make 传裸 -j（无上限）：147 个编译单元同时起跑会把
+        # 3 vCPU/7GB 压垮（实测 27–35 分钟）；固定 3 后冷构建 116s（run 37993321189）
         run: cmake --build build --parallel 3
       - name: ccache stats
         if: always()
