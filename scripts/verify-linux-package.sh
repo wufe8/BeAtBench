@@ -36,8 +36,17 @@ install_package() {
       dnf install -y -q "$PKG"
       ;;
     arch)
-      pacman -Sy --noconfirm >/dev/null
-      pacman -U --noconfirm "$PKG"
+      # ⚠️ 仅适用于一次性容器：CI 的 archlinux:base-devel 里没有 Qt，必须先 -Sy
+      # 让 pacman -U 能解析并安装依赖。在滚动发行版**实机**上，-Sy 后 -U 是部分升级
+      # （partial upgrade）反模式，可能危害系统——实机验收请直接：
+      #   sudo pacman -U --noconfirm <pkg>
+      if [ -e /.dockerenv ] || [ -e /run/.containerenv ]; then
+        pacman -Sy --noconfirm >/dev/null
+        pacman -U --noconfirm "$PKG"
+      else
+        echo "⚠️ 非容器环境：跳过 pacman -Sy（避免部分升级），直接 pacman -U" >&2
+        pacman -U --noconfirm "$PKG"
+      fi
       ;;
   esac
 }
