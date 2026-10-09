@@ -94,6 +94,14 @@ target_link_libraries(m5_playback_test PRIVATE beatbench_core GTest::gtest_main)
 beatbench_set_warnings(m5_playback_test)
 add_test(NAME m5_playback_tests COMMAND m5_playback_test)
 
+# OnsetDetector 单测（M6.5 瞬态检测）：STFT 谱通量 onset（纯 DSP，零依赖、零 Qt）。
+add_executable(onset_detector_test onset_detector_test.cpp
+    ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
+target_include_directories(onset_detector_test PRIVATE ${CMAKE_SOURCE_DIR}/audio/include)
+target_link_libraries(onset_detector_test PRIVATE GTest::gtest_main)
+beatbench_set_warnings(onset_detector_test)
+add_test(NAME onset_detector_tests COMMAND onset_detector_test)
+
 # ReferenceTrack 单测（M6.1 参考音轨）：解码 + 金字塔 + 窗口截取（无设备/无 Qt）。
 add_executable(reference_track_test reference_track_test.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/reference_track.cpp
@@ -118,7 +126,8 @@ if (Qt6Core_FOUND)
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp
-        ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.hpp)
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.hpp
+        ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
     target_include_directories(slice_workspace_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
     target_link_libraries(slice_workspace_test PRIVATE
         beatbench_core beatbench_audio Qt6::Core GTest::gtest_main)
