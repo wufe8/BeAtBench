@@ -153,7 +153,10 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
-        run: cmake --build build --parallel
+        # --parallel 不带值会向 make 传裸 -j（无限并发）：3 vCPU 上十余个 clang 相互
+        # 饿死，单 TU 墙钟膨胀 3–4 倍（ftime-trace 诊断：单 TU 跨度 42 分钟、各 TU
+        # 跨度和远超核时预算），按 GitHub macos-15 规格固定 3
+        run: cmake --build build --parallel 3
       - name: ccache stats
         if: always()
         continue-on-error: true
