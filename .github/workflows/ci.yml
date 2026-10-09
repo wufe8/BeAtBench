@@ -17,7 +17,7 @@ name: CI
 
 on:
   push:
-    # 仅 master：同仓库 PR 会 push + PR 双跑（每遍携 ~32 分钟的 macOS job），
+    # 仅 master：同仓库 PR 会 push + PR 双跑（每遍都带一遍 macOS job），
     # 分支上的验证靠 PR 事件 / 手动 dispatch。
     branches: [master]
   pull_request:
@@ -127,7 +127,9 @@ jobs:
     # macOS 侧从未人工验证过，风险隔离；其实际结论由 summary job 经 API 翻出
     continue-on-error: true
     runs-on: macos-15
-    # 实测 Qt 缓存 miss 时 Build 独占 ~31 分钟（Linux 同款 2 分钟），45 分钟贴近撞限
+    # 实测：Build 稳定 18–35 分钟且与 Qt 缓存状态无关（冷装仅 54s，冷缓存 run 的 Build 同量
+    # 级）；瓶颈是 AppleClang/M1（3 vCPU）对 Qt 重模板 TU 的病态编译（单 TU 可达 350s，
+    # Linux 同款数秒）。ccache 冷启动首跑仍全 miss，timeout 须覆盖无缓存场景
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
