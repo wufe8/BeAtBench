@@ -4,8 +4,11 @@
 #
 # 设计：文件布局单一来源 = app/CMakeLists 的 install 规则；本脚本只做
 #   cmake Release 构建 → DESTDIR staging → 按格式加元数据（control / spec / PKGBUILD）。
-# 产物按发行版惯例命名（内嵌版本/发行号/架构，便于 dpkg -i / dnf install / pacman -U）；
-# workflow 以中性 artifact 名（beatbench-linux-deb 等）分发。
+# 产物文件名统一为 beatbench-v<ver>-...（连字符分隔，与 tag v<ver> / win64.zip 一致）；
+# 包内元数据版本保持发行版原生格式（dpkg/rpm 要求版本号以数字开头，v 只落在文件名层）；
+# dpkg -i / apt install ./ / dnf install ./ / pacman -U 本地安装都读包内元数据，
+# 不解析文件名（唯一例外：arch 的 .PKGINFO filename 字段仍是旧名，仅影响 repo-add 类
+# 仓库工具，本地安装无影响）。workflow 以中性 artifact 名（beatbench-linux-deb 等）分发。
 #
 # 用法（容器内，通常 root）:
 #   bash scripts/package-linux.sh <deb|rpm|arch> [--skip-deps]
@@ -149,7 +152,9 @@ Description: BMS chart editor
 EOF
 
   mkdir -p "$OUT"
-  local file="beatbench_${VER}-1_${DEB_ARCH}.deb"
+  # 命名统一：dpkg-deb --build 的输出文件名完全由第二个参数决定，不强制下划线惯例；
+  # 有意偏离 Debian 的 <pkg>_<ver>_<arch>.deb，换取全产物连字符格式。
+  local file="beatbench-v${VER}-1-${DEB_ARCH}.deb"
   dpkg-deb --build --root-owner-group "$PKGROOT" "$OUT/$file"
   (cd "$OUT" && sha256sum "$file" > "$file.sha256")
   echo "==> 产物: $OUT/$file"
@@ -207,10 +212,14 @@ EOF
   local rpmfile
   rpmfile="$(find "$top/RPMS" -name '*.rpm' | head -1)"
   [ -n "$rpmfile" ] || { echo "错误: rpmbuild 未产出包" >&2; exit 1; }
+  # 命名统一：rpmbuild 产物名由 spec 的 Name-Version-Release 生成（header 内 version 不带 v），
+  # 此处只在文件名层加 v 前缀；rpm/dnf 本地安装只读 header。
+  local base="${rpmfile##*/}"
+  local out_name="${base/#beatbench-/beatbench-v}"
   mkdir -p "$OUT"
-  cp "$rpmfile" "$OUT/"
-  (cd "$OUT" && sha256sum "$(basename "$rpmfile")" > "$(basename "$rpmfile").sha256")
-  echo "==> 产物: $OUT/$(basename "$rpmfile")"
+  cp "$rpmfile" "$OUT/$out_name"
+  (cd "$OUT" && sha256sum "$out_name" > "$out_name.sha256")
+  echo "==> 产物: $OUT/$out_name"
 }
 
 make_arch() {
@@ -253,10 +262,14 @@ EOF
   local pkgfile
   pkgfile="$(find "$work" -maxdepth 1 -name '*.pkg.tar.zst' | head -1)"
   [ -n "$pkgfile" ] || { echo "错误: makepkg 未产出包" >&2; exit 1; }
+  # 命名统一：makepkg 产物名由 pkgver 生成（.PKGINFO 内 pkgver 不带 v），
+  # 此处只在文件名层加 v 前缀；pacman -U 本地安装读 .PKGINFO，不校验文件名。
+  local base="${pkgfile##*/}"
+  local out_name="${base/#beatbench-/beatbench-v}"
   mkdir -p "$OUT"
-  cp "$pkgfile" "$OUT/"
-  (cd "$OUT" && sha256sum "$(basename "$pkgfile")" > "$(basename "$pkgfile").sha256")
-  echo "==> 产物: $OUT/$(basename "$pkgfile")"
+  cp "$pkgfile" "$OUT/$out_name"
+  (cd "$OUT" && sha256sum "$out_name" > "$out_name.sha256")
+  echo "==> 产物: $OUT/$out_name"
 }
 
 install_build_deps
