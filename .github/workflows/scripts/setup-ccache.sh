@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 安装钉版 ccache 并做本 run 的初始配置（三 Qt job 共用）。
-# sha256 校验防供应链漂移；RUNNER_OS 由 runner 注入。
+# 安装钉版 ccache 并做本 run 的初始配置（三 Qt job 共用）；同时按平台规格导出
+# 有界构建并行度 CMAKE_BUILD_PARALLEL_LEVEL。sha256 校验防供应链漂移；
+# RUNNER_OS 由 runner 注入。
 set -euo pipefail
 
 CCACHE_VERSION=4.14.1
@@ -45,3 +46,21 @@ ccache --set-config max_size=512M
 ccache --set-config compiler_check=content
 ccache --zero-stats
 "$HOME/.local/bin/ccache" --version
+
+# 构建并行度：有界自动。cmake --build --parallel 不带值时读 CMAKE_BUILD_PARALLEL_LEVEL，
+# 未设则向 make 传裸 -j（无上限）——147 个编译单元同起跑曾把 3 vCPU/7GB 的 macos 压到
+# 27–35 分钟（run 37964482001）。按平台规格取 min(CPU数, 上限)：macos 3（GitHub 规格），
+# 其余 4（runner 规格）
+case "$RUNNER_OS" in
+  macOS) cap=3 ;;
+  *)     cap=4 ;;
+esac
+case "$RUNNER_OS" in
+  Windows) raw="${NUMBER_OF_PROCESSORS:-}" ;;
+  *)       raw="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || true)" ;;
+esac
+case "$raw" in
+  ''|*[!0-9]*) raw=$cap ;;
+esac
+if [ "$raw" -gt "$cap" ]; then raw=$cap; fi
+echo "CMAKE_BUILD_PARALLEL_LEVEL=$raw" >> "$GITHUB_ENV"
