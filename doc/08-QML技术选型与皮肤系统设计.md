@@ -3,7 +3,7 @@
 > 状态：**决策稿 v1（2026-08 定）**。GUI 层采用 Qt Quick / QML；core 维持零 Qt 依赖。
 > 本稿吸收并取代 `06-换肤与扩展设计.md`（2026-08 前端会话草稿，Widgets 语汇，内容已并入本稿后删除）。
 > 关联：`doc/04`（手册，决策速查已更新）；`doc/05`（前端界面设计构思，UI 细节待前端会话按 QML 更新）；
-> `doc/06-插件体系与时间单位设计.md`（命令协议/分层接口，**不受影响**）；`local/doc/07`（M2 计划，构建命令已更新）。
+> `doc/06-插件体系与时间单位设计.md`（命令协议/分层接口，**不受影响**）；本机过程记录（M2 计划，构建命令已更新）。
 > 配套设计参考：`doc/beatbench-ui-styles.html`（六套外观卡，本质是六份主题数据）。
 
 ## 0. 决策（2026-08 拍板）
@@ -22,15 +22,15 @@
 - **QML vs Widgets**：编辑器硬骨头（表格/富文本）Widgets 省力，但本项目硬骨头是自绘时间轴（两栈都要自写）；
   GPU 渲染收益被高估（时间轴用 `QQuickPaintedItem` 即可）；最大收益是**设计迭代**（声明式设计 → QML 近乎无损）。
   代价：双语言纪律（逻辑放 C++，QML 只管表现）。
-- 完整评估（beatoraja 拆解 / Widgets-QML 逐项对比）→ `local/doc/08-QML与Widgets评估.md`（gitignore）。
+- 完整评估（beatoraja 拆解 / Widgets-QML 逐项对比）→ 本机过程记录（gitignore）。
 
 > 原 §2（QML vs Widgets 逐项评估）与原 §5（对既有文档的影响）已移入
-> `local/doc/08-QML与Widgets评估.md`；以下保留现行设计。
+> 本机过程记录；以下保留现行设计。
 
 ## 2. 双语言纪律（桥接原则）
 
 - **逻辑放 C++（`app/bridge`），QML 只管表现与 `invoke`**；JS 不写散业务
-  （`SessionController.qml` 是迁移期例外，按 `local/doc/13-大文件拆分规划.md` 逐步回抽 C++）。
+  （`SessionController.qml` 是迁移期例外，按 本机过程记录 逐步回抽 C++）。
 - 新增业务不要往 `Main.qml` / `SessionController.qml` 堆 JS；handler 用字符串方法名只是迁移期兼容，
   新动作优先在 C++ 注册真实处理器。
 - 渲染路线：时间轴用 `QQuickPaintedItem`（QPainter 起步），瓶颈后迁 QSG。
@@ -106,7 +106,7 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 | `pageSwitcher` | 底部页面条 | 位置可配置（doc/05 待拍板 2） |
 | `statusBar` | 状态栏 | 固定全局 |
 
-**2026-08 布局探索新增候选插槽**（结论 → `local/doc/05-布局探索与皮肤可行性.md`）——理想皮肤若要免整壳支持，需纳入 schema：
+**2026-08 布局探索新增候选插槽**（结论 → 本机过程记录）——理想皮肤若要免整壳支持，需纳入 schema：
 
 - `documentTabs`：顶部多文档标签条（① IDE 式）；
 - `activityRail`：左图标栏（① IDE 式 / ④ Material 式）；
@@ -126,12 +126,12 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 ## 6. 未做 / 待拍板
 
 - [ ] **L2 `layout.json`**（面板集/顺序/dock/工具条组成；surface 清单见 §3.6）——设计已定稿、未实现，
-      细节在本机 `local/doc/11`（gitignore）；
-- [ ] **L3 QML 壳覆写**：整壳替换 vs 按区域 `Replace:` 声明（本机 `local/doc/11` §9 已拍「同名 components/ 覆写」，未进仓库）；
+      细节在本机 本机过程记录（gitignore）；
+- [ ] **L3 QML 壳覆写**：整壳替换 vs 按区域 `Replace:` 声明（本机 本机过程记录 §9 已拍「同名 components/ 覆写」，未进仓库）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME；文本框已让行 Ctrl+Z 等）。
 
 > 已落地项（L1 运行时换肤、`theme.json` 颜色/非颜色 token、UI 动作注册表、工具条枚举、快捷键三层）
-> 见 `doc/04` §5–§6 与 `doc/09` §11；逐批实现快照 → `local/doc/09-操作注册设计-实现快照.md`（gitignore）。
+> 见 `doc/04` §5–§6 与 `doc/09` §11；逐批实现快照 → 本机过程记录（gitignore）。
 
 ## 7. 文件清单
 
@@ -139,4 +139,4 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 - `doc/beatbench-ui-styles.html`（设计参考 + token 数据来源，随 doc/ 提交）；
 - `skins/`（内置 Aurora / Linear / OsuLight / Win10；L1 token + 可选 keymap.json）；
 - `local/ui-demos/`（5 套布局气质 demo，纯静态、gitignore——2026-08 布局探索产物，
-  结论见 `local/doc/05-布局探索与皮肤可行性.md`，仅本地参照）。
+  结论见 本机过程记录，仅本地参照）。
