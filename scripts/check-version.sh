@@ -14,12 +14,13 @@
 # 硬性检查（失败即退出 1）:
 #   1. CMakeLists.txt 的 project(... VERSION x.y.z) 与目标版本一致
 #   2. CHANGELOG.md 有 "## [x.y.z]" 小节，且小节里至少有一条内容
-#   3. README.md 里出现的发行物名 beatbench-vX.Y.Z-win64 必须与目标版本一致
+#   3. README.md 里出现的所有发行物名（beatbench-vX.Y.Z...，含 win64/deb/rpm/arch）
+#      必须与目标版本一致
 #   4. core/.../Version.hpp 的 kVersion 与 CMakeLists 版本一致
 #      （CLI `version`、JSON 协议 version、GUI「关于」都读它；v0.3.2 首发漏改过它）
 # 警告（--strict 时视为失败）:
 #   5. 被跟踪文档里的 Qt 版本示例与当前 Qt minor 不一致（如残留 /c/Qt/6.8.0）
-#   6. CHANGELOG 之外的文档里残留其它版本的发行物名
+#   6. CHANGELOG 之外的文档里残留其它版本的发行物名（含旧命名格式）
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -96,13 +97,18 @@ else
 fi
 
 # ---- 3. README 发行物名 ----
-mapfile -t readme_assets < <(git grep -hoE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+-win64' -- README.md | sort -u || true)
+mapfile -t readme_assets < <(git grep -hoE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+' -- README.md | sort -u || true)
 if [ "${#readme_assets[@]}" -gt 0 ]; then
-  if printf '%s\n' "${readme_assets[@]}" | grep -qx "beatbench-v$VER-win64"; then
-    echo "  ✓ README.md: 下载名已是 beatbench-v$VER-win64"
+  if [ "${#readme_assets[@]}" -eq 1 ] && [ "${readme_assets[0]}" = "beatbench-v$VER" ]; then
+    echo "  ✓ README.md: 发行物名统一为 beatbench-v$VER 系列"
   else
-    fail "README.md 里的发行物名是 ${readme_assets[*]}，与目标 v$VER 不一致（下载链接要跟着改）"
+    fail "README.md 里的发行物名是 ${readme_assets[*]}，与目标 v$VER 不一致（下载/安装名要跟着改）"
   fi
+fi
+# 旧命名（无 v 前缀 / 下划线分隔）不允许再回到 README（产物文件名已统一为连字符带 v）
+mapfile -t readme_legacy < <(git grep -hoE 'beatbench[_-][0-9]+\.[0-9]+\.[0-9]+' -- README.md | sort -u || true)
+if [ "${#readme_legacy[@]}" -gt 0 ]; then
+  fail "README.md 残留旧命名格式（应统一为 beatbench-v...）：${readme_legacy[*]}"
 fi
 
 # ---- 4. Version.hpp 的 kVersion（CLI/JSON/关于页的版本来源） ----
@@ -139,7 +145,7 @@ done < <(git grep -nE '(/c/Qt|/g/Qt|C:/Qt|G:/Qt)/6\.[0-9]+|Qt 6\.[0-9]+' -- '*.m
 while IFS= read -r line; do
   [ -n "$line" ] || continue
   warn "其它文档残留旧发行物名：$line"
-done < <(git grep -nE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+-win64' -- '*.md' ':!CHANGELOG.md' ':!README.md' || true)
+done < <(git grep -nE 'beatbench[_-]v?[0-9]+\.[0-9]+\.[0-9]+' -- '*.md' ':!CHANGELOG.md' ':!README.md' || true)
 
 echo
 if [ "$FAIL" -ne 0 ]; then
