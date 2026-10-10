@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### 变更（发布产物）
+
+- **Windows 包瘦身 ~35%**：`scripts/package-release.sh` 现在会裁掉 `windeployqt` 多带的内容——
+  Qt Quick Controls 样式（只留 Basic + Fusion；app 里 `QQuickStyle::setStyle("Fusion")` 是写死的，
+  样式不会随环境变量或皮肤变化）与 Qt Quick 3D 残留（`dxcompiler.dll`、`Qt6Quick3DUtils.dll`，
+  后者只在装了 `qtquick3d` 的完整 Qt 上才会被部署）。本机实测 zip **38.66 → 24.92 MiB（−35.5%）**，
+  解压 106.3 → 71.6 MB / 1480 → 351 个文件；载入真实谱面的界面截图与裁剪前**像素级等价**
+  （AE 887 / 1,024,000）。v0.3.1 的 Windows 包曾因此多发 19.8 MB 死重（本地打包 + 完整 Qt，
+  CI 的 aqt 最小安装没有这个问题）。
+
 ### 修复（发布基础设施）
 
 - **arch 包的维护者字段是 `Unknown Packager`**：`makepkg` 只从环境变量 / `makepkg.conf` 读

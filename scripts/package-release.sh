@@ -5,6 +5,7 @@
 # 步骤：
 #   1. Release 构建（build-release）
 #   2. staging 目录：exe + windeployqt 部署 + 应用 QML 模块 + 运行时/翻译/文档
+#      （随后裁剪：翻译只留中文、去 qmltooling、去多余控件样式与 Qt Quick 3D 残留）
 #   3. 冒烟（staging 内自检）
 #   4. staging 原子改名为 dist（out/beatbench-v<ver>-win64）
 #   5. zip + sha256
@@ -77,8 +78,16 @@ copystep "$BUILD/app/beatbench.exe" "$STAGE/beatbench.exe"
 copystep "$BUILD/cli/beatbench-cli.exe" "$STAGE/beatbench-cli.exe"
 
 echo "==> windeployqt 部署 Qt 运行时"
+# --no-system-dxc-compiler：dxcompiler.dll 是 D3D12 的运行时着色器编译器，本项目用默认
+#   RHI（D3D11/OpenGL）用不到；在装了 qtquick3d 的**完整 Qt**上 windeployqt 会把它当
+#   「system DXC」一起部署，实测 19.26 MB（v0.3.1 就这样多发了 19.8 MB）。
+#   与既有的 --no-system-d3d-compiler 同一类开关。
+# --no-quick3dutils：Qt6Quick3DUtils.dll（0.49 MB）同理，只有装了 qtquick3d 的 Qt 才会带。
+#   包内 exe/DLL 的导入表与全部 QML 都不引用这两个 DLL（实测扫描），删掉安全；
+#   真少了会加载失败，下方冒烟会拦住。
 "$QT_ROOT/bin/windeployqt.exe" --release --qmldir "$ROOT/app/qml" \
-  --no-opengl-sw --no-system-d3d-compiler --no-compiler-runtime \
+  --no-opengl-sw --no-system-d3d-compiler --no-system-dxc-compiler --no-compiler-runtime \
+  --no-quick3dutils \
   "$STAGE/beatbench.exe" >/dev/null
 # windeployqt 偶发把 exe 复制/改名成与 QML 模块同名文件（BeatBench，无扩展名），
 # 且可能生成残留目录；此处一律清掉（应用模块稍后从构建目录重新拷贝）。
@@ -132,6 +141,31 @@ echo "==> 翻译裁剪（仅保留中文）"
 
 echo "==> 清理调试工具集（qmltooling 只在 QML 调试时用）"
 rm -rf "$STAGE/qmltooling"
+
+echo "==> 裁剪未使用的 Qt Quick Controls 样式（只留 Basic + Fusion）
+   app/main.cpp 无条件 QQuickStyle::setStyle(\"Fusion\")（选中它是因为 Fusion 尊重应用调色板，
+   见 doc/08 §2），控件样式**不会**随环境变量或皮肤切换；而 windeployqt 无从得知这点，会把
+   Qt 安装里的全部样式一并部署。实测多余样式占解压后 ~15 MB，其中 FluentWinUI3 一家就
+   5.4 MB / 854 个文件。
+   保留 Basic：它是各样式公用的实现基线，删掉有退回默认外观的风险（省下的 2 MB 不值得冒）。"
+_ctrldir="$STAGE/qml/QtQuick/Controls"
+[ -d "$_ctrldir" ] || { echo "错误: 找不到 $_ctrldir（windeployqt 未部署控件样式？）" >&2; exit 1; }
+_trimmed=""
+for style in Imagine Material Universal FluentWinUI3 Windows macOS; do
+  [ -d "$_ctrldir/$style" ] && _trimmed="$_trimmed$style "
+  rm -rf "$_ctrldir/$style"
+  # 样式实现动态库（顶层）随 QML 目录一起删；rm -f 对不存在的名字是空操作
+  rm -f "$STAGE/Qt6QuickControls2${style}.dll" "$STAGE/Qt6QuickControls2${style}StyleImpl.dll"
+done
+echo "    已移除: ${_trimmed:-（无匹配，Qt 布局可能变了）}"
+# 断言：保留项还在（删错会让控件退回 Basic 外观，冒烟截图不一定抓得到），且没有漏删的样式目录。
+for keep in Basic Fusion; do
+  [ -d "$_ctrldir/$keep" ] || {
+    echo "错误: 裁剪误删 Qt Quick Controls 的 $keep 样式（Fusion 是应用显式选用的样式）" >&2; exit 1; }
+done
+leftover="$(cd "$_ctrldir" && find . -mindepth 1 -maxdepth 1 -type d \
+  | sed 's|^\./||' | grep -vxE 'Basic|Fusion|impl' || true)"
+[ -z "$leftover" ] || { echo "错误: 仍有未裁剪的控件样式: $leftover" >&2; exit 1; }
 
 echo "==> README.txt / LICENSE"
 cat > "$STAGE/README.txt" <<EOF
