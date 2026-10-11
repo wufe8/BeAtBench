@@ -40,6 +40,10 @@ class SliceWorkspace : public QObject {
     Q_PROPERTY(qreal offsetSec READ offsetSec WRITE setOffsetSec NOTIFY offsetChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusChanged)
+    /// M7 切音目标集合（绝对路径；QML 注入：项目页勾选，未勾选 = 当前编辑谱）。
+    /// 勾选非空时，「同时铺入编辑区」对所有目标生效（每谱一个撤销步）。
+    Q_PROPERTY(QStringList exportTargets READ exportTargets WRITE setExportTargets
+                   NOTIFY exportTargetsChanged)
     // ---- M6.2 切片 ----
     Q_PROPERTY(QVariantList slices READ slices NOTIFY slicesChanged)
     Q_PROPERTY(bool hasSlices READ hasSlices NOTIFY slicesChanged)
@@ -87,6 +91,9 @@ public:
                                          qreal fadeMs, bool placeIntoChart = false,
                                          const QString& conflictPolicy = QStringLiteral("error"),
                                          int idBaseMode = 0, bool independentExport = false);
+    QStringList exportTargets() const { return m_exportTargets; }
+    void setExportTargets(const QStringList& paths);
+
     /// 测试入口：同步装载参考音频（不经 QThreadPool / 不碰声卡）。生产路径仍用 loadAudioFile。
     bool loadAudioFileSyncForTest(const QString& path);
     /// 测试入口：直接注入切片表（绕过 detectSlices）。
@@ -193,6 +200,7 @@ signals:
     void offsetChanged();
     void busyChanged();
     void statusChanged();
+    void exportTargetsChanged();
     /// M6.2 切片表变化（生成/清除/放置开关）。
     void slicesChanged();
     void sliceHistoryChanged();
@@ -221,6 +229,10 @@ private:
         std::vector<double> manualPoints;
     };
     void pushSliceUndo();
+    /// 目标路径 → 已加载会话 id；不存在则新建会话并 session.load。失败置 err 并返回空。
+    std::string sessionIdForPath(const QString& path, QString* err);
+    /// 生效目标：m_exportTargets 非空 → 它；否则回退当前谱面会话（m_chartSession）。
+    QStringList effectiveTargets() const;
     void restoreSliceSnapshot(const SliceSnapshot& snap);
     /// 解码完成（UI 线程）：ok 且 track 有效 → 移入 m_track + 交 AudioEngine 预览；
     /// 失败 → statusText（原参考音轨保留）。
@@ -229,6 +241,7 @@ private:
 
     AudioEngine* m_engine = nullptr;
     ChartSession* m_chartSession = nullptr;  ///< 当前谱面（#WAV 占用/输出目录；不拥有）
+    QStringList m_exportTargets;             ///< M7：切音目标（勾选；空 = 回退当前谱面）
     QString m_audioPath;
     QString m_midiPath;
     beatbench::audio::ReferenceTrack m_track;  ///< 参考音轨（PCM + 金字塔 + 统计；音频层）

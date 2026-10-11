@@ -3,6 +3,7 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QFileInfo>
 #include <QMetaObject>
 #include <QThreadPool>
 #include <QVariantMap>
@@ -10,6 +11,9 @@
 #include <exception>
 #include <utility>
 
+#include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/edit/SessionRegistry.hpp"
+#include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/project/Project.hpp"
 
 namespace beatbench::app {
@@ -104,11 +108,13 @@ void ProjectController::scan(const QString& folder) {
     m_resources.clear();
     m_missingCount = 0;
     m_unreferencedCount = 0;
+    m_sliceTargets.clear();  // 换项目：旧勾选无意义
     m_state = QStringLiteral("indexing");
     emit stateChanged();
     emit summaryChanged();
     emit chartsChanged();
     emit resourcesChanged();
+    emit sliceTargetsChanged();
 
     const std::string root = clean.toUtf8().toStdString();
     QThreadPool::globalInstance()->start([this, gen, root, clean] {
@@ -254,9 +260,84 @@ void ProjectController::openChart(const QString& relative) {
     if (!abs.isEmpty()) emit chartOpenRequested(abs);
 }
 
-void ProjectController::setSliceTarget(const QString& relative) {
-    const QString abs = absolutePath(relative);
-    if (!abs.isEmpty()) emit sliceTargetRequested(abs);
+void ProjectController::setSliceTargetChecked(const QString& relative, bool checked) {
+    if (relative.isEmpty()) return;
+    const bool had = m_sliceTargets.contains(relative);
+    if (checked == had) return;
+    if (checked) {
+        m_sliceTargets.push_back(relative);
+        m_sliceTargets.sort();
+    } else {
+        m_sliceTargets.removeAll(relative);
+    }
+    emit sliceTargetsChanged();  // 行内 checkbox 绑定 project.sliceTargets，无需重建模型
+}
+
+void ProjectController::setAllSliceTargets(bool checked) {
+    if (checked) {
+        m_sliceTargets.clear();
+        if (m_project) {
+            for (const auto& c : m_project->charts) m_sliceTargets.push_back(qs(c.path));
+        }
+    } else {
+        m_sliceTargets.clear();
+    }
+    emit sliceTargetsChanged();
+}
+
+void ProjectController::clearSliceTargets() {
+    if (m_sliceTargets.isEmpty()) return;
+    m_sliceTargets.clear();
+    emit sliceTargetsChanged();
+}
+
+QStringList ProjectController::effectiveSliceTargets(const QString& editorPath) const {
+    // 一律返回**绝对路径**（切音工作区按路径寻址会话）
+    QStringList out;
+    if (!m_sliceTargets.isEmpty()) {
+        out.reserve(m_sliceTargets.size());
+        for (const QString& rel : m_sliceTargets) out.push_back(absolutePath(rel));
+        return out;
+    }
+    if (!editorPath.isEmpty()) out.push_back(editorPath);
+    return out;
+}
+
+QString ProjectController::saveSliceTargets(const QString& editorPath) {
+    using beatbench::json::Json;
+    auto& reg = beatbench::edit::session_registry();
+    const QStringList targets = effectiveSliceTargets(editorPath);
+    int saved = 0;
+    QStringList problems;
+    for (const QString& abs : targets) {
+        const std::string sid = reg.find_by_path(abs.toUtf8().toStdString());
+        if (sid.empty()) continue;  // 未加载 = 无内存改动
+        const beatbench::edit::EditorSession* s = reg.by_id(sid);
+        if (s == nullptr || !s->is_dirty()) continue;
+        Json req = Json::object();
+        req.set("command", "session.save");
+        Json args = Json::object();
+        args.set("session_id", sid);
+        args.set("overwrite", true);
+        req.set("args", std::move(args));
+        const Json resp = beatbench::cmd::global_registry().dispatch(req);
+        const Json* okp = resp.find("ok");
+        const bool ok = okp && okp->is_bool() && okp->as_bool();
+        if (ok) {
+            ++saved;
+            continue;
+        }
+        QString msg = QFileInfo(abs).fileName();
+        if (const Json* e = resp.find("error")) {
+            if (const Json* m = e->find("message"))
+                msg += QStringLiteral(": ") + QString::fromStdString(m->as_str());
+        }
+        problems << msg;
+    }
+    if (!problems.isEmpty())
+        return tr("已保存 %1 个谱面；失败：%2").arg(saved).arg(problems.join(QStringLiteral("; ")));
+    if (saved == 0) return tr("没有需要保存的改动");
+    return tr("已保存 %1 个谱面").arg(saved);
 }
 
 }  // namespace beatbench::app
