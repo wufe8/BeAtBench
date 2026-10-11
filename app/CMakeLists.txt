@@ -21,6 +21,8 @@ add_executable(beatbench
     bridge/PlayheadOverlayItem.cpp
     bridge/SliceWorkspace.cpp
     bridge/SliceWaveformItem.cpp
+    bridge/ProjectController.cpp
+    bridge/ProjectController.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
     bridge/SampleListModel.hpp
     bridge/LintListModel.hpp
@@ -61,6 +63,7 @@ qt_add_qml_module(beatbench
         qml/pages/EditPage.qml
         qml/pages/SlicePage.qml
         qml/pages/TestPage.qml
+        qml/pages/ProjectPage.qml
         qml/components/PageSwitcher.qml
         qml/components/MetaPanel.qml
         qml/components/BbToolButton.qml

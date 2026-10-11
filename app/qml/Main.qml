@@ -31,7 +31,9 @@ ApplicationWindow {
     font.pixelSize: Theme.fsBase
 
     // ---------- 会话状态（不入 undo，doc/05 §1.2） ----------
-    property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试
+    property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试 / 3 项目
+    /// M7 阶段①：项目页"设为切音目标"记录的目标路径（正式生效见阶段③）
+    property string sliceTargetPath: ""
     property var chartMeta: null         // dispatch(info) 的 result.meta
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     /// 元信息面板草稿（未点面板「保存」、也未 Ctrl+S）也算未保存。
@@ -428,6 +430,9 @@ ApplicationWindow {
             MenuItem { text: uiActions.label("view.page.test"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.test")
                        onTriggered: uiActions.invoke("view.page.test") }
+            MenuItem { text: uiActions.label("view.page.project"); checkable: true
+                       checked: window.uiStateTick >= 0 && uiActions.checked("view.page.project")
+                       onTriggered: uiActions.invoke("view.page.project") }
         }
         Menu {
             title: qsTr("设置")
@@ -795,6 +800,9 @@ ApplicationWindow {
                 kbdPageActive: window.currentPage === 1 && !window.textInputFocused
             }
             TestPage {}
+            ProjectPage {
+                id: projectPage
+            }
         }
 
         // 底部页面条（固定，Resolve 式页面切换）
@@ -931,9 +939,31 @@ ApplicationWindow {
         onRejected: { /* 用户取消 */ }
     }
 
+    // ---------- M7 项目页：打开歌曲文件夹 + 选中动作接线（doc/07 §9.1 阶段①） ----------
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("打开歌曲文件夹（一首歌的项目）")
+        onAccepted: doOpenFolder(urlToPath(selectedFolder))
+        onRejected: { /* 用户取消 */ }
+    }
+    // 桥层只发信号、不拥有文档：打开走既有 doOpenChart 链路
+    Connections {
+        target: project
+        function onChartOpenRequested(path) { window.doOpenChart(path) }
+        function onSliceTargetRequested(path) {
+            // 阶段① 只记录目标并提示；"目标 ≠ 当前编辑谱"的正式生效见阶段③
+            // （须让切音工作区持有自己的会话——审查稿 P0）
+            window.sliceTargetPath = path
+            window.setStatus(qsTr("切音目标：") + path)
+        }
+    }
+
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
     property string debugOpenPath: ""
     onDebugOpenPathChanged: if (debugOpenPath !== "") doOpenChart(debugOpenPath)
+    // --project 调试参数：启动即打开歌曲文件夹（项目页；--screenshot-delay 等后台解析）
+    property string debugProjectPath: ""
+    onDebugProjectPathChanged: if (debugProjectPath !== "") doOpenFolder(debugProjectPath)
     // 外部文件（双击文件关联 / 把文件拖到 exe 图标：Explorer 把路径作为 argv[1] 传入）：
     // 与「拖拽入窗口」共用同一路由函数，按后缀分流（谱面 → 编辑页；音频/MIDI → 切音工作台）。
     property string externalFilePath: ""
@@ -1671,6 +1701,12 @@ ApplicationWindow {
     // 迁移期机制：行为原点不变（原 chrome 的第 2 遍调用并入 handler）；invoke 失败 =
     // 方法不存在（C++ qWarning）或动作禁用（静默）。
     function uiActionOpen() { requestDocumentAction("open") }
+    /// M7：打开歌曲文件夹 → 项目页（只读索引版）。不替换当前文档，故无需未保存确认。
+    function uiActionOpenFolder() { folderDialog.open() }
+    function doOpenFolder(path) {
+        project.scan(path)
+        window.currentPage = 3
+    }
     function uiActionSaveAs() { saveAsDialog.open() }
     function uiActionExit() { window.close() }
     /// 运行时换肤（doc/08 §3.3）：应用皮肤 token（applySkinByName）+ 该皮肤目录 keymap.json。
@@ -1751,6 +1787,7 @@ ApplicationWindow {
         uiActions.setChecked("view.page.edit", currentPage === 0)
         uiActions.setChecked("view.page.slice", currentPage === 1)
         uiActions.setChecked("view.page.test", currentPage === 2)
+        uiActions.setChecked("view.page.project", currentPage === 3)
     }
     onChartMetaChanged: { updateActionStates(); updateCheckedStates() }
     onSelectionRefsChanged: { updateActionStates(); updateCheckedStates() }

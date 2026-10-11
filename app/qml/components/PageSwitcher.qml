@@ -26,7 +26,8 @@ Rectangle {
             model: [
                 { label: qsTr("编辑"), hint: qsTr("调整谱面") },
                 { label: qsTr("切音"), hint: qsTr("对音 / MIDI / key 音（占位）") },
-                { label: qsTr("测试"), hint: qsTr("试玩 / 预览（占位）") }
+                { label: qsTr("测试"), hint: qsTr("试玩 / 预览（占位）") },
+                { label: qsTr("项目"), hint: qsTr("谱面 / 资源索引") }
             ]
             Button {
                 id: pageBtn
