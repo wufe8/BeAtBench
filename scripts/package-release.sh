@@ -5,6 +5,7 @@
 # 步骤：
 #   1. Release 构建（build-release）
 #   2. staging 目录：exe + windeployqt 部署 + 应用 QML 模块 + 运行时/翻译/文档
+#      （随后裁剪：翻译只留中文、去 qmltooling、去多余控件样式与 Qt Quick 3D 残留）
 #   3. 冒烟（staging 内自检）
 #   4. staging 原子改名为 dist（out/beatbench-v<ver>-win64）
 #   5. zip + sha256
@@ -26,11 +27,26 @@ ROOT="$(pwd)"
 # ---- 可配置项 ----
 QT_ROOT="${QT_ROOT:-}"
 CXX_BIN="${CXX_BIN:-}"
+CC_BIN="${CC_BIN:-}"
 NINJA_BIN="${NINJA_BIN:-}"
 
 [ -n "$QT_ROOT" ] || { echo "错误: 请设置 QT_ROOT（Qt 安装目录）" >&2; exit 1; }
 [ -n "$CXX_BIN" ] || { echo "错误: 请设置 CXX_BIN（MinGW g++.exe 路径）" >&2; exit 1; }
 [ -n "$NINJA_BIN" ] || { echo "错误: 请设置 NINJA_BIN（Ninja 路径）" >&2; exit 1; }
+
+# C 编译器：PortAudio 是 C 代码。只指定 CXX 而让 C 走 PATH 上的默认编译器时，若那套 gcc 与
+# Qt 自带的 MinGW 不是同一个（例如 Git Bash 的 /mingw64 与 Qt 的 minGW13**），报错是
+# 「dsound.h / rpcsal.h: No such file or directory」这类**指向错误**的假线索——头文件其实都在
+# Qt 的 MinGW 里。默认从 CXX_BIN 同目录推导 gcc（Qt 的 MinGW 套件里二者同级）。
+if [ -z "$CC_BIN" ]; then
+  _cc_cand="$(dirname "$CXX_BIN")/gcc.exe"
+  [ -f "$_cc_cand" ] && CC_BIN="$_cc_cand"
+fi
+if [ -z "$CC_BIN" ]; then
+  echo "提示: 未能确定 C 编译器（CC_BIN）。PortAudio 是 C 代码，若 PATH 上默认 gcc 与 Qt 自带的" >&2
+  echo "      MinGW 不一致，会报 dsound.h/rpcsal.h 缺失之类的假错误。建议设 CC_BIN，或把 Qt 的" >&2
+  echo "      MinGW bin 目录放到 PATH 最前面。" >&2
+fi
 BUILD="$ROOT/build-release"
 OUT="$ROOT/out"
 
@@ -52,9 +68,13 @@ echo "==> Qt:   $QT_ROOT"
 if [ ! -f "$BUILD/CMakeCache.txt" ]; then
   echo "==> 配置 $BUILD (Release/Ninja)"
   # CMake >= 4.0 移除 <3.5 兼容；portaudio(FetchContent).CMakeLists 仍写 VERSION 2.8，需显式放行。
+  # C 编译器同样显式指定（PortAudio 是 C）：见上方 CC_BIN 的说明。
+  CC_ARG=()
+  [ -n "$CC_BIN" ] && CC_ARG=(-DCMAKE_C_COMPILER="$CC_BIN")
   cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$QT_ROOT" \
     -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+    "${CC_ARG[@]}" \
     -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
     -DBEATBENCH_BUILD_TESTS=OFF \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -77,8 +97,33 @@ copystep "$BUILD/app/beatbench.exe" "$STAGE/beatbench.exe"
 copystep "$BUILD/cli/beatbench-cli.exe" "$STAGE/beatbench-cli.exe"
 
 echo "==> windeployqt 部署 Qt 运行时"
+# --no-system-dxc-compiler：dxcompiler.dll 是 D3D12 的运行时着色器编译器，本项目用默认
+#   RHI（D3D11/OpenGL）用不到；在装了 qtquick3d 的**完整 Qt**上 windeployqt 会把它当
+#   「system DXC」一起部署，实测 19.26 MB（v0.3.1 就这样多发了 19.8 MB）。
+#   与既有的 --no-system-d3d-compiler 同一类开关。
+# --no-quick3dutils：Qt6Quick3DUtils.dll（0.49 MB）同理，只有装了 qtquick3d 的 Qt 才会带。
+#   包内 exe/DLL 的导入表与全部 QML 都不引用这两个 DLL（实测扫描），删掉安全；
+#   真少了会加载失败，下方冒烟会拦住。
+#
+#   ⚠️ 但 --no-quick3dutils **只在装了 qtquick3d 的 Qt 上被注册**：quick3d 相关开关是随该
+#   模块注册的，缺失时 windeployqt 直接 `Unknown option 'no-quick3dutils'` 并以 1 退出
+#   （同类先例 msys2/MINGW-packages#22952）。它**不列在 --help 里**，所以不能靠帮助文本判断，
+#   只能实跑探测。CI 的 aqt 最小安装恰好没有 qtquick3d —— v0.4.0 首次自动发版就倒在这里
+#   （本机开发是完整 Qt，开关存在，故 A/B 测试发现不了）。
+#   处理：探测不可用就跳过；未装 qtquick3d 的 Qt 本来也不会部署那个 DLL，跳过无损失。
+QUICK3D_OPT=()
+# 探测**不能写成 `windeployqt … | grep -q`**：本脚本开了 pipefail，探测命令本身以非 0 退出
+# 会让整条管道非 0，grep 即便命中也会被读成「不支持」——恰好在 CI 那种情况下判反。
+quick3d_probe="$("$QT_ROOT/bin/windeployqt.exe" --no-quick3dutils 2>&1 || true)"
+case "$quick3d_probe" in
+  *"Unknown option"*)
+    echo "  [skip] 此 windeployqt 未注册 --no-quick3dutils（该 Qt 未装 qtquick3d，没有 Quick3D 残留可裁）" ;;
+  *) QUICK3D_OPT=(--no-quick3dutils) ;;
+esac
+
 "$QT_ROOT/bin/windeployqt.exe" --release --qmldir "$ROOT/app/qml" \
-  --no-opengl-sw --no-system-d3d-compiler --no-compiler-runtime \
+  --no-opengl-sw --no-system-d3d-compiler --no-system-dxc-compiler --no-compiler-runtime \
+  "${QUICK3D_OPT[@]}" \
   "$STAGE/beatbench.exe" >/dev/null
 # windeployqt 偶发把 exe 复制/改名成与 QML 模块同名文件（BeatBench，无扩展名），
 # 且可能生成残留目录；此处一律清掉（应用模块稍后从构建目录重新拷贝）。
@@ -132,6 +177,31 @@ echo "==> 翻译裁剪（仅保留中文）"
 
 echo "==> 清理调试工具集（qmltooling 只在 QML 调试时用）"
 rm -rf "$STAGE/qmltooling"
+
+echo "==> 裁剪未使用的 Qt Quick Controls 样式（只留 Basic + Fusion）
+   app/main.cpp 无条件 QQuickStyle::setStyle(\"Fusion\")（选中它是因为 Fusion 尊重应用调色板，
+   见 doc/08 §2），控件样式**不会**随环境变量或皮肤切换；而 windeployqt 无从得知这点，会把
+   Qt 安装里的全部样式一并部署。实测多余样式占解压后 ~15 MB，其中 FluentWinUI3 一家就
+   5.4 MB / 854 个文件。
+   保留 Basic：它是各样式公用的实现基线，删掉有退回默认外观的风险（省下的 2 MB 不值得冒）。"
+_ctrldir="$STAGE/qml/QtQuick/Controls"
+[ -d "$_ctrldir" ] || { echo "错误: 找不到 $_ctrldir（windeployqt 未部署控件样式？）" >&2; exit 1; }
+_trimmed=""
+for style in Imagine Material Universal FluentWinUI3 Windows macOS; do
+  [ -d "$_ctrldir/$style" ] && _trimmed="$_trimmed$style "
+  rm -rf "$_ctrldir/$style"
+  # 样式实现动态库（顶层）随 QML 目录一起删；rm -f 对不存在的名字是空操作
+  rm -f "$STAGE/Qt6QuickControls2${style}.dll" "$STAGE/Qt6QuickControls2${style}StyleImpl.dll"
+done
+echo "    已移除: ${_trimmed:-（无匹配，Qt 布局可能变了）}"
+# 断言：保留项还在（删错会让控件退回 Basic 外观，冒烟截图不一定抓得到），且没有漏删的样式目录。
+for keep in Basic Fusion; do
+  [ -d "$_ctrldir/$keep" ] || {
+    echo "错误: 裁剪误删 Qt Quick Controls 的 $keep 样式（Fusion 是应用显式选用的样式）" >&2; exit 1; }
+done
+leftover="$(cd "$_ctrldir" && find . -mindepth 1 -maxdepth 1 -type d \
+  | sed 's|^\./||' | grep -vxE 'Basic|Fusion|impl' || true)"
+[ -z "$leftover" ] || { echo "错误: 仍有未裁剪的控件样式: $leftover" >&2; exit 1; }
 
 echo "==> README.txt / LICENSE"
 cat > "$STAGE/README.txt" <<EOF

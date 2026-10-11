@@ -57,6 +57,46 @@ protected:
                            std::istreambuf_iterator<char>());
     }
 
+    /// 2s 44100Hz 单声道 16-bit；0.5/1.0/1.5s 处 50ms 指数衰减 880Hz burst
+    /// （M6.5 瞬态检测输入；OnsetDetector 自身单测同参数，位置可预期）。
+    static std::string writeBurstWav(const std::filesystem::path& path) {
+        FILE* f = std::fopen(path.string().c_str(), "wb");
+        EXPECT_TRUE(f != nullptr);
+        const int sampleRate = 44100;
+        const int frames = sampleRate * 2;
+        auto write16 = [&](std::uint16_t v) { std::fwrite(&v, 2, 1, f); };
+        auto write32 = [&](std::uint32_t v) { std::fwrite(&v, 4, 1, f); };
+        std::fwrite("RIFF", 1, 4, f);
+        write32(36 + static_cast<std::uint32_t>(frames) * 2);
+        std::fwrite("WAVE", 1, 4, f);
+        std::fwrite("fmt ", 1, 4, f);
+        write32(16);
+        write16(1);
+        write16(1);
+        write32(static_cast<std::uint32_t>(sampleRate));
+        write32(static_cast<std::uint32_t>(sampleRate * 2));
+        write16(2);
+        write16(16);
+        std::fwrite("data", 1, 4, f);
+        write32(static_cast<std::uint32_t>(frames * 2));
+        std::vector<float> buf(static_cast<std::size_t>(frames), 0.0f);
+        for (const double t : {0.5, 1.0, 1.5}) {
+            const int start = static_cast<int>(t * sampleRate);
+            for (int i = 0; i < 2205; ++i) {
+                const double env = std::exp(-static_cast<double>(i) / (0.015 * sampleRate));
+                buf[static_cast<std::size_t>(start + i)] += static_cast<float>(
+                    0.4 * env * std::sin(2.0 * 3.14159265358979323846 * 880.0 * i / sampleRate));
+            }
+        }
+        for (int i = 0; i < frames; ++i) {
+            const double v = std::max(-1.0, std::min(1.0, static_cast<double>(buf[static_cast<std::size_t>(i)])));
+            const auto s = static_cast<std::int16_t>(std::lround(v * 32000.0));
+            std::fwrite(&s, 2, 1, f);
+        }
+        std::fclose(f);
+        return path.string();
+    }
+
     static std::string writeSineWav(const std::filesystem::path& path) {
         FILE* f = std::fopen(path.string().c_str(), "wb");
         EXPECT_TRUE(f != nullptr);
@@ -501,6 +541,70 @@ TEST_F(SliceWorkspaceTest, SliceUndoDoesNotTouchChartSession) {
     ASSERT_TRUE(workspace_.undoSliceEdit());
     EXPECT_EQ(beatbench::edit::session_registry().active().undo_depth(), undoBefore);
     EXPECT_EQ(workspace_.occupiedWavIds().size(), 1);
+}
+
+// ---- M6.5 瞬态检测（audio 源；桥层落点/替换/追加/undo 语义） ----
+
+TEST_F(SliceWorkspaceTest, OnsetDetectRebuildsAsManualSlices) {
+    const auto src = makeTempDir("onset") / "burst.wav";
+    ASSERT_TRUE(workspace_.loadAudioFileSyncForTest(QString::fromStdString(writeBurstWav(src))));
+    ASSERT_TRUE(workspace_.detectOnsetSlicesSyncForTest(5.0, 0.06, false));
+    const auto& slices = workspace_.slicesC();
+    ASSERT_EQ(slices.size(), 4u);  // 3 检出点切 4 片
+    for (const auto& s : slices) EXPECT_EQ(s.kind, "manual");
+    const std::vector<double> truth = {0.5, 1.0, 1.5};
+    for (std::size_t i = 0; i < truth.size(); ++i)
+        EXPECT_NEAR(slices[i + 1].startSec, truth[i], 0.05) << "边界 " << i;
+}
+
+TEST_F(SliceWorkspaceTest, OnsetDetectAppendKeepsExistingAndDedupes) {
+    const auto src = makeTempDir("onset") / "burst.wav";
+    ASSERT_TRUE(workspace_.loadAudioFileSyncForTest(QString::fromStdString(writeBurstWav(src))));
+    ASSERT_TRUE(workspace_.toggleManualPoint(0.8));  // 预置手动点 → 整轨拆 2 片
+    ASSERT_TRUE(workspace_.detectOnsetSlicesSyncForTest(5.0, 0.06, true));
+    const auto& slices = workspace_.slicesC();
+    ASSERT_EQ(slices.size(), 5u);  // 0.8 + 3 检出点 → 5 片
+    bool has08 = false;
+    for (const auto& s : slices)
+        if (std::abs(s.startSec - 0.8) < 0.01) has08 = true;
+    EXPECT_TRUE(has08);
+    // 再追加一次：全部与已有点去重 → 片数不变
+    ASSERT_TRUE(workspace_.detectOnsetSlicesSyncForTest(5.0, 0.06, true));
+    EXPECT_EQ(workspace_.slicesC().size(), 5u);
+}
+
+TEST_F(SliceWorkspaceTest, OnsetDetectReplaceClearsOldManualPoints) {
+    const auto src = makeTempDir("onset") / "burst.wav";
+    ASSERT_TRUE(workspace_.loadAudioFileSyncForTest(QString::fromStdString(writeBurstWav(src))));
+    ASSERT_TRUE(workspace_.toggleManualPoint(0.3));
+    ASSERT_TRUE(workspace_.detectOnsetSlicesSyncForTest(5.0, 0.06, false));
+    for (const auto& s : workspace_.slicesC())
+        EXPECT_FALSE(std::abs(s.startSec - 0.3) < 0.02) << "旧手动点应被替换";
+}
+
+TEST_F(SliceWorkspaceTest, OnsetDetectEmptyResultKeepsState) {
+    // 纯正弦 0.1s@8kHz 不足一窗 → 检出空 → 预置切片不动（零破坏）
+    const auto src = makeTempDir("onset") / "sine.wav";
+    ASSERT_TRUE(workspace_.loadAudioFileSyncForTest(QString::fromStdString(writeSineWav(src))));
+    beatbench::slice::Slice a;
+    a.index = 0;
+    a.startSec = 0.0;
+    a.endSec = 0.1;
+    a.kind = "grid";
+    workspace_.setSlicesForTest({a}, {true});
+    ASSERT_TRUE(workspace_.detectOnsetSlicesSyncForTest(5.0, 0.06, false));
+    ASSERT_EQ(workspace_.slicesC().size(), 1u);
+    EXPECT_EQ(workspace_.slicesC()[0].kind, "grid");
+}
+
+TEST_F(SliceWorkspaceTest, OnsetDetectUndoRestoresPreDetection) {
+    const auto src = makeTempDir("onset") / "burst.wav";
+    ASSERT_TRUE(workspace_.loadAudioFileSyncForTest(QString::fromStdString(writeBurstWav(src))));
+    ASSERT_TRUE(workspace_.toggleManualPoint(0.8));
+    ASSERT_TRUE(workspace_.detectOnsetSlicesSyncForTest(5.0, 0.06, false));
+    ASSERT_EQ(workspace_.slicesC().size(), 4u);
+    ASSERT_TRUE(workspace_.undoSliceEdit());
+    EXPECT_EQ(workspace_.slicesC().size(), 2u);  // 回到检测前（0.8 点拆出的 2 片）
 }
 
 }  // namespace

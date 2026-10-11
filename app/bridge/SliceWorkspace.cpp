@@ -21,6 +21,7 @@
 #include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
 #include "beatbench/audio/ChartRenderer.hpp"
+#include "beatbench/audio/OnsetDetector.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/slice/SliceExport.hpp"
@@ -40,6 +41,10 @@ std::vector<std::uint32_t> occupied_wav_ids(const ChartSession* session) {
 }
 
 constexpr int kExportNameWidth = 3;
+/// M6.5 追加式去重容差（秒）：与现有手动点距 ≤ 此值的检出点跳过。
+constexpr double kOnsetAppendEps = 0.01;
+/// 边界判定容差（秒）：手动点与切片起点的「同一性」判断（M6.4c；顶部声明供全文件用）。
+constexpr double kPointEps = 1e-4;
 
 QString normalize_export_prefix(const QString& prefix) {
     QString base = prefix.isEmpty() ? QStringLiteral("slice") : prefix;
@@ -639,6 +644,110 @@ bool SliceWorkspace::detectSlices(const QString& source, qreal bpm, int subdivis
     return true;
 }
 
+// ---- M6.5 瞬态检测（audio 源） ----
+
+int SliceWorkspace::applyOnsetPoints(std::vector<double> onsets, bool append) {
+    if (onsets.empty()) return 0;  // 空结果零破坏（不开 undo 步，不清表）
+    pushSliceUndo();
+    if (!append) {
+        // 替换式：清空切片表与手动点，整轨按检出点重建（后续 splitSliceAt 空表
+        // 分支会先建 [0, dur) 整轨）
+        m_slices.clear();
+        m_sliceEnabled.clear();
+        m_manualPoints.clear();
+    }
+    std::sort(onsets.begin(), onsets.end());
+    const double dur = audioDurationSec();
+    int n = 0;
+    for (const double t : onsets) {
+        if (t <= kPointEps || (dur > 0.0 && t >= dur - kPointEps))
+            continue;  // 曲首/曲尾不设点（与手动点同规则）
+        if (append) {
+            // 去重：与现有手动点距 ≤ kOnsetAppendEps 的跳过
+            const auto it = std::lower_bound(m_manualPoints.begin(),
+                                             m_manualPoints.end(),
+                                             t - kOnsetAppendEps);
+            if (it != m_manualPoints.end() && *it <= t + kOnsetAppendEps) continue;
+        }
+        // 拆分式插入（不 toggle——避免命中边界被合并）；恰与现有边界重合 → 记入集合
+        if (splitSliceAt(t, false) || findBoundaryIndex(t) >= 0) {
+            m_manualPoints.push_back(t);
+            ++n;
+        }
+    }
+    std::sort(m_manualPoints.begin(), m_manualPoints.end());
+    renumberSlices();
+    emit slicesChanged();
+    return n;
+}
+
+bool SliceWorkspace::detectOnsetSlices(qreal sensitivity, qreal minGapSec, bool append) {
+    if (!m_track.valid() || m_track.pcm() == nullptr) {
+        setStatus(QStringLiteral("尚无参考音频（请先导入音频）"));
+        return false;
+    }
+    if (m_busy) {
+        setStatus(QStringLiteral("正在检测中…"));
+        return false;
+    }
+    // shared_ptr 保活 PCM；回调时比对 raw 指针（检测期间换音频 → 丢弃结果）
+    const auto pcm = m_track.pcm();
+    const auto* pcmPtr = pcm.get();
+    const int channels = m_track.channels();
+    const double sr = m_track.sampleRate();
+    m_busy = true;
+    emit busyChanged();
+    QThreadPool::globalInstance()->start(
+        [this, pcm, pcmPtr, sr, channels, sensitivity, minGapSec, append] {
+            beatbench::audio::OnsetConfig cfg;
+            cfg.sensitivity = static_cast<double>(sensitivity);
+            cfg.minGapSec = static_cast<double>(minGapSec);
+            auto onsets = beatbench::audio::detect_onsets(
+                pcm->data(), pcm->size() / static_cast<std::size_t>(channels), channels,
+                sr, cfg);
+            QMetaObject::invokeMethod(
+                this,
+                [this, onsets = std::move(onsets), pcmPtr, append] {
+                    m_busy = false;
+                    emit busyChanged();
+                    if (m_track.pcm().get() != pcmPtr) {
+                        setStatus(QStringLiteral("检测完成，但参考音频已更换，结果已丢弃"));
+                        return;
+                    }
+                    const std::size_t total = onsets.size();
+                    const int n = applyOnsetPoints(std::move(onsets), append);
+                    setStatus(n > 0
+                                  ? QStringLiteral("瞬态检测：%1 点 → %2 片（%3）")
+                                        .arg(n)
+                                        .arg(m_slices.size())
+                                        .arg(append ? QStringLiteral("追加")
+                                                    : QStringLiteral("替换"))
+                                  : QStringLiteral("瞬态检测：未检出瞬态（共 %1 候选；"
+                                                    "可调高敏感度或减小最小间隔）")
+                                        .arg(total));
+                },
+                Qt::QueuedConnection);
+        });
+    return true;
+}
+
+bool SliceWorkspace::detectOnsetSlicesSyncForTest(qreal sensitivity, qreal minGapSec,
+                                                  bool append) {
+    if (!m_track.valid() || m_track.pcm() == nullptr) {
+        setStatus(QStringLiteral("尚无参考音频（请先导入音频）"));
+        return false;
+    }
+    const auto pcm = m_track.pcm();
+    beatbench::audio::OnsetConfig cfg;
+    cfg.sensitivity = static_cast<double>(sensitivity);
+    cfg.minGapSec = static_cast<double>(minGapSec);
+    auto onsets = beatbench::audio::detect_onsets(
+        pcm->data(), pcm->size() / static_cast<std::size_t>(m_track.channels()),
+        m_track.channels(), m_track.sampleRate(), cfg);
+    applyOnsetPoints(std::move(onsets), append);
+    return true;
+}
+
 void SliceWorkspace::clearSlices() {
     if (m_slices.empty()) return;
     pushSliceUndo();
@@ -710,11 +819,6 @@ bool SliceWorkspace::setSliceBounds(int index, double startSec, double durationS
 }
 
 // ---- M6.4c 手动切分点 ----
-
-namespace {
-/// 边界判定容差（秒）：手动点与切片起点的「同一性」判断。
-constexpr double kPointEps = 1e-4;
-}
 
 /// 命中内部边界的切片序号（startSec ≈ t 且 i >= 1；靠后优先——负数容差对称无所谓）。
 int SliceWorkspace::findBoundaryIndex(double t) const {

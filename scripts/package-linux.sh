@@ -4,8 +4,11 @@
 #
 # 设计：文件布局单一来源 = app/CMakeLists 的 install 规则；本脚本只做
 #   cmake Release 构建 → DESTDIR staging → 按格式加元数据（control / spec / PKGBUILD）。
-# 产物按发行版惯例命名（内嵌版本/发行号/架构，便于 dpkg -i / dnf install / pacman -U）；
-# workflow 以中性 artifact 名（beatbench-linux-deb 等）分发。
+# 产物文件名统一为 beatbench-v<ver>-...（连字符分隔，与 tag v<ver> / win64.zip 一致）；
+# 包内元数据版本保持发行版原生格式（dpkg/rpm 要求版本号以数字开头，v 只落在文件名层）；
+# dpkg -i / apt install ./ / dnf install ./ / pacman -U 本地安装都读包内元数据，
+# 不解析文件名（唯一例外：arch 的 .PKGINFO filename 字段仍是旧名，仅影响 repo-add 类
+# 仓库工具，本地安装无影响）。workflow 以中性 artifact 名（beatbench-linux-deb 等）分发。
 #
 # 用法（容器内，通常 root）:
 #   bash scripts/package-linux.sh <deb|rpm|arch> [--skip-deps]
@@ -95,6 +98,26 @@ stage_assert() {
   [ "$missing" = 0 ] || exit 1
 }
 
+# 断言：staging 内所有 ELF 对 Qt 的符号版本依赖只能是泛化 Qt_6，不得出现小版本 tag
+# （Qt_6.4 / Qt_6.12 之类）。小版本 tag 来自 QtCore 的 qt_version_tag 哨兵，构建侧已在
+# CMake 全局禁用（QT_NO_VERSION_TAGGING）；此断言机械防回退——新目标/新依赖漏覆盖时
+# 在打包阶段失败，而不是流出到低版本 Qt 用户手里（实例：v0.3.2 arch 包在 Qt 6.11
+# 系统上 version 'Qt_6.12' not found）。
+assert_portable_qt_links() {
+  local bad=0 f
+  while IFS= read -r -d '' f; do
+    # 只检查 ELF（头四字节 7f 45 4c 46）；其余文件 readelf 无意义
+    [ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" = "7f454c46" ] || continue
+    if readelf -V "$f" 2>/dev/null | grep -qE 'Qt_[0-9]+\.[0-9]+'; then
+      echo "错误: $f 绑定了 Qt 小版本符号版本（应为泛化 Qt_6）：" >&2
+      readelf -V "$f" 2>/dev/null | grep -E 'Qt_[0-9]+\.[0-9]+' >&2
+      bad=1
+    fi
+  done < <(find "$PKGROOT" -type f -print0)
+  [ "$bad" = 0 ] || { echo "错误: 产物不得依赖 Qt 小版本符号版本（见 QT_NO_VERSION_TAGGING）" >&2; exit 1; }
+  echo "==> Qt 链接可移植性断言通过（无小版本符号版本依赖）"
+}
+
 make_deb() {
   # Debian 政策：/usr/share/doc/<pkg>/copyright
   install -Dm644 "$SRC/LICENSE" "$PKGROOT/usr/share/doc/beatbench/copyright"
@@ -149,7 +172,9 @@ Description: BMS chart editor
 EOF
 
   mkdir -p "$OUT"
-  local file="beatbench_${VER}-1_${DEB_ARCH}.deb"
+  # 命名统一：dpkg-deb --build 的输出文件名完全由第二个参数决定，不强制下划线惯例；
+  # 有意偏离 Debian 的 <pkg>_<ver>_<arch>.deb，换取全产物连字符格式。
+  local file="beatbench-v${VER}-1-${DEB_ARCH}.deb"
   dpkg-deb --build --root-owner-group "$PKGROOT" "$OUT/$file"
   (cd "$OUT" && sha256sum "$file" > "$file.sha256")
   echo "==> 产物: $OUT/$file"
@@ -207,10 +232,14 @@ EOF
   local rpmfile
   rpmfile="$(find "$top/RPMS" -name '*.rpm' | head -1)"
   [ -n "$rpmfile" ] || { echo "错误: rpmbuild 未产出包" >&2; exit 1; }
+  # 命名统一：rpmbuild 产物名由 spec 的 Name-Version-Release 生成（header 内 version 不带 v），
+  # 此处只在文件名层加 v 前缀；rpm/dnf 本地安装只读 header。
+  local base="${rpmfile##*/}"
+  local out_name="${base/#beatbench-/beatbench-v}"
   mkdir -p "$OUT"
-  cp "$rpmfile" "$OUT/"
-  (cd "$OUT" && sha256sum "$(basename "$rpmfile")" > "$(basename "$rpmfile").sha256")
-  echo "==> 产物: $OUT/$(basename "$rpmfile")"
+  cp "$rpmfile" "$OUT/$out_name"
+  (cd "$OUT" && sha256sum "$out_name" > "$out_name.sha256")
+  echo "==> 产物: $OUT/$out_name"
 }
 
 make_arch() {
@@ -226,7 +255,9 @@ pkgdesc='BMS chart editor'
 arch=('x86_64')
 url='https://github.com/wufe8/BeAtBench'
 license=('GPL-3.0-only')
-depends=('qt6-base' 'qt6-declarative' 'alsa-lib' 'hicolor-icon-theme')
+# 下限 6.4 与代码侧 API 口径一致（probe-qt64 守卫）：pacman -U 只校验包版本依赖、
+# 不查 ELF 符号版本，这行 depends 是 arch 包唯一的机械版本防线。
+depends=('qt6-base>=6.4' 'qt6-declarative' 'alsa-lib' 'hicolor-icon-theme')
 optdepends=('qt6-wayland: Wayland 平台插件' 'noto-fonts-cjk: 中文界面字体')
 options=('!debug')
 source=()
@@ -253,15 +284,20 @@ EOF
   local pkgfile
   pkgfile="$(find "$work" -maxdepth 1 -name '*.pkg.tar.zst' | head -1)"
   [ -n "$pkgfile" ] || { echo "错误: makepkg 未产出包" >&2; exit 1; }
+  # 命名统一：makepkg 产物名由 pkgver 生成（.PKGINFO 内 pkgver 不带 v），
+  # 此处只在文件名层加 v 前缀；pacman -U 本地安装读 .PKGINFO，不校验文件名。
+  local base="${pkgfile##*/}"
+  local out_name="${base/#beatbench-/beatbench-v}"
   mkdir -p "$OUT"
-  cp "$pkgfile" "$OUT/"
-  (cd "$OUT" && sha256sum "$(basename "$pkgfile")" > "$(basename "$pkgfile").sha256")
-  echo "==> 产物: $OUT/$(basename "$pkgfile")"
+  cp "$pkgfile" "$OUT/$out_name"
+  (cd "$OUT" && sha256sum "$out_name" > "$out_name.sha256")
+  echo "==> 产物: $OUT/$out_name"
 }
 
 install_build_deps
 build_and_stage
 stage_assert
+assert_portable_qt_links
 case "$FORMAT" in
   deb) make_deb ;;
   rpm) make_rpm ;;

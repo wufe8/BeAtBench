@@ -10,13 +10,14 @@
 # - macOS continue-on-error：macOS 侧从未人工验证过，首跑风险隔离；其余 job 阻塞。
 # - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
 #   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
-# - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2），Qt 走 action 缓存。
+# - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2）；Qt 装机走 action 缓存，
+#   编译走钉版 ccache（三 Qt job 共用；macOS 的 make -j 无限并发曾是 CI 总时长瓶颈）。
 # - 发布打包不在这里：独立 package.yml（tag/手动触发，见 doc/11）。
 name: CI
 
 on:
   push:
-    # 仅 master：同仓库 PR 会 push + PR 双跑（每遍携 ~32 分钟的 macOS job），
+    # 仅 master：同仓库 PR 会 push + PR 双跑（每遍都带一遍 macOS job），
     # 分支上的验证靠 PR 事件 / 手动 dispatch。
     branches: [master]
   pull_request:
@@ -80,10 +81,24 @@ jobs:
       # 冒烟截图防豆腐块：runner 默认无 CJK 字体
       - name: Install CJK fonts
         run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-qt6112-${{ runner.os }}-
+      - name: Install ccache (pinned 4.14.1)
+        shell: bash
+        run: ./.github/workflows/scripts/setup-ccache.sh
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: cmake --build build --parallel
+      - name: ccache stats
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: ./.github/workflows/scripts/ccache-summary.sh
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke
@@ -113,7 +128,9 @@ jobs:
     # macOS 侧从未人工验证过，风险隔离；其实际结论由 summary job 经 API 翻出
     continue-on-error: true
     runs-on: macos-15
-    # 实测 Qt 缓存 miss 时 Build 独占 ~31 分钟（Linux 同款 2 分钟），45 分钟贴近撞限
+    # 历史教训：make -j 无限并发曾把全量构建拖到 18–35 分钟（147 个编译单元同起跑，
+    # 3 vCPU/7GB 被调度与换页压垮）；--parallel 3 后冷构建实测 116s。timeout 90 为
+    # 排队与缓存缺失留余量
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
@@ -124,10 +141,28 @@ jobs:
           arch: clang_64
           cache: true
           cache-key-prefix: install-qt-macos
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          # ccache 4.x 在 macOS 默认写 ~/Library/Caches/ccache（Apple 惯例），非 XDG
+          path: ~/Library/Caches/ccache
+          key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-qt6112-${{ runner.os }}-
+      - name: Install ccache (pinned 4.14.1)
+        shell: bash
+        run: ./.github/workflows/scripts/setup-ccache.sh
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
+        # 并行度由 setup-ccache.sh 写入 CMAKE_BUILD_PARALLEL_LEVEL（macos 上限 3）：
+        # 不带值的 --parallel 原本会向 make 传裸 -j 无限并发，147 个编译单元同起跑
+        # 曾把 3 vCPU/7GB 压到 27–35 分钟；有界后冷构建 116s（run 37993321189）
         run: cmake --build build --parallel
+      - name: ccache stats
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: ./.github/workflows/scripts/ccache-summary.sh
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke
@@ -176,14 +211,29 @@ jobs:
           add-tools-to-path: true
           cache: true
           cache-key-prefix: install-qt-windows-mingw
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/ccache
+          key: ccache-qt6112-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-qt6112-${{ runner.os }}-
+      - name: Install ccache (pinned 4.14.1)
+        shell: bash
+        run: ./.github/workflows/scripts/setup-ccache.sh
       - name: Configure
         shell: bash
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON \
-            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: cmake --build build --parallel
+      - name: ccache stats
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: ./.github/workflows/scripts/ccache-summary.sh
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: GUI smoke

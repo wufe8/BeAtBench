@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# 发布流水线：打 tag → 构建 + 单测 + 版本一致性检查 + 打包 → 建 GitHub Release。
+# 发布流水线：tag 出现（正常由 release-please 在 release PR 合并后打，见 release-please.yml）
+# → 构建 + 单测 + 版本一致性检查 + 打包 → 建/更新 GitHub Release。
 #
 # 设计要点：
 # - **只有一个打包实现**：调 scripts/package-release.sh（与本地 scripts/release.sh 同一条路径），
@@ -17,6 +18,9 @@ on:
       tag:
         description: '要发布的已有 tag（如 v0.3.1）'
         required: true
+      ref:
+        description: '可选：用哪个 ref 的工作树打包（默认取上面的 tag）。回填历史 tag 时填 master —— tag 指向的提交里若打包脚本有问题，重跑只会原样复现。'
+        required: false
 
 permissions:
   contents: write
@@ -32,7 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          # inputs.ref 优先：回填历史 tag 时用 master 的脚本（tag 里的那份可能正有 bug，
+          # 否则重跑只会原样复现 —— v0.4.0 的 Windows 包就卡在这里）。
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
           fetch-depth: 0            # check-version 用 git grep，且需要 tag 信息
 
       - name: Install Qt ${{ env.QT_VERSION }} (win64_mingw) + MinGW/Ninja
@@ -96,7 +102,7 @@ jobs:
             echo "- 编译器: \`$(g++ --version | head -1)\`"
             echo "- CMake: \`$(cmake --version | head -1)\`"
             echo "- Runner: \`${{ runner.os }}-${{ runner.arch }}\`"
-            echo "- 完整变更: https://github.com/${{ github.repository }}/compare/${{ github.ref_name }}...HEAD"
+            echo "- 完整变更: https://github.com/${{ github.repository }}/compare/$TAG...HEAD"
           } > "$NOTES"
           cat "$NOTES"
 
@@ -114,6 +120,26 @@ jobs:
           ls -l "$ZIP" "$SHA"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ZIP" "$SHA" --clobber
+            # release-please 已建 Release（notes = 自动生成的 CHANGELOG 小节）：
+            # 只追加可复现性构建环境段，不覆盖其 notes 主体；幂等 —— 已有该段则跳过
+            # （重跑 / 手动重触发不叠加）。
+            if ! gh release view "$TAG" --json body --jq .body | grep -q '### 构建环境'; then
+              gh release view "$TAG" --json body --jq .body > local/tmp/existing-notes.md
+              {
+                echo
+                echo "---"
+                echo
+                echo "### 构建环境（可复现性）"
+                echo
+                echo "- Qt: \`$QT_VERSION\`（win64_mingw，windeployqt 部署）"
+                echo "- 编译器: \`$(g++ --version | head -1)\`"
+                echo "- CMake: \`$(cmake --version | head -1)\`"
+                echo "- Runner: \`${{ runner.os }}-${{ runner.arch }}\`"
+                # 用 $TAG（而非 github.ref_name）：ref 输入的 dispatch 下 ref_name 会变成分支名
+                echo "- 完整变更: https://github.com/${{ github.repository }}/compare/$TAG...HEAD"
+              } >> local/tmp/existing-notes.md
+              gh release edit "$TAG" --notes-file local/tmp/existing-notes.md
+            fi
           else
             # 想先审一遍再公开：给下面这行加 --draft，再手动点发布
             gh release create "$TAG" "$ZIP" "$SHA" \
