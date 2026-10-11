@@ -2,18 +2,39 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
-## [未发布]
+## [0.4.0](https://github.com/wufe8/BeAtBench/compare/v0.3.2...v0.4.0) (2026-10-11)
 
-### 修复（发布基础设施）
 
-- **arch 包的维护者字段是 `Unknown Packager`**：`makepkg` 只从环境变量 / `makepkg.conf` 读
-  `$PACKAGER`，**不读** PKGBUILD 里的变量，而 `scripts/package-linux.sh` 生成的 PKGBUILD 里只有
-  `# Maintainer:` 注释、CI 容器也没设该变量 → 三个包里只有 arch 缺维护者信息（v0.3.2 的 arch 包
-  即如此）。现改为 `env PACKAGER="$MAINTAINER"` 调用 `makepkg`，与 deb / rpm 一致。
-- **`scripts/verify-linux-package.sh` 在滚动发行版实机上是部分升级反模式**：arch 分支原来无条件
-  `pacman -Sy` + `pacman -U`。CI 容器里 `-Sy` 是必需的（`archlinux:base-devel` 没有 Qt），但实机上
-  「刷新数据库后只升级一个包」是 classic partial upgrade，可能危害系统。现按 `/.dockerenv` /
-  `/run/.containerenv` 分流：容器内保持原行为，实机只 `pacman -U`（缺依赖时明确报错）。
+### Features
+
+* **slice:** 瞬态检测 audio 源（OnsetDetector + 桥层落手动点） ([7806d0c](https://github.com/wufe8/BeAtBench/commit/7806d0cba8957161ea5071fbb668830ceefcb246))
+* **slice:** 瞬态检测切片源（M6.5，按音频变化自动选切音点） ([096f0dd](https://github.com/wufe8/BeAtBench/commit/096f0dd618442636c68c822f5e78b497e6882685))
+* **slice:** 瞬态检测源接入切音页 + 文档同步 ([7d5897a](https://github.com/wufe8/BeAtBench/commit/7d5897a9c75b98d5a3461cd22f7bbf2a3a7a5a83))
+
+
+### Bug Fixes
+
+* **build:** 禁用 Qt 版本哨兵，发行版产物不再绑定 Qt 小版本 ([33b68bd](https://github.com/wufe8/BeAtBench/commit/33b68bdedd26d6ea8734f37a09f7d39cf0b4276a))
+* **build:** 禁用 Qt 版本哨兵，发行版包不再绑定 Qt 小版本（v0.3.2 arch 包无法启动的根因） ([cc093f2](https://github.com/wufe8/BeAtBench/commit/cc093f23587eb2cfba1fea651833b4d662d0d53b))
+* **ci:** ccache 统计步骤兼容 macOS bash 3.2 的多字节变量解析 ([83d312c](https://github.com/wufe8/BeAtBench/commit/83d312c33f82dfebcc2bebc6fdc1e53debef70e3))
+* **ci:** macos Build 显式 --parallel 3，杜绝 make -j 无限并发 ([0ff2d36](https://github.com/wufe8/BeAtBench/commit/0ff2d36b6e6cbb40931e2aca746f7d1d4229bef2))
+* **ci:** macos ccache 路径对齐 ccache 默认值，修正注释归因 ([90d06ba](https://github.com/wufe8/BeAtBench/commit/90d06bac6fc8a291cb2f7bd16e906fa759c7dec2))
+* **package-linux:** arch 包 depends 显式 qt6-base&gt;=6.4 下限 ([9dbeee5](https://github.com/wufe8/BeAtBench/commit/9dbeee504b33e818b8b25229c74b1e6f328a3dfe))
+* **pkg:** arch 包维护者字段改为 env PACKAGER —— makepkg 不读 PKGBUILD 变量 ([7c4a67b](https://github.com/wufe8/BeAtBench/commit/7c4a67bae660430859475cc050b8843513cfab66))
+* **pkg:** PR [#5](https://github.com/wufe8/BeAtBench/issues/5) arch 验收 follow-up（packager 字段 / 实机部分升级 / 悬停高亮可自动化） ([cb3d6fb](https://github.com/wufe8/BeAtBench/commit/cb3d6fbba280dbd20d18b66bf43847c5eaf66283))
+* **release:** 产物文件名统一为 beatbench-v 前缀连字符格式 ([554b111](https://github.com/wufe8/BeAtBench/commit/554b1113208f68ed4183e6499e09fcae5149e183))
+* **release:** 产物文件名统一为 beatbench-v 前缀连字符格式 ([999654a](https://github.com/wufe8/BeAtBench/commit/999654a86ef2b9107cedd09ac5c8ad767afbed79))
+* **release:** 产物文件名统一为 beatbench-v 前缀连字符格式 ([444d61f](https://github.com/wufe8/BeAtBench/commit/444d61f81e8f0fa11799ca06b465842ef2e4be61))
+* **release:** 产物文件名统一为 beatbench-v 前缀连字符格式 ([f8ef4d1](https://github.com/wufe8/BeAtBench/commit/f8ef4d1ce1bbdf2653c39c92e2da0ea9f16d508e))
+* **release:** 修好 release-please 首次发版会踩的两处坑（README 包名被改坏 + 门禁漏放） ([7c9330a](https://github.com/wufe8/BeAtBench/commit/7c9330a9495d31daf4c41cf5e60186ee9c89bc48))
+* **release:** 修好 release-please 首次发版会踩的两处坑（README 包名被改坏 + 门禁漏放） ([fe9241e](https://github.com/wufe8/BeAtBench/commit/fe9241ed62ae569035df50bf758e6e96cf1a765c))
+* **scripts:** verify-linux-package.sh 的 arch 分支按容器/实机分流 ([ffd80f7](https://github.com/wufe8/BeAtBench/commit/ffd80f7f6b092dc5bd3b20dcd99c67cda0f2e40c))
+
+
+### Performance Improvements
+
+* **pkg:** Windows 包裁剪多余控件样式与 Qt Quick 3D 残留（zip -35.5%） ([316e645](https://github.com/wufe8/BeAtBench/commit/316e645ba61961acc0c9c5202921e70407d0b7b2))
+* **pkg:** Windows 包裁剪多余控件样式与 Qt Quick 3D 残留（zip −35.5%） ([3c02911](https://github.com/wufe8/BeAtBench/commit/3c02911da885733a8ae539c8275cc05522ac81e8))
 
 ## [0.3.2] - 2026-10-08
 

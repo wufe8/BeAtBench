@@ -14,12 +14,13 @@
 # 硬性检查（失败即退出 1）:
 #   1. CMakeLists.txt 的 project(... VERSION x.y.z) 与目标版本一致
 #   2. CHANGELOG.md 有 "## [x.y.z]" 小节，且小节里至少有一条内容
-#   3. README.md 里出现的发行物名 beatbench-vX.Y.Z-win64 必须与目标版本一致
+#   3. README.md 的发行物名必须是 beatbench-vX.Y.Z-<后缀>：版本与目标一致，
+#      且发行物后缀（-win64.zip / deb / rpm / pkg.tar.zst）没被截断
 #   4. core/.../Version.hpp 的 kVersion 与 CMakeLists 版本一致
 #      （CLI `version`、JSON 协议 version、GUI「关于」都读它；v0.3.2 首发漏改过它）
 # 警告（--strict 时视为失败）:
 #   5. 被跟踪文档里的 Qt 版本示例与当前 Qt minor 不一致（如残留 /c/Qt/6.8.0）
-#   6. CHANGELOG 之外的文档里残留其它版本的发行物名
+#   6. CHANGELOG 之外的文档里残留其它版本的发行物名（含旧命名格式）
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -89,20 +90,47 @@ fi
 # ---- 2. CHANGELOG 小节 ----
 if ! grep -qE "^## \[$VER\]" CHANGELOG.md; then
   fail "CHANGELOG.md 缺少小节 “## [$VER]”"
-elif [ -z "$(extract_notes | grep -E '^[[:space:]]*-[[:space:]]' || true)" ]; then
+# 条目符号 '-' 与 '*' 都算：release-please 自动生成的 CHANGELOG 用 '*'，
+# 只认 '-' 会把「有内容的版本小节」误判成空（首次自动发版会在这里卡住 release.yml）。
+elif [ -z "$(extract_notes | grep -E '^[[:space:]]*[-*][[:space:]]' || true)" ]; then
   fail "CHANGELOG.md 的 [$VER] 小节是空的"
 else
   echo "  ✓ CHANGELOG.md: 有 [$VER] 小节且有内容"
 fi
 
 # ---- 3. README 发行物名 ----
-mapfile -t readme_assets < <(git grep -hoE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+-win64' -- README.md | sort -u || true)
-if [ "${#readme_assets[@]}" -gt 0 ]; then
-  if printf '%s\n' "${readme_assets[@]}" | grep -qx "beatbench-v$VER-win64"; then
-    echo "  ✓ README.md: 下载名已是 beatbench-v$VER-win64"
+# 正则连后缀一起抓：旧写法只抓版本号（beatbench-vX.Y.Z），四个名字被截断后都塌缩成同一个
+# beatbench-vX.Y.Z——数量与取值都「正确」，看不出截断。要抓的两类问题：
+#   ① 版本不符（残留旧版本）；② 后缀被 release-please 吃掉（beatbench-v0.3.2-win64.zip →
+#   beatbench-v0.4.0）；成因见 README 顶部标记注释。
+# 提取前先剥掉行内 HTML 注释：标记注释就插在版本号与发行物后缀之间，不剥的话 token 会在
+# `<!--` 处被截断成 beatbench-vX.Y.Z（正是要抓的形态之一，会自伤）。
+mapfile -t readme_assets < <(sed 's/<!--.*-->//g' README.md | grep -oE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9._-]*' | sort -u || true)
+if [ "${#readme_assets[@]}" -eq 0 ]; then
+  fail "README.md 里找不到任何 beatbench-v<版本> 发行物名（下载/安装命令缺失或名字被改坏）"
+else
+  readme_bad=()
+  for _asset in "${readme_assets[@]}"; do
+    case "$_asset" in
+      "beatbench-v$VER-"*) ;;
+      *) readme_bad+=("$_asset") ;;
+    esac
+  done
+  if [ "${#readme_bad[@]}" -eq 0 ]; then
+    echo "  ✓ README.md: ${#readme_assets[@]} 个发行物名均为 beatbench-v$VER-…（版本一致、后缀完整）"
   else
-    fail "README.md 里的发行物名是 ${readme_assets[*]}，与目标 v$VER 不一致（下载链接要跟着改）"
+    fail "README.md 发行物名不正确：${readme_bad[*]}（期望 beatbench-v$VER-<后缀>；版本不符或后缀被截断，下载会 404）"
   fi
+  # 四类产物各至少要有名字：按后缀特征识别，不钉发行版号（发行版换代不用改这里）
+  for _kind in '-win64.zip' '.deb' '.rpm' '.pkg.tar.zst'; do
+    printf '%s\n' "${readme_assets[@]}" | grep -q -- "$_kind" ||
+      fail "README.md 缺少 $_kind 类型的发行物名（该行被删了？）"
+  done
+fi
+# 旧命名（无 v 前缀 / 下划线分隔）不允许再回到 README（产物文件名已统一为连字符带 v）
+mapfile -t readme_legacy < <(git grep -hoE 'beatbench[_-][0-9]+\.[0-9]+\.[0-9]+' -- README.md | sort -u || true)
+if [ "${#readme_legacy[@]}" -gt 0 ]; then
+  fail "README.md 残留旧命名格式（应统一为 beatbench-v...）：${readme_legacy[*]}"
 fi
 
 # ---- 4. Version.hpp 的 kVersion（CLI/JSON/关于页的版本来源） ----
@@ -139,7 +167,7 @@ done < <(git grep -nE '(/c/Qt|/g/Qt|C:/Qt|G:/Qt)/6\.[0-9]+|Qt 6\.[0-9]+' -- '*.m
 while IFS= read -r line; do
   [ -n "$line" ] || continue
   warn "其它文档残留旧发行物名：$line"
-done < <(git grep -nE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+-win64' -- '*.md' ':!CHANGELOG.md' ':!README.md' || true)
+done < <(git grep -nE 'beatbench[_-]v?[0-9]+\.[0-9]+\.[0-9]+' -- '*.md' ':!CHANGELOG.md' ':!README.md' || true)
 
 echo
 if [ "$FAIL" -ne 0 ]; then

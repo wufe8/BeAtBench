@@ -11,7 +11,8 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # 于是没有语言被启用 → C 目标报 "cannot determine linker language"。在父项目启用 C 即可
 # 全局覆盖，且**跨平台通用**（原先靠 audio/patch_portaudio.ps1 往 upstream 首行插
 # ENABLE_LANGUAGE(C)，那既依赖 PowerShell，也与平台无关地必要——2026-09 改为本方案）。
-project(beatbench VERSION 0.3.2 LANGUAGES C CXX)
+# 版本号唯一手改点：release-please 依行尾标记自动 bump（同步 Version.hpp / README / CHANGELOG）
+project(beatbench VERSION 0.4.0 LANGUAGES C CXX) # x-release-please-version
 
 # 安装路径变量（GNUInstallDirs：CMAKE_INSTALL_BINDIR/DATADIR/FULL_DATADIR 等）。
 # 供 app/cli 的 Linux 安装规则使用（发行版打包，见 app/CMakeLists 末尾）。
@@ -20,6 +21,15 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# 产物不绑定 Qt 小版本：QtCore 的 qt_version_tag 哨兵（qversiontagging.h）会把编译时的
+# Qt 主次版本写成 ELF 符号版本依赖（如 Qt_6.12），产物只能在不低于构建 Qt 的系统上
+# 加载。实例：v0.3.2 arch 包在滚动容器 Qt 6.12 下构建，用户系统 Qt 6.11 启动即报
+# version 'Qt_6.12' not found。定义本宏（官方开关，见 qversiontagging.h）后产物只
+# 依赖泛化 Qt_6，兼容性回归代码真实使用的 API 下限（6.4+，由 package.yml 的
+# probe-qt64 编译期守卫）。必须在首个 add_subdirectory 之前声明以覆盖全部目标
+# （QML 模块插件同样链接 QtCore，不能漏）；防回退断言见 scripts/package-linux.sh。
+add_compile_definitions(QT_NO_VERSION_TAGGING)
 
 option(BEATBENCH_BUILD_APP "构建 Qt GUI（需要 Qt 6.11+ Qml/Quick/QuickControls2）" ON)
 option(BEATBENCH_BUILD_TESTS "构建单元测试（FetchContent 下载 GoogleTest）" ON)

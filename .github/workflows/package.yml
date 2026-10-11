@@ -10,6 +10,9 @@
 #   checkout 在宿主机完成，源码只读挂载，构建/冒烟产物经 /out 卷带回宿主机。
 # - 触发：tag v*（发布）与手动 dispatch（演练/重跑）；tag 与 CMakeLists 版本的
 #   一致性由 version-check job 校验，防止产物版本与标签脱节。
+#   另有每周定时（schedule）：arch 容器是滚动的（qt6-base 永远拉最新），每周跑一次
+#   Linux 打包矩阵提前暴露 Qt 新版的编译破坏，避免专挑发版时爆炸；attach-to-release
+#   仅 tag 触发（github.ref_type == 'tag'），schedule 跑的只是构建 + 冒烟，不会碰 Release。
 # - **Windows 发布包不在这里**：由 `.github/workflows/release.yml`（发布线）跑完整回归后
 #   调同一个 scripts/package-release.sh 并挂到 GitHub Release（避免同一 tag 构建两遍）。
 # - 本流水线的产物在 tag 触发时由 attach-to-release 作业挂到 release.yml 建好的同一个
@@ -20,6 +23,9 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  schedule:
+    # 每周一 03:37 UTC；arch 容器滚动，每周构建一次提前暴露 Qt 新版编译破坏
+    - cron: '37 3 * * 1'
 
 permissions:
   contents: read

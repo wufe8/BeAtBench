@@ -15,7 +15,11 @@
 
 **Windows 10/11 64 位（免安装）**
 
-1. 下载 `beatbench-v0.3.2-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
+<!-- ⚠️ 版本号由 release-please 自动改写（见 release-please-config.json 的 extra-files）。
+     行内标记注释必须紧跟在版本号之后、发行物后缀之前——release-please 的版本正则会贪婪
+     匹配「版本 + 紧随的 -xxx」并整体替换，注释若写在行尾，发行物后缀会被连同注释一起
+     吃掉（Windows zip 与 rpm 的包名曾因此被改坏）。改这几行前先看 scripts/check-version.sh 第 3 段。 -->
+1. 下载 `beatbench-v0.4.0<!-- x-release-please-version -->-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
 2. 双击 `beatbench.exe` 启动图形界面，或运行 `beatbench-cli.exe` 使用命令行；
 3. 无需安装运行库，Qt 运行时（6.11.2）已内置。
 
@@ -27,9 +31,9 @@
 发行版包使用**系统 Qt**（需 Qt 6.4+），GUI 与 CLI 同包安装到 `/usr/bin`：
 
 ```bash
-sudo apt install ./beatbench_0.3.2-1_amd64.deb      # Debian 12+ / Ubuntu 24.04+
-sudo dnf install ./beatbench-0.3.2-1.fc43.x86_64.rpm # Fedora 43+
-sudo pacman -U ./beatbench-0.3.2-1-x86_64.pkg.tar.zst # Arch
+sudo apt install ./beatbench-v0.4.0<!-- x-release-please-version -->-1-amd64.deb       # Debian 12+ / Ubuntu 24.04+
+sudo dnf install ./beatbench-v0.4.0<!-- x-release-please-version -->-1.fc43.x86_64.rpm # Fedora 43+
+sudo pacman -U ./beatbench-v0.4.0<!-- x-release-please-version -->-1-x86_64.pkg.tar.zst # Arch
 ```
 
 装好后直接运行 `beatbench`（或 `beatbench-cli`）；皮肤在 `/usr/share/beatbench/skins`，
@@ -43,10 +47,19 @@ sudo pacman -U ./beatbench-0.3.2-1-x86_64.pkg.tar.zst # Arch
 
 ## 状态
 
-**M1-M6 已完成**（2026-09）：BMS codec + timing + CLI + QML 编辑器（编辑/时间轴/元信息/采样/BGA/lint/剪贴板/多文档/动作注册表/皮肤 L1）→ **M4 音频**（单发试听/设置页/解码缓存/离线渲染/波形/秒标尺/增量重渲染）→ **M5 随时播放**（Space 播放/暂停、PcmEngine 零拷贝、播放时钟、编辑即停）+ 播放头红线/视口跟随/A-B 循环/seek + note 编辑增强（鼠标预览 ghost、多选拖动、BGM 相对距离、`bgm_line→sub_line` 泛化）+ 编辑增强（**02 小节长度编辑 + 变拍高 + 加一小节 + 新建谱面**、编辑/撤销波形不消失）→ **M6 切音工作台**（导入/切分/导出/手动切分点/切片编辑/剪贴板整段粘贴，见 doc/04 §6）。
-**0.3.0 已发布**（tag [`v0.3.0`](https://github.com/wufe8/BeAtBench/releases/tag/v0.3.0)）：发布包 M6/bmson 文案与过期本机路径注释修正、未来功能状态表、`command/` 与 `commands/` 遗留头核实并删除、JSON 命令契约测试（含 CLI↔GUI 信封一致性）、版本推进与干净构建验证。
-**0.3.1**（2026-09-20）：修复 v0.1.0–v0.3.0 发布包未随包分发内置皮肤 `skins/`（「视图→皮肤」四项失效）；皮肤目录解析增加 exe 目录回退，不再依赖工作目录；新增拖拽入窗口 / 拖到 exe 图标 / 双击关联打开谱面与音频/MIDI；构建侧移除 PortAudio 的 PowerShell 补丁依赖。详见 `CHANGELOG.md`。
-测试以源码 `TEST()` 计数为准（core 317 + 音频 55 + Qt 桥层 57）；真实谱面集缺失时部分 SKIP，不要把某一天的 PASS 数写死。详见 `doc/04` §6。
+**M1–M6 已完成**（2026-09）：「谱面编辑 → 试听 → 发布」全链路可用。
+
+- **核心 / 工具**：格式无关模型 + BMS codec / timing；CLI `info` / `check` / `convert` / `version`（支持 `--json`）
+- **编辑器**：编辑、时间轴、元信息、采样、BGA、lint、剪贴板、多文档、动作注册表、皮肤（L1）；note 编辑增强
+  （鼠标预览 ghost、多选拖动、BGM 相对距离、`bgm_line→sub_line` 泛化）、小节编辑（02 小节长度、变拍高、加一小节、新建谱面）
+- **音频**：单发试听、解码缓存、波形（秒标尺、增量重渲染）、离线渲染、随时播放（Space、PcmEngine 零拷贝、
+  播放时钟、编辑即停）、播放头红线与视口跟随、A-B 循环、seek
+- **切音工作台**：导入、切分（含 M6.5 瞬态检测自动选切音点）、导出、手动切分点、切片编辑、剪贴板整段粘贴
+
+**版本与完整变更历史**：[`CHANGELOG.md`](CHANGELOG.md) · [Releases](https://github.com/wufe8/BeAtBench/releases)
+（0.3.x 起提供 Linux deb/rpm/arch 与 Windows zip；CHANGELOG 自 0.4.0 起由 release-please 依据 Conventional Commits 自动生成）
+
+**测试基线**：core 317 + 音频 61 + Qt 桥层 63（源码 `TEST()` 计数）；真实谱面集缺失时部分用例 SKIP，不要把某一天的 PASS 数写死。详见 `doc/04` §6。
 
 ### 计划中
 
@@ -91,8 +104,10 @@ macOS 打包范畴；② GUI 的悬停 / 拖拽等交互行为在 Linux/macOS **
 
 ## 快速构建
 
-> GUI 需要 Qt **6.4+**（Linux 系统 Qt 下限，CI 的 `probe-qt64` 持续验证；CI 另在 6.11.2 上跑全量；
-> Windows 发布包内嵌 CI 所用 Qt 版本 6.11.2）。
+> GUI 需要 Qt **6.4+**(Linux 系统 Qt 下限,CI 的 `probe-qt64` 持续验证;CI 另在 6.11.2 上跑全量;
+> Windows 发布包内嵌 CI 所用 Qt 版本 6.11.2)。发行版包**不绑定 Qt 小版本**(构建侧禁用
+> Qt 版本哨兵 `QT_NO_VERSION_TAGGING`,打包脚本机械断言兜底),只要系统的 Qt ≥ 6.4
+> 即可加载,与构建容器的 Qt 版本无关。
 
 ### CLI + 测试
 

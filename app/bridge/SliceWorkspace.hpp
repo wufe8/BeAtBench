@@ -119,6 +119,15 @@ public:
     /// 同起始和弦合并成一片），false = 按 note 结束切分（历史行为）。
     Q_INVOKABLE bool detectSlices(const QString& source, qreal bpm, int subdivision,
                                   qreal durationSec, bool extendToNextOnset = true);
+    /// M6.5 瞬态检测（audio 源）：STFT complex-domain 谱通量（audio 库
+    /// OnsetDetector）→ 检出点落手动点集合（kind=manual，可 Z 增删/Ctrl+Z 撤销）。
+    /// sensitivity 1-10（越大越敏感）；minGapSec 相邻切点最小间隔；
+    /// append=false 替换式（检出 0 点则不动，>0 清空后整轨按检出点重建），
+    /// true 追加式（与现有手动点距 ≤10ms 的跳过）。异步（QThreadPool，busy 期间
+    /// 拒绝重入；完成前更换参考音频 → 结果丢弃并提示）；无参考音频 → false + 提示。
+    Q_INVOKABLE bool detectOnsetSlices(qreal sensitivity, qreal minGapSec, bool append);
+    /// 测试入口：同步执行同一检测 + 落点路径（不经线程池）。
+    bool detectOnsetSlicesSyncForTest(qreal sensitivity, qreal minGapSec, bool append);
     /// 清除切片（保留参考素材）。
     Q_INVOKABLE void clearSlices();
     /// 切片「放置」开关（M6.3 铺放预选；越界忽略）。
@@ -203,6 +212,9 @@ private:
     bool removeManualPointAt(std::size_t i, bool recordUndo = true);
     /// 重排 slice index（拆分/合并后）。
     void renumberSlices();
+    /// M6.5 检出点落点（UI 线程；替换/追加 + 拆分式插入 + 手动点集合维护；
+    /// 空点集零破坏返回 0）。返回生效点数。
+    int applyOnsetPoints(std::vector<double> onsets, bool append);
     struct SliceSnapshot {
         std::vector<beatbench::slice::Slice> slices;
         std::vector<bool> enabled;
