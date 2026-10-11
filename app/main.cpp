@@ -39,6 +39,7 @@
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/ProjectController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWorkspace.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -85,7 +86,7 @@ static void loadNativeTranslations(QGuiApplication& app) {
 // 否则大谱面 17 分钟级渲染完成前截图 → 波形总览条不可见）。
 static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& outPath,
                                bool waitRender = false, bool expectIncremental = false,
-                               double playDuration = 0.0) {
+                               double playDuration = 0.0, int initialDelayMs = 1500) {
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().value(0));
     if (!win) {
         qWarning("screenshot: root window 不可用");
@@ -93,7 +94,7 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
         return;
     }
     QTimer* wait = nullptr;
-    QTimer::singleShot(waitRender ? 0 : 1500, win, [win, outPath, waitRender, expectIncremental, playDuration] {
+    QTimer::singleShot(waitRender ? 0 : initialDelayMs, win, [win, outPath, waitRender, expectIncremental, playDuration] {
         if (waitRender) {
             // 波形/增量验收：等 ChartSession 渲染完成（renderFinished → QML 置
             // debugRenderDone）+ 增量也完成（--click-after-render 场景等 count ≥ 2）。
@@ -284,6 +285,9 @@ int main(int argc, char** argv) {
     // 纯函数回抽（2026-09；SessionController.qml 减肥第一刀）：gcd/refEquals/addPosDelta +
     // 剪贴板文本判定（Base62 粘贴警告前置）。QML 经 editUtils 访问。
     beatbench::app::EditUtils editUtils;
+    // M7 项目页（doc/07 §9.1 阶段①）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
+    // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
+    beatbench::app::ProjectController projectController;
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
@@ -298,6 +302,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
     engine.rootContext()->setContextProperty(QStringLiteral("clipboard"), &clipboardBridge);
     engine.rootContext()->setContextProperty(QStringLiteral("editUtils"), &editUtils);
+    engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
     audioEngine.setChartSession(&chartSession);
 
@@ -338,6 +343,8 @@ int main(int argc, char** argv) {
         // 文件动作（label 用 QCoreApplication::tr，因为 main 函数不是 QObject）
         uiActions.add(UiActionDef{"file.new", QCoreApplication::tr("新建谱面"), "Ctrl+N", "file", nullptr, qml("newChart")});
         uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file", nullptr, qml("uiActionOpen")});
+        // M7：打开歌曲文件夹（项目页只读索引版，doc/07 §9.1 阶段①）
+        uiActions.add(UiActionDef{"file.openFolder", QCoreApplication::tr("打开歌曲文件夹…"), "Ctrl+Shift+O", "file", nullptr, qml("uiActionOpenFolder")});
         uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, qml("saveChart")});
         uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, qml("uiActionSaveAs")});
         uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：打开/保存/另存 ↔ 退出
@@ -400,6 +407,7 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, setProp("currentPage", 0), true});
         uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, setProp("currentPage", 1), true});
         uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, setProp("currentPage", 2), true});
+        uiActions.add(UiActionDef{"view.page.project", QCoreApplication::tr("项目页"), "", "view", nullptr, setProp("currentPage", 3), true});
         // 切音页动作（M6.4f 键盘 2026-09 用户 woslicer 系；category=slice 无菜单，仅快捷键）。
         // 生产 handler 直接调用 QML 的正式 dispatchSliceAction 方法；debugSliceAct 只保留给
         // --slice-act 的异步调试队列，避免生产动作借用 debug 属性和轮询管线。
@@ -536,6 +544,14 @@ int main(int argc, char** argv) {
             root->setProperty("debugPasteText", args.at(pasteIdx + 1));
     }
 
+    // --project <文件夹>：启动即打开歌曲文件夹（项目页，异步扫描；配 --screenshot-delay
+    // 等后台解析完成后再截图）。走 QML doOpenFolder()，与「文件 → 打开歌曲文件夹」同路径。
+    const int projectIdx = args.indexOf(QStringLiteral("--project"));
+    if (projectIdx >= 0 && projectIdx + 1 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugProjectPath", args.at(projectIdx + 1));
+    }
+
     // --screenshot <png>：截图后退出（见 scheduleScreenshot）
     const int shotIdx = args.indexOf(QStringLiteral("--screenshot"));
     const bool waitRender = args.contains(QStringLiteral("--wait-render"));
@@ -545,9 +561,13 @@ int main(int argc, char** argv) {
     const int playDurIdx = args.indexOf(QStringLiteral("--play-duration"));
     if (playDurIdx >= 0 && playDurIdx + 1 < args.size())
         playDuration = args.at(playDurIdx + 1).toDouble();
+    int shotDelayMs = 1500;
+    const int shotDelayIdx = args.indexOf(QStringLiteral("--screenshot-delay"));
+    if (shotDelayIdx >= 0 && shotDelayIdx + 1 < args.size())
+        shotDelayMs = args.at(shotDelayIdx + 1).toInt();
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
         scheduleScreenshot(engine, args.at(shotIdx + 1), waitRender, expectIncremental,
-                           playDuration);
+                           playDuration, shotDelayMs);
 
     // --render <out.wav>：调试——启动后自动渲染谱面→WAV（复现 Space；M4.3b 崩溃定位）
     const int renderIdx = args.indexOf(QStringLiteral("--render"));
