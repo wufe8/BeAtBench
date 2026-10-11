@@ -18,6 +18,8 @@ Item {
     /// 当前播放头（秒；<0 = 无）。播放中由下方 Timer 刷新（audioEngine 20Hz 信号在此聚合）。
     property real playheadSec: -1
     /// M6.3 导出结果（exportSlices 返回 map）+ 可复制 raw。
+    /// M7：编辑页当前打开的谱面路径（切音目标回退用；Main 注入）
+    property string editorChartPath: ""
     property var exportResult: null
     property string rawText: ""
     /// 「MIDI 线」开关实际态（网格模式默认关；Ctrl 临时勾选 = 经 checkbox.toggle() 同路径翻
@@ -1121,6 +1123,22 @@ Item {
                 enabled: sliceWorkspace.hasSlices && sliceWorkspace.hasAudio
                 onClicked: root.doExport()
             }
+            // M7 切音目标集合（项目页勾选；未勾选 = 当前编辑页打开的谱面）
+            Label {
+                Layout.fillWidth: true
+                text: {
+                    var count = (typeof project !== "undefined") ? project.sliceTargetCount : 0
+                    var editor = root.editorChartPath
+                    if (count > 0)
+                        return qsTr("铺放目标：项目页勾选的 %1 个谱面（每谱一个撤销步）").arg(count)
+                    if (editor !== "")
+                        return qsTr("铺放目标：当前编辑谱 %1").arg(editor)
+                    return qsTr("铺放目标：无（请在项目页勾选谱面，或在编辑页打开一个谱面）")
+                }
+                color: Theme.textMuted
+                font.pixelSize: Theme.fsSmall
+                elide: Text.ElideMiddle
+            }
         }
         RowLayout {
             Layout.fillWidth: true
@@ -1129,7 +1147,9 @@ Item {
                 text: root.exportResult && root.exportResult.ok
                       ? (qsTr("已导出 %1 片").arg(root.exportResult.count)
                          + (root.exportResult.placed
-                            ? qsTr(" · 已铺 %1 片").arg(root.exportResult.placedNotes)
+                            ? qsTr(" · 已铺 %1 片 → %2 个谱面")
+                                  .arg(root.exportResult.placedNotes)
+                                  .arg(root.exportResult.placedTargets)
                             : (root.exportResult.placeError
                                ? qsTr(" · 铺放失败：") + root.exportResult.placeError
                                : ""))

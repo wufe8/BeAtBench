@@ -14,6 +14,7 @@ Item {
     id: root
 
     property string selectedChart: ""
+    property string saveText: ""
     property var selectedResource: null
     property var resModel: []
 
@@ -83,6 +84,11 @@ Item {
                     font.pixelSize: Theme.fsSmall
                 }
                 Label {
+                    text: qsTr("切音目标 %1").arg(project.sliceTargetCount)
+                    color: project.sliceTargetCount > 0 ? Theme.primary : Theme.textMuted
+                    font.pixelSize: Theme.fsSmall
+                }
+                Label {
                     Layout.fillWidth: true
                     text: project.root
                     elide: Text.ElideMiddle
@@ -124,6 +130,19 @@ Item {
                         Layout.topMargin: 6
                         Layout.bottomMargin: 4
                         spacing: 8
+                        BbCheckBox {
+                            id: allTargetsBox
+                            text: ""
+                            // 全选态 = 有谱面且全部勾选；用户点击后 setAll 驱动模型，再恢复绑定
+                            checked: project.chartCount > 0 && project.sliceTargetCount === project.chartCount
+                            onToggled: {
+                                project.setAllSliceTargets(checked)
+                                allTargetsBox.checked = Qt.binding(function () {
+                                    return project.chartCount > 0
+                                           && project.sliceTargetCount === project.chartCount
+                                })
+                            }
+                        }
                         Label { text: qsTr("谱面"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.fillWidth: true }
                         Label { text: qsTr("难度"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 54 }
                         Label { text: qsTr("等级"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 40 }
@@ -162,6 +181,11 @@ Item {
                                 anchors.leftMargin: 10
                                 anchors.rightMargin: 10
                                 spacing: 8
+                                BbCheckBox {
+                                    text: ""
+                                    checked: project.sliceTargets.indexOf(chartRow.modelData.path) >= 0
+                                    onToggled: project.setSliceTargetChecked(chartRow.modelData.path, checked)
+                                }
                                 Label {
                                     Layout.fillWidth: true
                                     text: chartRow.modelData.path
@@ -176,7 +200,7 @@ Item {
                                     Layout.preferredWidth: 130
                                     text: root.chartStatus(chartRow.modelData)
                                     color: chartRow.modelData.missing > 0 || chartRow.modelData.errors > 0
-                                           ? Theme.warn : Theme.textFaint
+                                           ? Theme.warning : Theme.textFaint
                                     font.pixelSize: Theme.fsSmall
                                     elide: Text.ElideRight
                                 }
@@ -218,13 +242,21 @@ Item {
                                 onClicked: project.openChart(root.selectedChart)
                             }
                             BbToolButton {
-                                text: qsTr("设为切音目标")
-                                enabled: root.selectedChart !== ""
-                                onClicked: project.setSliceTarget(root.selectedChart)
+                                text: qsTr("保存勾选谱面")
+                                enabled: project.sliceTargetCount > 0 || window.chartPath !== ""
+                                onClicked: root.saveText = project.saveSliceTargets(window.chartPath)
+                            }
+                            Label {
+                                visible: root.saveText !== ""
+                                text: root.saveText
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.fsSmall
                             }
                             Label {
                                 Layout.fillWidth: true
-                                text: qsTr("（目标 ≠ 当前编辑谱的正式生效见阶段③；当前仅记录目标）")
+                                text: project.sliceTargetCount > 0
+                                      ? qsTr("已勾选 %1 个谱面作为切音目标（切音页导出/铺放按勾选生效）").arg(project.sliceTargetCount)
+                                      : qsTr("未勾选任何谱面 → 切音目标 = 当前编辑页打开的谱面")
                                 color: Theme.textFaint
                                 font.pixelSize: Theme.fsSmall
                                 elide: Text.ElideRight
@@ -279,6 +311,21 @@ Item {
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
+                    // 资源表列头（与行同间距/同列宽）
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        Layout.topMargin: 4
+                        Layout.bottomMargin: 2
+                        spacing: 8
+                        Label { Layout.fillWidth: true; text: qsTr("文件"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                        Label { Layout.preferredWidth: 44; text: qsTr("类型"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                        Label { Layout.preferredWidth: 88; text: qsTr("状态"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                        Label { Layout.preferredWidth: 44; text: qsTr("引用"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+
                     ListView {
                         id: resList
                         Layout.fillWidth: true
@@ -312,14 +359,14 @@ Item {
                                     Layout.fillWidth: true
                                     text: resRow.modelData.path
                                     elide: Text.ElideMiddle
-                                    color: resRow.modelData.onDisk ? Theme.text : Theme.warn
+                                    color: resRow.modelData.onDisk ? Theme.text : Theme.warning
                                     font.pixelSize: Theme.fsSmall
                                 }
                                 Label { Layout.preferredWidth: 44; text: resRow.modelData.kind; color: Theme.textFaint; font.pixelSize: Theme.fsSmall }
                                 Label {
                                     Layout.preferredWidth: 88
                                     text: resRow.modelData.state
-                                    color: resRow.modelData.state === "缺失" ? Theme.warn
+                                    color: resRow.modelData.state === "缺失" ? Theme.warning
                                            : (resRow.modelData.state === "无引用" ? Theme.textFaint : Theme.textMuted)
                                     font.pixelSize: Theme.fsSmall
                                 }
@@ -341,6 +388,13 @@ Item {
                         Layout.bottomMargin: 6
                         spacing: 2
 
+                        Label {
+                            Layout.fillWidth: true
+                            visible: root.selectedResource === null
+                            text: qsTr("选中资源查看引用出处（文件 ← 谱面 / 定义 ID / 头部字段）")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fsSmall
+                        }
                         Label {
                             Layout.fillWidth: true
                             visible: root.selectedResource !== null

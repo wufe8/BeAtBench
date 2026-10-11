@@ -311,3 +311,22 @@ TEST(SessionRegistry, SaveNoPathFails) {
     EXPECT_FALSE(sresp.at("ok").as_bool());
     EXPECT_EQ(sresp.at("error").at("code").as_str(), "no_path");
 }
+
+TEST(SessionRegistry, FindByPathAddressesDocumentNotActiveSession) {
+    // doc/07 §9.3：项目页/切音目标要"按文件寻址"，不能靠活动会话。
+    auto& reg = session_registry();
+    reg.activate("default");
+    const std::string a = "H:/tmp/bb_find_by_path/A.bms";
+    const std::string b = "H:/tmp/bb_find_by_path/B.bms";
+    reg.active().load(make_chart(1), a);
+    ASSERT_TRUE(reg.create("find-t2"));
+    reg.by_id("find-t2")->load(make_chart(1), b);
+    reg.activate("default");
+
+    EXPECT_EQ(reg.find_by_path(a), "default");
+    EXPECT_EQ(reg.find_by_path(b), "find-t2");
+    EXPECT_EQ(reg.active_id(), "default");  // 查找不改变活动会话
+    EXPECT_TRUE(reg.find_by_path("H:/tmp/bb_find_by_path/none.bms").empty());
+    EXPECT_TRUE(reg.find_by_path("").empty());
+    EXPECT_TRUE(reg.close("find-t2"));
+}

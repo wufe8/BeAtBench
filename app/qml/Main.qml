@@ -32,8 +32,6 @@ ApplicationWindow {
 
     // ---------- 会话状态（不入 undo，doc/05 §1.2） ----------
     property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试 / 3 项目
-    /// M7 阶段①：项目页"设为切音目标"记录的目标路径（正式生效见阶段③）
-    property string sliceTargetPath: ""
     property var chartMeta: null         // dispatch(info) 的 result.meta
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     /// 元信息面板草稿（未点面板「保存」、也未 Ctrl+S）也算未保存。
@@ -794,6 +792,7 @@ ApplicationWindow {
             }
             SlicePage {
                 id: slicePage
+                editorChartPath: window.chartPath
                 // M6.4f 快捷键门控（父注入：跨文档绑定里无法引用 window 的 id）：
                 // 页面激活（currentPage）&& 无文本输入焦点（SpinBox 聚焦时 activeFocusItem
                 // 是其 TextInput → textInputFocused=true → ↑↓ 调值不被快捷键抢）
@@ -950,12 +949,7 @@ ApplicationWindow {
     Connections {
         target: project
         function onChartOpenRequested(path) { window.doOpenChart(path) }
-        function onSliceTargetRequested(path) {
-            // 阶段① 只记录目标并提示；"目标 ≠ 当前编辑谱"的正式生效见阶段③
-            // （须让切音工作区持有自己的会话——审查稿 P0）
-            window.sliceTargetPath = path
-            window.setStatus(qsTr("切音目标：") + path)
-        }
+        function onSliceTargetsChanged() { window.syncSliceExportTargets() }
     }
 
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
@@ -1707,6 +1701,12 @@ ApplicationWindow {
         project.scan(path)
         window.currentPage = 3
     }
+    /// M7：把"生效切音目标"（勾选非空 → 勾选集合；否则当前编辑谱）注入切音工作区。
+    /// 铺放（同时铺入编辑区）按该集合对每个谱面各写一个撤销步。
+    function syncSliceExportTargets() {
+        sliceWorkspace.exportTargets = project.effectiveSliceTargets(window.chartPath)
+    }
+    onChartPathChanged: syncSliceExportTargets()
     function uiActionSaveAs() { saveAsDialog.open() }
     function uiActionExit() { window.close() }
     /// 运行时换肤（doc/08 §3.3）：应用皮肤 token（applySkinByName）+ 该皮肤目录 keymap.json。

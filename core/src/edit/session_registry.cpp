@@ -68,6 +68,14 @@ const EditorSession& SessionRegistry::active() const {
     return *it->second;
 }
 
+std::string SessionRegistry::find_by_path(std::string_view path) const {
+    if (path.empty()) return {};
+    for (const auto& [id, session] : m_sessions) {
+        if (session && session->path() == path) return id;
+    }
+    return {};
+}
+
 std::vector<std::string> SessionRegistry::ids() const {
     std::vector<std::string> out;
     out.reserve(m_sessions.size());

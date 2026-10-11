@@ -23,6 +23,7 @@
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/OnsetDetector.hpp"
 #include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/slice/SliceExport.hpp"
 
@@ -395,13 +396,36 @@ QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision,
     // 单撤销步；子行接续：目标小节段已有最高子行 +1 起（不挤旧行、新内容跨小节同列）。
     bool placed = false;
     int placedNotes = 0;
+    int placedTargets = 0;
     QString placeError;
-    if (placeIntoChart && errors.isEmpty() && !rawStr.empty() && m_chartSession &&
-        m_chartSession->hasChart()) {
+    // M7：勾选目标非空 → 对每个目标铺放（每谱一个撤销步）；未勾选 → 回退当前编辑谱。
+    // 回退直接走**活动会话**（允许"新建未保存谱面"这种没有路径的情况）。
+    std::vector<std::pair<std::string, QString>> targets;  // (session_id, 展示名)
+    if (placeIntoChart && errors.isEmpty() && !rawStr.empty()) {
+        if (!m_exportTargets.isEmpty()) {
+            for (const QString& path : m_exportTargets) {
+                QString err;
+                const std::string sid = sessionIdForPath(path, &err);
+                if (sid.empty()) {
+                    if (!placeError.isEmpty()) placeError += QStringLiteral("; ");
+                    placeError += QFileInfo(path).fileName() + QStringLiteral(": ") + err;
+                    continue;
+                }
+                targets.emplace_back(sid, QFileInfo(path).fileName());
+            }
+        } else if (m_chartSession && m_chartSession->hasChart()) {
+            const QString name = m_chartSession->path().isEmpty()
+                                     ? QStringLiteral("当前谱面")
+                                     : QFileInfo(m_chartSession->path()).fileName();
+            targets.emplace_back(beatbench::edit::session_registry().active_id(), name);
+        }
+    }
+    for (const auto& [sid, label] : targets) {
         using beatbench::json::Json;
         Json req = Json::object();
         req.set("command", "clipboard.paste");
         Json args = Json::object();
+        args.set("session_id", sid);
         args.set("text", rawStr);
         args.set("sub_line_mode", "uniform");
         req.set("args", std::move(args));
@@ -415,31 +439,94 @@ QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision,
         const Json* innerOk = result ? result->find("ok") : nullptr;
         const bool execOk = innerOk && innerOk->is_bool() && innerOk->as_bool();
         if (cmdOk && execOk) {
+            ++placedTargets;
+            placed = true;
             if (result)
                 if (const Json* n = result->find("notes"))
-                    placedNotes = static_cast<int>(n->as_i64());
-            placed = true;
-            m_chartSession->refresh();  // 内容变化 → 视图刷新（fingerprint 判定）
-            emit samplesPlaced();       // #WAV 定义已入谱面 → QML 刷新采样面板
-        } else if (const Json* e = resp.find("error")) {
-            if (const Json* code = e->find("code"))
-                placeError = QString::fromStdString(code->as_str());
-            if (const Json* msg = e->find("message"))
-                placeError += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
-        } else if (cmdOk) {
-            // 顶层成功但 exec 未应用：合成可见错误（无 error 对象可读）。
-            placeError = QStringLiteral("paste_failed: clipboard.paste 未应用（result.ok=false）");
+                    placedNotes += static_cast<int>(n->as_i64());
+            continue;
         }
+        QString one;
+        if (const Json* e = resp.find("error")) {
+            if (const Json* code = e->find("code")) one = QString::fromStdString(code->as_str());
+            if (const Json* msg = e->find("message"))
+                one += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
+        } else if (cmdOk) {
+            one = QStringLiteral("paste_failed: clipboard.paste 未应用（result.ok=false）");
+        } else {
+            one = QStringLiteral("unknown_error");
+        }
+        if (!placeError.isEmpty()) placeError += QStringLiteral("; ");
+        placeError += label + QStringLiteral(": ") + one;
     }
-    qWarning("slice export: place=%d notes=%d placeErr=%s", placed ? 1 : 0, placedNotes,
-             placeError.toUtf8().constData());
+    if (placed) {
+        // 当前编辑会话被铺放 → 视图刷新；采样面板按当前谱面刷新（其余目标为独立会话）
+        if (m_chartSession && m_chartSession->hasChart()) m_chartSession->refresh();
+        emit samplesPlaced();
+    }
+    qWarning("slice export: place=%d targets=%d notes=%d placeErr=%s", placed ? 1 : 0,
+             placedTargets, placedNotes, placeError.toUtf8().constData());
     res.insert(QStringLiteral("placed"), placed);
+    res.insert(QStringLiteral("placedTargets"), placedTargets);
     res.insert(QStringLiteral("placedNotes"), placedNotes);
     if (!placeError.isEmpty())
         res.insert(QStringLiteral("placeError"), placeError);
     if (!errors.isEmpty())
         res.insert(QStringLiteral("error"), errors.join(QStringLiteral("; ")));
     return res;
+}
+
+void SliceWorkspace::setExportTargets(const QStringList& paths) {
+    if (m_exportTargets == paths) return;
+    m_exportTargets = paths;
+    emit exportTargetsChanged();
+}
+
+QStringList SliceWorkspace::effectiveTargets() const {
+    if (!m_exportTargets.isEmpty()) return m_exportTargets;
+    const auto& active = beatbench::edit::session_registry().active();
+    if (active.has_chart() && !active.path().empty())
+        return QStringList{QString::fromStdString(active.path())};
+    return {};
+}
+
+std::string SliceWorkspace::sessionIdForPath(const QString& path, QString* err) {
+    using beatbench::json::Json;
+    auto& reg = beatbench::edit::session_registry();
+    const std::string want = path.toUtf8().toStdString();
+    if (const std::string found = reg.find_by_path(want); !found.empty()) return found;
+    // ⚠️ session.create 会**激活**新会话（GUI 新标签页语义）→ 结束后恢复原活动会话，
+    // 否则编辑页/采样面板会跟着切到目标谱面（审查稿 P0：不能靠活动会话寻址）。
+    const std::string prev_active = reg.active_id();
+    std::string id = "slice-target-" + std::to_string(reg.ids().size() + 1);
+    while (reg.by_id(id) != nullptr) id += "x";
+    if (!reg.create(id)) {
+        if (err) *err = QStringLiteral("无法创建会话");
+        return {};
+    }
+    Json req = Json::object();
+    req.set("command", "session.load");
+    Json args = Json::object();
+    args.set("session_id", id);
+    args.set("path", want);
+    req.set("args", std::move(args));
+    const Json resp = beatbench::cmd::global_registry().dispatch(req);
+    if (!prev_active.empty() && prev_active != id) reg.activate(prev_active);
+    const Json* okp = resp.find("ok");
+    if (!okp || !okp->is_bool() || !okp->as_bool()) {
+        reg.close(id);
+        if (err) {
+            QString msg = QStringLiteral("载入失败");
+            if (const Json* e = resp.find("error")) {
+                if (const Json* c = e->find("code")) msg = QString::fromStdString(c->as_str());
+                if (const Json* m = e->find("message"))
+                    msg += QStringLiteral(": ") + QString::fromStdString(m->as_str());
+            }
+            *err = msg;
+        }
+        return {};
+    }
+    return id;
 }
 
 void SliceWorkspace::setStatus(const QString& text) {

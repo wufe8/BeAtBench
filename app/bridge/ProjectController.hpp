@@ -2,6 +2,7 @@
 #pragma once
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <memory>
 
@@ -32,6 +33,9 @@ class ProjectController : public QObject {
     Q_PROPERTY(int resourceCount READ resourceCount NOTIFY summaryChanged)
     Q_PROPERTY(int missingCount READ missingCount NOTIFY summaryChanged)
     Q_PROPERTY(int unreferencedCount READ unreferencedCount NOTIFY summaryChanged)
+    /// 切音目标集合（项目页勾选；相对项目根路径）
+    Q_PROPERTY(QStringList sliceTargets READ sliceTargets NOTIFY sliceTargetsChanged)
+    Q_PROPERTY(int sliceTargetCount READ sliceTargetCount NOTIFY sliceTargetsChanged)
 
 public:
     explicit ProjectController(QObject* parent = nullptr);
@@ -46,6 +50,8 @@ public:
     int resourceCount() const { return m_resources.size(); }
     int missingCount() const { return m_missingCount; }
     int unreferencedCount() const { return m_unreferencedCount; }
+    QStringList sliceTargets() const { return m_sliceTargets; }
+    int sliceTargetCount() const { return static_cast<int>(m_sliceTargets.size()); }
 
     /// 打开歌曲文件夹并开始扫描（异步；立刻返回）。
     Q_INVOKABLE void scan(const QString& folder);
@@ -61,8 +67,17 @@ public:
     Q_INVOKABLE QString absolutePath(const QString& relative) const;
     /// 请求在编辑页打开该谱面（发信号；由 Main 接既有 doOpenChart 链路）。
     Q_INVOKABLE void openChart(const QString& relative);
-    /// 请求把切音目标设为该谱面（发信号；Main 决定呈现与生效时机）。
-    Q_INVOKABLE void setSliceTarget(const QString& relative);
+    /// 勾选/取消一个谱面作为切音目标（项目页 checkbox）。
+    Q_INVOKABLE void setSliceTargetChecked(const QString& relative, bool checked);
+    /// 全选 / 全不选。
+    Q_INVOKABLE void setAllSliceTargets(bool checked);
+    Q_INVOKABLE void clearSliceTargets();
+    /// **生效目标**：勾选非空 = 勾选集合；否则 = 当前编辑页打开的谱面（用户拍板 2026-10-11）；
+    /// 两者都空 = 空（切音页据此提示"无目标"）。
+    Q_INVOKABLE QStringList effectiveSliceTargets(const QString& editorPath) const;
+    /// 统一保存：对生效目标里**已加载且有改动**的会话执行 session.save（overwrite）；
+    /// 返回人类可读摘要（"已保存 N 个谱面" / "无改动" / 含失败项）。
+    Q_INVOKABLE QString saveSliceTargets(const QString& editorPath);
 
 signals:
     void stateChanged();
@@ -70,7 +85,7 @@ signals:
     void chartsChanged();
     void resourcesChanged();
     void chartOpenRequested(const QString& absolutePath);
-    void sliceTargetRequested(const QString& absolutePath);
+    void sliceTargetsChanged();
 
 private:
     void applyIndex();
@@ -87,6 +102,7 @@ private:
     QVariantList m_resources;
     int m_missingCount = 0;
     int m_unreferencedCount = 0;
+    QStringList m_sliceTargets;  ///< 切音目标（项目页勾选；相对路径，已排序去重）
 };
 
 }  // namespace beatbench::app
