@@ -24,8 +24,18 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  pull_request:
+    # 只对"打包面"文件跑：让改打包脚本 / 本 workflow 的 PR 在合并前就能被这条流水线验证
+    # （2026-10 的教训：PR #24 改的就是本文件，而当时它没有 PR 触发，改动没被自己的流水线
+    # 跑过）。改源码/文档不触发，不拖慢日常 CI。tag 触发时才跑 attach-to-release。
+    branches: [master]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/package.yml'
   schedule:
-    # 每周一 03:37 UTC；arch 容器滚动，每周构建一次提前暴露 Qt 新版编译破坏
+    # 每周一 03:37 UTC；arch 基线已钉 archive 快照，schedule 的意义是在钉定基线上
+    # 每周验证 master 可构建可冒烟（回归检测，顺带监测归档可用性）。
+    # ⚠️ 2026-10-11 引入至今（10-12）尚未触发过一次，别当既有安全网。
     - cron: '37 3 * * 1'
 
 permissions:
@@ -39,16 +49,21 @@ env:
   # Linux 系统 Qt 下限（Ubuntu 24.04 LTS 的 Qt 主次版本）；探针容器漂移会被断言拦下。
   QT_FLOOR: '6.4'
   # arch 构建基线：钉在 archive 快照。ARCH_ROOTFS 是快照日的唯一编辑点（实际存在的
-  # Docker weekly tag，无法杜攋），mirrorlist 的日期由 tag 内嵌 YYYYMMDD 派生
+  # Docker weekly tag，无法杜撰），mirrorlist 的日期由 tag 内嵌 YYYYMMDD 派生
   # （linux-arch 首个 step），机械保证工具链与包仓库同日。
-  # 为什么钉：Qt 只承诺向后兼容（构建 Qt 不得新于运行 Qt），滚动容器的 Qt 随上游
-  # 漂移，产物符号面由当时的头文件决定——v0.3.2/v0.4.0 恰好构建于已撤回的 6.12.0
-  # 窗口（6.12 头文件把 QVariant(QString&&) 等改为库导出），当前全体 Arch 用户
-  # （6.11.2）无法启动，见 #23。本快照（20260927）的 qt6-base 为 6.11.2-3，符号面
-  # 覆盖当前全部用户；6.12 正式重进仓库后用户升级，库向后导出旧符号，产物继续可用。
-  # 无需定期 bump：仅当代码开始依赖更新 Qt 的符号/行为时再选更晚 weekly tag
-  # （换前先核对当日 archive extra.db 里的 qt6-base 版本）。
+  # 为什么钉：Qt 只承诺向后兼容（构建 Qt 不得新于运行 Qt），滚动容器的产物符号面由当时的
+  # 头文件决定。v0.3.2/v0.4.0 恰好构建在 6.12.0 在库的期：Qt 6.12.0 新增了一批库导出的
+  # QVariant 右值构造函数，用 6.12 头文件编译时重载决议改选它们，产物引用了 6.11 库里不
+  # 存在的符号 → 仍是 6.11.x 的系统（Manjaro 至今如此）启动即 symbol lookup error，见 #23。
+  # 本快照（20260927）的 qt6-base 是 6.11.2-3，符号面覆盖当前全部用户；6.12 库向后导出旧
+  # 符号，故产物在 6.12 上也照跑。无需定期 bump：仅当代码开始依赖更新 Qt 的符号/行为时
+  # 再选更晚 weekly tag（换前先核对当日 archive extra.db 里的 qt6-base 版本）。
   ARCH_ROOTFS: 'archlinux:base-devel-20260927.0.600689'
+  # arch 通道声明的运行下限（= 构建面）。快照 tag 只编码日期、看不出 Qt 版本，所以下限
+  # 必须单独声明：linux-arch 会拿钉定仓库解析出的 qt6-base 版本与它机械比对，拦下
+  # "钉了更晚的快照却忘了抬高下限"。deb/rpm 的下限由容器 tag 本身（debian:12 / fedora:43）
+  # 声明，不另设常量。改这里要同步 doc/11 的「各通道的运行下限」表。
+  ARCH_QT_FLOOR: '6.11.2'
 
 jobs:
   # ---------- 版本一致性：tag 必须等于 v<CMakeLists 版本>（产物与标签一一对应） ----------
@@ -207,6 +222,24 @@ jobs:
           printf 'Server = https://archive.archlinux.org/repos/%s/%s/%s/$repo/os/$arch\n' \
             "${d:0:4}" "${d:4:2}" "${d:6:2}" > "$RUNNER_TEMP/mirror/mirrorlist"
           echo "arch 基线快照: $d"
+      - name: Assert pinned Qt floor
+        run: |
+          set -euo pipefail
+          # 快照里解析出的 qt6-base 必须等于声明的通道下限：换了更晚的快照却忘了抬高
+          # ARCH_QT_FLOOR（= 悄悄抬高运行下限）会在这里失败，而不是等用户报 symbol lookup error。
+          # 只读仓库 db（pacman -Si），不装包，几秒钟。
+          ver="$(docker run --rm -e LC_ALL=C \
+            -v "$RUNNER_TEMP/mirror/mirrorlist:/etc/pacman.d/mirrorlist:ro" \
+            "$ARCH_ROOTFS" \
+            bash -c 'pacman -Sy --noconfirm >/dev/null && pacman -Si qt6-base | grep ^Version' \
+            | awk '{print $3}')"
+          [ -n "$ver" ] || { echo "::error::无法从钉定仓库读到 qt6-base 版本"; exit 1; }
+          base="${ver%-*}"   # 去掉 pkgrel，只比 Qt 版本（6.11.2-3 → 6.11.2）
+          echo "钉定仓库的 qt6-base: $ver → $base（声明下限 ${ARCH_QT_FLOOR}）"
+          if [ "$base" != "${ARCH_QT_FLOOR}" ]; then
+            echo "::error::快照里的 Qt $base ≠ 声明下限 ${ARCH_QT_FLOOR}——构建面变了就是运行下限变了，须同步抬高 ARCH_QT_FLOOR 与 doc/11 的「各通道的运行下限」表"
+            exit 1
+          fi
       - name: Build arch package (pinned snapshot)
         run: |
           set -euo pipefail
