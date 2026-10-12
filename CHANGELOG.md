@@ -2,6 +2,15 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [0.4.1](https://github.com/wufe8/BeAtBench/compare/v0.4.0...v0.4.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **pkg:** --no-quick3dutils 改为探测后再传（无 qtquick3d 的 Qt 上它不存在，v0.4.0 首发因此失败） ([cf167ac](https://github.com/wufe8/BeAtBench/commit/cf167acb4e57f226938d4b460d8e374683c3dc90))
+* **pkg:** --no-quick3dutils 改为探测后再传（无 qtquick3d 的 Qt 上它不存在，v0.4.0 首发因此失败） ([af5704c](https://github.com/wufe8/BeAtBench/commit/af5704ce15466db5fe8911b3a12a5b54af3817fb))
+* **pkg:** 打包脚本显式指定 C 编译器（PortAudio 是 C，混用工具链时报假缺头） ([9f9837a](https://github.com/wufe8/BeAtBench/commit/9f9837aa1b1f5b75f3f36b7e437127556278a7a3))
+
 ## [0.4.0](https://github.com/wufe8/BeAtBench/compare/v0.3.2...v0.4.0) (2026-10-11)
 
 
