@@ -10,9 +10,10 @@
 #   checkout 在宿主机完成，源码只读挂载，构建/冒烟产物经 /out 卷带回宿主机。
 # - 触发：tag v*（发布）与手动 dispatch（演练/重跑）；tag 与 CMakeLists 版本的
 #   一致性由 version-check job 校验，防止产物版本与标签脱节。
-#   另有每周定时（schedule）：arch 容器是滚动的（qt6-base 永远拉最新），每周跑一次
-#   Linux 打包矩阵提前暴露 Qt 新版的编译破坏，避免专挑发版时爆炸；attach-to-release
-#   仅 tag 触发（github.ref_type == 'tag'），schedule 跑的只是构建 + 冒烟，不会碰 Release。
+#   另有每周定时(schedule):arch 基线已钉 archive 快照(见 ARCH_ROOTFS),schedule 的
+#   意义是在钉定基线上每周验证 master 可构建可冒烟(回归检测,顺带监测归档可用性);
+#   attach-to-release 仅 tag 触发(github.ref_type == 'tag'),schedule 跑的只是构建 +
+#   冒烟,不会碰 Release。
 # - **Windows 发布包不在这里**：由 `.github/workflows/release.yml`（发布线）跑完整回归后
 #   调同一个 scripts/package-release.sh 并挂到 GitHub Release（避免同一 tag 构建两遍）。
 # - 本流水线的产物在 tag 触发时由 attach-to-release 作业挂到 release.yml 建好的同一个
@@ -37,6 +38,17 @@ concurrency:
 env:
   # Linux 系统 Qt 下限（Ubuntu 24.04 LTS 的 Qt 主次版本）；探针容器漂移会被断言拦下。
   QT_FLOOR: '6.4'
+  # arch 构建基线：钉在 archive 快照。ARCH_ROOTFS 是快照日的唯一编辑点（实际存在的
+  # Docker weekly tag，无法杜攋），mirrorlist 的日期由 tag 内嵌 YYYYMMDD 派生
+  # （linux-arch 首个 step），机械保证工具链与包仓库同日。
+  # 为什么钉：Qt 只承诺向后兼容（构建 Qt 不得新于运行 Qt），滚动容器的 Qt 随上游
+  # 漂移，产物符号面由当时的头文件决定——v0.3.2/v0.4.0 恰好构建于已撤回的 6.12.0
+  # 窗口（6.12 头文件把 QVariant(QString&&) 等改为库导出），当前全体 Arch 用户
+  # （6.11.2）无法启动，见 #23。本快照（20260927）的 qt6-base 为 6.11.2-3，符号面
+  # 覆盖当前全部用户；6.12 正式重进仓库后用户升级，库向后导出旧符号，产物继续可用。
+  # 无需定期 bump：仅当代码开始依赖更新 Qt 的符号/行为时再选更晚 weekly tag
+  # （换前先核对当日 archive extra.db 里的 qt6-base 版本）。
+  ARCH_ROOTFS: 'archlinux:base-devel-20260927.0.600689'
 
 jobs:
   # ---------- 版本一致性：tag 必须等于 v<CMakeLists 版本>（产物与标签一一对应） ----------
@@ -183,18 +195,34 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - name: Build arch package (rolling)
+      - name: Write pinned archive mirrorlist
+        run: |
+          set -euo pipefail
+          # 快照日期从 ARCH_ROOTFS tag 派生（单一事实），8 位校验拒绝手滑的半截日期
+          d="${ARCH_ROOTFS#archlinux:base-devel-}"; d="${d%%.*}"
+          test "${#d}" = 8 || { echo "错误: ARCH_ROOTFS 未内嵌 8 位日期: $d" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/mirror"
+          # $repo/$arch 必须字面写入容器内 mirrorlist
+          # shellcheck disable=SC2016
+          printf 'Server = https://archive.archlinux.org/repos/%s/%s/%s/$repo/os/$arch\n' \
+            "${d:0:4}" "${d:4:2}" "${d:6:2}" > "$RUNNER_TEMP/mirror/mirrorlist"
+          echo "arch 基线快照: $d"
+      - name: Build arch package (pinned snapshot)
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/pkg-arch"; mkdir -p "$OUT"
           docker run --rm -e OUT=/out \
-            -v "$PWD:/src:ro" -v "$OUT:/out" archlinux:base-devel \
+            -v "$PWD:/src:ro" -v "$OUT:/out" \
+            -v "$RUNNER_TEMP/mirror/mirrorlist:/etc/pacman.d/mirrorlist:ro" \
+            "$ARCH_ROOTFS" \
             bash /src/scripts/package-linux.sh arch
       - name: Install smoke on Arch
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/pkg-arch"
-          docker run --rm -v "$OUT:/pkgs:ro" -v "$PWD:/src:ro" archlinux:base-devel \
+          docker run --rm -v "$OUT:/pkgs:ro" -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/mirror/mirrorlist:/etc/pacman.d/mirrorlist:ro" \
+            "$ARCH_ROOTFS" \
             bash /src/scripts/verify-linux-package.sh arch /pkgs
       - name: Upload arch packages
         uses: actions/upload-artifact@v7
