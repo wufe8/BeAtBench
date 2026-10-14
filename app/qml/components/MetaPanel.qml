@@ -264,7 +264,12 @@ ColumnLayout {
                         visible: !root.comboOptions(modelData.key, modelData.value)
                         Layout.fillWidth: true
                         text: modelData.value
-                        onTextChanged: { modelData.value = text; root.dirtyTick++
+                        // ⚠️ 必须用 onTextEdited（**用户**编辑）而非 onTextChanged：后者在
+                        // `text:` 绑定首次求值/重新载入时也会触发（"" → "ZZ" 算一次变化），
+                        // 于是"打开谱面"本身就会 dispatch meta.edit ——2026-10-14 实测：
+                        // 打开含 `#LNOBJ ZZ` 的谱面会写一次 LNOBJ=<原值>，把文档标成未保存
+                        // （标题出现 *、关闭必弹确认、项目页"未保存"徽标误报）。
+                        onTextEdited: { modelData.value = text; root.dirtyTick++
                                          if (modelData.key === "LNOBJ") { modelData.orig = text; root.modeEditRequested("LNOBJ", text) } }
                     }
                     ComboBox {

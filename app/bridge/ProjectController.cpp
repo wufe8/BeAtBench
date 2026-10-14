@@ -115,6 +115,7 @@ void ProjectController::scan(const QString& folder) {
     emit chartsChanged();
     emit resourcesChanged();
     emit sliceTargetsChanged();
+    refreshOpenStates();
 
     const std::string root = clean.toUtf8().toStdString();
     QThreadPool::globalInstance()->start([this, gen, root, clean] {
@@ -173,6 +174,7 @@ void ProjectController::scan(const QString& folder) {
                 m_project = proj;
                 rebuildCharts();
                 rebuildResources();
+                refreshOpenStates();
                 m_state = QStringLiteral("ready");
                 emit chartsChanged();
                 emit resourcesChanged();
@@ -211,7 +213,11 @@ void ProjectController::rebuildCharts() {
     m_charts.clear();
     if (!m_project) return;
     m_charts.reserve(static_cast<int>(m_project->charts.size()));
-    for (const auto& c : m_project->charts) m_charts.push_back(chartToMap(c));
+    for (const auto& c : m_project->charts) {
+        QVariantMap m = chartToMap(c);
+        m["absPath"] = absolutePath(qs(c.path));  // 与 openStates 键、切音目标寻址一致
+        m_charts.push_back(m);
+    }
 }
 
 void ProjectController::rebuildResources() {
@@ -255,9 +261,51 @@ QString ProjectController::absolutePath(const QString& relative) const {
     return QDir::cleanPath(QDir(m_root).absoluteFilePath(relative));
 }
 
+void ProjectController::refreshOpenStates() {
+    auto& reg = beatbench::edit::session_registry();
+    const std::string active_id = reg.active_id();
+    QVariantMap next;
+    for (const std::string& id : reg.ids()) {
+        const beatbench::edit::EditorSession* session = reg.by_id(id);
+        if (session == nullptr || !session->has_chart() || session->path().empty()) continue;
+        QVariantMap entry;
+        entry["id"] = QString::fromStdString(id);
+        entry["dirty"] = session->is_dirty();
+        entry["active"] = (id == active_id);
+        next[QString::fromStdString(session->path())] = entry;
+    }
+    if (next == m_openStates) return;  // 无变化不刷 UI
+    m_openStates = next;
+    emit openStatesChanged();
+}
+
+QString ProjectController::sessionIdForPath(const QString& absolutePath) const {
+    if (absolutePath.isEmpty()) return {};
+    auto& reg = beatbench::edit::session_registry();
+    return QString::fromStdString(reg.find_by_path(absolutePath.toUtf8().toStdString()));
+}
+
 void ProjectController::openChart(const QString& relative) {
     const QString abs = absolutePath(relative);
-    if (!abs.isEmpty()) emit chartOpenRequested(abs);
+    if (abs.isEmpty()) return;
+    // 已在会话中打开 → 切到该会话，**不重新读盘**（保护未保存修改；审查稿 P0）。
+    const QString id = sessionIdForPath(abs);
+    if (!id.isEmpty()) {
+        using beatbench::json::Json;
+        Json req = Json::object();
+        req.set("command", "session.activate");
+        Json args = Json::object();
+        args.set("id", id.toUtf8().toStdString());
+        req.set("args", std::move(args));
+        const Json resp = beatbench::cmd::global_registry().dispatch(req);
+        const Json* okp = resp.find("ok");
+        if (okp && okp->is_bool() && okp->as_bool()) {
+            refreshOpenStates();
+            emit chartActivated(abs);
+            return;
+        }
+    }
+    emit chartOpenRequested(abs);  // 未打开 → 走读盘路径（Main 负责未保存确认）
 }
 
 void ProjectController::setSliceTargetChecked(const QString& relative, bool checked) {
@@ -334,6 +382,7 @@ QString ProjectController::saveSliceTargets(const QString& editorPath) {
         }
         problems << msg;
     }
+    refreshOpenStates();  // 保存后脏标记变化 → 项目页徽标刷新
     if (!problems.isEmpty())
         return tr("已保存 %1 个谱面；失败：%2").arg(saved).arg(problems.join(QStringLiteral("; ")));
     if (saved == 0) return tr("没有需要保存的改动");

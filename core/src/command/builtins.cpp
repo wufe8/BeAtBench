@@ -2053,18 +2053,28 @@ public:
             throw CommandError("bad_args", "edits 不能为空");
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
+        std::size_t applied = 0;
         for (const auto& item : edits->as_array()) {
             if (!item.is_object()) throw CommandError("bad_args", "edits 元素应为对象");
             const Json* key = item.find("key");
             if (!key || !key->is_string()) throw CommandError("bad_args", "edits 元素缺 key");
             const Json* val = item.find("value");
             if (!val || !val->is_string()) throw CommandError("bad_args", "edits 元素缺 value");
+            // 无变化 = 不执行（2026-10-14）：值与原值相同（含"删一个不存在的字段"）时
+            // 不产生 undo 步、**不把文档标脏**。防御性守卫——UI 侧绑定求值误报一次
+            // meta.edit 就会让"打开谱面"即变未保存（见 MetaPanel onTextEdited 注释）。
+            const auto cur = session.chart().meta.find(key->as_str());
+            const bool exists = (cur != session.chart().meta.end());
+            if (exists && cur->second == val->as_str()) continue;
+            if (!exists && val->as_str().empty()) continue;
             comp->add(std::make_unique<edit::MetaEditCommand>(key->as_str(), val->as_str()));
+            ++applied;
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = applied == 0 ? true : session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("edits", static_cast<std::int64_t>(edits->as_array().size()));
+        out.set("applied", static_cast<std::int64_t>(applied));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }

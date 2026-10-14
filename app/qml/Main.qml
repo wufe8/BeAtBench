@@ -949,6 +949,7 @@ ApplicationWindow {
     Connections {
         target: project
         function onChartOpenRequested(path) { window.doOpenChart(path) }
+        function onChartActivated(path) { window.adoptChart(path) }
         function onSliceTargetsChanged() { window.syncSliceExportTargets() }
     }
 
@@ -1478,6 +1479,68 @@ ApplicationWindow {
         }
     }
 
+    /// M7：切到**已在会话中打开**的谱面——不重新读盘（保护未保存修改；审查稿 P0）。
+    /// 与 openChart 的区别：只换活动会话 + 用内存态刷新各面板。
+    function adoptChart(path) {
+        var d = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.dirty", args: {} })))
+        if (!d.ok || !d.result.has_chart) {
+            window.statusText = qsTr("切换失败：未加载谱面")
+            statusClearTimer.restart()
+            return
+        }
+        chartSession.refresh()      // 视图跟随新活动会话（不读盘）
+        chartSession.renderAsync()  // 该会话若未渲染过 → 后台补渲染（内存态）
+        window.chartPath = d.result.path
+        // 元信息：**内存态**（meta.list 读活动会话 chart），不用 info 的磁盘态
+        var m = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "meta.list", args: {} })))
+        if (m.ok) {
+            window.chartMeta = m.result.meta
+            if (window.chartMeta && window.chartMeta.BPM !== undefined) {
+                const b = parseFloat(window.chartMeta.BPM)
+                if (isFinite(b) && b > 0) window.currentBpmValue = b
+            }
+        }
+        // 采样面板：session.samples（内存态）→ 合成 info 形状喂给 loadFromInfo
+        var ss = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} })))
+        if (ss.ok) {
+            sampleModel.loadFromInfo(JSON.stringify(
+                { result: { samples: ss.result.samples, id_base: chartSession.idBase() } }))
+        }
+        var inf = beatbench.dispatch(JSON.stringify({ command: "info", args: { path: d.result.path } }))
+        var ri = JSON.parse(inf)
+        if (ri.ok) {
+            window.chartFormat = ri.result.format !== undefined ? ri.result.format : ""
+            window.chartMode = ri.result.mode !== undefined ? ri.result.mode : ""
+            var enc = ""
+            if (ri.result.diagnostics) {
+                for (var di = 0; di < ri.result.diagnostics.length; ++di) {
+                    var dm = ri.result.diagnostics[di].message
+                    if (dm && dm.indexOf("encoding:") === 0) {
+                        var mm = dm.match(/^encoding:\s*(\S+)/)
+                        if (mm) enc = mm[1]
+                        break
+                    }
+                }
+            }
+            window.chartEncoding = enc
+        }
+        window.pendingLnHead = null
+        window.selectionRefs = []
+        window.metaSelection = []
+        refreshTiming()
+        if (typeof editPage !== "undefined" && editPage) {
+            editPage.reloadMeta()
+            editPage.reloadBga()
+        }
+        if (typeof sessionController !== "undefined" && sessionController)
+            sessionController.refreshLint()
+        if (typeof audioEngine !== "undefined" && audioEngine)
+            audioEngine.setChartPath(d.result.path)
+        project.refreshOpenStates()
+        window.statusText = qsTr("已切换到已打开的谱面：%1").arg(d.result.path)
+        statusClearTimer.restart()
+    }
+
     // file:///C:/x → C:/x（Windows 本地路径）
     function urlToPath(url) {
         var s = url.toString()
@@ -1795,6 +1858,8 @@ ApplicationWindow {
     onCurrentPageChanged: {
         updateActionStates()
         updateCheckedStates()
+        // M7：进项目页 → 重新采集「已打开 / 未保存」状态（§9.2）
+        if (currentPage === 3) project.refreshOpenStates()
         // M6.1 页切换音频协调：进切音页 → 谱面播放暂停（共用内核 kPcmSlot，互斥）；
         // 离开切音页 → 参考播放停止（退出切音页即静音）
         if (typeof audioEngine === "undefined" || !audioEngine) return
