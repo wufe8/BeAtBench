@@ -57,7 +57,9 @@ public:
     /// 文档是否相对最近一次 load / mark_clean 有未保存编辑（含 undo 到非清洁点）。
     bool is_dirty() const { return m_generation != m_clean_generation; }
     /// 保存成功后调用：当前 generation 成为清洁点。load() 也会清脏。
-    void mark_clean() { m_clean_generation = m_generation; }
+    void mark_clean() { m_clean_generation = m_generation; m_saved_since_load = true; }
+    /// 区分“载入后尚未保存”与“已成功保存”；不参与 undo，重新 load 时重置。
+    bool saved_since_load() const { return m_saved_since_load; }
 
     /// 撤销/重做栈顶命令描述（菜单显示；空 → 空串）。
     std::string undo_label() const;
@@ -104,6 +106,7 @@ private:
     std::uint64_t m_generation = 0;        ///< 当前文档状态代际（undo 回到该状态号）
     std::uint64_t m_next_generation = 1;   ///< 只增不复用，避免保存点号被新编辑撞上
     std::uint64_t m_clean_generation = 0;  ///< 最近一次 load/mark_clean 的 generation
+    bool m_saved_since_load = false;
     std::vector<std::uint64_t> m_undo_generation;  ///< 与 m_undo 平行：该命令 apply 后的代际
     std::vector<std::uint64_t> m_redo_generation;  ///< 与 m_redo 平行
     PersistHook m_persist_hook;

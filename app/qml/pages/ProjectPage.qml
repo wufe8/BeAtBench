@@ -46,12 +46,13 @@ Item {
         root.chModel = out
     }
 
-    /// 文档徽标：已打开 / 未保存（doc/07 §9.2 项目页兼任「已打开文档」视图）
+    /// “未打开”是会话状态；清洁文档按是否实际保存区分“未修改 / 已保存”。
     function docBadge(m) {
         var st = project.openStates[m.absPath]
         if (!st) return qsTr("未打开")
         if (st.active && window.metaDraftDirty) return qsTr("草稿未存")
-        return st.dirty ? qsTr("未保存") : qsTr("已保存")
+        if (st.dirty) return qsTr("未保存")
+        return st.saved ? qsTr("已保存") : qsTr("未修改")
     }
     function docBadgeColor(m) {
         var st = project.openStates[m.absPath]

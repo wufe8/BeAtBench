@@ -264,6 +264,7 @@ void EditorSession::load(Chart chart) {
     m_generation = 0;
     m_next_generation = 1;
     m_clean_generation = 0;
+    m_saved_since_load = false;
     m_undo_generation.clear();
     m_redo_generation.clear();
 }

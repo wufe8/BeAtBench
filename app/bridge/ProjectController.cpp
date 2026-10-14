@@ -282,6 +282,7 @@ void ProjectController::refreshOpenStates() {
         QVariantMap entry;
         entry["id"] = QString::fromStdString(id);
         entry["dirty"] = session->is_dirty();
+        entry["saved"] = session->saved_since_load();
         entry["active"] = (id == active_id);
         next[DocumentService::normalizedPath(QString::fromStdString(session->path()))] = entry;
     }
