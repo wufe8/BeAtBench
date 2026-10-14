@@ -1490,6 +1490,20 @@ public:
         }
         Json out = Json::object();
         out.set("issues", std::move(arr));
+        // 同一份内存 lint 也供采样面板刷新可用性，不能重新 check 磁盘旧谱面。
+        Json availability = Json::object();
+        Json missing = Json::array(), mismatch = Json::array();
+        for (const auto& issue : lint) {
+            if (issue.code != "missing_wav" && issue.code != "wav_ext_mismatch") continue;
+            Json entry = Json::object();
+            entry.set("id", issue.id);
+            entry.set("file", issue.file);
+            entry.set("resolved", issue.resolved);
+            (issue.code == "missing_wav" ? missing : mismatch).push_back(std::move(entry));
+        }
+        availability.set("missing_wav", std::move(missing));
+        availability.set("wav_ext_mismatch", std::move(mismatch));
+        out.set("lint", std::move(availability));
         return out;
     }
 };

@@ -104,6 +104,9 @@ cmake --build "$BUILD_DIR" --parallel
 
 # ---- 3. 测试 ----
 step "测试$([ "$QUICK" -eq 1 ] && echo '（BB_SKIP_REAL=1）')"
+# 测试临时目录由运行环境指定，源码不依赖本机 local/ 内容。
+mkdir -p "$ROOT/local/tmp/tests"
+export BB_TEST_TMPDIR="$(cygpath -m "$ROOT/local/tmp/tests" 2>/dev/null || printf '%s' "$ROOT/local/tmp/tests")"
 if [ "$QUICK" -eq 1 ]; then
   BB_SKIP_REAL=1 ctest --test-dir "$BUILD_DIR" --output-on-failure
 else

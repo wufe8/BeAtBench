@@ -52,6 +52,7 @@ QtObject {
         var req = JSON.stringify({ command: "session.lint", args: {} })
         var resp = beatbench.dispatch(req)
         lintModel.loadFromIssues(resp)
+        sampleModel.loadFromCheck(resp)  // 内存绑定的缺失/扩展名状态，不读磁盘旧定义
     }
     function deleteNoteAt(ref) {
         var args = {
@@ -1013,15 +1014,16 @@ QtObject {
             if (edits && edits.length > 0) sessionCmd("meta.edit", { edits: edits })
             editPage.applyRawEdits()
         }
-        var r = sessionCmd("session.save", { path: path, overwrite: true })
-        if (r) {
+        const r = documents.save(documents.activeId(), path)
+        if (r.ok) {
+            chartSession.refresh()
+            project.refreshOpenStates()
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
-            window.chartPath = r.output
-            var msg = qsTr("已另存为：%1").arg(r.output)
-            if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
-            setStatus(msg)
+            window.chartPath = r.path
+            setStatus(qsTr("已另存为：%1").arg(r.path))
             return true
         }
+        setStatus(r.error)
         return false
     }
 }

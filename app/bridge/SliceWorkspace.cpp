@@ -20,6 +20,7 @@
 
 #include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
+#include "bridge/DocumentService.hpp"
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/OnsetDetector.hpp"
 #include "beatbench/core/command/Command.hpp"
@@ -491,42 +492,17 @@ QStringList SliceWorkspace::effectiveTargets() const {
 }
 
 std::string SliceWorkspace::sessionIdForPath(const QString& path, QString* err) {
-    using beatbench::json::Json;
     auto& reg = beatbench::edit::session_registry();
-    const std::string want = path.toUtf8().toStdString();
-    if (const std::string found = reg.find_by_path(want); !found.empty()) return found;
-    // ⚠️ session.create 会**激活**新会话（GUI 新标签页语义）→ 结束后恢复原活动会话，
-    // 否则编辑页/采样面板会跟着切到目标谱面（审查稿 P0：不能靠活动会话寻址）。
-    const std::string prev_active = reg.active_id();
-    std::string id = "slice-target-" + std::to_string(reg.ids().size() + 1);
-    while (reg.by_id(id) != nullptr) id += "x";
-    if (!reg.create(id)) {
-        if (err) *err = QStringLiteral("无法创建会话");
+    const std::string previous = reg.active_id();
+    DocumentService documents;
+    const QVariantMap opened = documents.open(path);
+    // 切音加载目标不改变编辑页活动文档（成功/失败均恢复）。
+    if (!previous.empty()) reg.activate(previous);
+    if (!opened.value(QStringLiteral("ok")).toBool()) {
+        if (err) *err = opened.value(QStringLiteral("error")).toString();
         return {};
     }
-    Json req = Json::object();
-    req.set("command", "session.load");
-    Json args = Json::object();
-    args.set("session_id", id);
-    args.set("path", want);
-    req.set("args", std::move(args));
-    const Json resp = beatbench::cmd::global_registry().dispatch(req);
-    if (!prev_active.empty() && prev_active != id) reg.activate(prev_active);
-    const Json* okp = resp.find("ok");
-    if (!okp || !okp->is_bool() || !okp->as_bool()) {
-        reg.close(id);
-        if (err) {
-            QString msg = QStringLiteral("载入失败");
-            if (const Json* e = resp.find("error")) {
-                if (const Json* c = e->find("code")) msg = QString::fromStdString(c->as_str());
-                if (const Json* m = e->find("message"))
-                    msg += QStringLiteral(": ") + QString::fromStdString(m->as_str());
-            }
-            *err = msg;
-        }
-        return {};
-    }
-    return id;
+    return opened.value(QStringLiteral("id")).toString().toUtf8().toStdString();
 }
 
 void SliceWorkspace::setStatus(const QString& text) {

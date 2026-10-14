@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "ProjectController.hpp"
+#include "DocumentService.hpp"
 
 #include <QDebug>
 #include <QDir>
@@ -97,12 +98,17 @@ QVariantMap resourceToMap(const beatbench::project::ResourceRef& r) {
 
 ProjectController::ProjectController(QObject* parent) : QObject(parent) {}
 
-ProjectController::~ProjectController() = default;
+ProjectController::~ProjectController() {
+    // 工作线程仍会向 this 投递回调；先等本控制器的任务退出，再析构 QObject。
+    // 不等待全局线程池，避免把其它音频任务的生命周期混进项目扫描。
+    m_scanPool.waitForDone();
+}
 
 void ProjectController::scan(const QString& folder) {
     const QString clean = QDir::cleanPath(folder);
     const quint64 gen = ++m_generation;  // 旧任务的回调据此作废
     m_root = clean;
+    m_project.reset();  // 换项目时不能保留旧根的索引供取消/全选使用
     m_errorText.clear();
     m_charts.clear();
     m_resources.clear();
@@ -118,7 +124,7 @@ void ProjectController::scan(const QString& folder) {
     refreshOpenStates();
 
     const std::string root = clean.toUtf8().toStdString();
-    QThreadPool::globalInstance()->start([this, gen, root, clean] {
+    m_scanPool.start([this, gen, root] {
         beatbench::project::ScanOptions index_opts;
         index_opts.parse = false;  // 第一段：只枚举（快）
         std::shared_ptr<beatbench::project::Project> proj;
@@ -156,7 +162,10 @@ void ProjectController::scan(const QString& folder) {
                 m_state = QStringLiteral("parsing");
                 emit stateChanged();
                 rebuildCharts();
+                rebuildResources();
                 emit chartsChanged();
+                emit resourcesChanged();
+                emit summaryChanged();
             },
             Qt::QueuedConnection);
 
@@ -188,7 +197,7 @@ void ProjectController::scan(const QString& folder) {
 void ProjectController::cancel() {
     ++m_generation;  // 在跑的任务回调作废
     if (m_state == QStringLiteral("indexing") || m_state == QStringLiteral("parsing")) {
-        m_state = m_project ? QStringLiteral("ready") : QStringLiteral("idle");
+        m_state = QStringLiteral("cancelled");  // 已有枚举快照也不宣称完整解析就绪
         emit stateChanged();
     }
 }
@@ -196,6 +205,8 @@ void ProjectController::cancel() {
 void ProjectController::clear() {
     ++m_generation;
     m_project.reset();
+    m_sliceTargets.clear();
+    emit sliceTargetsChanged();
     m_root.clear();
     m_errorText.clear();
     m_charts.clear();
@@ -256,9 +267,9 @@ QVariantList ProjectController::filterResources(const QString& kind, bool onlyMi
 }
 
 QString ProjectController::absolutePath(const QString& relative) const {
-    if (m_root.isEmpty()) return relative;
-    if (QDir::isAbsolutePath(relative)) return QDir::cleanPath(relative);
-    return QDir::cleanPath(QDir(m_root).absoluteFilePath(relative));
+    if (relative.isEmpty()) return {};
+    return DocumentService::normalizedPath(QDir::isAbsolutePath(relative) || m_root.isEmpty()
+                                              ? relative : QDir(m_root).absoluteFilePath(relative));
 }
 
 void ProjectController::refreshOpenStates() {
@@ -272,7 +283,7 @@ void ProjectController::refreshOpenStates() {
         entry["id"] = QString::fromStdString(id);
         entry["dirty"] = session->is_dirty();
         entry["active"] = (id == active_id);
-        next[QString::fromStdString(session->path())] = entry;
+        next[DocumentService::normalizedPath(QString::fromStdString(session->path()))] = entry;
     }
     if (next == m_openStates) return;  // 无变化不刷 UI
     m_openStates = next;
@@ -281,31 +292,15 @@ void ProjectController::refreshOpenStates() {
 
 QString ProjectController::sessionIdForPath(const QString& absolutePath) const {
     if (absolutePath.isEmpty()) return {};
-    auto& reg = beatbench::edit::session_registry();
-    return QString::fromStdString(reg.find_by_path(absolutePath.toUtf8().toStdString()));
+    return DocumentService::findSessionId(absolutePath);
 }
 
 void ProjectController::openChart(const QString& relative) {
     const QString abs = absolutePath(relative);
     if (abs.isEmpty()) return;
-    // 已在会话中打开 → 切到该会话，**不重新读盘**（保护未保存修改；审查稿 P0）。
-    const QString id = sessionIdForPath(abs);
-    if (!id.isEmpty()) {
-        using beatbench::json::Json;
-        Json req = Json::object();
-        req.set("command", "session.activate");
-        Json args = Json::object();
-        args.set("id", id.toUtf8().toStdString());
-        req.set("args", std::move(args));
-        const Json resp = beatbench::cmd::global_registry().dispatch(req);
-        const Json* okp = resp.find("ok");
-        if (okp && okp->is_bool() && okp->as_bool()) {
-            refreshOpenStates();
-            emit chartActivated(abs);
-            return;
-        }
-    }
-    emit chartOpenRequested(abs);  // 未打开 → 走读盘路径（Main 负责未保存确认）
+    // 激活也必须经过窗口的面板草稿确认；不能先 activate 再询问，否则会写错文档。
+    // DocumentService 统一处理按路径复用 / 创建独立会话。
+    emit chartOpenRequested(abs);
 }
 
 void ProjectController::setSliceTargetChecked(const QString& relative, bool checked) {
@@ -358,7 +353,7 @@ QString ProjectController::saveSliceTargets(const QString& editorPath) {
     int saved = 0;
     QStringList problems;
     for (const QString& abs : targets) {
-        const std::string sid = reg.find_by_path(abs.toUtf8().toStdString());
+        const std::string sid = DocumentService::findSessionId(abs).toUtf8().toStdString();
         if (sid.empty()) continue;  // 未加载 = 无内存改动
         const beatbench::edit::EditorSession* s = reg.by_id(sid);
         if (s == nullptr || !s->is_dirty()) continue;

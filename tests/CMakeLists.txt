@@ -119,10 +119,37 @@ add_test(NAME reference_track_tests COMMAND reference_track_test)
 # 配置（gtest 走 FetchContent）。
 find_package(Qt6 COMPONENTS Core QUIET)
 if (Qt6Core_FOUND)
+    # 项目控制器：异步快照/取消/销毁与打开路由（无窗口/音频）。
+    add_executable(project_controller_test project_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp)
+    target_include_directories(project_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(project_controller_test PRIVATE beatbench_core Qt6::Core GTest::gtest_main)
+    set_target_properties(project_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(project_controller_test)
+    add_test(NAME project_controller_tests COMMAND project_controller_test)
+
+    # 多文档服务：只链 QtCore/core，不拥有 ChartSession、不启动音频设备。
+    add_executable(document_service_test document_service_test.cpp sample_list_model_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/SampleListModel.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/SampleListModel.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp)  # Q_OBJECT 头须显式列入
+    target_include_directories(document_service_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(document_service_test PRIVATE
+        beatbench_core Qt6::Core GTest::gtest_main)
+    set_target_properties(document_service_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(document_service_test)
+    add_test(NAME document_service_tests COMMAND document_service_test)
+
     # Bridge queries use real session/workspace implementations without opening audio devices.
     add_executable(slice_workspace_test slice_workspace_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/SliceWorkspace.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/SliceWorkspace.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp

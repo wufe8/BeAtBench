@@ -106,12 +106,14 @@ void ChartSession::refresh() {
     auto& s = reg.active();
     const std::string sid = reg.active_id();
     const beatbench::Chart* c = s.has_chart() ? &s.chart() : nullptr;
-    const bool docChanged = (sid != m_sessionId) || (c != m_chart);
+    const bool pathChanged = QString::fromStdString(s.path()) != m_path;
+    const bool docChanged = (sid != m_sessionId) || (c != m_chart) || pathChanged;
     if (docChanged) {
         attachActive(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
+        if (pathChanged && m_chart && m_timing) renderAsync();  // 另存为后按新目录解码资源
         return;
     }
     const std::uint64_t ch = contentHash();
