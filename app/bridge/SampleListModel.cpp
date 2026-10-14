@@ -151,7 +151,12 @@ void SampleListModel::clear() {
     beginResetModel();
     m_all.clear();
     m_rows.clear();
+    m_mru.clear();
+    m_groups.clear();
     endResetModel();
+    setIsBase62(false);
+    emit currentSampleChanged(QString{});
+    emit groupsChanged();
     emit countChanged(0);
 }
 

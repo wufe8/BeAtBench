@@ -49,13 +49,14 @@ Item {
     /// 文档徽标：已打开 / 未保存（doc/07 §9.2 项目页兼任「已打开文档」视图）
     function docBadge(m) {
         var st = project.openStates[m.absPath]
-        if (!st) return ""
-        return st.dirty ? qsTr("未保存") : qsTr("已打开")
+        if (!st) return qsTr("未打开")
+        if (st.active && window.metaDraftDirty) return qsTr("草稿未存")
+        return st.dirty ? qsTr("未保存") : qsTr("已保存")
     }
     function docBadgeColor(m) {
         var st = project.openStates[m.absPath]
         if (!st) return Theme.textFaint
-        return st.dirty ? Theme.primary : Theme.textMuted
+        return st.dirty || (st.active && window.metaDraftDirty) ? Theme.primary : Theme.textMuted
     }
     function openCount() {
         var n = 0
@@ -74,6 +75,7 @@ Item {
         case "indexing": return qsTr("枚举中…")
         case "parsing": return qsTr("解析中…（谱面表已可用）")
         case "ready": return qsTr("就绪")
+        case "cancelled": return qsTr("已取消（结果可能不完整）")
         case "error": return qsTr("错误：") + project.errorText
         default: return qsTr("未打开文件夹")
         }
@@ -94,6 +96,13 @@ Item {
         function onResourcesChanged() { root.refreshResources() }
         function onChartsChanged() { root.refreshCharts() }
         function onOpenStatesChanged() { root.refreshCharts() }
+        function onStateChanged() {
+            if (project.state === "indexing" || project.state === "idle") {
+                root.selectedChart = ""
+                root.selectedResource = null
+                root.saveText = ""
+            }
+        }
     }
 
     ColumnLayout {
@@ -216,8 +225,8 @@ Item {
                         Label { text: qsTr("难度"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 54 }
                         Label { text: qsTr("等级"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 40 }
                         Label { text: qsTr("notes"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 52 }
-                        Label { text: qsTr("文档"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 56 }
-                        Label { text: qsTr("状态"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 130 }
+                        Label { text: qsTr("保存状态"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 76 }
+                        Label { text: qsTr("诊断"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 96 }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
@@ -260,6 +269,10 @@ Item {
                                     Layout.fillWidth: true
                                     text: chartRow.modelData.path
                                     elide: Text.ElideMiddle
+                                    HoverHandler { id: chartPathHover }
+                                    ToolTip.visible: chartPathHover.hovered
+                                    ToolTip.text: chartRow.modelData.path
+                                    ToolTip.delay: 500
                                     color: Theme.text
                                     font.pixelSize: Theme.fsSmall
                                 }
@@ -267,14 +280,14 @@ Item {
                                 Label { Layout.preferredWidth: 40; text: chartRow.modelData.playlevel; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
                                 Label { Layout.preferredWidth: 52; text: chartRow.modelData.parsed ? chartRow.modelData.notesText : "…"; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
                                 Label {
-                                    Layout.preferredWidth: 56
+                                    Layout.preferredWidth: 76
                                     text: root.docBadge(chartRow.modelData)
                                     color: root.docBadgeColor(chartRow.modelData)
                                     font.pixelSize: Theme.fsSmall
                                     elide: Text.ElideRight
                                 }
                                 Label {
-                                    Layout.preferredWidth: 130
+                                    Layout.preferredWidth: 96
                                     text: root.chartStatus(chartRow.modelData)
                                     color: chartRow.modelData.missing > 0 || chartRow.modelData.errors > 0
                                            ? Theme.warning : Theme.textFaint
@@ -319,9 +332,20 @@ Item {
                                 onClicked: project.openChart(root.selectedChart)
                             }
                             BbToolButton {
+                                text: qsTr("保存全部已打开")
+                                onClicked: window.saveAllDocuments()
+                            }
+                            BbToolButton {
                                 text: qsTr("保存勾选谱面")
                                 enabled: project.sliceTargetCount > 0 || window.chartPath !== ""
-                                onClicked: root.saveText = project.saveSliceTargets(window.chartPath)
+                                onClicked: {
+                                    if (window.metaDraftDirty) {
+                                        root.saveText = qsTr("请先提交面板草稿，或使用保存全部已打开")
+                                        return
+                                    }
+                                    root.saveText = project.saveSliceTargets(window.chartPath)
+                                    chartSession.refresh()
+                                }
                             }
                             Label {
                                 visible: root.saveText !== ""

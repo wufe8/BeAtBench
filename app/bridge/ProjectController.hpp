@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QThreadPool>
 #include <memory>
 
 namespace beatbench::project {
@@ -20,9 +21,8 @@ namespace beatbench::app {
 ///   2. 后台解析（≈4.7s）→ 补元信息/统计/资源引用，state = "ready"。
 /// 扫描跑在 QThreadPool；重复 scan() 会把旧任务标记为过期（回调丢弃）。
 ///
-/// **不拥有文档**：打开谱面/指定切音目标只发信号，由 Main.qml 走既有链路
-/// （切音目标要真正"目标 ≠ 当前编辑谱"，须等 SliceWorkspace 持有自己的会话——
-///  见 local/doc/M7-双痛点反向设计审查 §P0，不在本类里偷偷用 UI 选中态顶替）。
+/// **不拥有文档**：打开/激活都先交 Main 确认面板草稿，再由 DocumentService
+/// 按路径创建或复用独立会话；多目标铺放由 SliceWorkspace 显式指定 session_id。
 class ProjectController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString root READ root NOTIFY summaryChanged)
@@ -95,15 +95,12 @@ signals:
     void chartOpenRequested(const QString& absolutePath);
     void openStatesChanged();
     void sliceTargetsChanged();
-    /// 目标文档已在会话中打开 → 请求"切到该会话"（不读盘，保护未保存修改）
-    void chartActivated(const QString& absolutePath);
 
 private:
-    void applyIndex();
-    void applyParsed();
     void rebuildCharts();
     void rebuildResources();
 
+    QThreadPool m_scanPool;  ///< 本控制器独立持有，析构时安全收尾
     std::shared_ptr<beatbench::project::Project> m_project;
     quint64 m_generation = 0;  ///< 每次 scan() 递增；回调比对，过期即丢
     QString m_root;

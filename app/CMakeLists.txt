@@ -21,6 +21,8 @@ add_executable(beatbench
     bridge/PlayheadOverlayItem.cpp
     bridge/SliceWorkspace.cpp
     bridge/SliceWaveformItem.cpp
+    bridge/DocumentService.cpp
+    bridge/DocumentService.hpp   # Q_OBJECT：显式列入
     bridge/ProjectController.cpp
     bridge/ProjectController.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）

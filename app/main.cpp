@@ -21,6 +21,7 @@
 #include <QStringList>
 #include <QTextStream>
 #include <QTimer>
+#include <QThreadPool>
 #include <QTranslator>
 #include <QUrl>
 #include <QVariant>
@@ -37,6 +38,7 @@
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
 #include "bridge/EditUtils.hpp"
+#include "bridge/DocumentService.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
 #include "bridge/ProjectController.hpp"
@@ -288,6 +290,7 @@ int main(int argc, char** argv) {
     // M7 项目页（doc/07 §9.1 阶段①）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
+    beatbench::app::DocumentService documentService;
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
@@ -303,6 +306,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("clipboard"), &clipboardBridge);
     engine.rootContext()->setContextProperty(QStringLiteral("editUtils"), &editUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
+    engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
     audioEngine.setChartSession(&chartSession);
 
@@ -518,18 +522,19 @@ int main(int argc, char** argv) {
 
     const QStringList args = app.arguments();
 
-    // --open <bms>：启动即打开谱面（QML openChart 同路径；配 --screenshot 做真数据验收）
-    const int openIdx = args.indexOf(QStringLiteral("--open"));
-    if (openIdx >= 0 && openIdx + 1 < args.size()) {
+    // --open 可重复：独立文档打开/按路径复用，与项目页共用 DocumentService。
+    for (int i = 1; i + 1 < args.size(); ++i) {
+        if (args.at(i) != QStringLiteral("--open")) continue;
         if (QObject* root = engine.rootObjects().value(0))
-            root->setProperty("debugOpenPath", args.at(openIdx + 1));
+            root->setProperty("debugOpenPath", args.at(++i));
     }
 
     // 双击文件关联 / 把文件拖到 exe 图标：Explorer 把文件路径作为 argv[1] 传入（无开关时）。
     // 交给 QML 的 handleExternalFile 按后缀分流（谱面 → 编辑页；音频/MIDI → 切音工作台），
     // 与「拖拽入窗口」同一路径，避免两处维护类型判定。argv[1] 以 '-' 开头则视为开关，跳过。
-    if (args.size() >= 2 && !args.at(1).startsWith(QLatin1Char('-'))) {
-        const QString external = args.at(1);
+    // desktop 的 %F / 拖多个文件到 exe 可以传多个路径，不能只消费第一个。
+    for (int i = 1; i < args.size() && !args.at(i).startsWith(QLatin1Char('-')); ++i) {
+        const QString external = args.at(i);
         if (QFileInfo::exists(external)) {
             if (QObject* root = engine.rootObjects().value(0))
                 root->setProperty("externalFilePath", external);
@@ -947,5 +952,9 @@ int main(int argc, char** argv) {
 
     if (engine.rootObjects().isEmpty())
         return -1;
-    return app.exec();
+    const int exitCode = app.exec();
+    // 桥层后台任务投递回调时仍持有接收对象的裸地址；先等工作线程结束，再销毁桥层。
+    // 队列中的回调由 QObject 析构移除，不在退出后重新应用旧结果。
+    QThreadPool::globalInstance()->waitForDone();
+    return exitCode;
 }
