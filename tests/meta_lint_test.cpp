@@ -421,3 +421,52 @@ TEST(MetaLint, BgmPolyphonyOverflowLint) {
         if (issue.code == "bgm_polyphony_overflow") ++sc_hits;
     EXPECT_EQ(sc_hits, 0u);
 }
+
+TEST(MetaLint, NoOpEditDoesNotDirtyDocument) {
+    // 2026-10-14：值与原值相同的 meta.edit 必须是无副作用的空操作。
+    // 起因：MetaPanel 的 TextField 用 onTextChanged 兼收"绑定首次求值"，
+    // 打开含 #LNOBJ 的谱面时会 dispatch 一次同值 meta.edit → 文档被标未保存
+    // （标题出现 *、关闭弹确认、项目页"未保存"徽标误报）。
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_chart());
+    ASSERT_TRUE(session.has_chart());
+    const auto title_it = session.chart().meta.find("TITLE");
+    ASSERT_NE(title_it, session.chart().meta.end()) << "测试前置：make_chart 应含 TITLE";
+    const std::string before = title_it->second;
+    ASSERT_EQ(before, "测试");
+    const auto dispatch_edit = [](const char* key, const char* value) {
+        Json req = Json::object();
+        req.set("command", "meta.edit");
+        Json args = Json::object();
+        Json edits = Json::array();
+        Json e = Json::object();
+        e.set("key", key);
+        e.set("value", value);
+        edits.push_back(std::move(e));
+        args.set("edits", std::move(edits));
+        req.set("args", std::move(args));
+        return global_registry().dispatch(req);
+    };
+
+    const Json same = dispatch_edit("TITLE", before.c_str());
+    ASSERT_TRUE(same.at("ok").as_bool());
+    EXPECT_EQ(same.at("result").at("applied").as_i64(), 0);
+    EXPECT_FALSE(session.is_dirty());
+    EXPECT_EQ(session.undo_depth(), 0u);
+
+    // 删除一个不存在的字段同样是空操作
+    const Json del_missing = dispatch_edit("NOSUCHFIELD", "");
+    ASSERT_TRUE(del_missing.at("ok").as_bool());
+    EXPECT_EQ(del_missing.at("result").at("applied").as_i64(), 0);
+    EXPECT_FALSE(session.is_dirty());
+
+    // 真正改值仍然生效 + 一个 undo 步
+    const Json changed = dispatch_edit("TITLE", "改过的标题");
+    ASSERT_TRUE(changed.at("ok").as_bool());
+    EXPECT_EQ(changed.at("result").at("applied").as_i64(), 1);
+    EXPECT_TRUE(session.is_dirty());
+    EXPECT_EQ(session.undo_depth(), 1u);
+    const auto after = session.chart().meta.find("TITLE");
+    ASSERT_NE(after, session.chart().meta.end());
+    EXPECT_EQ(after->second, "改过的标题");
+}

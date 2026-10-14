@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 #include <memory>
 
 namespace beatbench::project {
@@ -34,6 +35,8 @@ class ProjectController : public QObject {
     Q_PROPERTY(int missingCount READ missingCount NOTIFY summaryChanged)
     Q_PROPERTY(int unreferencedCount READ unreferencedCount NOTIFY summaryChanged)
     /// 切音目标集合（项目页勾选；相对项目根路径）
+    /// 已打开文档状态：绝对路径 → {dirty, active, id}（doc/07 §9.2 项目页兼任已打开视图）
+    Q_PROPERTY(QVariantMap openStates READ openStates NOTIFY openStatesChanged)
     Q_PROPERTY(QStringList sliceTargets READ sliceTargets NOTIFY sliceTargetsChanged)
     Q_PROPERTY(int sliceTargetCount READ sliceTargetCount NOTIFY sliceTargetsChanged)
 
@@ -50,6 +53,7 @@ public:
     int resourceCount() const { return m_resources.size(); }
     int missingCount() const { return m_missingCount; }
     int unreferencedCount() const { return m_unreferencedCount; }
+    QVariantMap openStates() const { return m_openStates; }
     QStringList sliceTargets() const { return m_sliceTargets; }
     int sliceTargetCount() const { return static_cast<int>(m_sliceTargets.size()); }
 
@@ -63,6 +67,10 @@ public:
     /// text = 路径子串（大小写不敏感）。
     Q_INVOKABLE QVariantList filterResources(const QString& kind, bool onlyMissing,
                                              bool onlyUnreferenced, const QString& text) const;
+    /// 重新采集已打开文档状态（切页/打开/保存后调用）。
+    Q_INVOKABLE void refreshOpenStates();
+    /// 该路径是否已在某个会话中打开（是 → 返回 session id，否则空串）。
+    Q_INVOKABLE QString sessionIdForPath(const QString& absolutePath) const;
     /// 项目根相对路径 → 绝对路径（打开/切音用）。
     Q_INVOKABLE QString absolutePath(const QString& relative) const;
     /// 请求在编辑页打开该谱面（发信号；由 Main 接既有 doOpenChart 链路）。
@@ -85,7 +93,10 @@ signals:
     void chartsChanged();
     void resourcesChanged();
     void chartOpenRequested(const QString& absolutePath);
+    void openStatesChanged();
     void sliceTargetsChanged();
+    /// 目标文档已在会话中打开 → 请求"切到该会话"（不读盘，保护未保存修改）
+    void chartActivated(const QString& absolutePath);
 
 private:
     void applyIndex();
@@ -103,6 +114,7 @@ private:
     int m_missingCount = 0;
     int m_unreferencedCount = 0;
     QStringList m_sliceTargets;  ///< 切音目标（项目页勾选；相对路径，已排序去重）
+    QVariantMap m_openStates;    ///< 绝对路径 → {dirty, active, id}
 };
 
 }  // namespace beatbench::app

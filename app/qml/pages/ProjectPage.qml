@@ -17,6 +17,9 @@ Item {
     property string saveText: ""
     property var selectedResource: null
     property var resModel: []
+    property var chModel: []
+    property bool onlyOpen: false
+    property string chartSearch: ""
 
     // 资源筛选状态
     property string kindFilter: ""
@@ -27,6 +30,43 @@ Item {
     function refreshResources() {
         root.resModel = project.filterResources(root.kindFilter, root.onlyMissing,
                                                 root.onlyUnreferenced, root.searchText)
+    }
+
+    /// 谱面表筛选（仅已打开 / 路径子串）；数据源仍为 project.charts
+    function refreshCharts() {
+        var src = project.charts
+        var out = []
+        var needle = root.chartSearch.trim().toLowerCase()
+        for (var i = 0; i < src.length; ++i) {
+            var c = src[i]
+            if (root.onlyOpen && !project.openStates[c.absPath]) continue
+            if (needle !== "" && c.path.toLowerCase().indexOf(needle) < 0) continue
+            out.push(c)
+        }
+        root.chModel = out
+    }
+
+    /// 文档徽标：已打开 / 未保存（doc/07 §9.2 项目页兼任「已打开文档」视图）
+    function docBadge(m) {
+        var st = project.openStates[m.absPath]
+        if (!st) return ""
+        return st.dirty ? qsTr("未保存") : qsTr("已打开")
+    }
+    function docBadgeColor(m) {
+        var st = project.openStates[m.absPath]
+        if (!st) return Theme.textFaint
+        return st.dirty ? Theme.primary : Theme.textMuted
+    }
+    function openCount() {
+        var n = 0
+        for (var k in project.openStates) if (project.openStates.hasOwnProperty(k)) ++n
+        return n
+    }
+    function dirtyCount() {
+        var n = 0
+        for (var k in project.openStates)
+            if (project.openStates.hasOwnProperty(k) && project.openStates[k].dirty) ++n
+        return n
     }
 
     function stateText() {
@@ -48,10 +88,12 @@ Item {
         return parts.join(" · ")
     }
 
-    Component.onCompleted: refreshResources()
+    Component.onCompleted: { refreshResources(); refreshCharts() }
     Connections {
         target: project
         function onResourcesChanged() { root.refreshResources() }
+        function onChartsChanged() { root.refreshCharts() }
+        function onOpenStatesChanged() { root.refreshCharts() }
     }
 
     ColumnLayout {
@@ -81,6 +123,11 @@ Item {
                           .arg(project.chartCount).arg(project.resourceCount)
                           .arg(project.missingCount).arg(project.unreferencedCount)
                     color: Theme.textMuted
+                    font.pixelSize: Theme.fsSmall
+                }
+                Label {
+                    text: qsTr("已打开 %1（未保存 %2）").arg(root.openCount()).arg(root.dirtyCount())
+                    color: root.dirtyCount() > 0 ? Theme.primary : Theme.textMuted
                     font.pixelSize: Theme.fsSmall
                 }
                 Label {
@@ -130,6 +177,28 @@ Item {
                         Layout.topMargin: 6
                         Layout.bottomMargin: 4
                         spacing: 8
+                        BbTextField {
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("按谱面路径筛选…")
+                            onTextChanged: { root.chartSearch = text; root.refreshCharts() }
+                        }
+                        BbCheckBox {
+                            text: qsTr("仅已打开")
+                            onToggled: { root.onlyOpen = checked; root.refreshCharts() }
+                        }
+                        Label {
+                            text: qsTr("%1 项").arg(root.chModel.length)
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.fsSmall
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        Layout.topMargin: 6
+                        Layout.bottomMargin: 4
+                        spacing: 8
                         BbCheckBox {
                             id: allTargetsBox
                             text: ""
@@ -147,6 +216,7 @@ Item {
                         Label { text: qsTr("难度"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 54 }
                         Label { text: qsTr("等级"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 40 }
                         Label { text: qsTr("notes"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 52 }
+                        Label { text: qsTr("文档"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 56 }
                         Label { text: qsTr("状态"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 130 }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
@@ -156,7 +226,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        model: project.charts
+                        model: root.chModel
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {}
 
@@ -196,6 +266,13 @@ Item {
                                 Label { Layout.preferredWidth: 54; text: chartRow.modelData.difficulty; color: Theme.textMuted; font.pixelSize: Theme.fsSmall; elide: Text.ElideRight }
                                 Label { Layout.preferredWidth: 40; text: chartRow.modelData.playlevel; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
                                 Label { Layout.preferredWidth: 52; text: chartRow.modelData.parsed ? chartRow.modelData.notesText : "…"; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                                Label {
+                                    Layout.preferredWidth: 56
+                                    text: root.docBadge(chartRow.modelData)
+                                    color: root.docBadgeColor(chartRow.modelData)
+                                    font.pixelSize: Theme.fsSmall
+                                    elide: Text.ElideRight
+                                }
                                 Label {
                                     Layout.preferredWidth: 130
                                     text: root.chartStatus(chartRow.modelData)

@@ -131,6 +131,13 @@ if [ "$CORE_ONLY" -eq 0 ] && [ "$NO_SMOKE" -eq 0 ]; then
   rm -f "$SHOT" "$LOG"
 
   export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+  # offscreen 平台**没有原生字体库**（Windows 不走 GDI）→ 必须给字体目录，否则截图里
+  # 中文全是方框（2026-10-14）。Linux/macOS 的 offscreen 走系统字体栈，无需该变量。
+  if [ -z "${QT_QPA_FONTDIR:-}" ]; then
+    for d in "${WINDIR:-}/Fonts" /c/Windows/Fonts /mnt/c/Windows/Fonts; do
+      if [ -n "$d" ] && [ -d "$d" ]; then export QT_QPA_FONTDIR="$d"; break; fi
+    done
+  fi
   "$EXE" --screenshot "$SHOT" --apply-skin Aurora >/dev/null 2>&1 || true
 
   [ -f "$SHOT" ] || { tail -20 "$LOG" 2>/dev/null >&2 || true; fail "冒烟：没有生成截图（日志：$LOG）"; }
