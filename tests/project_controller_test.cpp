@@ -81,6 +81,33 @@ TEST_F(ProjectControllerTest, OpenRequestsConfirmationBeforeAnyActivation) {
     EXPECT_EQ(beatbench::edit::session_registry().active_id(), active);
 }
 
+TEST_F(ProjectControllerTest, OpenStateIncludesSuccessfulSaveHistory) {
+    auto& registry = beatbench::edit::session_registry();
+    const std::string original = registry.active_id();
+    ASSERT_TRUE(registry.create("project-save-state"));
+    struct Cleanup {
+        std::string original;
+        ~Cleanup() {
+            auto& reg = beatbench::edit::session_registry();
+            reg.close("project-save-state");
+            reg.activate(original);
+        }
+    } cleanup{original};
+    auto* doc = registry.by_id("project-save-state");
+    doc->load(beatbench::Chart{}, temp->filePath("A.bms").toUtf8().toStdString());
+    beatbench::app::ProjectController project;
+    const QString path = project.absolutePath(temp->filePath("A.bms"));
+    project.refreshOpenStates();
+    EXPECT_FALSE(project.openStates().value(path).toMap().value("saved").toBool());
+    doc->mark_clean();
+    project.refreshOpenStates();
+    EXPECT_TRUE(project.openStates().value(path).toMap().value("saved").toBool());
+    EXPECT_FALSE(project.openStates().value(path).toMap().value("dirty").toBool());
+    doc->load(beatbench::Chart{}, temp->filePath("A.bms").toUtf8().toStdString());
+    project.refreshOpenStates();
+    EXPECT_FALSE(project.openStates().value(path).toMap().value("saved").toBool());
+}
+
 TEST_F(ProjectControllerTest, EarlySnapshotNotifiesSummary) {
     beatbench::app::ProjectController project;
     bool early = false;

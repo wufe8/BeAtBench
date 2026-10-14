@@ -983,6 +983,7 @@ QtObject {
         if (r) {
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
             window.chartPath = r.output
+            project.refreshOpenStates()  // 干净文档直接保存也要从“未修改”更新为“已保存”
             var msg = qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes)
             if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
             setStatus(msg)

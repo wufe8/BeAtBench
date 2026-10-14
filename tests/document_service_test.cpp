@@ -221,6 +221,35 @@ TEST_F(DocumentServiceTest, TargetedSavePreservesActiveAndOtherDirtyDocument) {
     EXPECT_TRUE(ok(service_.open(aPath_)));  // 保存后仍复用内存文档
 }
 
+TEST_F(DocumentServiceTest, SavedStateDistinguishesLoadedCleanDocumentFromSuccessfulSave) {
+    const auto opened = service_.open(aPath_);
+    ASSERT_TRUE(ok(opened));
+    const QString id = idOf(opened);
+    auto* doc = session(id);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_FALSE(doc->is_dirty());
+    EXPECT_FALSE(doc->saved_since_load());  // 仅打开 = 未修改，而非已保存
+    const QString blocked = temporary_->filePath("cannot-save.bms");
+    ASSERT_TRUE(QDir().mkpath(blocked));
+    EXPECT_FALSE(ok(service_.save(id, blocked)));
+    EXPECT_FALSE(doc->saved_since_load());
+    ASSERT_TRUE(edit(id));
+    ASSERT_TRUE(doc->undo());
+    EXPECT_FALSE(doc->is_dirty());
+    EXPECT_FALSE(doc->saved_since_load());  // 编辑再撤回初始内容仍是未修改
+    ASSERT_TRUE(ok(service_.save(id)));
+    EXPECT_TRUE(doc->saved_since_load());
+    ASSERT_TRUE(ok(service_.open(aPath_)));
+    EXPECT_TRUE(doc->saved_since_load());  // 切换/复用保留保存记录
+    ASSERT_TRUE(edit(id));
+    EXPECT_TRUE(doc->is_dirty());
+    ASSERT_TRUE(doc->undo());
+    EXPECT_FALSE(doc->is_dirty());
+    EXPECT_TRUE(doc->saved_since_load());  // 撤回保存点 = 已保存
+    doc->load(beatbench::Chart{}, aPath_.toUtf8().toStdString());
+    EXPECT_FALSE(doc->saved_since_load());  // 重新加载开始新的会话记录
+}
+
 TEST_F(DocumentServiceTest, SaveFailureDoesNotMarkCleanOrChangeActiveAndPath) {
     const auto a = service_.open(aPath_);
     ASSERT_TRUE(ok(a));
