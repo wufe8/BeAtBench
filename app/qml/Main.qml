@@ -1787,7 +1787,11 @@ ApplicationWindow {
     // 方法不存在（C++ qWarning）或动作禁用（静默）。
     function uiActionOpen() { requestDocumentAction("open") }
     /// M7：打开歌曲文件夹 → 项目页（只读索引版）。不替换当前文档，故无需未保存确认。
-    function uiActionOpenFolder() { folderDialog.open() }
+    function uiActionOpenFolder() {
+        // Windows 会在重开原生弹窗时重用 initialDirectory；不能依赖其浏览历史。
+        folderDialog.currentFolder = project.folderPickerInitialFolder()
+        folderDialog.open()
+    }
     function doOpenFolder(path) {
         project.scan(path)
         window.currentPage = 3

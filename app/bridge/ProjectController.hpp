@@ -6,6 +6,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QThreadPool>
+#include <QUrl>
 #include <memory>
 
 namespace beatbench::project {
@@ -57,6 +58,8 @@ public:
     QStringList sliceTargets() const { return m_sliceTargets; }
     int sliceTargetCount() const { return static_cast<int>(m_sliceTargets.size()); }
 
+    /// 文件夹选择器起点：当前有效根 → 上次成功索引的目录（跨重启）→ 用户主目录。
+    Q_INVOKABLE QUrl folderPickerInitialFolder() const;
     /// 打开歌曲文件夹并开始扫描（异步；立刻返回）。
     Q_INVOKABLE void scan(const QString& folder);
     /// 放弃当前扫描（回调作废；已在跑的工作线程自然结束）。
