@@ -131,7 +131,7 @@ if (Qt6Core_FOUND)
     beatbench_set_warnings(project_controller_test)
     add_test(NAME project_controller_tests COMMAND project_controller_test)
 
-    # 多文档服务：只链 QtCore/core，不拥有 ChartSession、不启动音频设备。
+    # 多文档服务：持有固定 ID 的 ChartSession；渲染库不启动音频设备。
     add_executable(document_service_test document_service_test.cpp sample_list_model_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/SampleListModel.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/SampleListModel.hpp
@@ -143,6 +143,14 @@ if (Qt6Core_FOUND)
     set_target_properties(document_service_test PROPERTIES AUTOMOC ON)
     beatbench_set_warnings(document_service_test)
     add_test(NAME document_service_tests COMMAND document_service_test)
+    target_sources(document_service_test PRIVATE document_instances_test.cpp)
+    target_compile_definitions(document_service_test PRIVATE BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    foreach(document_test project_controller_test document_service_test)
+        target_sources(${document_test} PRIVATE
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+        target_link_libraries(${document_test} PRIVATE beatbench_audio)
+    endforeach()
 
     # Bridge queries use real session/workspace implementations without opening audio devices.
     add_executable(slice_workspace_test slice_workspace_test.cpp
@@ -239,6 +247,25 @@ if (Qt6Core_FOUND)
         beatbench_set_warnings(dialog_drag_test)
         add_test(NAME dialog_drag_tests COMMAND dialog_drag_test)
         set_tests_properties(dialog_drag_tests PROPERTIES
+            TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
+        add_executable(chart_view_binding_test chart_view_binding_test.cpp)
+        foreach(bridge ChartSession ChartViewItem PlayheadOverlayItem WaveformOverviewItem ThemeManager)
+            target_sources(chart_view_binding_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(chart_view_binding_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(chart_view_binding_test PRIVATE
+            beatbench_core beatbench_audio Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(chart_view_binding_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml-chart-view"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(chart_view_binding_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(chart_view_binding_test)
+        add_test(NAME chart_view_binding_tests COMMAND chart_view_binding_test)
+        set_tests_properties(chart_view_binding_tests PROPERTIES
             TIMEOUT 60
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
     endif()

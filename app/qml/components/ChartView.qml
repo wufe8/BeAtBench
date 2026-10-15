@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 中央视口：竖向时间轴（M2 第 5 步，doc/07 §3 步 5）。
-// ChartViewItem 自绘（QPainter，真数据 = chartSession 上下文属性）；滚动/缩放/水平滚动
+// ChartViewItem 自绘（QPainter，真数据 = root.documentSession）；滚动/缩放/水平滚动
 // 由本组件驱动（⚠️ Flickable 无 onWheel → WheelHandler，doc/04 §5）。秒标尺/波形铺底后置 Phase B。
 // 编辑接线（M3 命令，handoff-m2-m3）：
 // - 工具分发：select 普通拖 = 滚动（保持原交互）、Shift+拖 = 框选（selectionFinished）；
@@ -17,6 +17,22 @@ import BeatBench
 
 Item {
     id: root
+
+    // Explicit document bridge; existing single-document callers retain the context fallback.
+    property var documentSession: typeof chartSession !== "undefined" ? chartSession : null
+    // Read-only keeps selection/navigation/audition, but emits no document edits.
+    property bool editable: true
+    // 只有当前文档视图接全局播放时钟；固定副谱不跟随另一谱的 PCM/seek。
+    readonly property bool ownsPlayback: typeof chartSession !== "undefined"
+                                        && root.documentSession === chartSession
+    function restoreDocumentVisuals() {
+        const info = root.documentSession ? root.documentSession.waveformInfo() : ({})
+        waveformShown = info.valid === true
+        waveform.visible = waveformShown
+        view.playheadSec = -1
+    }
+    onDocumentSessionChanged: Qt.callLater(root.restoreDocumentVisuals)
+    Component.onCompleted: restoreDocumentVisuals()
 
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
     property bool topHigh: true          // 默认「顶部=高小节」（preview.html，note 自上而下落）
@@ -36,7 +52,7 @@ Item {
     property bool moveMode: false          // 平移开关（默认关，2026-09 用户确认：
                                            // 「默认关闭 note 平移限制」→ 自由 2D 拖动，
                                            // 时间+通道可同时动；勾选后按轴锁定）
-    property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
+    property int sampleId: -1            // 放置用采样数值 id（root.documentSession.sampleValueOf）
     property string sampleText: ""       // 当前采样展示（无放置采样时提示）
     property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
     property var metaSelection: []       // 选中 BGA/BPM/STOP 对象集合（回填 view.metaSelection 高亮）
@@ -91,7 +107,7 @@ Item {
         anchors.rightMargin: (waveformShown ? (waveform.width + 12) : 12)  // 右侧波形条 + 垂直滚动条区域
         // ⚠️ 用 waveformShown（首次渲染后恒真）而非 waveform.visible：内容变化隐藏波形条
         // （stale）时保持视口宽度不变 → 列不再重排（用户 2026-09：移动 note 后所有 note 跳位）。
-        session: typeof chartSession !== "undefined" ? chartSession : null
+        session: root.documentSession
         theme: Theme
         measureHeight: root.measureHeight
         topHigh: root.topHigh
@@ -112,7 +128,8 @@ Item {
         // 此处纯透传（不 XOR）——checkbox 视觉/视图状态始终一致（2026-09 用户）
         showChannelIds: root.showChannelIds
         // M6 编辑预览：放置工具 → ghost note 类型（note/ln/mine）；其它工具 = 关
-        previewNoteKind: root.editorTool === "note" ? "normal"
+        previewNoteKind: !root.editable ? ""
+                       : root.editorTool === "note" ? "normal"
                        : root.editorTool === "ln" ? "ln"
                        : root.editorTool === "mine" ? "mine" : ""
         onChartChanged: {
@@ -127,7 +144,7 @@ Item {
     PlayheadOverlayItem {
         id: playheadOverlay
         anchors.fill: view
-        session: typeof chartSession !== "undefined" ? chartSession : null
+        session: root.documentSession
         chartView: view  // 2026-09 变拍高修复：y 换算委托 ChartViewItem（按小节高度累计）
         measureHeight: view.measureHeight
         scrollY: view.scrollY
@@ -155,7 +172,7 @@ Item {
         // ⚠️ z 必须高于编辑区 MouseArea（后者默认 z:0 且声明在后 → 叠上层抢走点击，
         //   波形条点不动/拖动变成框选；2026-09 用户）。提 z 让波形条自收鼠标（点击/拖动 seek）。
         z: 5
-        session: typeof chartSession !== "undefined" ? chartSession : null
+        session: root.documentSession
         theme: Theme
         // 视口状态绑定（换算可见窗口指示）
         measureHeight: root.measureHeight
@@ -171,14 +188,14 @@ Item {
     // ⚠️ onRenderFinished 置 waveformShown=true（此后恒真）：内容变化隐藏波形条时视口宽度
     // 不变（仅波形内容变 blank）→ 列不重排。onDocumentChanged 重置 false（新谱面未渲染）。
     Connections {
-        target: typeof chartSession !== "undefined" ? chartSession : null
+        target: root.documentSession
         function onRenderFinished(ok, outPath, durationSec) {
             waveformShown = true
             waveform.visible = ok
         }
     }
     Connections {
-        target: typeof chartSession !== "undefined" ? chartSession : null
+        target: root.documentSession
         function onDocumentChanged() {
             waveform.visible = false
             waveformShown = false
@@ -195,7 +212,7 @@ Item {
     // 时间源 = AudioEngine 播放时钟（20Hz 刷新；暂停/停止也显示当前位置）。
     // 跟随：播放头出安全区 → 视口滚动（自动）；用户滚动 → 关闭（见 wheel/滚动条）。
     Connections {
-        target: typeof audioEngine !== "undefined" ? audioEngine : null
+        target: root.ownsPlayback && typeof audioEngine !== "undefined" ? audioEngine : null
         function onPlaybackChanged() {
             // 红线 = 视口光标（固定，见 PlayheadOverlayItem）；这里只：
             // ① view.playheadSec = 播放时钟（follow tick 让红线下方 = 时钟）
@@ -340,6 +357,22 @@ Item {
     property int _moveSourceSubLine: -1 // 拖起 note 的 BGM 子通道行号（相对平移对齐基准；非 BGM=-1）
     property var _pressedNoteRef: null  // press 命中的 note（有值 = 点击待确认；release 无拖译才播放）
 
+    // Becoming read-only cancels a pending edit, including its ghost. Mark the
+    // gesture consumed so re-enabling editing before release cannot place a note.
+    onEditableChanged: {
+        if (!root.editable) {
+            root._moving = false
+            root._moveKind = ""
+            root._moveObj = null
+            root._pressedNoteRef = null
+            root._dragged = true
+            view.movePreview = false
+            view.moveTargetLane = ({})
+            view.moveSourceLane = ({})
+            view.moveSourceSubLine = -1
+        }
+    }
+
     /// 平移判定：按下点在选中集内的某个 note 上？
     function isSelectedNote(hit) {
         if (!hit || !hit.valid) return false
@@ -389,7 +422,7 @@ Item {
                     root.metaObjectClicked(obj, ctrl)
                     // 2026-09 修复：pan（拖拽）工具下 meta 对象同样**只点选、不移动**——
                     // 与 note 的 pan 语义一致（点选/试听可用，拖动保持平移视口语义）。
-                    if (root.editorTool === "pan") return
+                    if (!root.editable || root.editorTool === "pan") return
                     _moving = true
                     _moveKind = obj.kind
                     _moveObj = obj
@@ -411,7 +444,7 @@ Item {
                 // 重复点击（已选中）也播放（用户「重复点击播放」确认）。
                 root.noteClicked(obj, false)
                 _pressedNoteRef = obj
-                if (root.editorTool === "pan") {
+                if (!root.editable || root.editorTool === "pan") {
                     // 拖拽工具（2026-09 用户默认「1 拖拽」）：点 note 只选中 +（release 无位移）试听，
                     // **不进入移动**——拖动保持「平移视口」语义（note 不移动）。
                     return
@@ -505,7 +538,7 @@ Item {
     function handleRelease(x, y) {
         _lastY = -1
         // 拖拽工具（pan）：点 note 选中后，release 无位移 → 试听该采样；有位移 → 平移视口（不移动 note）。
-        if (_pressedNoteRef && root.editorTool === "pan") {
+        if (_pressedNoteRef && (!root.editable || root.editorTool === "pan")) {
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             if (!_dragged && moved <= 4) root.playNoteSample(_pressedNoteRef)
             _pressedNoteRef = null
@@ -544,7 +577,7 @@ Item {
                     targetLane = laneHit && laneHit.valid ? laneHit : null
                 }
             }
-            if (Math.abs(deltaF) > 0.001 || targetLane) {
+            if (root.editable && (Math.abs(deltaF) > 0.001 || targetLane)) {
                 // 应用前 snap 时间（拍位吸附到 snapNum/snapDen；在 Main 侧再做）
                 if (root._moveKind !== "") {
                     root.metaMoveRequested(root._moveKind, root._moveObj, deltaF, targetLane)
@@ -588,7 +621,7 @@ Item {
         if (_dragged || moved > 4) return
         // 点击：放置工具（note / ln / mine）→ hitTest → hitPlaceRequested（Main 按工具定 kind）。
         // M3 note.put 已接 kind（normal/ln/mine）→ 三种工具都真实放置。
-        if ((root.editorTool === "note" || root.editorTool === "ln" ||
+        if (root.editable && (root.editorTool === "note" || root.editorTool === "ln" ||
                 root.editorTool === "mine") && y > 18) {
             const hit = view.hitTest(x, y)
             if (hit.valid) root.hitPlaceRequested(hit)
@@ -617,7 +650,7 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
         // select = 箭头（框选/点选）；pan = 手（拖动滚动）；note = 十字（点击放置）
-        cursorShape: root.editorTool === "note" ? Qt.CrossCursor
+        cursorShape: root.editable && root.editorTool === "note" ? Qt.CrossCursor
                      : root.editorTool === "pan" ? Qt.OpenHandCursor
                      : Qt.ArrowCursor
 
@@ -626,8 +659,8 @@ Item {
             root.editAreaPressed()
             if (mouse.button === Qt.RightButton) {
                 // 右键命中 note / BGA / BPM / STOP → 直接删除（BMS 编辑器惯例；select/pan/note 工具下可用）
-                if (root.editorTool === "select" || root.editorTool === "pan" ||
-                        root.editorTool === "note") {
+                if (root.editable && (root.editorTool === "select" || root.editorTool === "pan" ||
+                        root.editorTool === "note")) {
                     const obj = view.objectAt(mouse.x, mouse.y)
                     if (obj.valid) {
                         if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
@@ -675,7 +708,8 @@ Item {
         onDoubleClicked: (mouse) => {
             // 双击命中 note / BGA / BPM / STOP（select 工具）→ 编辑（note 改采样；bga 改 BMP/图层；
             // bpm/stop 改值；Main 弹对话框）
-            if (mouse.button === Qt.LeftButton && root.editorTool === "select" && mouse.y > 18) {
+            if (root.editable && mouse.button === Qt.LeftButton &&
+                    root.editorTool === "select" && mouse.y > 18) {
                 const obj = view.objectAt(mouse.x, mouse.y)
                 if (obj.valid) {
                     if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
@@ -803,7 +837,7 @@ Item {
         // 拖动静音定位（M5 收尾 2026-09）：scrub 拖动中只滚红线、**不触碰音频**（静音）；
         // 单点/标尺点击 = 正常 seek（音频跳转）。音频落到 release（WaveformOverviewItem）。
         const scrubbing = typeof waveform !== "undefined" && waveform && waveform.scrubbing
-        if (!scrubbing && typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
+        if (root.ownsPlayback && !scrubbing && typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
             audioEngine.seekSeconds(sec)
         if (view) view.scrollCursorToSec(sec)
     }

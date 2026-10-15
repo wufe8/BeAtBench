@@ -25,21 +25,25 @@ QtObject {
     }
 
     // ---------- 编辑命令封装（M3 协议：note.put/move/delete、session.*、clipboard.*） ----------
-    // 统一 dispatch + 成功即 chartSession.refresh()（指纹判定文档/内容变化，视图自动刷新）。
+    // 统一 dispatch + 成功即 documents.refresh()（指纹判定文档/内容变化，视图自动刷新）。
     function sessionCmd(name, args) {
-        var req = JSON.stringify({ command: name, args: args || {} })
+        args = args || {}
+        if (args.session_id === undefined) args.session_id = chartSession.sessionId
+        var req = JSON.stringify({ command: name, args: args })
         var resp = JSON.parse(beatbench.dispatch(req))
         if (!resp.ok) {
             setStatus(resp.error.code + ": " + resp.error.message)
             return null
         }
-        chartSession.refresh()
+        documents.refresh()
         refreshLint()  // 编辑后刷新 lint 面板（内存 lint：LN 未配对等）
         return resp.result
     }
     /// 只 dispatch 不 refresh（批删除循环里用；调用方完成后统一 refresh 一次）。
     function dispatchCmd(name, args) {
-        var req = JSON.stringify({ command: name, args: args || {} })
+        args = args || {}
+        if (args.session_id === undefined) args.session_id = chartSession.sessionId
+        var req = JSON.stringify({ command: name, args: args })
         var resp = JSON.parse(beatbench.dispatch(req))
         if (!resp.ok) {
             setStatus(resp.error.code + ": " + resp.error.message)
@@ -1017,7 +1021,7 @@ QtObject {
         }
         const r = documents.save(documents.activeId(), path)
         if (r.ok) {
-            chartSession.refresh()
+            documents.refresh()
             project.refreshOpenStates()
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
             window.chartPath = r.path

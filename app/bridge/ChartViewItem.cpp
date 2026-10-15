@@ -78,7 +78,10 @@ void ChartViewItem::setSession(QObject* session) {
         connect(cs, &ChartSession::contentChanged, this,
                 &ChartViewItem::onSessionContentChanged);
     }
+    m_subMaxLine = 0;
+    m_editableMeasures = 0;
     rebuildColumns();
+    rebuildMeasureHeights();  // 换桥也是换文档，不能沿用上一实例的小节高度缓存。
     emit sessionChanged();
     emit contentHeightChanged();
     emit cursorChanged();  // M5.2 视口光标读数（红线下方内容）随图/滚动/缩放刷新
