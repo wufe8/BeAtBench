@@ -1,17 +1,62 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-# Lightweight multi-document fixture
+# 轻量多谱面 / 切音测试项目
 
-Three original, four-measure BMS charts at 120 BPM, with 8 / 12 / 8 notes:
+三张原创 120 BPM、四小节小谱，音符数 8 / 12 / 8：
 
-- `01-easy.bms`: Base36, sparse notes.
-- `02-hard.bms`: Base36, a few extra notes; deliberately different WAV-slot mappings.
-- `03-base62.bms`: Base62, distinguishes `0A` (10) from `0a` (36).
+- `01-easy.bms`：Base36，稀疏音符。
+- `02-hard.bms`：Base36，少量加键，相同 WAV 槽故意绑定不同音色。
+- `03-base62.bms`：Base62，区分 `0A` (10) / `0a` (36)。
 
-No third-party chart/audio was copied. Shared resource names are basenames, not
-paths into any developer's local directory. This directory contains source text
-only: automated tests copy it to scratch storage and generate three tiny WAVs
-there. Do not save test edits into these canonical files.
+三个 `m7-mini-tone-*.wav` 是 120ms 的原创合成音色，谱面引用本文件夹内的资源。
+现在可以直接打开本文件夹测试，不依赖 local 或第三方音乐。自动化闭环仍将谱面
+复制到临时目录并生成自己的音频，不在这里运行破坏性编辑。
 
-The closed-loop tests exercise open/reuse, fixed document binding, inactive-document
-edits, independent undo/dirty state, save/reopen and offline rendering. Real
-complex-chart tests remain the full regression; this fixture does not replace them.
+## 切音 / 瞬态峰值检测
+
+在切音页导入 **`slice-onsets.wav`**：12 秒，44100 Hz、单声道 PCM16，120 BPM。
+这段参考音频故意没有绑定到谱面中，项目资源表显示它“无引用”是正常的。
+
+- 0.5–4.0 秒：8 次等间隔打击（每 0.5 秒一次，底鼓/军鼓交替）。
+- 5.0–6.75 秒：8 次较密的踩镲（每 0.25 秒一次）。
+- 8.0、9.5 秒：2 次弱打击，用来观察灵敏度。
+- 开头、段落之间及末尾留静音，用来观察误检。
+
+**合成源共有18次打击，不等于检测器必须输出18个切点。** 首段静音也会占一个切片，
+检测器还可能重复检出或漏掉弱打击。精确时间/采样帧和资源SHA256见
+[`slice-onsets.json`](slice-onsets.json)。先用灵敏度3、最小间隔20ms，再比较5/8及更大间隔。
+本机现行算法探针：灵敏度3/5/8分别检出22/23/25点，源打击在±60ms内匹配16/17/18个；
+它是可追溯的诊断样本，不是算法准确性的保证。本轮不修检测算法。
+
+生成工具是 Python 标准库合成，不需要安装音频包；FFmpeg 用于校验格式/峰值。
+本段峰值约 -3.32 dBFS，无削波。不是AI生成的歌曲，也没有拷贝第三方编排/音频。
+
+```sh
+# 校验基准音频与切点清单，不写文件
+python scripts/generate-mini-test-audio.py --check
+# 有意重生成这4个音频与JSON；不改谱面
+python scripts/generate-mini-test-audio.py --overwrite
+```
+
+## 重置与忽略规则
+
+以上基准谱面、音频和清单全部纳入 Git；根 `.gitignore` 只允许本项目明确列出的基准输入，
+其它导出分片、备份、渲染输出及临时子目录均忽略。新增正式样本需同时更新白名单。
+
+```sh
+# 在仓库根执行：放弃 testdata 内已跟踪文件的改动，恢复到索引版本
+# 先关闭应用中的测试谱面，避免内存中旧修改再次保存回来！
+git restore -- testdata/
+# 如需连同暂存改动一并还原到当前提交：
+git restore --source=HEAD --staged --worktree -- testdata/
+```
+
+**restore 不删除新增/被忽略的文件。** 因此重名导出文件可能仍影响下一次覆盖测试。
+默认将导出写到 `local/tmp`；需要清理测试目录时，先查看下列“仅预览”命令的名单，
+再手动删除确认无用的文件。`git clean -ndX -- testdata/` 本身不会删除任何文件；
+不要不经确认直接使用 `git clean -fdx`。
+
+```sh
+git clean -ndX -- testdata/
+```
+
+这组样本只用于快速闭环；真实复杂谱面的完整回归仍须保留。

@@ -31,3 +31,18 @@ beatbench-qml-errors.log
 
 # 视觉工具运行时缓存
 .dsh-vision-toolkit/
+
+# 测试目录只跟踪明确的基准输入；编辑备份、导出分片、渲染等产物不入库。
+# 新增测试项目/基准文件时显式补白名单，避免把手测产物当作 fixture 提交。
+/testdata/*
+!/testdata/m7-mini-project/
+/testdata/m7-mini-project/*
+!/testdata/m7-mini-project/README.md
+!/testdata/m7-mini-project/01-easy.bms
+!/testdata/m7-mini-project/02-hard.bms
+!/testdata/m7-mini-project/03-base62.bms
+!/testdata/m7-mini-project/m7-mini-tone-low.wav
+!/testdata/m7-mini-project/m7-mini-tone-mid.wav
+!/testdata/m7-mini-project/m7-mini-tone-high.wav
+!/testdata/m7-mini-project/slice-onsets.wav
+!/testdata/m7-mini-project/slice-onsets.json
