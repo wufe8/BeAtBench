@@ -267,6 +267,54 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         chart.mode_id = opts.mode;
     }
 
+    // ---- 预扫描 0c：9key（PMS）通道约定探测（2026-10 BME-SP 型兼容）。 ----
+    // 9KEYS 有两套真实通道约定（BMS command memo PMS 节）：
+    //   标准 PMS：键6-9 = 22-25（BMS-DP 通道复用，绝大多数 .pms）；
+    //   BME-SP 型：键6=18、键7=19、键8=16、键9=17（LR2 2009+ 对 .pms 的解释；
+    //   现行笔记派表把 16-19 顺次读成键6-9，BME-SP 谱面键位错位）。
+    // 探测（只依赖通道证据，不区分显式/推断来源）：出现 22-25 → 标准；仅出现
+    // 16-19 → 判 BME-SP 型，mode_id 升级为 "pms9k-bmesp"（读侧换 BME-SP 表、写回
+    // 约定跟随保号；LN 5x/地雷 D/E 槽位 5-8 同位序跟随）；两集合共存 → 维持标准
+    // 判读 + Warning（异常混用，写回标准）。无任何证据 → 标准（零破坏）。
+    // 显式 opts.mode = "pms9k-bmesp" 可强制（跳过探测，直接走 BME-SP 表）。
+    if (chart.mode_id && chart.mode_id->rfind("pms9k", 0) == 0 &&
+        *chart.mode_id != "pms9k-bmesp") {
+        bool bmesp_used = false;
+        bool std_used = false;
+        int first_bmesp_line = 0;
+        for (const auto& [line, number] : lines) {
+            (void)number;
+            if (line.empty() || line[0] != '#') continue;
+            const auto token = field_token(line);
+            // 数据行：#mmmcc:（3 位小节 + 2 位数字通道；16-19/22-25 全数字，无大小写问题）
+            if (token.size() != 5 || !is_ascii_digit(token[0]) || !is_ascii_digit(token[1]) ||
+                !is_ascii_digit(token[2]) || !is_ascii_digit(token[3]) ||
+                !is_ascii_digit(token[4])) {
+                continue;
+            }
+            const std::size_t token_end =
+                static_cast<std::size_t>(token.data() - line.data()) + token.size();
+            if (token_end >= line.size() || line[token_end] != ':') continue;
+            const auto cc = line.substr(static_cast<std::size_t>(token.data() - line.data()) + 3, 2);
+            if (cc >= "16" && cc <= "19") {
+                if (!bmesp_used) first_bmesp_line = number;
+                bmesp_used = true;
+            } else if (cc >= "22" && cc <= "25") {
+                std_used = true;
+            }
+        }
+        if (bmesp_used) {
+            if (std_used) {
+                result.diagnostics.push_back(
+                    {Severity::Warning,
+                     "9key 通道约定混用（16-19 与 22-25 共存）：按标准 PMS 判读，"
+                     "16-19 将按键6-9 处理；请检查谱面通道", first_bmesp_line});
+            } else {
+                chart.mode_id = "pms9k-bmesp";
+            }
+        }
+    }
+
     auto& raw = chart.raw_lines;
     std::vector<NoteInfo> note_infos;
     // 子行序号（2026-09 泛化：任意 Note 通道同小节多行 = 子行，按 (measure,channel) 记录「第几条

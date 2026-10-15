@@ -1604,8 +1604,10 @@ void ChartViewItem::rebuildColumns() {
             {
                 std::string mode = "sp7k";
                 if (chart->mode_id) mode = *chart->mode_id;
-                const int needKeys = (mode == "pms9k") ? 9 : 7;
-                const bool needAux = (mode != "pms9k");
+                // pms9k 前缀匹配（pms9k / pms9k-bmesp 变体，探测见 bms_parser 预扫描 0c）
+                const bool isPms = mode.rfind("pms9k", 0) == 0;
+                const int needKeys = isPms ? 9 : 7;
+                const bool needAux = !isPms;
                 maxKey1 = std::max(maxKey1, needKeys);
                 // sp7k：只补 1P；dp/battle：补 2P；pms9k：无皿/踏板
                 if (mode == "dp" || mode == "battle") {

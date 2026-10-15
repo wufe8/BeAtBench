@@ -79,6 +79,8 @@ ApplicationWindow {
         if (m === "dp") return "DP7K"
         if (m === "pms") return "PMS"
         if (m === "bms14") return "BMS14"
+        // BME-SP 型变体（读侧探测产物）与 pms9k 同呈现，标签不区分
+        if (m === "pms9k-bmesp") return "PMS9K"
         return m.toUpperCase()
     }
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换经下方 Connections 同路径翻转）

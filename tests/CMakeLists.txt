@@ -14,6 +14,7 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.cpp
     json_test.cpp command_test.cpp codec_registry_test.cpp chart_mode_test.cpp
+    pms_variant_test.cpp
     edit_commands_test.cpp session_registry_test.cpp timing_commands_test.cpp
     note_move_lane_test.cpp transform_quantize_test.cpp autosave_test.cpp
     meta_lint_test.cpp ln_mine_put_test.cpp move_region_test.cpp
