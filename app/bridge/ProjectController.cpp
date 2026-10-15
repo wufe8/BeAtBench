@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QSettings>
 #include <QThreadPool>
 #include <QVariantMap>
 
@@ -104,6 +105,16 @@ ProjectController::~ProjectController() {
     m_scanPool.waitForDone();
 }
 
+QUrl ProjectController::folderPickerInitialFolder() const {
+    // 每次打开前检查目录：移动/删除的项目或离线磁盘不能交给原生弹窗回退到 exe 目录。
+    const QString previous = QSettings().value(QStringLiteral("project/lastFolder")).toString();
+    for (const QString& path : {m_root, previous}) {
+        if (!path.isEmpty() && QFileInfo(path).isDir())
+            return QUrl::fromLocalFile(QDir(path).absolutePath());
+    }
+    return QUrl::fromLocalFile(QDir::homePath());
+}
+
 void ProjectController::scan(const QString& folder) {
     const QString clean = QDir::cleanPath(folder);
     const quint64 gen = ++m_generation;  // 旧任务的回调据此作废
@@ -159,6 +170,8 @@ void ProjectController::scan(const QString& folder) {
             [this, gen, early] {
                 if (gen != m_generation) return;
                 m_project = early;
+                // 只记住已成功枚举的歌曲目录；取消弹窗、无效路径和过期扫描不覆盖偏好。
+                QSettings().setValue(QStringLiteral("project/lastFolder"), QDir(m_root).absolutePath());
                 m_state = QStringLiteral("parsing");
                 emit stateChanged();
                 rebuildCharts();

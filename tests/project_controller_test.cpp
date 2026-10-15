@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QEventLoop>
 #include <QTemporaryDir>
+#include <QSettings>
 #include <QTimer>
 #include <memory>
 #include "bridge/ProjectController.hpp"
@@ -23,11 +24,26 @@ protected:
         ASSERT_TRUE(QDir().mkpath(base));
         temp = std::make_unique<QTemporaryDir>(QDir(base).filePath("project-controller-XXXXXX"));
         ASSERT_TRUE(temp->isValid());
+        // 扫描会记住文件夹；所有用例隔离到临时 INI，绝不触碰用户偏好。
+        oldFormat = QSettings::defaultFormat();
+        oldOrganization = QCoreApplication::organizationName();
+        oldApplication = QCoreApplication::applicationName();
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temp->path());
+        QCoreApplication::setOrganizationName("BeAtBenchTest");
+        QCoreApplication::setApplicationName("ProjectController");
+        settingsIsolated = true;
         QFile chart(temp->filePath("A.bms"));
         ASSERT_TRUE(chart.open(QIODevice::WriteOnly));
         ASSERT_GT(chart.write("#PLAYER 1\n#TITLE A\n#BPM 120\n"), 0);
     }
-    bool scanReady(beatbench::app::ProjectController& project) {
+    void TearDown() override {
+        if (!settingsIsolated) return;
+        QCoreApplication::setOrganizationName(oldOrganization);
+        QCoreApplication::setApplicationName(oldApplication);
+        QSettings::setDefaultFormat(oldFormat);
+    }
+    bool scanReady(beatbench::app::ProjectController& project, const QString& path = {}) {
         QEventLoop loop;
         QTimer timeout;
         timeout.setSingleShot(true);
@@ -35,13 +51,66 @@ protected:
         QObject::connect(&project, &beatbench::app::ProjectController::stateChanged, &loop, [&] {
             if (project.state() == "ready" || project.state() == "error") loop.quit();
         });
-        project.scan(temp->path());
+        project.scan(path.isEmpty() ? temp->path() : path);
         timeout.start(5000);
         loop.exec();
         return project.state() == "ready";
     }
     std::unique_ptr<QTemporaryDir> temp;
+    QSettings::Format oldFormat = QSettings::NativeFormat;
+    QString oldOrganization;
+    QString oldApplication;
+    bool settingsIsolated = false;
 };
+
+TEST_F(ProjectControllerTest, FolderPickerDefaultsToHomeWithoutOpeningProject) {
+    beatbench::app::ProjectController project;
+    EXPECT_EQ(project.folderPickerInitialFolder(), QUrl::fromLocalFile(QDir::homePath()));
+    EXPECT_EQ(project.state(), "idle");
+    EXPECT_TRUE(project.root().isEmpty());
+}
+
+TEST_F(ProjectControllerTest, FolderPickerRemembersSuccessfulFolderAcrossControllers) {
+    const QString folder = temp->filePath(QString::fromUtf8("song 空格 # %"));
+    ASSERT_TRUE(QDir().mkpath(folder));
+    {
+        beatbench::app::ProjectController project;
+        ASSERT_TRUE(scanReady(project, folder));
+        EXPECT_EQ(project.folderPickerInitialFolder().toLocalFile(), folder);
+        project.clear();
+        EXPECT_EQ(project.folderPickerInitialFolder().toLocalFile(), folder);
+    }
+    beatbench::app::ProjectController restarted;
+    EXPECT_EQ(restarted.folderPickerInitialFolder().toLocalFile(), folder);
+    EXPECT_EQ(restarted.state(), "idle");  // 仅恢复选择器起点，不自动打开项目
+}
+
+TEST_F(ProjectControllerTest, FolderPickerPrefersCurrentProjectToSharedPreference) {
+    beatbench::app::ProjectController project;
+    ASSERT_TRUE(scanReady(project));
+    const QString other = temp->filePath("other-song");
+    ASSERT_TRUE(QDir().mkpath(other));
+    QSettings().setValue("project/lastFolder", other);
+    EXPECT_EQ(project.folderPickerInitialFolder().toLocalFile(), temp->path());
+}
+
+TEST_F(ProjectControllerTest, FolderPickerFailedScanPreservesLastSuccessfulFolder) {
+    beatbench::app::ProjectController project;
+    ASSERT_TRUE(scanReady(project));
+    EXPECT_FALSE(scanReady(project, temp->filePath("missing-song")));
+    EXPECT_EQ(project.state(), "error");
+    EXPECT_EQ(project.folderPickerInitialFolder().toLocalFile(), temp->path());
+    beatbench::app::ProjectController restarted;
+    EXPECT_EQ(restarted.folderPickerInitialFolder().toLocalFile(), temp->path());
+}
+
+TEST_F(ProjectControllerTest, FolderPickerIgnoresStaleOrNonDirectoryPreference) {
+    beatbench::app::ProjectController project;
+    for (const QString& path : {temp->filePath("missing-song"), temp->filePath("A.bms")}) {
+        QSettings().setValue("project/lastFolder", path);
+        EXPECT_EQ(project.folderPickerInitialFolder(), QUrl::fromLocalFile(QDir::homePath()));
+    }
+}
 
 TEST_F(ProjectControllerTest, ClearDropsTargetsAndEmitsChange) {
     beatbench::app::ProjectController project;
@@ -67,6 +136,8 @@ TEST_F(ProjectControllerTest, NewRootCancelNeverReusesPreviousIndex) {
     EXPECT_EQ(project.state(), "cancelled");
     EXPECT_EQ(project.chartCount(), 0);
     EXPECT_EQ(project.sliceTargetCount(), 0);
+    EXPECT_EQ(QSettings().value("project/lastFolder").toString(), temp->path());
+    EXPECT_EQ(project.folderPickerInitialFolder().toLocalFile(), temp->path());
 }
 
 TEST_F(ProjectControllerTest, OpenRequestsConfirmationBeforeAnyActivation) {
