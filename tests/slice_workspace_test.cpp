@@ -1211,4 +1211,141 @@ TEST_F(SliceWorkspaceTest, InputAlphabetMustMatchResolvedTargetBeforeAnyWrite) {
     EXPECT_TRUE(result.value("raw").toString().contains(QStringLiteral("#WAV10")));
 }
 
+TEST_F(SliceWorkspaceTest, IdConflictOffersSkipOverwriteAndReadOnlyCancel) {
+    const auto dir = makeTempDir("id-choice");
+    prepareAudio(dir);
+    const auto target = dir / "target.bms";
+    touchFile(target, "#BPM 120\n#WAV01 old.wav\n#00011:01\n");
+    workspace_.setExportTargets({qpath(target)});
+    auto plan = prepare(dir / "output");
+    ASSERT_TRUE(plan.value("ok").toBool());
+    EXPECT_EQ(plan.value("idCollisions").toStringList(), QStringList{"01"});
+    EXPECT_TRUE(plan.value("skipAvailable").toBool());
+    EXPECT_TRUE(plan.value("overwriteAvailable").toBool());
+    auto* session = sessionAt(target);
+    ASSERT_NE(session, nullptr);
+    session->set_backup_enabled(false);
+    const auto before = diskSnapshot(dir);
+    const auto revision = session->revision();
+    workspace_.discardExportPlan();
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite").value("ok").toBool());
+    EXPECT_EQ(diskSnapshot(dir), before);
+    EXPECT_EQ(session->revision(), revision);
+
+    plan = prepare(dir / "output");
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "error").value("ok").toBool());
+    EXPECT_EQ(diskSnapshot(dir), before);
+    plan = prepare(dir / "output");
+    const auto skipped = workspace_.commitExport(plan.value("planId").toString(), "error", "skip");
+    ASSERT_TRUE(skipped.value("ok").toBool());
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "old.wav");
+    EXPECT_TRUE(skipped.value("raw").toString().contains("#WAV02"));
+    EXPECT_EQ(skipped.value("nextStartId").toInt(), 3);
+    ASSERT_TRUE(session->undo());
+
+    plan = prepare(dir / "output");
+    // ID 覆盖不能自动授权磁盘覆盖。
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite").value("ok").toBool());
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "old.wav");
+    const auto oldAudio = readFile(dir / "output" / "slice_000.wav");
+    plan = prepare(dir / "output");
+    const auto replaced = workspace_.commitExport(plan.value("planId").toString(), "continue", "overwrite");
+    ASSERT_TRUE(replaced.value("ok").toBool()) << replaced.value("error").toString().toStdString();
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "output/slice_001.wav");
+    EXPECT_EQ(replaced.value("nextStartId").toInt(), 2);
+    EXPECT_EQ(readFile(dir / "output" / "slice_000.wav"), oldAudio);
+    EXPECT_EQ(session->undo_depth(), 1u);
+    EXPECT_EQ(session->chart().notes.front().value.sample.id, 1u);
+    ASSERT_TRUE(session->undo());
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "old.wav");
+    EXPECT_EQ(session->chart().notes.size(), 1u);
+}
+
+TEST_F(SliceWorkspaceTest, FullIdTableAllowsExplicitOverwriteButRejectsSkip) {
+    const auto dir = makeTempDir("id-full-choice");
+    prepareAudio(dir);
+    beatbench::Chart chart;
+    for (std::uint32_t id = 1; id <= 1295; ++id) addWav(chart, id);
+    loadChart(chart);
+    auto plan = prepare(dir / "output");
+    ASSERT_TRUE(plan.value("ok").toBool()) << plan.value("error").toString().toStdString();
+    EXPECT_FALSE(plan.value("skipAvailable").toBool());
+    EXPECT_TRUE(plan.value("overwriteAvailable").toBool());
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "skip").value("ok").toBool());
+    EXPECT_FALSE(std::filesystem::exists(dir / "output"));
+    plan = prepare(dir / "output");
+    const auto result = workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite");
+    ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
+    EXPECT_TRUE(result.value("raw").toString().contains("#WAV01"));
+    auto* session = beatbench::edit::session_registry().by_id(sessionId_);
+    ASSERT_NE(session, nullptr);
+    EXPECT_EQ(session->undo_depth(), 1u);
+    ASSERT_TRUE(session->undo());
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file,
+              chart.samples.at({beatbench::SampleKind::Wav, 1}).file);
+}
+
+TEST_F(SliceWorkspaceTest, IdConflictUsesActualBase62UnionAndPreservesUnselectedItems) {
+    const auto dir = makeTempDir("id-base62-union");
+    prepareAudio(dir);
+    beatbench::slice::Slice a{workspace_.slicesC().front()};
+    auto b = a;
+    b.startSec = 0.04;
+    b.endSec = 0.06;
+    auto c = a;
+    c.startSec = 0.06;
+    c.endSec = 0.08;
+    workspace_.setSlicesForTest({a, b, c}, {true, false, true});
+    const auto pathB = dir / "B.bms", pathC = dir / "C.bms";
+    beatbench::Chart chartB, chartC;
+    chartB.id_base = chartC.id_base = beatbench::IdBase::Base62;
+    addWav(chartB, 36);  // 0a
+    chartC.meta["LNOBJ"] = "0b";
+    auto* targetB = namedSession("id-union-b", pathB, chartB);
+    auto* targetC = namedSession("id-union-c", pathC, chartC);
+    ASSERT_NE(targetB, nullptr);
+    ASSERT_NE(targetC, nullptr);
+    ASSERT_TRUE(beatbench::edit::session_registry().activate(sessionId_));
+    workspace_.setExportTargets({qpath(pathB), qpath(pathC)});
+    const auto plan = workspace_.prepareExport(120, 4, 4, 36, 1, qpath(dir / "output"),
+        "slice", 0.0, true, 2, false, 62);
+    ASSERT_TRUE(plan.value("ok").toBool());
+    EXPECT_EQ(plan.value("idCollisions").toStringList(), (QStringList{"0a", "0b"}));
+    const auto result = workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite");
+    ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
+    EXPECT_EQ(result.value("count").toInt(), 2);
+    EXPECT_EQ(result.value("nextStartId").toInt(), 38);
+    EXPECT_EQ(result.value("placedTargets").toInt(), 2);
+    EXPECT_FALSE(std::filesystem::exists(dir / "output" / "slice_002.wav"));
+    for (auto* target : {targetB, targetC}) {
+        EXPECT_EQ(target->undo_depth(), 1u);
+        EXPECT_EQ(target->chart().samples.at({beatbench::SampleKind::Wav, 36}).file, "output/slice_000.wav");
+        EXPECT_EQ(target->chart().samples.at({beatbench::SampleKind::Wav, 37}).file, "output/slice_001.wav");
+        ASSERT_TRUE(target->undo());
+    }
+    EXPECT_EQ(targetC->chart().meta.at("LNOBJ"), "0b");
+    EXPECT_TRUE(targetC->chart().samples.empty());
+    EXPECT_EQ(targetB->chart().samples.at({beatbench::SampleKind::Wav, 36}).file,
+              chartB.samples.at({beatbench::SampleKind::Wav, 36}).file);
+}
+
+TEST_F(SliceWorkspaceTest, IdOverwriteRejectsStalePlanBeforeWriting) {
+    const auto dir = makeTempDir("id-overwrite-stale");
+    prepareAudio(dir);
+    const auto target = dir / "target.bms";
+    touchFile(target, "#BPM 120\n#WAV01 old.wav\n");
+    workspace_.setExportTargets({qpath(target)});
+    const auto plan = prepare(dir / "output");
+    ASSERT_TRUE(plan.value("ok").toBool());
+    auto* session = sessionAt(target);
+    ASSERT_NE(session, nullptr);
+    session->set_backup_enabled(false);
+    ASSERT_TRUE(editTitle(*session, "changed"));
+    ASSERT_TRUE(session->undo());
+    const auto before = diskSnapshot(dir);
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "overwrite", "overwrite").value("ok").toBool());
+    EXPECT_EQ(diskSnapshot(dir), before);
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "old.wav");
+}
+
 }  // namespace

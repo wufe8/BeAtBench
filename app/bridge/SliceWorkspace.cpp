@@ -401,14 +401,30 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
         static_cast<std::uint32_t>(safeStartId), baseName.toStdString(), bpm,
         beatsPerMeasure, subdivision, m_offsetSec, safeStartMeasure, kExportNameWidth,
         idBase);
+    // 同一固定计划保存两种 ID 分配；覆盖定义与覆盖磁盘文件是独立授权。
+    plan.overwriteItems = slice::build_export_layout(
+        m_slices, m_sliceEnabled, {}, static_cast<std::uint32_t>(safeStartId),
+        baseName.toStdString(), bpm, beatsPerMeasure, subdivision, m_offsetSec,
+        safeStartMeasure, kExportNameWidth, idBase);
     int requestedIds = 0;
     int allocatedIds = 0;
+    int overwriteAllocated = 0;
+    for (const auto& item : plan.overwriteItems) {
+        if (!item.enabled || item.wavId == 0) continue;
+        ++overwriteAllocated;
+        if (reserved.contains(item.wavId)) {
+            const auto alphabet = QStringLiteral("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+            plan.idCollisions.append(QString(alphabet.at(item.wavId / resolvedBase)) +
+                                     alphabet.at(item.wavId % resolvedBase));
+        }
+    }
     for (const auto& it : items) {
         if (!it.enabled) continue;
         ++requestedIds;
         if (it.wavId != 0) ++allocatedIds;
     }
-    if (allocatedIds < requestedIds) {
+    plan.skipAvailable = allocatedIds == requestedIds;
+    if (allocatedIds < requestedIds && overwriteAllocated < requestedIds) {
         res.insert(QStringLiteral("error"),
                    QStringLiteral("可用 WAV ID 不足：需要 %1 个，仅分配到 %2 个（起始 ID %3）")
                        .arg(requestedIds).arg(allocatedIds).arg(safeStartId));
@@ -417,6 +433,9 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
         return res;
     }
     if (requestedIds == 0) return fail(QStringLiteral("没有启用的切片"));
+    res.insert(QStringLiteral("idCollisions"), plan.idCollisions);
+    res.insert(QStringLiteral("skipAvailable"), plan.skipAvailable);
+    res.insert(QStringLiteral("overwriteAvailable"), overwriteAllocated == requestedIds);
     QSet<QString> uniqueNames;
     for (const auto& item : items) {
         if (!item.enabled) continue;
@@ -461,7 +480,8 @@ QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision, int beatsPe
     return commitExport(preview.value(QStringLiteral("planId")).toString(), conflictPolicy);
 }
 
-QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& conflictPolicy) {
+QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& conflictPolicy,
+                                         const QString& wavIdPolicy) {
     QVariantMap res{{QStringLiteral("ok"), false}};
     auto fail = [&](const QString& error) { res.insert(QStringLiteral("error"), error); return res; };
     if (!m_exportPlan || m_exportPlan->id != planId || busy())
@@ -483,7 +503,18 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
             QString::fromStdString(session->path()) != target.path)
             return fail(QStringLiteral("目标文档已修改、重载或另存为，请重新预览：%1").arg(target.label));
     }
-    auto items = plan.items;
+    if (wavIdPolicy != QStringLiteral("skip") && wavIdPolicy != QStringLiteral("overwrite") &&
+        wavIdPolicy != QStringLiteral("error"))
+        return fail(QStringLiteral("未知 WAV ID 冲突策略"));
+    if (wavIdPolicy == QStringLiteral("error") && !plan.idCollisions.isEmpty())
+        return fail(QStringLiteral("WAV ID 已占用，请选择空位分配、覆盖或取消"));
+    const bool overwriteIds = wavIdPolicy == QStringLiteral("overwrite");
+    if (!overwriteIds && !plan.skipAvailable)
+        return fail(QStringLiteral("空闲 WAV ID 不足，请重新预览并选择覆盖或更改起始 ID"));
+    auto items = overwriteIds ? plan.overwriteItems : plan.items;
+    for (const auto& item : items)
+        if (item.enabled && item.wavId == 0)
+            return fail(QStringLiteral("起始 ID 之后的 WAV ID 范围不足，请更改起始 ID"));
     const auto scan = scan_export_disk(plan.outDir, plan.prefix, items);
     if (!scan.error.isEmpty()) return fail(scan.error);
     if (scan.stamp != plan.diskStamp || scan.collisions != plan.collisions ||
