@@ -110,6 +110,17 @@ Item {
         return Math.max(1, Math.min(max, v))
     }
     function doExport(policy) {
+        // 工具按钮保留文本焦点，快捷键也不会触发 editingFinished。
+        // 在固定计划前先提交可见文本，尤其不能把手填起始 ID 当成旧的自动推进值。
+        const inputs = [offsetBox, bpmBox, subBox, exportIdBox, startMeasureBox]
+        for (var i = 0; i < inputs.length; ++i) {
+            if (!inputs[i].commitPendingEdit()) {
+                sliceWorkspace.discardExportPlan()
+                exportResult = { ok: false, error: qsTr("导出参数无效，请检查偏移、BPM、细分、起始 ID 和小节输入") }
+                rawText = ""
+                return
+            }
+        }
         var dir = defaultOutDir()
         var prefix = prefixBox.text.length ? prefixBox.text : "slice"
         {
@@ -1071,6 +1082,7 @@ Item {
             Label { text: qsTr("导出起始ID"); color: Theme.textMuted }
             BbSpinBox {
                 id: exportIdBox
+                objectName: "exportIdBox"
                 from: 1
                 to: root.displayedExportBase === 62 ? 3843 : 1295
                 value: sliceWorkspace.nextFreeWavIdForBase(exportBaseBox.currentIndex, root.independentExport)
@@ -1130,6 +1142,7 @@ Item {
                 ToolTip.text: qsTr("导出后直接把切片铺进当前谱面 ch01（一个撤销步）\n子行接续：从目标小节段已有子行之后开始，\n同 tick 不挤旧行、新内容跨小节同列")
             }
             BbToolButton {
+                objectName: "sliceExportButton"
                 text: qsTr("导出分片")
                       + (uiActions.shortcut("slice.export")
                          ? "   " + root.prettyShortcut(uiActions.shortcut("slice.export")) : "")
@@ -1327,6 +1340,7 @@ Item {
     // B2：同前缀已有 wav 时先选覆盖 / 续号 / 取消（文件序号与 #WAV id 独立）。
     Dialog {
         id: exportConflictDialog
+        objectName: "exportConflictDialog"
         modal: true
         width: 560
         height: 380

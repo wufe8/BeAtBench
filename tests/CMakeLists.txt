@@ -268,5 +268,25 @@ if (Qt6Core_FOUND)
         set_tests_properties(chart_view_binding_tests PROPERTIES
             TIMEOUT 60
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
+        add_executable(slice_export_confirmation_test slice_export_confirmation_test.cpp
+            ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
+        foreach(bridge ChartSession SliceWorkspace SliceWaveformItem DocumentService AudioEngine ThemeManager UiActionRegistry KeyMonitor)
+            target_sources(slice_export_confirmation_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(slice_export_confirmation_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(slice_export_confirmation_test PRIVATE
+            beatbench_core beatbench_audio Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(slice_export_confirmation_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml-slice-export"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(slice_export_confirmation_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(slice_export_confirmation_test)
+        add_test(NAME slice_export_confirmation_tests COMMAND slice_export_confirmation_test)
+        set_tests_properties(slice_export_confirmation_tests PROPERTIES
+            TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
     endif()
 endif()
