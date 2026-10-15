@@ -1,0 +1,23 @@
+* SPDX-License-Identifier: GPL-3.0-only
+* Original synthetic fixture; 0A and 0a are distinct sample IDs.
+#BASE 62
+#PLAYER 1
+#TITLE M7 Mini Project [Base62]
+#ARTIST BeAtBench test fixture
+#GENRE TEST
+#BPM 120
+#PLAYLEVEL 1
+#RANK 2
+#DIFFICULTY 2
+#WAV0A m7-mini-tone-low.wav
+#WAV01 m7-mini-tone-mid.wav
+#WAV0a m7-mini-tone-high.wav
+
+#00011:0A00
+#00013:000a
+#00112:0100
+#00114:000a
+#00211:0A00
+#00215:000a
+#00313:0100
+#00311:000A

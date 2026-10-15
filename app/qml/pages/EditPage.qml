@@ -408,6 +408,8 @@ Item {
                 // 视口主体（M2 第 5 步：竖向时间轴，真数据 ChartSession）
                 ChartView {
                     id: chartView
+                    documentSession: chartSession
+                    editable: true
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     showChannelIds: root.showChannelIds

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// core↔QML 桥接：活动编辑会话的只读视图（时间轴视图数据源，M2 第 5 步，doc/07 §3 步 5）。
-// M3 编辑体系落地后（handoff-m2-m3）：文档由 core EditorSession（session_registry 活动会话）
-// 持有——加载走协议 session.load（与 CLI/info/check 同源，doc/06 §3.6），编辑命令（note.put
-// 等）由 QML dispatch 后调 refresh() 让视图追踪文档/内容变化。本类不再自行解析文件。
+// core↔QML 文档桥：绑定明确 sessionId，独立缓存时序与渲染，不拥有谱面/撤销栈。
+// DocumentService 统一持有各文档桥；主视图只切换当前项，副视图可固定另一项。
+// 空 sessionId 的跟随 active 行为仅保留兼容既有桥层调用/测试。
+// 文档由 core EditorSession 持有；编辑后 refresh() 追踪本实例版本，不自行解析文件。
 // 双语言纪律（doc/08 §2）：数据加载/持有/指纹判定在 C++（QML 只消费信号）。
 #pragma once
 
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
+#include <QVariantMap>
 
 #include <atomic>
 #include <cstdint>
@@ -24,6 +26,8 @@ namespace beatbench::app {
 
 class ChartSession : public QObject {
     Q_OBJECT
+    // 空 ID 保留兼容的跟随 active 模式；文档集合创建的桥始终绑定明确 ID。
+    Q_PROPERTY(QString sessionId READ sessionId WRITE setSessionId NOTIFY sessionIdChanged)
     Q_PROPERTY(QString path READ path NOTIFY documentChanged)
     Q_PROPERTY(bool hasChart READ hasChart NOTIFY documentChanged)
     Q_PROPERTY(int measureCount READ measureCount NOTIFY documentChanged)
@@ -31,6 +35,9 @@ class ChartSession : public QObject {
 
 public:
     explicit ChartSession(QObject* parent = nullptr);
+    ~ChartSession() override;
+    QString sessionId() const { return m_boundSessionId; }
+    void setSessionId(const QString& id);
 
     /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/06 §3.6）。
     /// 存在 Error 级诊断 → 失败并记录 errorMessage（协议语义：read_failed）。
@@ -152,6 +159,7 @@ public:
     int measureCount() const;
 
 signals:
+    void sessionIdChanged();
     void chartChanged();      ///< 兼容旧接口：文档或内容任一变化
     void documentChanged();   ///< 活动会话/文档切换（QML 应重置视图滚动）
     void contentChanged();    ///< 同文档内容变化（QML 保持视图滚动）
@@ -160,13 +168,16 @@ signals:
     void renderFinished(bool ok, const QString& outPath, double durationSec);
 
 private:
-    void attachActive(bool rebuildTiming);
+    void attachSession(bool rebuildTiming);
     void resetRenderState();  ///< 换文档：丢弃 PCM/金字塔并作废 in-flight
     void syncDirty();
     std::uint64_t contentHash() const;  ///< notes + bga + 采样定义指纹
     std::uint64_t timingHash() const;   ///< 初始 BPM + bpm/stop/measure 指纹
     std::uint64_t samplesHash() const;  ///< #WAV/#BMP/#BPM/#STOP 定义表
 
+    QString m_boundSessionId;
+    QThreadPool m_renderPool;  ///< 实例析构等待自己的快照任务，不等待其它文档。
+    std::uint64_t m_documentRevision = 0;
     std::string m_sessionId;
     const beatbench::Chart* m_chart = nullptr;  ///< 活动会话 chart（core 所有）
     QString m_path;

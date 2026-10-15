@@ -270,15 +270,15 @@ int main(int argc, char** argv) {
     beatbench::app::UiActionRegistry uiActions;
     beatbench::app::SampleListModel sampleModel;
     beatbench::app::LintListModel lintModel;
-    // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
-    // 与 info/check 命令共用同一 core 解析入口（doc/06 §3.6）
-    beatbench::app::ChartSession chartSession;
+    // 单开/多开共用同一文档集合，每个文档 ID 对应一个稳定的视图桥。
+    beatbench::app::DocumentService documentService;
+    auto* initialSession = documentService.currentSession();
     // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
     beatbench::app::AudioEngine audioEngine;
     // 切音工作台数据桥（M6.1）：参考音频 + MIDI 导入/持有；QML 经 `sliceWorkspace` 访问
     beatbench::app::SliceWorkspace sliceWorkspace;
     sliceWorkspace.setAudioEngine(&audioEngine);
-    sliceWorkspace.setChartSession(&chartSession);  // M6.3：#WAV 占用检测 + 输出目录
+    sliceWorkspace.setChartSession(initialSession);  // M6.3：#WAV 占用检测 + 输出目录
     // 全局修饰键监控（Ctrl 按住态；QML Keys 收不到独立修饰键，Alt 又被菜单栏拦截）
     beatbench::app::KeyMonitor keyMonitor;
     app.installEventFilter(&keyMonitor);
@@ -290,7 +290,6 @@ int main(int argc, char** argv) {
     // M7 项目页（doc/07 §9.1 阶段①）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
-    beatbench::app::DocumentService documentService;
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
@@ -299,7 +298,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("Theme"), &theme);
     engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
-    engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
+    engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), initialSession);
     engine.rootContext()->setContextProperty(QStringLiteral("audioEngine"), &audioEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("sliceWorkspace"), &sliceWorkspace);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
@@ -308,7 +307,15 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
-    audioEngine.setChartSession(&chartSession);
+    audioEngine.setChartSession(initialSession);
+    QObject::connect(&documentService, &beatbench::app::DocumentService::currentSessionChanged,
+                     &engine, [&] {
+        auto* current = documentService.currentSession();
+        audioEngine.setChartSession(current);
+        sliceWorkspace.setChartSession(current);
+        // 兼容已有面板的 context 名称；它只是集合当前项的别名，不再是第二份文档桥。
+        engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), current);
+    });
 
     // ---- 动作注册（doc/09 §5/§7）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
     // 是函数式绑定，只在首帧求值一次（注册表为空则取到空串）。若在 loadFromModule 后注册，

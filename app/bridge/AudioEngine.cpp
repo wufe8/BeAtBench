@@ -341,6 +341,12 @@ void AudioEngine::setChartPath(const QString& path) {
 
 /// 装载渲染 PCM（ChartSession 渲染完成时调用；session 为 PCM 来源）。
 void AudioEngine::setChartSession(QObject* session) {
+    if (m_chartSession == qobject_cast<ChartSession*>(session)) return;
+    // 当前文档别名改变时，不能让上一实例的 PCM/等待播放状态泄漏给下一谱。
+    m_playback.stop();
+    m_playback.load(nullptr, 0.0);
+    m_waitRender = false;
+    emit waitRenderChanged();
     // 断开旧连接（重复 set → 避免重复装载）
     if (m_chartSession)
         disconnect(m_chartSession, nullptr, this, nullptr);

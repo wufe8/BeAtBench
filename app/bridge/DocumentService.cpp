@@ -55,7 +55,77 @@ bool samePath(const QString& a, const QString& b) {
 }
 }  // namespace
 
-DocumentService::DocumentService(QObject* parent) : QObject(parent) {}
+DocumentService::DocumentService(QObject* parent) : QObject(parent) {
+    m_currentId = activeId();
+    currentSession();
+}
+
+DocumentService::~DocumentService() = default;
+
+ChartSession* DocumentService::session(const QString& id) {
+    if (id.isEmpty() || !beatbench::edit::session_registry().by_id(utf8(id))) return nullptr;
+    auto& instance = m_sessions[utf8(id)];
+    if (!instance) {
+        instance = std::make_unique<ChartSession>();
+        instance->setParent(this);  // QML 仅借用；文档集合持有实例。
+        instance->setSessionId(id);
+        connect(instance.get(), &ChartSession::dirtyChanged, this, &DocumentService::instancesChanged);
+        connect(instance.get(), &ChartSession::documentChanged, this, &DocumentService::instancesChanged);
+    }
+    return instance.get();
+}
+
+ChartSession* DocumentService::currentSession() { return session(activeId()); }
+
+QVariantList DocumentService::instances() {
+    QVariantList out;
+    auto& reg = beatbench::edit::session_registry();
+    for (const auto& id : reg.ids()) {
+        const auto* document = reg.by_id(id);
+        if (!document || !document->has_chart()) continue;
+        const QString path = qs(document->path());
+        out.append(QVariantMap{{QStringLiteral("id"), qs(id)}, {QStringLiteral("path"), path},
+            {QStringLiteral("label"), path.isEmpty() ? QStringLiteral("未命名谱面") : QFileInfo(path).fileName()},
+            {QStringLiteral("dirty"), document->is_dirty()}, {QStringLiteral("active"), id == reg.active_id()},
+            {QStringLiteral("session"), QVariant::fromValue(static_cast<QObject*>(session(qs(id))))}});
+    }
+    return out;
+}
+
+void DocumentService::refresh() {
+    auto& reg = beatbench::edit::session_registry();
+    for (const auto& id : reg.ids()) {
+        const auto* document = reg.by_id(id);
+        if (document && document->has_chart()) session(qs(id))->refresh();
+    }
+    // 已关闭的桥也清掉缓存；实例对象暂留，避免视图保留悬空 QObject。
+    for (auto& [id, instance] : m_sessions)
+        if (!reg.by_id(id)) instance->refresh();
+    const QString active = activeId();
+    if (active != m_currentId) {
+        m_currentId = active;
+        currentSession();
+        emit currentSessionChanged();
+    }
+    emit instancesChanged();
+}
+
+QVariantMap DocumentService::create() {
+    auto& reg = beatbench::edit::session_registry();
+    const std::string previous = reg.active_id();
+    const std::string id = "document-" + utf8(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    if (!reg.create(id)) return result(false, {}, {}, QStringLiteral("create_failed"));
+    Json args = Json::object();
+    args.set("session_id", id);
+    const Json response = dispatch("session.new", std::move(args));
+    if (!responseOk(response)) {
+        reg.close(id);
+        reg.activate(previous);
+        return result(false, {}, {}, responseError(response));
+    }
+    refresh();
+    return result(true, qs(id), {});
+}
 
 QString DocumentService::normalizedPath(const QString& path) {
     if (path.isEmpty()) return {};
@@ -120,6 +190,7 @@ QVariantMap DocumentService::open(const QString& path) {
         rollback();
         return failure(QStringLiteral("load_failed: ") + QString::fromUtf8(e.what()));
     }
+    refresh();
     QVariantMap out = result(true, qs(id), absolute);
     out.insert(QStringLiteral("reused"), false);
     return out;
@@ -133,6 +204,7 @@ QVariantMap DocumentService::activate(const QString& id) {
     const QString path = normalizedPath(qs(session->path()));
     if (!reg.activate(utf8(id)))
         return result(false, id, path, QStringLiteral("activate_failed: 无法激活文档会话"));
+    refresh();
     return result(true, id, path);
 }
 
@@ -177,6 +249,7 @@ QVariantMap DocumentService::save(const QString& id, const QString& path) {
         const Json* saved = body ? body->find("saved") : nullptr;
         if (!saved || !saved->is_bool() || !saved->as_bool() || session->is_dirty())
             return result(false, id, target, QStringLiteral("save_failed: 文档未保存成功"));
+        refresh();
         return result(true, id, normalizedPath(qs(session->path())));
     } catch (const std::exception& e) {
         return result(false, id, target, QStringLiteral("save_failed: ") + QString::fromUtf8(e.what()));

@@ -1262,9 +1262,8 @@ ApplicationWindow {
         window.pendingDocAction = action
         window.pendingOpenPath = path || ""
         window.pendingOriginalDocument = action === "close" ? documents.activeId() : ""
-        // 切换/打开独立文档不会丢会话内修改，但尚未提交的面板草稿须先确认。
-        const needsConfirm = action === "close" ? anyDocumentIsDirty()
-                           : (action === "new" ? documentIsDirty() : window.metaDraftDirty)
+        // 新建/切换/打开都只改变集合当前项，不丢已有文档；面板草稿仍须先确认。
+        const needsConfirm = action === "close" ? anyDocumentIsDirty() : window.metaDraftDirty
         if (!needsConfirm) {
             finishPendingDocumentAction()
             return
@@ -1286,7 +1285,7 @@ ApplicationWindow {
         } else if (action === "saveAll") {
             restoreDocument(original)
             project.refreshOpenStates()
-            chartSession.refresh()
+            documents.refresh()
             setStatus(qsTr("全部已打开文档已保存"))
         } else if (action === "open" || action === "switch") {
             if (path && path.length > 0) doOpenChart(path)
@@ -1318,7 +1317,7 @@ ApplicationWindow {
         }
         if (window.pendingDocAction === "close" || window.pendingDocAction === "saveAll") {
             const result = documents.saveDirtyNamed()
-            chartSession.refresh()
+            documents.refresh()
             project.refreshOpenStates()
             if (result.errors && result.errors.length > 0) {
                 var problems = []
@@ -1505,7 +1504,7 @@ ApplicationWindow {
             statusClearTimer.restart()
             return
         }
-        chartSession.refresh()      // 视图跟随新活动会话（不读盘）
+        documents.refresh()      // 视图跟随新活动会话（不读盘）
         chartSession.renderAsync()  // 该会话若未渲染过 → 后台补渲染（内存态）
         window.chartPath = d.result.path
         // 元信息：**内存态**（meta.list 读活动会话 chart），不用 info 的磁盘态
@@ -1687,8 +1686,9 @@ ApplicationWindow {
         requestDocumentAction("new")
     }
     function performNewChart() {
-        if (!chartSession.newChart()) {
-            setStatus(qsTr("新建空谱面失败：%1").arg(chartSession.errorMessage()))
+        const created = documents.create()
+        if (!created.ok) {
+            setStatus(qsTr("新建空谱面失败：%1").arg(created.error))
             statusClearTimer.restart()
             return
         }

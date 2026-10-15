@@ -1,0 +1,22 @@
+* SPDX-License-Identifier: GPL-3.0-only
+* Original synthetic fixture; no third-party chart or audio content.
+#PLAYER 1
+#TITLE M7 Mini Project [Easy]
+#ARTIST BeAtBench test fixture
+#GENRE TEST
+#BPM 120
+#PLAYLEVEL 1
+#RANK 2
+#DIFFICULTY 1
+#WAV01 m7-mini-tone-low.wav
+#WAV02 m7-mini-tone-mid.wav
+#WAV03 m7-mini-tone-high.wav
+
+#00011:0100
+#00013:0002
+#00112:0200
+#00114:0003
+#00211:0100
+#00215:0003
+#00313:0200
+#00311:0001

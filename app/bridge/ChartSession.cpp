@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// ChartSession 实现：视图 = core 活动编辑会话（session_registry().active()）。
+// ChartSession 实现：固定文档 ID 的视图桥；空 ID 仅作旧调用的 active 兼容。
 // 加载走协议 session.load（M3）；编辑后 QML 调 refresh()（指纹判定文档/内容变化）。
 #include "bridge/ChartSession.hpp"
 
@@ -36,12 +36,24 @@ struct ChartSession::RenderedAudioHolder {
 
 ChartSession::ChartSession(QObject* parent) : QObject(parent) {}
 
+ChartSession::~ChartSession() { m_renderPool.waitForDone(); }
+
+void ChartSession::setSessionId(const QString& id) {
+    if (m_boundSessionId == id) return;
+    m_boundSessionId = id;
+    attachSession(true);
+    emit sessionIdChanged();
+    emit documentChanged();
+    emit chartChanged();
+}
+
 bool ChartSession::openChart(const QString& path) {
     m_error.clear();
     Json req = Json::object();
     req.set("command", "session.load");
     Json args = Json::object();
     args.set("path", path.toStdString());
+    if (!m_boundSessionId.isEmpty()) args.set("session_id", m_boundSessionId.toStdString());
     req.set("args", std::move(args));
     const Json res = beatbench::cmd::global_registry().dispatch(req);
     const Json* okp = res.find("ok");
@@ -54,13 +66,13 @@ bool ChartSession::openChart(const QString& path) {
             if (const Json* msg = e->find("message"))
                 m_error += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
         }
-        attachActive(true);
+        attachSession(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
         return false;
     }
-    attachActive(true);
+    attachSession(true);
     emit documentChanged();
     emit chartChanged();
     syncDirty();
@@ -76,6 +88,7 @@ bool ChartSession::newChart() {
     Json req = Json::object();
     req.set("command", "session.new");
     Json args = Json::object();
+    if (!m_boundSessionId.isEmpty()) args.set("session_id", m_boundSessionId.toStdString());
     req.set("args", std::move(args));
     const Json res = beatbench::cmd::global_registry().dispatch(req);
     const Json* okp = res.find("ok");
@@ -88,13 +101,13 @@ bool ChartSession::newChart() {
             if (const Json* msg = e->find("message"))
                 m_error += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
         }
-        attachActive(true);
+        attachSession(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
         return false;
     }
-    attachActive(true);
+    attachSession(true);
     emit documentChanged();
     emit chartChanged();
     syncDirty();
@@ -103,13 +116,13 @@ bool ChartSession::newChart() {
 
 void ChartSession::refresh() {
     auto& reg = beatbench::edit::session_registry();
-    auto& s = reg.active();
-    const std::string sid = reg.active_id();
-    const beatbench::Chart* c = s.has_chart() ? &s.chart() : nullptr;
-    const bool pathChanged = QString::fromStdString(s.path()) != m_path;
+    const std::string sid = m_boundSessionId.isEmpty() ? reg.active_id() : m_boundSessionId.toStdString();
+    const auto* s = reg.by_id(sid);
+    const beatbench::Chart* c = s && s->has_chart() ? &s->chart() : nullptr;
+    const bool pathChanged = (s ? QString::fromStdString(s->path()) : QString()) != m_path;
     const bool docChanged = (sid != m_sessionId) || (c != m_chart) || pathChanged;
     if (docChanged) {
-        attachActive(true);
+        attachSession(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
@@ -119,27 +132,29 @@ void ChartSession::refresh() {
     const std::uint64_t ch = contentHash();
     const std::uint64_t th = timingHash();
     const std::uint64_t sh = samplesHash();
-    const bool changed = (ch != m_contentHash) || (th != m_timingHash) || (sh != m_samplesHash);
+    const auto revision = s ? s->revision() : 0;
+    const bool changed = (revision != m_documentRevision) || (ch != m_contentHash) ||
+                         (th != m_timingHash) || (sh != m_samplesHash);
+    m_documentRevision = revision;
     const bool timingChanged = (th != m_timingHash);
     const bool samplesChanged = (sh != m_samplesHash);
+    const bool renderChanged = (ch != m_contentHash) || timingChanged || samplesChanged;
     if (timingChanged && m_chart && m_timing) m_timing->rebuild(*m_chart);
     m_contentHash = ch;
     m_timingHash = th;
     m_samplesHash = sh;
     if (changed) {
-        // M4.3c+：内容变化 = 旧渲染过期（后台 in-flight 结果的版本校验丢弃）
-        m_renderVersion.fetch_add(1, std::memory_order_relaxed);
-        // M4.3c 增量：timing 变化（BPM/STOP/节拍）→ 下次渲染**全量**（正确性优先）；
-        // 同 ID 换采样文件：note 键不变，增量 diff 看不见，必须全量。
-        m_timingDirty = timingChanged || samplesChanged;
-        // 2026-09 波形消失根因：timing 变化（BPM/STOP/小节长/节拍）此前只置 m_timingDirty 不触发渲染，
-        // 而前端 onContentChanged 会隐藏波形 → 没有 renderFinished 恢复（直到 Ctrl+R/Space）。
-        // 修：任何内容变化（含 timing）都触发后台渲染（renderAsync 内部按 m_timingDirty 定全量/增量）。
-        if (m_rendered && !m_renderInFlight.load()) {
-            const double sr = m_rendered->sampleRate;
-            renderAsync(sr > 0.0 ? sr : 44100.0);
-        } else if (m_rendered) {
-            m_pendingIncremental = true;  // 渲染中 → 完成后补一次
+        // TITLE/ARTIST 等修改也通知视图，但不作废仍有效的首次音频渲染。
+        if (renderChanged) {
+            // 只作废影响渲染的内容；BPM/采样变化必须完整重混。
+            m_renderVersion.fetch_add(1, std::memory_order_relaxed);
+            m_timingDirty = m_timingDirty || timingChanged || samplesChanged;
+            if (m_rendered && !m_renderInFlight.load()) {
+                const double sr = m_rendered->sampleRate;
+                renderAsync(sr > 0.0 ? sr : 44100.0);
+            } else if (m_renderInFlight.load()) {
+                m_pendingIncremental = true;  // 首次渲染也可能尚无 PCM；完成后补最新快照。
+            }
         }
         emit contentChanged();
         emit chartChanged();
@@ -248,15 +263,16 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
         else { m_renderInFlight.store(false); return false; }  // 无脏 note（仅 BGA 变化等）
     }
 
-    QThreadPool::globalInstance()->start(
-        [this, chartCopy, sourceDir, sr, outPath, version, incremental, dirtyLo, dirtyHi, saveWav] {
+    const auto previousRender = m_rendered;
+    m_renderPool.start(
+        [this, chartCopy, sourceDir, sr, outPath, version, incremental, dirtyLo, dirtyHi, saveWav, previousRender] {
         // 后台：重建 timing（快照 chart；全量/增量都需要——增量仅用于事件→秒换算）
         beatbench::TimingEngine timing;
         timing.rebuild(chartCopy);
         beatbench::audio::SampleCache cache;
         if (incremental) {
             // ---- 增量：只重混脏区间（新区间 → 替换共享 PCM 缓冲元素） ----
-            auto holder = m_rendered;  // 现有结果（UI 线程已有；共享缓冲）
+            auto holder = previousRender;  // UI 线程捕获本次所属实例的结果，后台不读取成员指针
             if (!holder) { m_renderInFlight.store(false); return; }
             const double t0 = static_cast<double>(dirtyLo) / sr;
             const double t1 = static_cast<double>(dirtyHi) / sr;
@@ -285,7 +301,13 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
             // 结果回 UI（queued；波形已就地更新 → 只发 renderFinished 刷新状态栏）
             QMetaObject::invokeMethod(this, [this, rPtr, outPath, version, holder, chartCopy, sr, wfNew] {
                 m_renderInFlight.store(false);
-                if (version != m_renderVersion.load()) return;
+                if (version != m_renderVersion.load()) {
+                    if (m_pendingIncremental && m_chart) {
+                        m_pendingIncremental = false;
+                        renderAsync(sr);
+                    }
+                    return;
+                }
                 if (rPtr->ok) {
                     m_error.clear();
                     m_waveform = wfNew;  // 指针替换（UI 线程原子读；旧金字塔被引用者释放）
@@ -328,8 +350,14 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
         QMetaObject::invokeMethod(this, [this, rPtr, outPath, version, wfPtr, chartCopy, sr, pcmShared] {
             m_renderInFlight.store(false);
             const auto& r = *rPtr;
-            // 版本校验：期间有更新的渲染启动 → 丢弃旧结果（简单粗暴：仅最新保留）
-            if (version != m_renderVersion.load()) return;
+            // 丢弃旧快照；首次渲染期间有编辑时，继续生成最新版本而不是停在无 PCM。
+            if (version != m_renderVersion.load()) {
+                if (m_pendingIncremental && m_chart) {
+                    m_pendingIncremental = false;
+                    renderAsync(sr);
+                }
+                return;
+            }
             if (r.ok) {
                 // ⚠️ 先取时长再 move（move 后 r.audio 为空，durationSeconds()=0——
                 // 2026-09 曾把 holder->durationSec 放在 move 之后 → 状态栏恒 0 秒）
@@ -539,12 +567,13 @@ void ChartSession::resetRenderState() {
     }
 }
 
-void ChartSession::attachActive(bool rebuildTiming) {
+void ChartSession::attachSession(bool rebuildTiming) {
     auto& reg = beatbench::edit::session_registry();
-    auto& s = reg.active();
-    m_sessionId = reg.active_id();
-    m_chart = s.has_chart() ? &s.chart() : nullptr;
-    m_path = QString::fromStdString(s.path());
+    m_sessionId = m_boundSessionId.isEmpty() ? reg.active_id() : m_boundSessionId.toStdString();
+    const auto* s = reg.by_id(m_sessionId);
+    m_chart = s && s->has_chart() ? &s->chart() : nullptr;
+    m_path = s ? QString::fromStdString(s->path()) : QString();
+    m_documentRevision = s ? s->revision() : 0;
     if (m_chart && rebuildTiming) {
         if (!m_timing) m_timing = std::make_unique<beatbench::TimingEngine>();
         m_timing->rebuild(*m_chart);
@@ -554,7 +583,7 @@ void ChartSession::attachActive(bool rebuildTiming) {
     m_timingHash = timingHash();
     m_samplesHash = samplesHash();
     m_initialized = true;
-    const bool dirty = s.has_chart() && s.is_dirty();
+    const bool dirty = s && s->has_chart() && s->is_dirty();
     if (m_dirty != dirty) {
         m_dirty = dirty;
         emit dirtyChanged();
@@ -562,8 +591,9 @@ void ChartSession::attachActive(bool rebuildTiming) {
 }
 
 void ChartSession::syncDirty() {
-    auto& s = beatbench::edit::session_registry().active();
-    const bool dirty = s.has_chart() && s.is_dirty();
+    auto& reg = beatbench::edit::session_registry();
+    const auto* s = reg.by_id(m_boundSessionId.isEmpty() ? reg.active_id() : m_boundSessionId.toStdString());
+    const bool dirty = s && s->has_chart() && s->is_dirty();
     if (m_dirty == dirty) return;
     m_dirty = dirty;
     emit dirtyChanged();
