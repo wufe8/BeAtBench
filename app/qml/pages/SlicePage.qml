@@ -32,7 +32,15 @@ Item {
     /// （子行接续：目标小节段已有最高子行 +1 起；一个撤销步）。
     property bool placeToChart: false
     property bool independentExport: false
-    property bool _base62WarningConfirmed: false
+    property int chartHintTick: 0
+    readonly property int displayedExportBase: {
+        chartHintTick
+        return sliceWorkspace.effectiveWavIdBase(exportBaseBox.currentIndex)
+    }
+    Connections {
+        target: (typeof chartSession !== "undefined") ? chartSession : null
+        function onChartChanged() { root.chartHintTick++ }
+    }
     /// M6.4f 键盘快捷键门控（Main 注入：页面激活 && 无文本输入焦点）；
     /// 本页自持 = 页面可见（StackLayout 激活）&& 切片编辑对话框未开。
     property bool kbdPageActive: false
@@ -79,7 +87,7 @@ Item {
     }
     // #WAV id 文本：自动/显式 Base36 或 Base62，均显示两位。
     function idTextOf(v) {
-        var base = sliceWorkspace.effectiveWavIdBase(exportBaseBox ? exportBaseBox.currentIndex : 0)
+        var base = root.displayedExportBase
         var alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         var n = Math.max(0, parseInt(v, 10) || 0)
         var s = ""
@@ -88,7 +96,7 @@ Item {
         return s
     }
     function idValueOf(text) {
-        var base = sliceWorkspace.effectiveWavIdBase(exportBaseBox ? exportBaseBox.currentIndex : 0)
+        var base = root.displayedExportBase
         var alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         var t = ("" + text).trim()
         var v = 0
@@ -102,24 +110,21 @@ Item {
         return Math.max(1, Math.min(max, v))
     }
     function doExport(policy) {
-        if (policy === undefined && exportBaseBox.currentIndex === 2 &&
-            !root.independentExport && root.placeToChart &&
-            (typeof chartSession !== "undefined" && chartSession && chartSession.hasChart) &&
-            sliceWorkspace.effectiveWavIdBase(0) !== 62 &&
-            !root._base62WarningConfirmed) {
-            base62PlacementWarning.open()
-            return
-        }
         var dir = defaultOutDir()
         var prefix = prefixBox.text.length ? prefixBox.text : "slice"
-        if (policy === undefined || policy === null || policy === "") {
-            var preview = sliceWorkspace.previewExportFiles(dir, prefix)
+        {
+            var preview = sliceWorkspace.prepareExport(bpmBox.value, subBox.value, 4,
+                            exportIdBox.value, startMeasureBox.value, dir, prefix, 1.0,
+                            root.placeToChart && !root.independentExport,
+                            exportBaseBox.currentIndex, root.independentExport, root.displayedExportBase)
             if (!preview || !preview.ok) {
                 exportResult = preview
                 rawText = ""
                 return
             }
-            if (preview.collisions && preview.collisions.length > 0) {
+            if (!policy && preview.collisions && preview.collisions.length > 0) {
+                exportConflictDialog.planId = preview.planId
+                exportConflictDialog.targets = preview.targets
                 exportConflictDialog.outDir = preview.outDir || dir
                 exportConflictDialog.prefix = preview.prefix || prefix
                 exportConflictDialog.collisions = preview.collisions
@@ -127,13 +132,12 @@ Item {
                 exportConflictDialog.open()
                 return
             }
-            policy = "overwrite"
+            policy = policy || "error"
         }
-        var r = sliceWorkspace.exportSlices(bpmBox.value, subBox.value, 4,
-                                            exportIdBox.value, startMeasureBox.value,
-                                            dir, prefix, 1.0,
-                                            root.placeToChart && !root.independentExport, policy,
-                                            exportBaseBox.currentIndex, root.independentExport)
+        commitPreparedExport(preview.planId, policy)
+    }
+    function commitPreparedExport(planId, policy) {
+        const r = sliceWorkspace.commitExport(planId, policy)
         exportResult = r
         rawText = (typeof r.raw === "string") ? r.raw : ""
         if (r.ok) {
@@ -1059,7 +1063,7 @@ Item {
             BbSpinBox {
                 id: exportIdBox
                 from: 1
-                to: exportBaseBox.currentIndex === 2 ? 3843 : 1295
+                to: root.displayedExportBase === 62 ? 3843 : 1295
                 value: sliceWorkspace.nextFreeWavIdForBase(exportBaseBox.currentIndex, root.independentExport)
                 editable: true
                 // 36 进制 id 输入：默认 IntValidator 只放行数字 → 覆盖为字母可入（A0-ZZ/a0-zz）
@@ -1087,7 +1091,7 @@ Item {
                 implicitWidth: 76
                 onCurrentIndexChanged: exportIdBox.value = sliceWorkspace.nextFreeWavIdForBase(currentIndex, root.independentExport)
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("自动：跟随当前谱面；无谱面或未声明 #BASE 时使用 Base36")
+                ToolTip.text: qsTr("自动：ID 输入跟随当前谱面，无谱面时为 Base36。铺放目标进制不同时必须明确选择；混合进制目标需分批导出。")
             }
             Label { text: qsTr("前缀"); color: Theme.textMuted }
             BbTextField {
@@ -1133,6 +1137,8 @@ Item {
                         return qsTr("铺放目标：项目页勾选的 %1 个谱面（每谱一个撤销步）").arg(count)
                     if (editor !== "")
                         return qsTr("铺放目标：当前编辑谱 %1").arg(editor)
+                    if (typeof chartSession !== "undefined" && chartSession.hasChart)
+                        return qsTr("铺放目标：当前未命名谱面（请另存为以便管理）")
                     return qsTr("铺放目标：无（请在项目页勾选谱面，或在编辑页打开一个谱面）")
                 }
                 color: Theme.textMuted
@@ -1153,14 +1159,21 @@ Item {
                             : (root.exportResult.placeError
                                ? qsTr(" · 铺放失败：") + root.exportResult.placeError
                                : ""))
-                         + (root.exportResult.placementText
+                         + (root.exportResult.placed && root.exportResult.placeError
+                             ? qsTr(" · 部分铺放失败：") + root.exportResult.placeError : "")
+                          + (root.exportResult.placementText
                             ? (" · " + root.exportResult.placementText) : "")
                          + (root.exportResult.outDir
                             ? (" · " + root.exportResult.outDir) : ""))
                       : (root.exportResult
-                         ? (qsTr("导出失败：") + root.exportResult.error)
+                         ? ((root.exportResult.count > 0
+                              ? qsTr("已写出 %1 片，导出未全部完成：").arg(root.exportResult.count)
+                              : qsTr("导出失败：")) + root.exportResult.error)
                          : (sliceWorkspace.hasSlices ? "" : qsTr("（先生成切片）")))
-                color: (root.exportResult && root.exportResult.ok) ? Theme.success : Theme.warning
+                color: (root.exportResult && root.exportResult.ok && !root.exportResult.partial) ? Theme.success : Theme.warning
+                ToolTip.visible: resultHover.hovered
+                ToolTip.text: text
+                HoverHandler { id: resultHover }
                 elide: Text.ElideRight
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
@@ -1240,35 +1253,24 @@ Item {
         }
     }
 
-    BbDialog {
-        id: base62PlacementWarning
-        width: 520
-        height: 250
-        title: qsTr("Base62 导出提醒")
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("当前编辑区谱面未启用 #BASE 62，但导出进制选择为 Base62。\n\n若同时铺入编辑区，Base62 的 ID 可能按 Base36 解释并覆盖已有定义，这通常不是预期行为。建议改回“自动”，或先在编辑区谱面中设置 #BASE 62。\n\n仍要继续吗？")
-            color: Theme.text
-            wrapMode: Text.WordWrap
-        }
-        onAccepted: {
-            root._base62WarningConfirmed = true
-            root.doExport()
-        }
-    }
-
     // B2：同前缀已有 wav 时先选覆盖 / 续号 / 取消（文件序号与 #WAV id 独立）。
     Dialog {
         id: exportConflictDialog
         modal: true
-        anchors.centerIn: parent
-        width: 500
-        height: 280
+        width: 560
+        height: 380
+        BbDialogPositioner {
+            id: exportConflictPositioner
+            dialog: exportConflictDialog
+        }
         padding: 0
         standardButtons: Dialog.NoButton
         title: qsTr("导出文件已存在")
+        property string planId: ""
+        property var targets: []
         property string outDir: ""
         property string prefix: "slice"
+        onRejected: sliceWorkspace.discardExportPlan()
         property var collisions: []
         property int nextContinueIndex: 0
         function collisionText() {
@@ -1293,21 +1295,9 @@ Item {
             border.width: 1
             radius: Theme.boxRadius
         }
-        header: Rectangle {
-            width: exportConflictDialog.width
-            height: 34
-            color: Theme.surface
-            border.color: Theme.borderStrong
-            border.width: 1
-            Label {
-                anchors.left: parent.left
-                anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: exportConflictDialog.title
-                color: Theme.text
-                font.bold: true
-                font.pixelSize: Theme.fsBase
-            }
+        header: BbDialogHeader {
+            dialog: exportConflictDialog
+            positioner: exportConflictPositioner
         }
         footer: Rectangle {
             width: exportConflictDialog.width
@@ -1325,14 +1315,14 @@ Item {
                     text: qsTr("覆盖重名文件")
                     onClicked: {
                         exportConflictDialog.close()
-                        root.doExport("overwrite")
+                        root.commitPreparedExport(exportConflictDialog.planId, "overwrite")
                     }
                 }
                 BbToolButton {
                     text: qsTr("接续后续编号")
                     onClicked: {
                         exportConflictDialog.close()
-                        root.doExport("continue")
+                        root.commitPreparedExport(exportConflictDialog.planId, "continue")
                     }
                 }
                 BbToolButton {
@@ -1351,7 +1341,7 @@ Item {
                 spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: qsTr("目标目录已有同名前缀 wav。覆盖只替换本批计划文件；续号保留旧文件并从 %1 起编号。文件序号与 #WAV id 独立。").arg(exportConflictDialog.prefix + "_" + exportConflictDialog.pad3(exportConflictDialog.nextContinueIndex) + ".wav")
+                text: qsTr("已有同名 WAV。覆盖会替换下列音频，引用它们的其它谱面也会受影响，谱面撤销不能恢复音频。续号保留旧文件，从 %1 起编号。已有 WAV ID 自动避让，不覆盖旧定义。").arg(exportConflictDialog.prefix + "_" + exportConflictDialog.pad3(exportConflictDialog.nextContinueIndex) + ".wav")
                 color: Theme.text
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fsSmall
@@ -1364,15 +1354,23 @@ Item {
                 font.pixelSize: Theme.fsTiny
                 font.family: Theme.fontMono
             }
-            Label {
+            ScrollView {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 72
-                text: exportConflictDialog.collisionText()
-                color: Theme.warning
-                wrapMode: Text.WordWrap
-                elide: Text.ElideRight
-                font.pixelSize: Theme.fsTiny
-                font.family: Theme.fontMono
+                Layout.fillHeight: true
+                clip: true
+                Label {
+                    width: parent.width
+                    text: qsTr("重名文件（%1）：\n").arg(exportConflictDialog.collisions.length)
+                          + exportConflictDialog.collisions.join("\n")
+                          + (exportConflictDialog.targets.length
+                             ? qsTr("\n\n铺放目标（%1）：\n").arg(exportConflictDialog.targets.length)
+                               + exportConflictDialog.targets.map(function(t) { return t.label }).join("\n")
+                             : qsTr("\n\n仅导出文件，不修改谱面。"))
+                    color: Theme.warning
+                    wrapMode: Text.WrapAnywhere
+                    font.pixelSize: Theme.fsTiny
+                    font.family: Theme.fontMono
+                }
             }
             }
         }

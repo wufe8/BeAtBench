@@ -13,6 +13,7 @@
 #include "beatbench/core/bms/BmsUtil.hpp"  // c36/c62 id 转换（LNOBJ 文本 → 数值 id）
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
@@ -253,6 +254,14 @@ void set_timing_value(Event<T>& ev, double v) {
 
 // ---------- EditorSession ----------
 
+namespace {
+// 不同会话/重载/同 id 会话重建也不得复用版本，避免旧预览意外重新有效。
+std::uint64_t next_document_revision() {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+}
+
 EditorSession::EditorSession() = default;
 
 void EditorSession::load(Chart chart) {
@@ -265,6 +274,7 @@ void EditorSession::load(Chart chart) {
     m_next_generation = 1;
     m_clean_generation = 0;
     m_saved_since_load = false;
+    m_revision = next_document_revision();
     m_undo_generation.clear();
     m_redo_generation.clear();
 }
@@ -292,6 +302,7 @@ bool EditorSession::exec(std::unique_ptr<EditCommand> cmd) {
                            m_generation != m_clean_generation &&
                            m_undo.back()->merge_with(*cmd);
     m_generation = m_next_generation++;
+    m_revision = next_document_revision();
     if (can_merge) {
         m_undo_generation.back() = m_generation;
         maybe_persist();
@@ -316,6 +327,7 @@ bool EditorSession::undo() {
     m_redo.push_back(std::move(cmd));
     m_redo_generation.push_back(gen_after);
     m_generation = m_undo_generation.empty() ? 0 : m_undo_generation.back();
+    m_revision = next_document_revision();
     maybe_persist();
     return true;
 }
@@ -331,6 +343,7 @@ bool EditorSession::redo() {
     m_undo.push_back(std::move(cmd));
     m_undo_generation.push_back(gen_after);
     m_generation = gen_after;
+    m_revision = next_document_revision();
     maybe_persist();
     return true;
 }

@@ -17,28 +17,17 @@ Dialog {
     modal: true
     width: 680
     height: 520
-    // 模态 Dialog 右对齐窗口（doc/04 §5）：x 用 window 宽 - 自身宽 - 12（随窗口宽度）。
-    x: (parent ? parent.width - width - 12 : 0)
-    y: 40
+    // 每次打开恢复右上默认位置；拖动后只在越界/窗口 resize 时钳位。
+    BbDialogPositioner {
+        id: dialogPositioner
+        dialog: root
+        horizontalAlignment: Qt.AlignRight
+        verticalAlignment: Qt.AlignTop
+    }
     padding: 0  // contentItem 全窗口（去掉默认边距；内容区自涂背景）
     // ⚠️ 上下边框主题化（M4.2 用户实测：皮肤前标题栏/关闭按钮行是 Qt 默认白色——
     // Dialog 未定制 header/footer → 用系统默认浅色样式，与暗色内容区割裂）。
-    header: Rectangle {
-        width: root.width
-        height: 34
-        color: Theme.surface
-        border.color: Theme.borderStrong
-        border.width: 1  // 顶边 + 下边框线
-        Label {
-            anchors.left: parent.left
-            anchors.leftMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("首选项")
-            color: Theme.text
-            font.bold: true
-            font.pixelSize: Theme.fsBase
-        }
-    }
+    header: BbDialogHeader { dialog: root; positioner: dialogPositioner }
     footer: Rectangle {
         width: root.width
         height: 44
