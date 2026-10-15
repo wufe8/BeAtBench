@@ -75,7 +75,7 @@ public:
     /// planned/collisions 为相对 prefix 的路径（如 slice_000.wav）。无切片也可扫盘（planned 空）。
     Q_INVOKABLE QVariantMap previewExportFiles(const QString& outDir, const QString& prefix) const;
     /// 导出：对每个「放置开关=开」的切片 → window()+fade → 写 <outDir>/<prefix>_<NNN>.wav，
-    /// 分配 #WAV id（铺放时跳过所有目标定义/引用的占用并集），并生成可复制 BMS raw。
+    /// 分配 #WAV id（默认跳过所有目标定义/引用的占用并集，GUI 可确认连续覆盖），并生成 BMS raw。
     /// 兼容直接调用；GUI 必须走 prepareExport + commitExport 固定确认计划。
     /// prefix = 落盘前缀（可含 `/` 或 `\` 作子目录，如 "slices/slice" 或 "slice"）；
     /// 自动识别正反斜杠。bpm/beatsPerMeasure/subdivision 用于拍位换算；offset 用当前 m_offsetSec。
@@ -104,9 +104,12 @@ public:
                                           bool placeIntoChart = false, int idBaseMode = 0,
                                           bool independentExport = false, int inputIdBase = 0);
     /// 仅提交最近一次有效计划；校验版本/目标/磁盘状态后消费，不能重复提交。
-    /// overwrite 明确授权覆盖预览中的文件；continue 保留旧文件；error 零覆盖。
+    /// conflictPolicy: overwrite 明确覆盖文件；continue 保留旧文件；error 零覆盖。
+    /// wavIdPolicy 独立授权: skip 跳过占用（兼容默认）、overwrite 连续覆盖 ID、error 有占用则拒绝。
+    /// prepare 返回 idCollisions / skipAvailable / overwriteAvailable 供 GUI 先确认 ID。
     Q_INVOKABLE QVariantMap commitExport(const QString& planId,
-                                         const QString& conflictPolicy = QStringLiteral("error"));
+                                         const QString& conflictPolicy = QStringLiteral("error"),
+                                         const QString& wavIdPolicy = QStringLiteral("skip"));
     Q_INVOKABLE void discardExportPlan() { m_exportPlan.reset(); }
     QStringList exportTargets() const { return m_exportTargets; }
     void setExportTargets(const QStringList& paths);
@@ -268,7 +271,9 @@ private:
         QByteArray diskStamp;
         std::vector<int> occupiedIndexes;
         std::vector<ExportTarget> targets;
-        std::vector<slice::SliceExportItem> items;
+        std::vector<slice::SliceExportItem> items, overwriteItems;
+        QStringList idCollisions;
+        bool skipAvailable = true;
         std::vector<slice::Slice> slices;
         std::vector<std::uint32_t> occupied;
         IdBase idBase = IdBase::Base36;

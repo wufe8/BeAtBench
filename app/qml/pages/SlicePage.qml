@@ -45,7 +45,7 @@ Item {
     /// 本页自持 = 页面可见（StackLayout 激活）&& 切片编辑对话框未开。
     property bool kbdPageActive: false
     readonly property bool kbdEnabled: root.kbdPageActive && root.visible
-                                       && !sliceEditDialog.visible && !exportConflictDialog.visible
+                                       && !sliceEditDialog.visible && !exportConflictDialog.visible && !wavIdConflictDialog.visible
     /// 焦点区域高亮（PR 式 2026-09；同 EditPage）：页内最后点击区域 → 边缘高亮（sliceLeft/
     /// sliceCenter/sliceRight）；切页清除。页级 propagate MouseArea 记录（accept=false 不拦截）。
     property string focusRegionId: ""
@@ -122,22 +122,31 @@ Item {
                 rawText = ""
                 return
             }
+            if (!policy && preview.idCollisions && preview.idCollisions.length > 0) {
+                wavIdConflictDialog.preview = preview
+                wavIdConflictDialog.open()
+                return
+            }
+            finishExportPreview(preview, "skip", policy)
+        }
+    }
+    function finishExportPreview(preview, idPolicy, policy) {
             if (!policy && preview.collisions && preview.collisions.length > 0) {
                 exportConflictDialog.planId = preview.planId
                 exportConflictDialog.targets = preview.targets
-                exportConflictDialog.outDir = preview.outDir || dir
-                exportConflictDialog.prefix = preview.prefix || prefix
+                exportConflictDialog.idPolicy = idPolicy
+                exportConflictDialog.outDir = preview.outDir
+                exportConflictDialog.prefix = preview.prefix
                 exportConflictDialog.collisions = preview.collisions
                 exportConflictDialog.nextContinueIndex = preview.nextContinueIndex || 0
                 exportConflictDialog.open()
                 return
             }
             policy = policy || "error"
-        }
-        commitPreparedExport(preview.planId, policy)
+        commitPreparedExport(preview.planId, policy, idPolicy)
     }
-    function commitPreparedExport(planId, policy) {
-        const r = sliceWorkspace.commitExport(planId, policy)
+    function commitPreparedExport(planId, policy, idPolicy) {
+        const r = sliceWorkspace.commitExport(planId, policy, idPolicy || "skip")
         exportResult = r
         rawText = (typeof r.raw === "string") ? r.raw : ""
         if (r.ok) {
@@ -1253,6 +1262,68 @@ Item {
         }
     }
 
+    BbDialog {
+        id: wavIdConflictDialog
+        objectName: "wavIdConflictDialog"
+        width: 560
+        height: 340
+        title: qsTr("WAV ID 已占用")
+        property var preview: ({})
+        onRejected: sliceWorkspace.discardExportPlan()
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("从指定起始 ID 连续分配会遇到已有定义、音符引用或 LNOBJ。请选择跳过占用 ID（当前逻辑），或从指定 ID 连续覆盖。覆盖会改变目标谱面中所有引用这些 ID 的旧音符声音，也可能影响 LNOBJ 语义；不会删除旧音频文件。谱面变更可撤销，磁盘文件覆盖另行确认。")
+            color: Theme.text
+            wrapMode: Text.WordWrap
+            font.pixelSize: Theme.fsSmall
+        }
+        ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            Label {
+                width: parent.width
+                text: qsTr("冲突 ID：") + (wavIdConflictDialog.preview.idCollisions || []).join(", ")
+                      + qsTr("\n\n铺放目标：\n")
+                      + ((wavIdConflictDialog.preview.targets || []).map(function(t) { return t.label }).join("\n") || qsTr("仅生成 raw，不修改谱面"))
+                color: Theme.warning
+                wrapMode: Text.WrapAnywhere
+                font.pixelSize: Theme.fsTiny
+            }
+        }
+        footer: Rectangle {
+            width: wavIdConflictDialog.width
+            height: 42
+            color: Theme.surface2
+            border.color: Theme.borderStrong
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 5
+                Item { Layout.fillWidth: true }
+                BbToolButton {
+                    text: qsTr("从空位分配")
+                    enabled: wavIdConflictDialog.preview.skipAvailable === true
+                    onClicked: {
+                        wavIdConflictDialog.close()
+                        root.finishExportPreview(wavIdConflictDialog.preview, "skip")
+                    }
+                }
+                BbToolButton {
+                    text: qsTr("覆盖已有 ID")
+                    enabled: wavIdConflictDialog.preview.overwriteAvailable === true
+                    onClicked: {
+                        wavIdConflictDialog.close()
+                        root.finishExportPreview(wavIdConflictDialog.preview, "overwrite")
+                    }
+                }
+                BbToolButton {
+                    text: qsTr("取消")
+                    onClicked: wavIdConflictDialog.reject()
+                }
+            }
+        }
+    }
+
     // B2：同前缀已有 wav 时先选覆盖 / 续号 / 取消（文件序号与 #WAV id 独立）。
     Dialog {
         id: exportConflictDialog
@@ -1267,6 +1338,7 @@ Item {
         standardButtons: Dialog.NoButton
         title: qsTr("导出文件已存在")
         property string planId: ""
+        property string idPolicy: "skip"
         property var targets: []
         property string outDir: ""
         property string prefix: "slice"
@@ -1315,14 +1387,14 @@ Item {
                     text: qsTr("覆盖重名文件")
                     onClicked: {
                         exportConflictDialog.close()
-                        root.commitPreparedExport(exportConflictDialog.planId, "overwrite")
+                        root.commitPreparedExport(exportConflictDialog.planId, "overwrite", exportConflictDialog.idPolicy)
                     }
                 }
                 BbToolButton {
                     text: qsTr("接续后续编号")
                     onClicked: {
                         exportConflictDialog.close()
-                        root.commitPreparedExport(exportConflictDialog.planId, "continue")
+                        root.commitPreparedExport(exportConflictDialog.planId, "continue", exportConflictDialog.idPolicy)
                     }
                 }
                 BbToolButton {
@@ -1341,7 +1413,7 @@ Item {
                 spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: qsTr("已有同名 WAV。覆盖会替换下列音频，引用它们的其它谱面也会受影响，谱面撤销不能恢复音频。续号保留旧文件，从 %1 起编号。已有 WAV ID 自动避让，不覆盖旧定义。").arg(exportConflictDialog.prefix + "_" + exportConflictDialog.pad3(exportConflictDialog.nextContinueIndex) + ".wav")
+                text: qsTr("已有同名 WAV。覆盖会替换下列音频，引用它们的其它谱面也会受影响，谱面撤销不能恢复音频。续号保留旧文件，从 %1 起编号。WAV ID 按前一步选择分配，与此处文件策略无关。").arg(exportConflictDialog.prefix + "_" + exportConflictDialog.pad3(exportConflictDialog.nextContinueIndex) + ".wav")
                 color: Theme.text
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fsSmall
