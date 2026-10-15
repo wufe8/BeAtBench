@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "beatbench/core/Version.hpp"
+#include "beatbench/core/ChartMode.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChartCheck.hpp"
@@ -1318,6 +1319,17 @@ public:
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         beatbench::Chart chart;  // 空谱面（0 小节）
+        // 可选 mode（2026-10 模式系统阶段一，issue #26）：显式指定新建谱面的游玩模式，
+        // 编辑下限/写回/check 全链路按 chart.mode_id 跟随（消除 value_or("sp7k") 兑底分裂）。
+        // 缺省不设 → 沿用现行兑底行为（协议向后兼容）。值域 = chart_mode_by_id 可识别 id
+        // （pms9k-bmesp 变体是读侧探测产物，不在配置表 → 天然被拒）。
+        if (const Json* m = args.find("mode");
+            m && m->is_string() && !m->as_str().empty()) {
+            if (!chart_mode_by_id(m->as_str())) {
+                throw CommandError("bad_args", "未知游玩模式: " + m->as_str());
+            }
+            chart.mode_id = m->as_str();
+        }
         session.load(std::move(chart), "");
         // 注入 BMS 持久化钩子（另存为/自动保存用）
         if (const Codec* bms = global_codec_registry().by_id("bms"))

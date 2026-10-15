@@ -359,3 +359,68 @@ TEST(Command, GlobalRegistryLazyBuiltins) {
     EXPECT_NE(reg.find("convert"), nullptr);
     EXPECT_NE(reg.find("version"), nullptr);
 }
+
+// —— session.new 的 mode 参数（2026-10 模式系统阶段一，issue #26）——
+
+TEST(Command, SessionNewModeValidation) {
+    auto& reg = beatbench::cmd::global_registry();
+
+    // 合法 id → ok
+    Json args = Json::object();
+    args.set("mode", "dp");
+    EXPECT_TRUE(reg.dispatch(request("session.new", std::move(args))).at("ok").as_bool());
+
+    // 未知模式 / 读侧探测产物变体（不在 chart_mode_by_id 配置表）→ bad_args
+    for (const char* bad : {"frobnicate", "pms9k-bmesp"}) {
+        Json a = Json::object();
+        a.set("mode", bad);
+        const Json r = reg.dispatch(request("session.new", std::move(a)));
+        ASSERT_FALSE(r.at("ok").as_bool());
+        EXPECT_EQ(r.at("error").at("code").as_str(), "bad_args");
+    }
+
+    // 缺省不传 → 现行行为（协议向后兼容）
+    EXPECT_TRUE(reg.dispatch(request("session.new", Json::object())).at("ok").as_bool());
+}
+
+TEST(Command, SessionNewModeDrivesChannelTable) {
+    auto& reg = beatbench::cmd::global_registry();
+    // 同一 lane 语义在不同模式表下落不同通道：dp 2P键1 → 21；pms9k 1P键6 → 22（7key 表
+    // 下键6 是 18——能区分模式表是否真实驱动写回映射）。逐例：new{mode} → note.put →
+    // save → 检查文本通道。
+    const struct {
+        const char* mode;
+        std::int64_t player;
+        std::int64_t index;
+        const char* channel;
+    } cases[] = {
+        {"dp", 1, 1, "#00021"},
+        {"pms9k", 0, 6, "#00022"},
+    };
+    for (const auto& c : cases) {
+        Json a = Json::object();
+        a.set("mode", c.mode);
+        ASSERT_TRUE(reg.dispatch(request("session.new", std::move(a))).at("ok").as_bool());
+
+        Json put = Json::object();
+        put.set("measure", static_cast<std::int64_t>(0));
+        Json lane = Json::object();
+        lane.set("player", c.player);
+        lane.set("kind", "Key");
+        lane.set("index", c.index);
+        put.set("lane", std::move(lane));
+        put.set("sample", static_cast<std::int64_t>(1));
+        ASSERT_TRUE(reg.dispatch(request("note.put", std::move(put))).at("ok").as_bool());
+
+        const auto path = (temp_dir() / "new-mode-out.bms").string();
+        Json sv = Json::object();
+        sv.set("path", path);
+        sv.set("overwrite", true);
+        ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv))).at("ok").as_bool());
+
+        std::ifstream in(path, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_NE(text.find(c.channel), std::string::npos)
+            << "mode=" << c.mode << " 应写出通道 " << c.channel;
+    }
+}

@@ -37,7 +37,11 @@ public:
     Q_INVOKABLE bool openChart(const QString& path);
     /// 2026-09 新建空谱面：走协议 session.new（空 chart 载入活动会话）；返回成功后 QML 重置
     /// 编辑器状态 + seed 编辑 floor（渲染/可放小节 0）。路径空 → 保存走另存为。
-    Q_INVOKABLE bool newChart();
+    /// mode 非空时显式指定游玩模式（session.new 的 mode 参数，2026-10 模式系统阶段一）:
+    /// 编辑下限/写回按该模式跟随；空串 = 现行兑底行为（sp7k）。
+    Q_INVOKABLE bool newChart(const QString& mode = {});
+    /// 各格式支持的游玩模式 id（Codec::modes，capabilities 同源）——新建对话框/子菜单用。
+    Q_INVOKABLE QStringList codecModes() const;
 
     /// 编辑命令 / 会话切换后由 QML 调用：检测「文档切换」（documentChanged，视图应重置
     /// 滚动）或「内容变化」（contentChanged，视图保持滚动），必要时重建 TimingEngine。
