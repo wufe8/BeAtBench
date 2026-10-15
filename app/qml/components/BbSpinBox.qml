@@ -23,6 +23,22 @@ SpinBox {
     /// 设置后先调用该钩子（对话框自己 reject），再释放焦点。非对话框场景保持 null → 原行为不变。
     property var escapeHandler: null
 
+    /// 不抢焦点的工具按钮/快捷键读取参数前调用；不能只依赖 Enter 或焦点离开。
+    /// 返回 false 时保留无效文本，让调用方阻止操作，而不是偷偷使用旧 value。
+    function commitPendingEdit() {
+        if (!root.editable) return true
+        const editor = root.contentItem
+        if (!editor || !editor.acceptableInput) return false
+        const parsed = root.valueFromText(editor.text, root.locale)
+        if (!isFinite(parsed) || parsed < Math.min(root.from, root.to)
+                              || parsed > Math.max(root.from, root.to)) return false
+        if (root.value !== parsed) {
+            root.value = parsed
+            root.valueModified()
+        }
+        return true
+    }
+
     /// 用户驱动的数值调整（箭头/键盘/键入 Enter）：stepFactor>0 → ×/÷；否则 ±1。夹逼 [from,to]。
     /// 调整后**发 valueModified**（⚠️ BbSpinBox 的 contentItem 是自绘 TextInput，绕过了默认
     /// SpinBox 的 valueFromText/valueModified 管线——不补发则依赖 onValueModified 的页面失效）。
