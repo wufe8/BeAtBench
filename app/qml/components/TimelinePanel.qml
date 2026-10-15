@@ -72,7 +72,7 @@ ColumnLayout {
             text: qsTr("+")
             Layout.preferredWidth: 30
             Layout.preferredHeight: 28
-            onClicked: dialog.openForAdd(root.kind)
+            onClicked: timelineDialog.openForAdd(root.kind)
             ToolTip.visible: hovered
             ToolTip.text: qsTr("在该位置添加一个 %1 事件").arg(root.kind.toUpperCase())
         }
@@ -168,7 +168,7 @@ ColumnLayout {
                     anchors.fill: parent
                     hoverEnabled: true
                     // 右键删除 / 双击编辑值
-                    onDoubleClicked: dialog.openForEdit(
+                    onDoubleClicked: timelineDialog.openForEdit(
                                          root.kind, row.modelData.measure,
                                          row.modelData.pos.num, row.modelData.pos.den,
                                          row.modelData.value, row.modelData.ref || "")
@@ -357,16 +357,19 @@ ColumnLayout {
 
     // ---- 添加 / 编辑对话框 ----
     Dialog {
-        id: dialog
+        id: timelineDialog
+        objectName: "timelineEventDialog"
         modal: true
-        // 2026-09 用户：「无论 dock 什么宽度都可以显示」——右对齐到**窗口右缘**
-        //（模态 Popup 的 parent = Overlay = 窗口内容），不再受右 dock 宽度约束；
-        // 宽度封顶 260 避免占满窗口。纵向居中。
+        // 初始右对齐主窗口、纵向居中；逻辑 parent 即使在窄 dock 中也正确映射。
         width: 260
-        x: (parent !== null ? parent.width - width - 12 : 0)
-        y: (parent !== null ? Math.max(8, (parent.height - height) / 2) : 0)
         title: qsTr("时间轴事件")
         standardButtons: Dialog.Ok | Dialog.Cancel
+        BbDialogPositioner {
+            id: timelineDialogPositioner
+            dialog: timelineDialog
+            horizontalAlignment: Qt.AlignRight
+        }
+        header: BbDialogHeader { dialog: timelineDialog; positioner: timelineDialogPositioner }
 
         property string kind: "bpm"
         property bool editing: false
@@ -404,8 +407,8 @@ ColumnLayout {
             numSpin.value = baseNum
             denSpin.value = Math.max(1, baseDen)
             // 编辑模式：值字段留空（不填 = 维持原值）；添加模式：填默认值
-            valueField.text = editing ? "" : (dialog.kind === "bpm" ? String(baseValue)
-                                                                    : (dialog.kind === "stop" ? stopToDisplay(baseValue)
+            valueField.text = editing ? "" : (timelineDialog.kind === "bpm" ? String(baseValue)
+                                                                    : (timelineDialog.kind === "stop" ? stopToDisplay(baseValue)
                                                                                               : String(baseValue)))
             refField.text = baseRef
         }
@@ -438,8 +441,8 @@ ColumnLayout {
                 spacing: 4
                 Layout.fillWidth: true
                 Label {
-                    text: dialog.kind === "bpm" ? qsTr("值(BPM)")
-                          : (dialog.kind === "stop" ? qsTr("值(%1)").arg(stopUnitLabel()) : qsTr("值(拍数)"))
+                    text: timelineDialog.kind === "bpm" ? qsTr("值(BPM)")
+                          : (timelineDialog.kind === "stop" ? qsTr("值(%1)").arg(stopUnitLabel()) : qsTr("值(拍数)"))
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny
                 }
                 BbTextField {
@@ -447,12 +450,12 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 70   // 覆写隐式宽 → 值输入框不越界
                     Layout.maximumWidth: 150  // 限制「值(BPM)」列长度（2026-09 用户）
-                    placeholderText: dialog.editing
-                                     ? qsTr("不填=维持 %1").arg(dialog.baseValue)
-                                     : (dialog.kind === "bpm" ? qsTr("130") : qsTr("96"))
+                    placeholderText: timelineDialog.editing
+                                     ? qsTr("不填=维持 %1").arg(timelineDialog.baseValue)
+                                     : (timelineDialog.kind === "bpm" ? qsTr("130") : qsTr("96"))
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: refField.forceActiveFocus()
-                    escapeHandler: function() { dialog.reject() }
+                    escapeHandler: function() { timelineDialog.reject() }
                 }
                 Item { Layout.fillWidth: true }
             }
@@ -460,9 +463,9 @@ ColumnLayout {
             RowLayout {
                 spacing: 4
                 Layout.fillWidth: true
-                visible: dialog.kind !== "measure"
+                visible: timelineDialog.kind !== "measure"
                 Label {
-                    text: "#" + (dialog.kind === "bpm" ? "BPM" : "STOP") + " id"
+                    text: "#" + (timelineDialog.kind === "bpm" ? "BPM" : "STOP") + " id"
                     color: Theme.textMuted; font.pixelSize: Theme.fsTiny
                 }
                 BbTextField {
@@ -472,14 +475,14 @@ ColumnLayout {
                     placeholderText: qsTr("留空=自动")
                     font.family: Theme.fontMono
                     font.pixelSize: Theme.fsSmall
-                    onAccepted: dialog.accept()
-                    escapeHandler: function() { dialog.reject() }
+                    onAccepted: timelineDialog.accept()
+                    escapeHandler: function() { timelineDialog.reject() }
                 }
                 Item { Layout.fillWidth: true }
             }
             Label {
-                visible: dialog.kind !== "measure"
-                text: dialog.kind === "bpm"
+                visible: timelineDialog.kind !== "measure"
+                text: timelineDialog.kind === "bpm"
                       ? (refField.text.trim() === "" ? qsTr("值自动派生 #BPMxx") : qsTr("绑定 #%1xx").arg("BPM"))
                       : (refField.text.trim() === ""
                          ? (stopUnit === 0 ? qsTr("值自动派生 #STOPxx") : qsTr("值自动派生 #STOPxx"))
@@ -512,7 +515,7 @@ ColumnLayout {
                                              : parseFloat(valueText)
             }
             if (!isFinite(value)) value = baseValue
-            root.timingEditRequested(dialog.kind, measureSpin.value,
+            root.timingEditRequested(timelineDialog.kind, measureSpin.value,
                                      numSpin.value, denSpin.value, value, ref)
         }
     }

@@ -75,6 +75,8 @@ qt_add_qml_module(beatbench
         qml/components/BbSpinBox.qml
         qml/components/BbTextField.qml
         qml/components/BbDialog.qml
+        qml/components/BbDialogHeader.qml
+        qml/components/BbDialogPositioner.qml
         qml/components/BbComboBox.qml
         qml/components/SamplePanel.qml
         qml/components/SettingsDialog.qml

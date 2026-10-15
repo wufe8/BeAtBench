@@ -362,11 +362,13 @@ ColumnLayout {
     // ---- 添加/改值 BGA 事件对话框 ----
     Dialog {
         id: eventDialog
+        objectName: "bgaEventDialog"
         modal: true
         width: Math.min(root.width - 4, 240)
-        anchors.centerIn: parent
         title: qsTr("BGA 事件")
         standardButtons: Dialog.Ok | Dialog.Cancel
+        BbDialogPositioner { id: eventDialogPositioner; dialog: eventDialog }
+        header: BbDialogHeader { dialog: eventDialog; positioner: eventDialogPositioner }
 
         property int dlgLayer: 0
         property bool editing: false

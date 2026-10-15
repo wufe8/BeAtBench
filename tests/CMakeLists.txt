@@ -222,4 +222,24 @@ if (Qt6Core_FOUND)
         beatbench_set_warnings(theme_manager_test)
         add_test(NAME theme_manager_tests COMMAND theme_manager_test)
     endif()
+
+    # Qt Quick 鼠标注入：实际弹窗/设置组件，无声卡、无用户偏好写入；兼容 Qt 6.4。
+    find_package(Qt6 6.4 COMPONENTS QuickTest QuickControls2 QUIET)
+    if (Qt6QuickTest_FOUND AND Qt6QuickControls2_FOUND)
+        add_executable(dialog_drag_test dialog_drag_test.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.hpp)
+        target_include_directories(dialog_drag_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(dialog_drag_test PRIVATE
+            beatbench_core Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(dialog_drag_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(dialog_drag_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(dialog_drag_test)
+        add_test(NAME dialog_drag_tests COMMAND dialog_drag_test)
+        set_tests_properties(dialog_drag_tests PROPERTIES
+            TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+    endif()
 endif()

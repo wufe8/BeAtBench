@@ -12,16 +12,19 @@
 #pragma once
 
 #include <QObject>
+#include <QByteArray>
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "beatbench/audio/ReferenceTrack.hpp"
 #include "beatbench/core/midi/MidiFile.hpp"
 #include "beatbench/core/slice/Slice.hpp"
+#include "beatbench/core/slice/SliceExport.hpp"
 
 namespace beatbench::app {
 
@@ -72,7 +75,8 @@ public:
     /// planned/collisions 为相对 prefix 的路径（如 slice_000.wav）。无切片也可扫盘（planned 空）。
     Q_INVOKABLE QVariantMap previewExportFiles(const QString& outDir, const QString& prefix) const;
     /// 导出：对每个「放置开关=开」的切片 → window()+fade → 写 <outDir>/<prefix>_<NNN>.wav，
-    /// 分配 #WAV id（从 startId 起，跳过 occupied），并生成可复制 BMS raw。
+    /// 分配 #WAV id（铺放时跳过所有目标定义/引用的占用并集），并生成可复制 BMS raw。
+    /// 兼容直接调用；GUI 必须走 prepareExport + commitExport 固定确认计划。
     /// prefix = 落盘前缀（可含 `/` 或 `\` 作子目录，如 "slices/slice" 或 "slice"）；
     /// 自动识别正反斜杠。bpm/beatsPerMeasure/subdivision 用于拍位换算；offset 用当前 m_offsetSec。
     /// startMeasure = ch01 铺放起始小节（1-based；第 N 小节 = 文件 `#(N-1)01:`）。
@@ -91,6 +95,19 @@ public:
                                          qreal fadeMs, bool placeIntoChart = false,
                                          const QString& conflictPolicy = QStringLiteral("error"),
                                          int idBaseMode = 0, bool independentExport = false);
+    /// 固定参数/切片、目标身份与内容版本、磁盘冲突的预览；不写音频、不编辑谱面。
+    /// 失败不创建可提交计划；成功返回 {ok, planId, targets, collisions, planned, nextContinueIndex}。
+    /// inputIdBase=0 为数值API；GUI传入输入框实际字母表，目标进制不匹配时要求显式选择。
+    Q_INVOKABLE QVariantMap prepareExport(qreal bpm, int subdivision, int beatsPerMeasure,
+                                          int startId, int startMeasure, const QString& outDir,
+                                          const QString& prefix, qreal fadeMs,
+                                          bool placeIntoChart = false, int idBaseMode = 0,
+                                          bool independentExport = false, int inputIdBase = 0);
+    /// 仅提交最近一次有效计划；校验版本/目标/磁盘状态后消费，不能重复提交。
+    /// overwrite 明确授权覆盖预览中的文件；continue 保留旧文件；error 零覆盖。
+    Q_INVOKABLE QVariantMap commitExport(const QString& planId,
+                                         const QString& conflictPolicy = QStringLiteral("error"));
+    Q_INVOKABLE void discardExportPlan() { m_exportPlan.reset(); }
     QStringList exportTargets() const { return m_exportTargets; }
     void setExportTargets(const QStringList& paths);
 
@@ -239,6 +256,27 @@ private:
     void audioDecoded(bool ok, beatbench::audio::ReferenceTrack* track,
                       const QString& path);
 
+    struct ExportTarget {
+        std::string id;
+        QString path;
+        QString label;
+        std::uint64_t revision = 0;
+    };
+    struct ExportPlan {
+        QString id, outDir, prefix;
+        QStringList requestedTargets, collisions;
+        QByteArray diskStamp;
+        std::vector<int> occupiedIndexes;
+        std::vector<ExportTarget> targets;
+        std::vector<slice::SliceExportItem> items;
+        std::vector<slice::Slice> slices;
+        std::vector<std::uint32_t> occupied;
+        IdBase idBase = IdBase::Base36;
+        qreal bpm = 120, fadeMs = 0;
+        int beatsPerMeasure = 4, safeStartId = 1;
+        bool place = false;
+    };
+    std::optional<ExportPlan> m_exportPlan;
     AudioEngine* m_engine = nullptr;
     ChartSession* m_chartSession = nullptr;  ///< 当前谱面（#WAV 占用/输出目录；不拥有）
     QStringList m_exportTargets;             ///< M7：切音目标（勾选；空 = 回退当前谱面）

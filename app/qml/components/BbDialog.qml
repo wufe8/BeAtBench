@@ -16,8 +16,9 @@ Dialog {
     id: root
 
     modal: true
-    anchors.centerIn: parent
     padding: 0
+
+    BbDialogPositioner { id: dialogPositioner; dialog: root }
 
     /// 是否显示「取消」（关于类对话框只留确定）。
     property bool showCancel: true
@@ -31,22 +32,7 @@ Dialog {
         border.width: 1
         radius: Theme.boxRadius
     }
-    header: Rectangle {
-        width: root.width
-        height: 34
-        color: Theme.surface
-        border.color: Theme.borderStrong
-        border.width: 1
-        Label {
-            anchors.left: parent.left
-            anchors.leftMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.title
-            color: Theme.text
-            font.bold: true
-            font.pixelSize: Theme.fsBase
-        }
-    }
+    header: BbDialogHeader { dialog: root; positioner: dialogPositioner }
     footer: Rectangle {
         width: root.width
         height: 42
