@@ -3,6 +3,7 @@
 // 加载走协议 session.load（M3）；编辑后 QML 调 refresh()（指纹判定文档/内容变化）。
 #include "bridge/ChartSession.hpp"
 
+#include <algorithm>
 #include <bit>
 
 #include <QFileInfo>
@@ -37,6 +38,20 @@ struct ChartSession::RenderedAudioHolder {
 ChartSession::ChartSession(QObject* parent) : QObject(parent) {}
 
 ChartSession::~ChartSession() { m_renderPool.waitForDone(); }
+
+const beatbench::Chart* ChartSession::chart() const {
+    if (!m_chart) return nullptr;
+    // Other bridges may synchronously query us while only the first bridge has
+    // refreshed after a multi-document reload. Never dereference the cached pointer
+    // before checking the owning session; revision also rejects address reuse and
+    // in-place edits whose timing has not yet been rebuilt. Resolve the attached ID,
+    // not active_id(): changing the active tab alone does not invalidate this view.
+    const auto* session = beatbench::edit::session_registry().by_id(m_sessionId);
+    if (!session || !session->has_chart() || session->revision() != m_documentRevision)
+        return nullptr;
+    const auto* liveChart = &session->chart();
+    return liveChart == m_chart ? liveChart : nullptr;
+}
 
 void ChartSession::setSessionId(const QString& id) {
     if (m_boundSessionId == id) return;
@@ -163,9 +178,10 @@ void ChartSession::refresh() {
 }
 
 int ChartSession::sampleValueOf(const QString& idText) const {
-    if (!m_chart) return -1;
+    const auto* currentChart = chart();
+    if (!currentChart) return -1;
     const std::string t = idText.toStdString();
-    const bool b62 = m_chart->id_base == beatbench::IdBase::Base62;
+    const bool b62 = currentChart->id_base == beatbench::IdBase::Base62;
     const std::uint32_t id =
         b62 ? beatbench::bms::c62_to_u32(t, 2) : beatbench::bms::c36_to_u32(t, 2);
     // 2026-09 用户：**未绑定文件的槽位也允许放置**（LNOBJ 尾通常空音、不绑文件）。
@@ -176,21 +192,24 @@ int ChartSession::sampleValueOf(const QString& idText) const {
 }
 
 QString ChartSession::idTextOf(int id) const {
-    if (!m_chart) return QString();
+    const auto* currentChart = chart();
+    if (!currentChart) return QString();
     return QString::fromStdString(beatbench::bms::id_text(
-        *m_chart, static_cast<std::uint32_t>(id)));
+        *currentChart, static_cast<std::uint32_t>(id)));
 }
 
 QString ChartSession::wavFileOfId(int id) const {
-    if (!m_chart || id <= 0) return QString();
-    const auto it = m_chart->samples.find(
+    const auto* currentChart = chart();
+    if (!currentChart || id <= 0) return QString();
+    const auto it = currentChart->samples.find(
         {beatbench::SampleKind::Wav, static_cast<std::uint32_t>(id)});
-    if (it == m_chart->samples.end()) return QString();
+    if (it == currentChart->samples.end()) return QString();
     return QString::fromStdString(it->second.file);  // 相对谱面目录（AudioEngine 解析）
 }
 
 bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
-    if (!m_chart || !m_timing) {
+    const auto* currentChart = chart();
+    if (!currentChart || !m_timing) {
         m_error = QStringLiteral("未打开谱面");
         return false;
     }
@@ -202,7 +221,7 @@ bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
     // 帧内无并发——简单 SampleCache 即可）
     beatbench::audio::SampleCache cache;
     const auto r = beatbench::audio::render_chart_w(
-        *m_chart, *m_timing, cache, static_cast<double>(sampleRate), sourceDir);
+        *currentChart, *m_timing, cache, static_cast<double>(sampleRate), sourceDir);
     if (!r.ok) {
         m_error = QString::fromStdString(r.message);
         return false;
@@ -235,7 +254,8 @@ static QString noteSnapKey(const beatbench::Event<beatbench::Note>& n) {
 static constexpr double kTailSec = 8.0;
 
 bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
-    if (!m_chart || !m_timing) return false;
+    const auto* currentChart = chart();
+    if (!currentChart || !m_timing) return false;
     // 去重：渲染中忽略（完成信号回 UI；再次触发等 finish）
     bool expected = false;
     if (!m_renderInFlight.compare_exchange_strong(expected, true)) return false;
@@ -243,7 +263,7 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
     // 快照（后台线程独占）：chart 值拷贝（值语义安全）+ 路径 + 版本号
     // ⚠️ chart/timing 是 core 所有、编辑会变——后台必须用快照（拷贝），
     // 否则边渲染边编辑 → 竞态。TimingEngine move-only → 后台 rebuild。
-    const beatbench::Chart chartCopy = *m_chart;
+    const beatbench::Chart chartCopy = *currentChart;
     // 输出 = 谱面同目录 <stem>.render.wav（去原扩展名；与 CLI render 命名一致）
     // ⚠️ M5 saveWav=false（自动/增量）：不写盘（PCM 内存驻留；发布行为）
     const QFileInfo outFi(m_path);
@@ -258,7 +278,7 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
     // 增量脏区间帧（UI 线程算好传入；无脏 = 全量）
     std::size_t dirtyLo = 0, dirtyHi = 0;
     if (incremental) {
-        const auto dirty = computeDirtyRange(*m_chart, *m_timing, sr);
+        const auto dirty = computeDirtyRange(*currentChart, *m_timing, sr);
         if (dirty.first >= 0) { dirtyLo = dirty.first; dirtyHi = dirty.second; }
         else { m_renderInFlight.store(false); return false; }  // 无脏 note（仅 BGA 变化等）
     }
@@ -516,7 +536,8 @@ QVariantMap ChartSession::waveformRange(qlonglong frameLo, qlonglong frameHi) co
 }
 
 QString ChartSession::laneChannel(int player, const QString& kindStr, int index) const {
-    if (!m_chart) return QString();
+    const auto* currentChart = chart();
+    if (!currentChart) return QString();
     beatbench::Lane lane;
     lane.player = static_cast<std::uint8_t>(player);
     lane.index = static_cast<std::uint8_t>(index);
@@ -530,27 +551,30 @@ QString ChartSession::laneChannel(int player, const QString& kindStr, int index)
 }
 
 int ChartSession::lnType() const {
-    if (!m_chart) return 1;
-    const auto it = m_chart->meta.find("LNTYPE");
-    if (it == m_chart->meta.end()) return 1;
+    const auto* currentChart = chart();
+    if (!currentChart) return 1;
+    const auto it = currentChart->meta.find("LNTYPE");
+    if (it == currentChart->meta.end()) return 1;
     if (it->second == "2") return 2;
     if (it->second == "0") return 0;
     return 1;
 }
 
 int ChartSession::lnobjSample() const {
-    if (!m_chart) return -1;
-    const auto it = m_chart->meta.find("LNOBJ");
-    if (it == m_chart->meta.end() || it->second.empty()) return -1;
-    return static_cast<int>(m_chart->id_base == beatbench::IdBase::Base62
+    const auto* currentChart = chart();
+    if (!currentChart) return -1;
+    const auto it = currentChart->meta.find("LNOBJ");
+    if (it == currentChart->meta.end() || it->second.empty()) return -1;
+    return static_cast<int>(currentChart->id_base == beatbench::IdBase::Base62
                                 ? beatbench::bms::c62_to_u32(it->second, 2)
                                 : beatbench::bms::c36_to_u32(it->second, 2));
 }
 
 int ChartSession::decodeId(const QString& idText) const {
-    if (!m_chart || idText.isEmpty()) return -1;
+    const auto* currentChart = chart();
+    if (!currentChart || idText.isEmpty()) return -1;
     const std::string t = idText.toStdString();
-    return static_cast<int>(m_chart->id_base == beatbench::IdBase::Base62
+    return static_cast<int>(currentChart->id_base == beatbench::IdBase::Base62
                                 ? beatbench::bms::c62_to_u32(t, 2)
                                 : beatbench::bms::c36_to_u32(t, 2));
 }
@@ -600,16 +624,17 @@ void ChartSession::syncDirty() {
 }
 
 int ChartSession::measureCount() const {
-    if (!m_chart) return 0;
+    const auto* currentChart = chart();
+    if (!currentChart) return 0;
     std::uint32_t maxMeasure = 0;
     const auto touch = [&](std::uint32_t m) {
         if (m > maxMeasure) maxMeasure = m;
     };
-    for (const auto& e : m_chart->notes) touch(e.measure);
-    for (const auto& e : m_chart->bpm_events) touch(e.measure);
-    for (const auto& e : m_chart->stop_events) touch(e.measure);
-    for (const auto& e : m_chart->measure_events) touch(e.measure);
-    for (const auto& e : m_chart->bga_events) touch(e.measure);
+    for (const auto& e : currentChart->notes) touch(e.measure);
+    for (const auto& e : currentChart->bpm_events) touch(e.measure);
+    for (const auto& e : currentChart->stop_events) touch(e.measure);
+    for (const auto& e : currentChart->measure_events) touch(e.measure);
+    for (const auto& e : currentChart->bga_events) touch(e.measure);
     // ⚠️ 空谱保底 1 小节（2026-09：空文件载入后编辑区至少 1 小节 + 模式默认列
     // → 可立即放置编辑；此前返回 0 → paint 显示「打开谱面开始编辑」占位、无网格）。
     return static_cast<int>(maxMeasure + 1);
@@ -675,23 +700,33 @@ std::uint64_t ChartSession::timingHash() const {
     } else {
         h = fnv1a(h, 0xB0);
     }
+    // TimingEngine indexes every measure through the furthest event, including
+    // notes/BGA. Extending or shrinking that extent must rebuild the index even
+    // when BPM/STOP/measure definitions themselves did not change.
+    std::uint32_t maxMeasure = 0;
+    const auto touch = [&](std::uint32_t measure) { maxMeasure = std::max(maxMeasure, measure); };
+    for (const auto& e : m_chart->notes) touch(e.measure);
+    for (const auto& e : m_chart->bga_events) touch(e.measure);
     for (const auto& e : m_chart->bpm_events) {
+        touch(e.measure);
         h = fnv1a(h, e.measure);
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.num));
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.den));
         h = fnv1a(h, f64(e.value.value));
     }
     for (const auto& e : m_chart->stop_events) {
+        touch(e.measure);
         h = fnv1a(h, e.measure);
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.num));
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.den));
         h = fnv1a(h, static_cast<std::uint64_t>(e.value.count));
     }
     for (const auto& e : m_chart->measure_events) {
+        touch(e.measure);
         h = fnv1a(h, e.measure);
         h = fnv1a(h, f64(e.value.beats));
     }
-    return h;
+    return fnv1a(h, maxMeasure);
 }
 
 }  // namespace beatbench::app

@@ -132,6 +132,188 @@ protected:
     qsizetype initialCount_ = 0;
 };
 
+// Notes and BGA can extend the TimingEngine index without changing any timing definitions.
+TEST_F(DocumentInstancesTest, RefreshRebuildsTimingWhenNoteOrBgaExtentChanges) {
+    auto& reg = session_registry();
+    const std::string aId = "timing-extent-active", bId = "timing-extent-reference";
+    ASSERT_TRUE(reg.create(aId));
+    ASSERT_TRUE(reg.create(bId));
+    beatbench::Chart chart;
+    chart.mode_id = "sp7k";
+    chart.meta["BPM"] = "120";
+    beatbench::Event<beatbench::Note> note{1, {0, 1}, {}};
+    note.value.lane = {0, beatbench::LaneKind::Key, 1};
+    note.value.sample.id = 1;
+    chart.notes.push_back(note);
+    reg.by_id(aId)->load(chart);
+    auto* reference = reg.by_id(bId);
+    reference->load(chart);
+    ASSERT_TRUE(reg.activate(aId));
+    ChartSession bridge;
+    bridge.setSessionId(QString::fromStdString(bId));
+    const beatbench::Position tail{6, {0, 1}};
+    ASSERT_NE(bridge.timing(), nullptr);
+    const auto initialHash = bridge.debugTimingHash();
+    EXPECT_EQ(bridge.measureCount(), 2);
+    EXPECT_DOUBLE_EQ(bridge.timing()->bpm_at(tail), 0.0);
+    // Editing inside an existing extent must not invalidate the timing fingerprint.
+    ASSERT_TRUE(reference->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
+        0, beatbench::Rational(1, 2), beatbench::Lane{0, beatbench::LaneKind::Key, 2}, 1)));
+    EXPECT_EQ(bridge.chart(), nullptr);
+    EXPECT_EQ(bridge.timing(), nullptr);
+    bridge.refresh();
+    EXPECT_EQ(bridge.debugTimingHash(), initialHash);
+    ASSERT_TRUE(reference->undo());
+    bridge.refresh();
+    for (const bool bga : {false, true}) {
+        if (bga) {
+            ASSERT_TRUE(reference->exec(std::make_unique<beatbench::edit::BgaPutCommand>(
+                6, beatbench::Rational(0, 1), 0, 1)));
+        } else {
+            ASSERT_TRUE(reference->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
+                6, beatbench::Rational(0, 1), beatbench::Lane{0, beatbench::LaneKind::Bgm, 0}, 1)));
+        }
+        EXPECT_EQ(bridge.chart(), nullptr);
+        EXPECT_EQ(bridge.timing(), nullptr);
+        bridge.refresh();
+        ASSERT_NE(bridge.chart(), nullptr);
+        ASSERT_NE(bridge.timing(), nullptr);
+        EXPECT_NE(bridge.debugTimingHash(), initialHash);
+        EXPECT_EQ(bridge.measureCount(), 7);
+        EXPECT_EQ(bridge.timing()->time_us(tail), 12000000);
+        EXPECT_DOUBLE_EQ(bridge.timing()->bpm_at(tail), 120.0);
+        ASSERT_TRUE(reference->undo());
+        EXPECT_EQ(bridge.timing(), nullptr);
+        bridge.refresh();
+        EXPECT_EQ(bridge.debugTimingHash(), initialHash);
+        EXPECT_EQ(bridge.measureCount(), 2);
+        EXPECT_EQ(bridge.timing()->time_us(tail), 0);
+        EXPECT_DOUBLE_EQ(bridge.timing()->bpm_at(tail), 0.0);
+        ASSERT_TRUE(reference->redo());
+        bridge.refresh();
+        EXPECT_EQ(bridge.timing()->time_us(tail), 12000000);
+        EXPECT_DOUBLE_EQ(bridge.timing()->bpm_at(tail), 120.0);
+        ASSERT_TRUE(reference->undo());
+        bridge.refresh();
+        EXPECT_EQ(reg.active_id(), aId);
+    }
+}
+
+// Reproduce the overlay failure window without changing refresh ordering: A's
+// synchronous signal consumer reads B after both core documents were replaced,
+// but before B's bridge has refreshed. No renderer/audio job is required.
+TEST_F(DocumentInstancesTest, UnrefreshedPeerIsUnavailableDuringOtherBridgeSignals) {
+    auto& reg = session_registry();
+    const std::string aId = "bridge-lifetime-a", bId = "bridge-lifetime-b";
+    ASSERT_TRUE(reg.create(aId));
+    ASSERT_TRUE(reg.create(bId));
+    auto make = [](unsigned measure, const char* bpm) {
+        beatbench::Chart chart;
+        chart.mode_id = "sp7k";
+        chart.meta["BPM"] = bpm;
+        chart.meta["LNTYPE"] = "2";
+        chart.meta["LNOBJ"] = "0a";
+        chart.id_base = beatbench::IdBase::Base62;
+        chart.notes.push_back({measure, {0, 1}, {}});
+        return chart;
+    };
+    reg.by_id(aId)->load(make(4, "120"));
+    reg.by_id(bId)->load(make(4, "120"));
+    ChartSession a, b;
+    a.setSessionId(QString::fromStdString(aId));
+    b.setSessionId(QString::fromStdString(bId));
+    ASSERT_NE(b.chart(), nullptr);
+    ASSERT_NE(b.timing(), nullptr);
+    ASSERT_EQ(b.measureCount(), 5);
+    reg.by_id(aId)->load(make(8, "240"));
+    reg.by_id(bId)->load(make(8, "240"));
+    int observations = 0;
+    QObject::connect(&a, &ChartSession::chartChanged, &b, [&] {
+        ++observations;
+        EXPECT_EQ(b.chart(), nullptr);
+        EXPECT_EQ(b.timing(), nullptr);
+        EXPECT_FALSE(b.hasChart());
+        EXPECT_EQ(b.measureCount(), 0);
+        EXPECT_EQ(b.idBase(), 36);
+        EXPECT_EQ(b.sampleValueOf("0a"), -1);
+        EXPECT_EQ(b.decodeId("0a"), -1);
+        EXPECT_TRUE(b.idTextOf(36).isEmpty());
+        EXPECT_TRUE(b.wavFileOfId(36).isEmpty());
+        EXPECT_TRUE(b.laneChannel(0, "key", 1).isEmpty());
+        EXPECT_EQ(b.lnType(), 1);
+        EXPECT_EQ(b.lnobjSample(), -1);
+        EXPECT_FALSE(b.renderAsync());
+        EXPECT_FALSE(b.renderToFile(QString()));
+    });
+    a.refresh();
+    EXPECT_EQ(observations, 1);
+    b.refresh();
+    ASSERT_NE(b.chart(), nullptr);
+    ASSERT_NE(b.timing(), nullptr);
+    EXPECT_EQ(b.chart(), &reg.by_id(bId)->chart());
+    EXPECT_EQ(b.measureCount(), 9);
+    EXPECT_EQ(b.idBase(), 62);
+    EXPECT_EQ(b.decodeId("0a"), 36);
+    EXPECT_EQ(b.lnType(), 2);
+    EXPECT_EQ(b.lnobjSample(), 36);
+    EXPECT_EQ(b.timing()->time_us({1, beatbench::Rational(0, 1)}), 1000000);
+}
+
+TEST_F(DocumentInstancesTest, RevisionGuardRejectsSameAddressEditsUntilRefresh) {
+    auto& reg = session_registry();
+    const std::string id = "bridge-lifetime-revision";
+    ASSERT_TRUE(reg.create(id));
+    beatbench::Chart chart;
+    chart.meta["BPM"] = "120";
+    // Index measure 1: an empty chart only has timing for measure 0.
+    chart.notes.push_back({1u, {0, 1}, {}});
+    reg.by_id(id)->load(std::move(chart));
+    ChartSession bridge;
+    bridge.setSessionId(QString::fromStdString(id));
+    const auto* address = bridge.chart();
+    ASSERT_NE(address, nullptr);
+    const auto revision = reg.by_id(id)->revision();
+    ASSERT_TRUE(reg.by_id(id)->exec(
+        std::make_unique<beatbench::edit::MetaEditCommand>("BPM", "240")));
+    ASSERT_EQ(&reg.by_id(id)->chart(), address); // deterministic: no allocator reuse needed
+    ASSERT_NE(reg.by_id(id)->revision(), revision);
+    EXPECT_EQ(bridge.chart(), nullptr);
+    EXPECT_EQ(bridge.timing(), nullptr);
+    EXPECT_FALSE(bridge.hasChart());
+    EXPECT_EQ(bridge.measureCount(), 0);
+    bridge.refresh();
+    EXPECT_EQ(bridge.chart(), address);
+    ASSERT_NE(bridge.timing(), nullptr);
+    EXPECT_EQ(bridge.timing()->time_us({1, beatbench::Rational(0, 1)}), 1000000);
+    ASSERT_TRUE(reg.by_id(id)->undo());
+    EXPECT_EQ(bridge.chart(), nullptr);
+    bridge.refresh();
+    ASSERT_NE(bridge.timing(), nullptr);
+    EXPECT_EQ(bridge.timing()->time_us({1, beatbench::Rational(0, 1)}), 2000000);
+}
+
+TEST_F(DocumentInstancesTest, AttachedIdentitySurvivesActiveSwitchButNotCoreClose) {
+    auto& reg = session_registry();
+    const std::string aId = "bridge-lifetime-follow-a", bId = "bridge-lifetime-follow-b";
+    ASSERT_TRUE(reg.create(aId));
+    reg.by_id(aId)->load(beatbench::Chart{});
+    ChartSession follower; // legacy empty sessionId follows active only when refreshed
+    follower.refresh();
+    ASSERT_NE(follower.chart(), nullptr);
+    const auto* aChart = follower.chart();
+    ASSERT_TRUE(reg.create(bId));
+    reg.by_id(bId)->load(beatbench::Chart{});
+    EXPECT_EQ(follower.chart(), aChart);
+    ASSERT_TRUE(reg.close(aId));
+    EXPECT_EQ(follower.chart(), nullptr);
+    EXPECT_EQ(follower.timing(), nullptr);
+    EXPECT_FALSE(follower.hasChart());
+    EXPECT_EQ(follower.measureCount(), 0);
+    follower.refresh();
+    EXPECT_EQ(follower.chart(), &reg.by_id(bId)->chart());
+    ASSERT_NE(follower.timing(), nullptr);
+}
+
 TEST_F(DocumentInstancesTest, FixedBridgesEditUndoSaveAndReopenWithoutCrossDocumentState) {
     const auto a = open("01-easy.bms");
     ASSERT_TRUE(ok(a));

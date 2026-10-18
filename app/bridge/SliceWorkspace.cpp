@@ -703,7 +703,9 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
     }
     if (placed) {
         // 当前编辑会话被铺放 → 视图刷新；采样面板按当前谱面刷新（其余目标为独立会话）
-        if (m_chartSession && m_chartSession->hasChart()) m_chartSession->refresh();
+        // Placement invalidates the bridge revision; refresh must not require
+        // hasChart(), which intentionally rejects unrefreshed document views.
+        if (m_chartSession) m_chartSession->refresh();
         emit samplesPlaced();
     }
     qWarning("slice export: place=%d targets=%d notes=%d placeErr=%s", placed ? 1 : 0,
