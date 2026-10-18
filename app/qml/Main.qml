@@ -83,6 +83,7 @@ ApplicationWindow {
     }
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换经下方 Connections 同路径翻转）
     property bool showChannelIds: false
+    property bool hideReferenceSecondaryChannels: true
     /// Ctrl 临时勾选状态机（同 SlicePage MIDI 线）：按下 → 直接翻转 window.showChannelIds
     /// （与点击同一条状态链路：checkbox 经 uiActions 注册表跟随显示——⚠️ 不要用
     /// checkbox.toggle()：实测 Qt 6.11 只改内部 checked 不发 toggled，外部状态不更新）；
@@ -236,26 +237,30 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("file.exit") : ""
                onActivated: uiActions.invoke("file.exit") }
 
+    // B keeps local selection; mutation actions must not act on A's old selection.
+    readonly property bool chartEditingAllowed: currentPage === 0 && !editPage.referenceFocused
+    onChartEditingAllowedChanged: updateActionStates()
+
     // 编辑动作
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.undo") : ""
                enabled: !window.textInputFocused &&
-                        ((currentPage === 0 && chartMeta !== null) ||
+                        ((chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canUndoSlice))
                onActivated: uiActions.invoke("edit.undo") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.redo") : ""
                enabled: !window.textInputFocused &&
-                        ((currentPage === 0 && chartMeta !== null) ||
+                        ((chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
                onActivated: uiActions.invoke("edit.redo") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.copy") : ""
-               enabled: chartMeta !== null && currentPage === 0 &&
+               enabled: chartMeta !== null && chartEditingAllowed &&
                         !window.textInputFocused && window.selectionRefs.length > 0
                onActivated: uiActions.invoke("edit.copy") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.paste") : ""
-               enabled: chartMeta !== null && currentPage === 0 && !window.textInputFocused
+               enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.paste") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
-               enabled: chartMeta !== null && currentPage === 0
+               enabled: chartMeta !== null && chartEditingAllowed
                onActivated: uiActions.invoke("edit.delete") }
 
     // 工具动作（数字 1-5：文本输入焦点时让行）
@@ -394,6 +399,13 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("视图")
+            MenuItem {
+                objectName: "hideReferenceSecondaryChannelsMenuItem"
+                text: qsTr("隐藏 B 侧次要通道与波形")
+                checkable: true
+                checked: window.hideReferenceSecondaryChannels
+                onTriggered: window.hideReferenceSecondaryChannels = checked
+            }
             // 皮肤（doc/08 §3.3 运行时换肤）：L1 token 覆写 + 运行时切换。
             // 列出「默认」+ 内置皮肤，当前生效项打勾；点击即运行时切换（Theme.applySkinByName）。
             // ⚠️ 运行时切肤同时应用该皮肤目录的 keymap.json（doc/10 §4 待改进）——默认皮肤清除覆写。
@@ -718,6 +730,9 @@ ApplicationWindow {
             currentIndex: window.currentPage
             EditPage {
                 id: editPage
+                documentService: documents
+                hideSecondaryChannels: window.hideReferenceSecondaryChannels
+                onReferenceSwapRequested: (id) => window.requestDocumentAction("swap", id)
                 chartMeta: window.chartMeta
                 chartPath: window.chartPath
                 modeLabel: window.modeLabel()
@@ -801,6 +816,8 @@ ApplicationWindow {
             TestPage {}
             ProjectPage {
                 id: projectPage
+                onPrimaryAssignRequested: (path) => window.requestDocumentAction("assign", path)
+                onReferenceOpenRequested: (path) => window.doOpenReferenceChart(path)
             }
         }
 
@@ -826,7 +843,7 @@ ApplicationWindow {
                 visible: window.currentPage !== 1
                 // 主消息（可变长，占满剩余空间，右截断）：悬停信息 > 状态消息。
                 Label {
-                    text: editPage.hoverText !== "" ? editPage.hoverText : window.statusText
+                    text: window.currentPage === 0 && editPage.hoverText !== "" ? editPage.hoverText : window.statusText
                     color: editPage.hoverText !== "" ? Theme.accent : Theme.textMuted
                     elide: Text.ElideRight
                     Layout.fillWidth: true
@@ -1037,7 +1054,14 @@ ApplicationWindow {
     // contentChanged 只刷新时间轴/波形，定义表须显式重取 session.samples）。
     Connections {
         target: sliceWorkspace
-        function onSamplesPlaced() { session.refreshSamples(); project.refreshOpenStates() }
+        function onSamplesPlaced() {
+            // Multi-target placement edits core sessions directly, including an already
+            // open inactive reference. Publish every bridge revision before consumers
+            // read chart/timing again; refreshing only the active sample list is not enough.
+            documents.refresh()
+            session.refreshSamples()
+            project.refreshOpenStates()
+        }
         function onSliceHistoryChanged() { updateActionStates() }
         function onSlicesChanged() { updateActionStates() }
         function onAudioChanged() { updateActionStates() }
@@ -1228,7 +1252,7 @@ ApplicationWindow {
     }
 
     /// 关闭/新建/打开前的未保存确认。切音工作区是独立会话，不并入谱面脏。
-    property string pendingDocAction: ""   // "" | "close" | "new" | "open" | "switch"
+    property string pendingDocAction: ""   // "" | "close" | "new" | "open" | "switch" | "assign" | "swap" (target ID in pendingOpenPath)
     property string pendingOpenPath: ""
     property string pendingOriginalDocument: ""
     property bool allowClose: false
@@ -1287,6 +1311,15 @@ ApplicationWindow {
             project.refreshOpenStates()
             documents.refresh()
             setStatus(qsTr("全部已打开文档已保存"))
+        } else if (action === "swap") {
+            const previousId = documents.activeId()
+            editPage.prepareReferenceSwap()
+            const activated = documents.activate(path)
+            if (!activated.ok) { editPage.abortReferenceSwap(); setStatus(activated.error); return }
+            adoptChart(activated.path)
+            editPage.finishReferenceSwap(previousId)
+        } else if (action === "assign") {
+            if (path) doOpenChart(path, false)
         } else if (action === "open" || action === "switch") {
             if (path && path.length > 0) doOpenChart(path)
             else fileDialog.open()
@@ -1463,11 +1496,25 @@ ApplicationWindow {
         }
     }
 
-    function doOpenChart(path) {
+    /// B 只选择统一集合中的实例；不采用 A 的面板/播放/草稿切换流程。
+    function doOpenReferenceChart(path) {
+        const result = documents.openReference(path)
+        if (!result.ok) { setStatus(qsTr("打开对照失败：%1").arg(result.error)); return false }
+        if (!editPage.openReference(result.id)) {
+            setStatus(qsTr("打开对照失败：文档不可用"))
+            return false
+        }
+        project.refreshOpenStates()
+        setStatus(qsTr("已设为 B 侧只读对照：%1").arg(result.path || path))
+        return true
+    }
+
+    function doOpenChart(path, navigateToEditor = true) {
         const result = documents.open(path)
         if (!result.ok) { setStatus(qsTr("打开失败：%1").arg(result.error)); return }
         adoptChart(result.path)
-        window.currentPage = 0
+        if (navigateToEditor) window.currentPage = 0
+        setStatus(qsTr("已在 A 侧打开：%1").arg(result.path || path))
     }
 
     /// 外部文件路由（拖拽入窗口 / 拖到 exe 图标 / 双击关联）：分类 → 打开并切到对应页。
@@ -1549,6 +1596,7 @@ ApplicationWindow {
         window.metaSelection = []
         refreshTiming()
         if (typeof editPage !== "undefined" && editPage) {
+            editPage.activatePrimary()
             editPage.reloadMeta()
             editPage.reloadBga()
         }
@@ -1556,7 +1604,7 @@ ApplicationWindow {
         if (typeof audioEngine !== "undefined" && audioEngine)
             audioEngine.setChartPath(d.result.path)
         project.refreshOpenStates()
-        window.statusText = qsTr("已切换到已打开的谱面：%1").arg(d.result.path)
+        window.statusText = qsTr("已切换 A 侧谱面：%1").arg(d.result.path)
         statusClearTimer.restart()
     }
 
@@ -1710,6 +1758,7 @@ ApplicationWindow {
         // 清空上一谱面的采样（新建空谱面无采样；lint 面板对空谱面显空/占位，暂不额外清）
         sampleModel.clear()
         if (typeof editPage !== "undefined" && editPage) {
+            editPage.activatePrimary()
             editPage.reloadMeta()
             editPage.reloadBga()
         }
@@ -1845,19 +1894,19 @@ ApplicationWindow {
         setActionEnabled("file.save", chartMeta !== null)
         setActionEnabled("file.saveAs", chartMeta !== null)
         setActionEnabled("edit.undo",
-                         (currentPage === 0 && chartMeta !== null) ||
+                         (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canUndoSlice))
         setActionEnabled("edit.redo",
-                         (currentPage === 0 && chartMeta !== null) ||
+                         (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
-        setActionEnabled("edit.copy", chartMeta !== null && selectionRefs.length > 0)
-        setActionEnabled("edit.paste", chartMeta !== null && currentPage === 0)
-        setActionEnabled("edit.delete", chartMeta !== null && currentPage === 0 &&
+        setActionEnabled("edit.copy", chartEditingAllowed && chartMeta !== null && selectionRefs.length > 0)
+        setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed)
+        setActionEnabled("edit.delete", chartMeta !== null && chartEditingAllowed &&
                                            (selectionRefs.length > 0 || metaSelection.length > 0))
-        setActionEnabled("tool.quantize", selectionRefs.length > 0)
-        setActionEnabled("tool.mirror", selectionRefs.length > 0)
-        setActionEnabled("tool.rotate", selectionRefs.length > 0)
-        setActionEnabled("tool.toggleLn", selectionRefs.length > 0)
+        setActionEnabled("tool.quantize", chartEditingAllowed && selectionRefs.length > 0)
+        setActionEnabled("tool.mirror", chartEditingAllowed && selectionRefs.length > 0)
+        setActionEnabled("tool.rotate", chartEditingAllowed && selectionRefs.length > 0)
+        setActionEnabled("tool.toggleLn", chartEditingAllowed && selectionRefs.length > 0)
         setActionEnabled("tool.pan", currentPage === 0)
         setActionEnabled("tool.select", currentPage === 0)
         setActionEnabled("tool.note", currentPage === 0)

@@ -170,6 +170,20 @@ ColumnLayout {
             root.fields[i].orig = root.fields[i].value
         root.dirtyTick = 0
     }
+    // Repeater/filter modelData may be a QVariant-converted copy. Always stage
+    // by key into the authoritative fields array; never rely on JS object aliasing.
+    function editField(key, value) {
+        for (let i = 0; i < root.fields.length; ++i) {
+            if (root.fields[i].key !== key) continue
+            root.fields[i].value = value
+            root.dirtyTick++
+            if (key === "LNTYPE" || key === "LNOBJ") {
+                root.fields[i].orig = value
+                root.modeEditRequested(key, value)
+            }
+            return
+        }
+    }
     /// 脏字段编辑集（保存用；value 空串=删除）
     function collectEdits() {
         const edits = []
@@ -269,8 +283,7 @@ ColumnLayout {
                         // 于是"打开谱面"本身就会 dispatch meta.edit ——2026-10-14 实测：
                         // 打开含 `#LNOBJ ZZ` 的谱面会写一次 LNOBJ=<原值>，把文档标成未保存
                         // （标题出现 *、关闭必弹确认、项目页"未保存"徽标误报）。
-                        onTextEdited: { modelData.value = text; root.dirtyTick++
-                                         if (modelData.key === "LNOBJ") { modelData.orig = text; root.modeEditRequested("LNOBJ", text) } }
+                        onTextEdited: { modelData.value = text; root.editField(modelData.key, text) }
                     }
                     ComboBox {
                         id: combo
@@ -306,11 +319,8 @@ ColumnLayout {
                             if (idx >= 0) {
                                 const v = root.comboOptions(source.key, source.value)[idx].value
                                 if (source.value !== v) {
-                                    source.value = v; root.dirtyTick++
-                                    if (source.key === "LNTYPE") {
-                                        source.orig = v
-                                        root.modeEditRequested("LNTYPE", v)
-                                    }
+                                    source.value = v
+                                    root.editField(source.key, v)
                                 }
                             }
                         }
@@ -410,7 +420,7 @@ ColumnLayout {
                             visible: !root.comboOptions(modelData.key, modelData.value)
                             Layout.fillWidth: true
                             text: modelData.value
-                            onTextChanged: { modelData.value = text; root.dirtyTick++ }
+                            onTextEdited: { modelData.value = text; root.editField(modelData.key, text) }
                         }
                         ComboBox {
                             id: combo
@@ -442,7 +452,7 @@ ColumnLayout {
                                 const idx = currentIndex
                                 if (idx >= 0) {
                                     const v = root.comboOptions(source.key, source.value)[idx].value
-                                    if (source.value !== v) { source.value = v; root.dirtyTick++ }
+                                    if (source.value !== v) { source.value = v; root.editField(source.key, v) }
                                 }
                             }
                             indicator: Item {

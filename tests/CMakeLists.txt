@@ -250,8 +250,39 @@ if (Qt6Core_FOUND)
             TIMEOUT 60
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
 
+        # Full production Main/SessionController integration; audio is a no-device spy.
+        add_executable(main_integration_test main_integration_test.cpp
+            ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
+        foreach(bridge ChartSession DocumentService CommandDispatcher SampleListModel LintListModel
+                ChartViewItem PlayheadOverlayItem WaveformOverviewItem SliceWaveformItem
+                SliceWorkspace AudioEngine ThemeManager UiActionRegistry KeyMonitor ClipboardBridge EditUtils ProjectController)
+            target_sources(main_integration_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(main_integration_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(main_integration_test PRIVATE
+            beatbench_core beatbench_audio Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(main_integration_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml-main-integration"
+            BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(main_integration_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(main_integration_test)
+        add_test(NAME main_integration_tests COMMAND main_integration_test)
+        # Isolate this case: leaving the final snapshot alive exercises setup teardown
+        # after QGuiApplication/global QThreadPool destruction (the full suite resets it).
+        add_test(NAME main_project_scan_teardown_tests COMMAND main_integration_test
+            ProductionMainIntegration::test_project_large_snapshot_publication_keeps_visible_models_and_details_live)
+        set_tests_properties(main_project_scan_teardown_tests PROPERTIES
+            TIMEOUT 45
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+        set_tests_properties(main_integration_tests PROPERTIES
+            TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
         add_executable(chart_view_binding_test chart_view_binding_test.cpp)
-        foreach(bridge ChartSession ChartViewItem PlayheadOverlayItem WaveformOverviewItem ThemeManager)
+        foreach(bridge ChartSession DocumentService ChartViewItem PlayheadOverlayItem WaveformOverviewItem ThemeManager)
             target_sources(chart_view_binding_test PRIVATE
                 ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
                 ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
