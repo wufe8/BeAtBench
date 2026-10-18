@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <QObject>
+#include <QAbstractItemModel>
+#include <atomic>
+#include <functional>
+#include "beatbench/core/project/Project.hpp"
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -9,11 +13,11 @@
 #include <QUrl>
 #include <memory>
 
-namespace beatbench::project {
-struct Project;
-}
-
 namespace beatbench::app {
+
+class ProjectRowsModel;
+class ProjectFilterModel;
+struct ProjectSnapshot;
 
 /// M7 项目页桥层（doc/07 §9.1 阶段①）：把 `project.scan` 的结果喂给 QML。
 ///
@@ -27,10 +31,14 @@ namespace beatbench::app {
 class ProjectController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString root READ root NOTIFY summaryChanged)
-    Q_PROPERTY(QString state READ state NOTIFY stateChanged)  ///< idle/indexing/parsing/ready/error
+    Q_PROPERTY(QString state READ state NOTIFY stateChanged)  ///< idle/indexing/parsing/ready/cancelled/error
     Q_PROPERTY(QString errorText READ errorText NOTIFY stateChanged)
     Q_PROPERTY(QVariantList charts READ charts NOTIFY chartsChanged)
     Q_PROPERTY(QVariantList resources READ resources NOTIFY resourcesChanged)
+    // QML consumes only visible rows, never converts the complete snapshot to JS arrays.
+    Q_PROPERTY(QAbstractItemModel* chartModel READ chartModel CONSTANT)
+    Q_PROPERTY(QAbstractItemModel* resourceModel READ resourceModel CONSTANT)
+    Q_PROPERTY(QAbstractItemModel* resourceUsesModel READ resourceUsesModel CONSTANT)
     Q_PROPERTY(int chartCount READ chartCount NOTIFY summaryChanged)
     Q_PROPERTY(int resourceCount READ resourceCount NOTIFY summaryChanged)
     Q_PROPERTY(int missingCount READ missingCount NOTIFY summaryChanged)
@@ -42,7 +50,15 @@ class ProjectController : public QObject {
     Q_PROPERTY(int sliceTargetCount READ sliceTargetCount NOTIFY sliceTargetsChanged)
 
 public:
+    // Dependency injection for deterministic slow/failing scanner tests; never called on GUI.
+    struct ScanFunctions {
+        std::function<beatbench::project::Project(const std::string&,
+                                                 const beatbench::project::ScanOptions&)> index;
+        std::function<void(beatbench::project::Project&,
+                           const beatbench::project::ScanOptions&)> parse;
+    };
     explicit ProjectController(QObject* parent = nullptr);
+    explicit ProjectController(ScanFunctions functions, QObject* parent = nullptr);
     ~ProjectController() override;
 
     QString root() const { return m_root; }
@@ -50,8 +66,16 @@ public:
     QString errorText() const { return m_errorText; }
     QVariantList charts() const { return m_charts; }
     QVariantList resources() const { return m_resources; }
-    int chartCount() const { return m_charts.size(); }
-    int resourceCount() const { return m_resources.size(); }
+    int chartCount() const { return static_cast<int>(m_charts.size()); }
+    int resourceCount() const { return static_cast<int>(m_resources.size()); }
+    QAbstractItemModel* chartModel() const;
+    QAbstractItemModel* resourceModel() const;
+    QAbstractItemModel* resourceUsesModel() const;
+    Q_INVOKABLE void setChartFilter(bool onlyOpen, const QString& text);
+    Q_INVOKABLE void setResourceFilter(const QString& kind, bool onlyMissing,
+                                       bool onlyUnreferenced, const QString& text);
+    Q_INVOKABLE QVariantMap chartDetails(const QString& path) const;
+    Q_INVOKABLE QVariantMap selectResource(const QString& path);
     int missingCount() const { return m_missingCount; }
     int unreferencedCount() const { return m_unreferencedCount; }
     QVariantMap openStates() const { return m_openStates; }
@@ -100,11 +124,20 @@ signals:
     void sliceTargetsChanged();
 
 private:
-    void rebuildCharts();
-    void rebuildResources();
+    void stopScan();
+    void publishSnapshot(const std::shared_ptr<const ProjectSnapshot>& snapshot);
 
-    QThreadPool m_scanPool;  ///< 本控制器独立持有，析构时安全收尾
-    std::shared_ptr<beatbench::project::Project> m_project;
+    QThreadPool m_scanPool;  ///< Owned workers; no callback can outlive QObject destruction.
+    ScanFunctions m_scanFunctions;
+    std::shared_ptr<std::atomic_bool> m_cancelled;
+    // Declared before models so it is released after every internal row reference.
+    std::shared_ptr<const ProjectSnapshot> m_snapshot;
+    std::unique_ptr<ProjectRowsModel> m_chartRows;
+    std::unique_ptr<ProjectRowsModel> m_resourceRows;
+    std::unique_ptr<ProjectRowsModel> m_resourceUses;
+    std::unique_ptr<ProjectFilterModel> m_chartFilter;
+    std::unique_ptr<ProjectFilterModel> m_resourceFilter;
+    std::shared_ptr<const beatbench::project::Project> m_project;
     quint64 m_generation = 0;  ///< 每次 scan() 递增；回调比对，过期即丢
     QString m_root;
     QString m_state = QStringLiteral("idle");

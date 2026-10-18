@@ -3,6 +3,10 @@
 #include "DocumentService.hpp"
 
 #include <QDebug>
+#include <QAbstractListModel>
+#include <QSortFilterProxyModel>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -55,7 +59,8 @@ QVariantMap chartToMap(const beatbench::project::ChartRef& c) {
     return m;
 }
 
-QVariantMap resourceToMap(const beatbench::project::ResourceRef& r) {
+QVariantMap resourceToMap(const beatbench::project::ResourceRef& r,
+                          const std::shared_ptr<std::atomic_bool>& cancelled) {
     QVariantMap m;
     m["path"] = qs(r.path);
     m["declared"] = qs(r.declared);
@@ -79,6 +84,7 @@ QVariantMap resourceToMap(const beatbench::project::ResourceRef& r) {
 
     QVariantList uses;
     for (const auto& u : r.uses) {
+        if (cancelled->load()) return {};
         QVariantMap um;
         um["chart"] = qs(u.chart);
         um["source"] = (u.source == beatbench::project::RefSource::HeaderField)
@@ -97,12 +103,203 @@ QVariantMap resourceToMap(const beatbench::project::ResourceRef& r) {
 
 }  // namespace
 
-ProjectController::ProjectController(QObject* parent) : QObject(parent) {}
+// QObject models live exclusively on the GUI thread. Their backing values are immutable,
+// prepared in the worker and installed by implicit-sharing swaps (no per-row conversion).
+class ProjectRowsModel final : public QAbstractListModel {
+public:
+    int rowCount(const QModelIndex& parent = {}) const override {
+        return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+    }
+    QVariant data(const QModelIndex& index, int role) const override {
+        if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size() ||
+            role != Qt::UserRole) return {};
+        return m_rows.at(index.row());
+    }
+    QHash<int, QByteArray> roleNames() const override { return {{Qt::UserRole, "modelData"}}; }
+    void replace(QVariantList rows) {
+        Q_ASSERT(QThread::currentThread() == thread());
+        beginResetModel();
+        m_rows.swap(rows);
+        endResetModel();
+    }
+private:
+    QVariantList m_rows;
+};
+
+class ProjectFilterModel final : public QSortFilterProxyModel {
+public:
+    bool charts = false;
+    bool onlyOpen = false;
+    bool onlyMissing = false;
+    bool onlyUnreferenced = false;
+    QString kind;
+    QString needle;
+    QVariantMap openStates;
+    void refilter() { invalidateFilter(); } // Qt 6.4 baseline
+protected:
+    bool filterAcceptsRow(int row, const QModelIndex& parent) const override {
+        // Common loading path: no materialization of maps, strings or nested uses.
+        if (needle.isEmpty() && (charts ? !onlyOpen :
+            (kind.isEmpty() && !onlyMissing && !onlyUnreferenced))) return true;
+        const auto m = sourceModel()->data(sourceModel()->index(row, 0, parent), Qt::UserRole).toMap();
+        if (charts) {
+            if (onlyOpen && !openStates.contains(m.value("absPath").toString())) return false;
+            return needle.isEmpty() || m.value("path").toString().contains(needle, Qt::CaseInsensitive);
+        }
+        if (!kind.isEmpty() && m.value("kind").toString() != kind) return false;
+        const bool onDisk = m.value("onDisk").toBool();
+        const bool referenced = m.value("referenced").toBool();
+        if (onlyMissing && (onDisk || !referenced)) return false;
+        if (onlyUnreferenced && (!onDisk || referenced)) return false;
+        return needle.isEmpty() ||
+            (m.value("path").toString() + QLatin1Char(' ') + m.value("declared").toString())
+                .contains(needle, Qt::CaseInsensitive);
+    }
+};
+
+struct ProjectSnapshot {
+    std::shared_ptr<const beatbench::project::Project> project;
+    QVariantList charts;
+    QVariantList resources;
+    QVariantList resourceRows; // shallow table rows deliberately exclude potentially huge uses[]
+    QHash<QString, qsizetype> chartsByPath;
+    QHash<QString, qsizetype> resourcesByPath;
+    QString absoluteRoot;
+    int missing = 0;
+    int unreferenced = 0;
+};
+
+namespace {
+
+// No QObject/model/session access here: filesystem canonicalization and every nested
+// resource-use map are built before publication, not in a queued GUI callback.
+std::shared_ptr<const ProjectSnapshot> prepareSnapshot(
+    std::shared_ptr<const beatbench::project::Project> project,
+    const std::shared_ptr<std::atomic_bool>& cancelled) {
+    // A rejected queued callback can drop its last reference on the GUI thread too.
+    // Always retire value-only snapshots in the pool, including large nested maps/core vectors.
+    auto out = std::shared_ptr<ProjectSnapshot>(new ProjectSnapshot, [](ProjectSnapshot* value) {
+        // Qt clears the global instance during application teardown. A controller
+        // (e.g. QuickTest setup) may outlive QGuiApplication; no interactive GUI
+        // remains then, so delete values directly rather than dereferencing null.
+        if (auto* pool = QThreadPool::globalInstance()) pool->start([value] { delete value; });
+        else delete value;
+    });
+    out->project = std::move(project);
+    out->absoluteRoot = QDir(qs(out->project->root)).absolutePath();
+    out->charts.reserve(static_cast<qsizetype>(out->project->charts.size()));
+    for (const auto& c : out->project->charts) {
+        if (cancelled->load()) return {};
+        QVariantMap m = chartToMap(c);
+        m["absPath"] = DocumentService::normalizedPath(QDir(out->absoluteRoot).absoluteFilePath(qs(c.path)));
+        out->chartsByPath.insert(qs(c.path), out->charts.size());
+        out->charts.push_back(std::move(m));
+    }
+    out->resources.reserve(static_cast<qsizetype>(out->project->resources.size()));
+    out->resourceRows.reserve(static_cast<qsizetype>(out->project->resources.size()));
+    for (const auto& r : out->project->resources) {
+        if (cancelled->load()) return {};
+        auto m = resourceToMap(r, cancelled);
+        if (cancelled->load()) return {};
+        out->resourcesByPath.insert(qs(r.path), out->resources.size());
+        out->resources.push_back(m);
+        m.remove("uses");
+        out->resourceRows.push_back(std::move(m));
+        out->missing += !r.on_disk && r.referenced();
+        out->unreferenced += r.on_disk && !r.referenced();
+    }
+    return out;
+}
+
+} // namespace
+
+ProjectController::ProjectController(QObject* parent) : ProjectController(ScanFunctions{}, parent) {}
+
+ProjectController::ProjectController(ScanFunctions functions, QObject* parent)
+    : QObject(parent), m_scanFunctions(std::move(functions)),
+      m_chartRows(std::make_unique<ProjectRowsModel>()),
+      m_resourceRows(std::make_unique<ProjectRowsModel>()),
+      m_resourceUses(std::make_unique<ProjectRowsModel>()),
+      m_chartFilter(std::make_unique<ProjectFilterModel>()),
+      m_resourceFilter(std::make_unique<ProjectFilterModel>()) {
+    if (!m_scanFunctions.index) m_scanFunctions.index = beatbench::project::scan;
+    if (!m_scanFunctions.parse) m_scanFunctions.parse = beatbench::project::scan_parse;
+    m_chartFilter->charts = true;
+    m_chartFilter->setSourceModel(m_chartRows.get());
+    m_resourceFilter->setSourceModel(m_resourceRows.get());
+    // A slow obsolete request must not prevent the latest request from starting;
+    // repeated replacement clears pending runnables rather than growing a queue.
+    m_scanPool.setMaxThreadCount(2);
+}
 
 ProjectController::~ProjectController() {
-    // 工作线程仍会向 this 投递回调；先等本控制器的任务退出，再析构 QObject。
-    // 不等待全局线程池，避免把其它音频任务的生命周期混进项目扫描。
+    stopScan();
+    // Workers only post to this receiver. Keep it alive until posting has stopped;
+    // QObject then removes all undelivered callbacks. Never pump a nested event loop.
     m_scanPool.waitForDone();
+}
+
+QAbstractItemModel* ProjectController::chartModel() const { return m_chartFilter.get(); }
+QAbstractItemModel* ProjectController::resourceModel() const { return m_resourceFilter.get(); }
+QAbstractItemModel* ProjectController::resourceUsesModel() const { return m_resourceUses.get(); }
+
+void ProjectController::setChartFilter(bool onlyOpen, const QString& text) {
+    const QString needle = text.trimmed();
+    if (m_chartFilter->onlyOpen == onlyOpen && m_chartFilter->needle == needle) return;
+    m_chartFilter->onlyOpen = onlyOpen;
+    m_chartFilter->needle = needle;
+    m_chartFilter->refilter();
+}
+
+void ProjectController::setResourceFilter(const QString& kind, bool onlyMissing,
+                                          bool onlyUnreferenced, const QString& text) {
+    const QString needle = text.trimmed();
+    if (m_resourceFilter->kind == kind && m_resourceFilter->onlyMissing == onlyMissing &&
+        m_resourceFilter->onlyUnreferenced == onlyUnreferenced && m_resourceFilter->needle == needle) return;
+    m_resourceFilter->kind = kind;
+    m_resourceFilter->onlyMissing = onlyMissing;
+    m_resourceFilter->onlyUnreferenced = onlyUnreferenced;
+    m_resourceFilter->needle = needle;
+    m_resourceFilter->refilter();
+}
+
+QVariantMap ProjectController::chartDetails(const QString& path) const {
+    if (!m_snapshot || path.isEmpty()) return {};
+    const auto it = m_snapshot->chartsByPath.constFind(path);
+    return it == m_snapshot->chartsByPath.cend() ? QVariantMap{} : m_charts.at(*it).toMap();
+}
+
+QVariantMap ProjectController::selectResource(const QString& path) {
+    if (m_snapshot) {
+        const auto it = m_snapshot->resourcesByPath.constFind(path);
+        if (it != m_snapshot->resourcesByPath.cend()) {
+            auto m = m_resources.at(*it).toMap();
+            m_resourceUses->replace(m.take("uses").toList());
+            return m;
+        }
+    }
+    m_resourceUses->replace({});
+    return {};
+}
+
+void ProjectController::publishSnapshot(const std::shared_ptr<const ProjectSnapshot>& snapshot) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    // Retain the old owner until all GUI models and legacy properties have released it.
+    const auto retired = std::exchange(m_snapshot, snapshot);
+    m_project = snapshot ? snapshot->project : nullptr;
+    m_charts = snapshot ? snapshot->charts : QVariantList{};
+    m_resources = snapshot ? snapshot->resources : QVariantList{};
+    m_missingCount = snapshot ? snapshot->missing : 0;
+    m_unreferencedCount = snapshot ? snapshot->unreferenced : 0;
+    m_chartRows->replace(m_charts);
+    m_resourceRows->replace(snapshot ? snapshot->resourceRows : QVariantList{});
+    m_resourceUses->replace({});
+}
+
+void ProjectController::stopScan() {
+    ++m_generation;
+    if (m_cancelled) m_cancelled->store(true);
+    m_scanPool.clear();
 }
 
 QUrl ProjectController::folderPickerInitialFolder() const {
@@ -116,16 +313,15 @@ QUrl ProjectController::folderPickerInitialFolder() const {
 }
 
 void ProjectController::scan(const QString& folder) {
-    const QString clean = QDir::cleanPath(folder);
-    const quint64 gen = ++m_generation;  // 旧任务的回调据此作废
-    m_root = clean;
-    m_project.reset();  // 换项目时不能保留旧根的索引供取消/全选使用
+    stopScan();
+    const quint64 gen = m_generation;
+    const auto cancelled = m_cancelled = std::make_shared<std::atomic_bool>(false);
+    // cleanPath is lexical; canonical/stat calls belong to prepareSnapshot in the worker.
+    m_root = QDir::cleanPath(folder);
+    publishSnapshot({});
+    if (gen != m_generation) return;
     m_errorText.clear();
-    m_charts.clear();
-    m_resources.clear();
-    m_missingCount = 0;
-    m_unreferencedCount = 0;
-    m_sliceTargets.clear();  // 换项目：旧勾选无意义
+    m_sliceTargets.clear();
     m_state = QStringLiteral("indexing");
     emit stateChanged();
     emit summaryChanged();
@@ -134,126 +330,113 @@ void ProjectController::scan(const QString& folder) {
     emit sliceTargetsChanged();
     refreshOpenStates();
 
-    const std::string root = clean.toUtf8().toStdString();
-    m_scanPool.start([this, gen, root] {
-        beatbench::project::ScanOptions index_opts;
-        index_opts.parse = false;  // 第一段：只枚举（快）
-        std::shared_ptr<beatbench::project::Project> proj;
-        QString errorCode;
-        QString errorText;
-        try {
-            proj = std::make_shared<beatbench::project::Project>(
-                beatbench::project::scan(root, index_opts));
-        } catch (const std::exception& e) {
-            errorText = QString::fromStdString(e.what());
-            if (const auto* pe = dynamic_cast<const beatbench::project::ProjectError*>(&e)) {
-                errorCode = QString::fromStdString(pe->code());
-            }
-        }
-        if (!proj) {
-            QMetaObject::invokeMethod(
-                this,
-                [this, gen, errorCode, errorText] {
-                    if (gen != m_generation) return;
-                    m_state = QStringLiteral("error");
-                    m_errorText = errorText.isEmpty() ? errorCode : errorText;
-                    if (!errorCode.isEmpty()) m_errorText = errorCode + QStringLiteral(": ") + errorText;
-                    emit stateChanged();
-                },
-                Qt::QueuedConnection);
-            return;
-        }
-        // 快照给主线程先画表；解析继续在 proj 上跑（两个对象，互不竞争）
-        auto early = std::make_shared<beatbench::project::Project>(*proj);
-        QMetaObject::invokeMethod(
-            this,
-            [this, gen, early] {
+    if (gen != m_generation || cancelled->load()) return; // A signal handler may start another scan.
+    const std::string root = m_root.toUtf8().toStdString();
+    const auto functions = m_scanFunctions;
+    const bool trace = qEnvironmentVariableIsSet("BB_PROJECT_SCAN_TRACE");
+    m_scanPool.start([this, gen, root, cancelled, functions, trace] {
+        auto postFailure = [this, gen, cancelled](QString text) {
+            if (cancelled->load()) return;
+            QMetaObject::invokeMethod(this, [this, gen, text = std::move(text)] {
                 if (gen != m_generation) return;
-                m_project = early;
-                // 只记住已成功枚举的歌曲目录；取消弹窗、无效路径和过期扫描不覆盖偏好。
-                QSettings().setValue(QStringLiteral("project/lastFolder"), QDir(m_root).absolutePath());
-                m_state = QStringLiteral("parsing");
+                // Keep the last complete enumeration snapshot, never a partially-mutated parse.
+                m_errorText = text;
+                m_state = QStringLiteral("error");
                 emit stateChanged();
-                rebuildCharts();
-                rebuildResources();
+            }, Qt::QueuedConnection);
+        };
+        try {
+            if (cancelled->load()) return;
+            QElapsedTimer timer;
+            timer.start();
+            beatbench::project::ScanOptions opts;
+            opts.parse = false;
+            auto proj = std::make_shared<beatbench::project::Project>(functions.index(root, opts));
+            const auto indexMs = timer.restart();
+            if (cancelled->load()) return;
+            auto early = prepareSnapshot(std::make_shared<const beatbench::project::Project>(*proj), cancelled);
+            if (!early || cancelled->load()) return;
+            const auto prepareMs = timer.restart();
+            if (trace) qInfo("project.scan worker: generation=%llu index_ms=%lld prepare_index_ms=%lld",
+                  static_cast<unsigned long long>(gen), static_cast<long long>(indexMs),
+                  static_cast<long long>(prepareMs));
+            QMetaObject::invokeMethod(this, [this, gen, early, trace] {
+                if (gen != m_generation) return;
+                QElapsedTimer publish;
+                publish.start();
+                publishSnapshot(early);
+                if (gen != m_generation) return;
+                // Successful, non-stale enumeration only; worker already resolved absolute root.
+                QSettings().setValue(QStringLiteral("project/lastFolder"), early->absoluteRoot);
+                m_state = QStringLiteral("parsing");
                 emit chartsChanged();
                 emit resourcesChanged();
                 emit summaryChanged();
-            },
-            Qt::QueuedConnection);
+                emit stateChanged();
+                if (trace) qInfo("project.scan GUI: generation=%llu stage=index publish_ms=%lld",
+                      static_cast<unsigned long long>(gen), static_cast<long long>(publish.elapsed()));
+            }, Qt::QueuedConnection);
 
-        beatbench::project::ScanOptions parse_opts;
-        parse_opts.parse = true;
-        try {
-            beatbench::project::scan_parse(*proj, parse_opts);
-        } catch (const std::exception&) {
-            // 逐谱容错已在 scan_parse 内；到这里说明整体失败，保留枚举结果
-        }
-        QMetaObject::invokeMethod(
-            this,
-            [this, gen, proj] {
+            if (cancelled->load()) return;
+            opts.parse = true;
+            functions.parse(*proj, opts);
+            const auto parseMs = timer.restart();
+            if (cancelled->load()) return;
+            auto ready = prepareSnapshot(std::move(proj), cancelled);
+            if (!ready || cancelled->load()) return;
+            if (trace) qInfo("project.scan worker: generation=%llu parse_ms=%lld prepare_ready_ms=%lld charts=%d resources=%d",
+                  static_cast<unsigned long long>(gen), static_cast<long long>(parseMs),
+                  static_cast<long long>(timer.elapsed()), static_cast<int>(ready->charts.size()),
+                  static_cast<int>(ready->resources.size()));
+            QMetaObject::invokeMethod(this, [this, gen, ready, trace] {
                 if (gen != m_generation) return;
-                m_project = proj;
-                rebuildCharts();
-                rebuildResources();
+                QElapsedTimer publish;
+                publish.start();
+                publishSnapshot(ready);
+                // Sessions/models are strictly GUI-owned; workers never inspect the registry.
                 refreshOpenStates();
+                if (gen != m_generation) return;
                 m_state = QStringLiteral("ready");
                 emit chartsChanged();
                 emit resourcesChanged();
                 emit summaryChanged();
                 emit stateChanged();
-            },
-            Qt::QueuedConnection);
+                if (trace) qInfo("project.scan GUI: generation=%llu stage=ready publish_ms=%lld",
+                      static_cast<unsigned long long>(gen), static_cast<long long>(publish.elapsed()));
+            }, Qt::QueuedConnection);
+        } catch (const beatbench::project::ProjectError& e) {
+            postFailure(qs(e.code()) + QStringLiteral(": ") + qs(e.what()));
+        } catch (const std::exception& e) {
+            postFailure(qs(e.what()));
+        } catch (...) {
+            postFailure(QStringLiteral("Project scan failed"));
+        }
     });
 }
 
 void ProjectController::cancel() {
-    ++m_generation;  // 在跑的任务回调作废
+    stopScan();
     if (m_state == QStringLiteral("indexing") || m_state == QStringLiteral("parsing")) {
-        m_state = QStringLiteral("cancelled");  // 已有枚举快照也不宣称完整解析就绪
+        m_state = QStringLiteral("cancelled");
         emit stateChanged();
     }
 }
 
 void ProjectController::clear() {
-    ++m_generation;
-    m_project.reset();
+    stopScan();
+    const auto gen = m_generation;
+    publishSnapshot({});
+    if (gen != m_generation) return;
     m_sliceTargets.clear();
     emit sliceTargetsChanged();
+    if (gen != m_generation) return;
     m_root.clear();
     m_errorText.clear();
-    m_charts.clear();
-    m_resources.clear();
-    m_missingCount = 0;
-    m_unreferencedCount = 0;
     m_state = QStringLiteral("idle");
     emit stateChanged();
     emit summaryChanged();
     emit chartsChanged();
     emit resourcesChanged();
-}
-
-void ProjectController::rebuildCharts() {
-    m_charts.clear();
-    if (!m_project) return;
-    m_charts.reserve(static_cast<int>(m_project->charts.size()));
-    for (const auto& c : m_project->charts) {
-        QVariantMap m = chartToMap(c);
-        m["absPath"] = absolutePath(qs(c.path));  // 与 openStates 键、切音目标寻址一致
-        m_charts.push_back(m);
-    }
-}
-
-void ProjectController::rebuildResources() {
-    m_resources.clear();
-    if (!m_project) return;
-    m_resources.reserve(static_cast<int>(m_project->resources.size()));
-    for (const auto& r : m_project->resources) m_resources.push_back(resourceToMap(r));
-    m_missingCount = static_cast<int>(m_project->missing_resources());
-    m_unreferencedCount = static_cast<int>(m_project->unreferenced_resources());
-    qInfo("project.scan: charts=%d resources=%d missing=%d unreferenced=%d",
-          static_cast<int>(m_project->charts.size()),
-          static_cast<int>(m_project->resources.size()), m_missingCount, m_unreferencedCount);
 }
 
 QVariantList ProjectController::filterResources(const QString& kind, bool onlyMissing,
@@ -301,6 +484,8 @@ void ProjectController::refreshOpenStates() {
     }
     if (next == m_openStates) return;  // 无变化不刷 UI
     m_openStates = next;
+    m_chartFilter->openStates = next;
+    if (m_chartFilter->onlyOpen) m_chartFilter->refilter();
     emit openStatesChanged();
 }
 
