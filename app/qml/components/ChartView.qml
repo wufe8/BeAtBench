@@ -22,13 +22,20 @@ Item {
     property var documentSession: typeof chartSession !== "undefined" ? chartSession : null
     // Read-only keeps selection/navigation/audition, but emits no document edits.
     property bool editable: true
+    // B is painted inside this viewport, never a second input surface.
+    property var referenceSession: null
+    property bool referenceOverlayEnabled: false
+    property color referenceOverlayColor: Theme.accent2
+    property real referenceOverlayOpacity: 0.45
+    property bool referenceOverlayHideSecondaryChannels: true
+    readonly property var referenceOverlayInfo: view.referenceOverlayInfo
     // 只有当前文档视图接全局播放时钟；固定副谱不跟随另一谱的 PCM/seek。
-    readonly property bool ownsPlayback: typeof chartSession !== "undefined"
+    readonly property bool ownsPlayback: root.editable && typeof chartSession !== "undefined"
                                         && root.documentSession === chartSession
     function restoreDocumentVisuals() {
         const info = root.documentSession ? root.documentSession.waveformInfo() : ({})
         waveformShown = info.valid === true
-        waveform.visible = waveformShown
+        waveformReady = waveformShown
         view.playheadSec = -1
     }
     onDocumentSessionChanged: Qt.callLater(root.restoreDocumentVisuals)
@@ -44,6 +51,7 @@ Item {
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
     property bool lnSelectMode: false    // LN 选取模式（默认关）：点 LN 任一段自动选配对两端
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
+    property bool hideSecondaryChannels: false
     property bool showGrid: true         // 槽位弱线显示开关（「网格」按钮；吸附不依赖此开关）
     /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
@@ -74,6 +82,12 @@ Item {
     /// M4.3c：波形条首次渲染后置 true（此后恒真）——内容变化隐藏波形条（stale）时
     /// **保留**右侧预留宽度，视口宽度不变 → 列不重排（用户 2026-09 移动 note 会跳位）。
     property bool waveformShown: false
+    property bool waveformReady: false
+    readonly property real waveformReservedWidth: waveformShown && !hideSecondaryChannels ? waveform.width : 0
+
+    signal viewportChanged()
+    signal navigationCompleted()
+    readonly property var viewportItem: view
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
@@ -104,10 +118,15 @@ Item {
         id: view
         anchors.fill: parent
         anchors.bottomMargin: 12   // 底部水平滚动条区域
-        anchors.rightMargin: (waveformShown ? (waveform.width + 12) : 12)  // 右侧波形条 + 垂直滚动条区域
+        anchors.rightMargin: root.waveformReservedWidth + 12  // 右侧波形条 + 垂直滚动条区域
         // ⚠️ 用 waveformShown（首次渲染后恒真）而非 waveform.visible：内容变化隐藏波形条
         // （stale）时保持视口宽度不变 → 列不再重排（用户 2026-09：移动 note 后所有 note 跳位）。
         session: root.documentSession
+        referenceSession: root.referenceSession
+        referenceOverlayEnabled: root.referenceOverlayEnabled
+        referenceOverlayColor: root.referenceOverlayColor
+        referenceOverlayOpacity: root.referenceOverlayOpacity
+        referenceOverlayHideSecondaryChannels: root.referenceOverlayHideSecondaryChannels
         theme: Theme
         measureHeight: root.measureHeight
         topHigh: root.topHigh
@@ -116,6 +135,7 @@ Item {
         noteSampleMode: root.noteSampleMode
         lnSelectMode: root.lnSelectMode
         showExtras: root.showExtras
+        hideSecondaryChannels: root.hideSecondaryChannels
         showGrid: root.showGrid
         selection: root.selection
         metaSelection: root.metaSelection
@@ -132,6 +152,7 @@ Item {
                        : root.editorTool === "note" ? "normal"
                        : root.editorTool === "ln" ? "ln"
                        : root.editorTool === "mine" ? "mine" : ""
+        onViewportAnchorChanged: root.viewportChanged()
         onChartChanged: {
             // 谱面切换 → 定位到起点（小节 0 落在播放线/视口 90%——开头留白兜底，
             // 避免「0-1 小节播放头锁不住 90% → 开始播放跳变」；2026-09 用户）
@@ -167,14 +188,16 @@ Item {
         anchors.topMargin: 0
         anchors.bottomMargin: 12   // 底部水平滚动条区域留白
         orientation: 1             // 垂直（右侧条；时间轴方向与视口一致 topHigh 感知）
-        visible: false              // 有波形时显示（renderFinished 后置 true）
+        visible: root.waveformReady && !root.hideSecondaryChannels
         width: 60
         // ⚠️ z 必须高于编辑区 MouseArea（后者默认 z:0 且声明在后 → 叠上层抢走点击，
         //   波形条点不动/拖动变成框选；2026-09 用户）。提 z 让波形条自收鼠标（点击/拖动 seek）。
         z: 5
         session: root.documentSession
         theme: Theme
-        // 视口状态绑定（换算可见窗口指示）
+        // Delegate variable-measure viewport geometry and own-timing clamping to A.
+        chartView: view
+        // 视口状态绑定（方向/重绘兼容绑定）
         measureHeight: root.measureHeight
         scrollY: view.scrollY
         contentHeight: view.contentHeight
@@ -191,13 +214,13 @@ Item {
         target: root.documentSession
         function onRenderFinished(ok, outPath, durationSec) {
             waveformShown = true
-            waveform.visible = ok
+            waveformReady = ok
         }
     }
     Connections {
         target: root.documentSession
         function onDocumentChanged() {
-            waveform.visible = false
+            waveformReady = false
             waveformShown = false
             view.playheadSec = -1  // 谱面切换：隐藏播放头（等新渲染/播放）
         }
@@ -257,8 +280,10 @@ Item {
     /// ⚠️ zoomAt 直接改 C++ measureHeight（锚点滚动计算），完成后回写 root.measureHeight
     /// 保持工具条「缩放 %」显示同步（root→view 单向绑定，回写同值不会二次缩放）。
     function zoomAt(y, factor) {
+        const previousHeight = view.measureHeight
         view.zoomAt(y, factor)
         root.measureHeight = view.measureHeight
+        if (view.measureHeight !== previousHeight) root.navigationCompleted()
     }
 
     // ---- 缩放级别（等比，无漂移）----
@@ -297,7 +322,7 @@ Item {
         const nIdx = up ? Math.min(lv.length - 1, idx + 1) : Math.max(0, idx - 1)
         if (nIdx === idx) return
         if (root.zoomToCursor) root.zoomAt(y, lv[nIdx] / lv[idx])
-        else root.measureHeight = lv[nIdx]
+        else { root.measureHeight = lv[nIdx]; root.navigationCompleted() }
     }
 
     WheelHandler {
@@ -324,16 +349,18 @@ Item {
             // 垂直滚动（pixelDelta 触控板优先；angleDelta 为滚轮档位）
             const dy = event.pixelDelta.y !== 0 ? event.pixelDelta.y
                                                 : event.angleDelta.y / 120 * 48
+            const previousY = view.scrollY
             view.scrollY -= dy
-            root.userScroll()  // 用户滚动 → 关跟随
+            root.userScroll(previousY)
             event.accepted = true
         }
     }
 
     /// 用户主动滚动：**不阻断**（跟随只在播放中锁定——用户 2026-09「只要在播放期间锁定即可」；
-    /// 暂停/停止可自由滚动浏览）。此函数保留为空壳（原自动关跟随逻辑废弃——硬锁定优先）。
-    function userScroll() {
-        // no-op：跟随开启时仅播放中锁定（见 onPlaybackChanged 的 playing 判定）
+    /// 暂停/停止可自由滚动浏览）。只报告导航，不自动关闭播放跟随（硬锁定优先）。
+    function userScroll(previousY) {
+        // Pure horizontal pans and clamped no-ops must not drive A from a short B.
+        if (Math.abs(view.scrollY - previousY) > 0.00000001) root.navigationCompleted()
     }
 
     // 手势（M3 接线）：列头命中 → 展开；否则按工具分发：
@@ -528,9 +555,10 @@ Item {
             return
         }
         if (_dragged) {
+            const previousY = view.scrollY
             view.scrollY -= (y - _lastY)
             view.scrollX -= (x - _lastX)
-            root.userScroll()  // 拖动滚动 → 关跟随
+            root.userScroll(previousY)
         }
         _lastY = y
         _lastX = x
@@ -687,8 +715,10 @@ Item {
                 const moved = Math.abs(mouse.y - root._pressY) + Math.abs(mouse.x - root._pressX)
                 if (moved > 4) root._dragged = true
                 if (root._dragged) {
+                    const previousY = view.scrollY
                     view.scrollY -= (mouse.y - root._lastY)
                     view.scrollX -= (mouse.x - root._lastX)
+                    root.userScroll(previousY)
                 }
                 root._lastY = mouse.y
                 root._lastX = mouse.x
@@ -736,7 +766,8 @@ Item {
         id: vbar
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: waveformShown ? waveform.left : parent.right
+        anchors.right: parent.right
+        anchors.rightMargin: root.waveformReservedWidth
         width: 12
         z: 2
         color: Theme.surface2
@@ -756,15 +787,17 @@ Item {
             property real grabOffset: 0
             onPressed: (mouse) => {
                 grabOffset = mouse.y - vthumb.y
+                const previousY = view.scrollY
                 view.scrollY = (mouse.y - vthumb.height / 2) /
                                Math.max(1, vbar.height - vthumb.height) * vbar.maxY
-                root.userScroll()
+                root.userScroll(previousY)
             }
             onPositionChanged: (mouse) => {
                 if (pressed) {
+                    const previousY = view.scrollY
                     view.scrollY = (mouse.y - grabOffset) /
                                    Math.max(1, vbar.height - vthumb.height) * vbar.maxY
-                    root.userScroll()
+                    root.userScroll(previousY)
                 }
             }
         }
@@ -826,7 +859,9 @@ Item {
 
     /// 秒 → 视口滚动（波形总览 seekRequested / --seek 调试走同一路径）。
     function seekToSeconds(sec) {
+        if (!isFinite(sec) || sec < 0) return
         view.scrollToTime(sec)
+        root.navigationCompleted()
     }
 
     /// M5 seek 交互：设播放位置 + 滚到红线（视口光标）。
@@ -834,12 +869,14 @@ Item {
     /// ② 视口滚到「该时间落红线(90%)」→ 红线读数 = 目标时间（非播放时红线显示就位）。
     /// 点秒标尺 / 波形条点击 / 波形条拖动（DAW 式 scrub）共用此路径。
     function seekTo(sec) {
+        if (!isFinite(sec) || sec < 0) return
         // 拖动静音定位（M5 收尾 2026-09）：scrub 拖动中只滚红线、**不触碰音频**（静音）；
         // 单点/标尺点击 = 正常 seek（音频跳转）。音频落到 release（WaveformOverviewItem）。
         const scrubbing = typeof waveform !== "undefined" && waveform && waveform.scrubbing
         if (root.ownsPlayback && !scrubbing && typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
             audioEngine.seekSeconds(sec)
         if (view) view.scrollCursorToSec(sec)
+        root.navigationCompleted()
     }
 
     /// note 引用 → 显示列下标（转发 ChartViewItem.columnIndexForRef；会话层拿连续列秩，

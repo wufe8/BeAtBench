@@ -13,11 +13,13 @@ import "../components"
 Item {
     id: root
 
+    signal primaryAssignRequested(string absolutePath)
+    signal referenceOpenRequested(string absolutePath)
+
     property string selectedChart: ""
     property string saveText: ""
     property var selectedResource: null
-    property var resModel: []
-    property var chModel: []
+    property var selectedChartInfo: ({})
     property bool onlyOpen: false
     property string chartSearch: ""
 
@@ -27,24 +29,22 @@ Item {
     property bool onlyUnreferenced: false
     property string searchText: ""
 
+    // C++ models expose visible rows only. Do not copy/filter the complete snapshot
+    // into JS arrays on every scan signal (including every nested resource use).
     function refreshResources() {
-        root.resModel = project.filterResources(root.kindFilter, root.onlyMissing,
-                                                root.onlyUnreferenced, root.searchText)
+        project.setResourceFilter(root.kindFilter, root.onlyMissing,
+                                  root.onlyUnreferenced, root.searchText)
+        if (root.selectedResource !== null) {
+            var detail = project.selectResource(root.selectedResource.path)
+            root.selectedResource = detail.path === undefined ? null : detail
+        }
     }
 
-    /// 谱面表筛选（仅已打开 / 路径子串）；数据源仍为 project.charts
     function refreshCharts() {
-        var src = project.charts
-        var out = []
-        var needle = root.chartSearch.trim().toLowerCase()
-        for (var i = 0; i < src.length; ++i) {
-            var c = src[i]
-            if (root.onlyOpen && !project.openStates[c.absPath]) continue
-            if (needle !== "" && c.path.toLowerCase().indexOf(needle) < 0) continue
-            out.push(c)
-        }
-        root.chModel = out
+        project.setChartFilter(root.onlyOpen, root.chartSearch)
+        root.selectedChartInfo = project.chartDetails(root.selectedChart)
     }
+    onSelectedChartChanged: root.selectedChartInfo = project.chartDetails(root.selectedChart)
 
     /// “未打开”是会话状态；清洁文档按是否实际保存区分“未修改 / 已保存”。
     function docBadge(m) {
@@ -96,7 +96,6 @@ Item {
         target: project
         function onResourcesChanged() { root.refreshResources() }
         function onChartsChanged() { root.refreshCharts() }
-        function onOpenStatesChanged() { root.refreshCharts() }
         function onStateChanged() {
             if (project.state === "indexing" || project.state === "idle") {
                 root.selectedChart = ""
@@ -197,7 +196,7 @@ Item {
                             onToggled: { root.onlyOpen = checked; root.refreshCharts() }
                         }
                         Label {
-                            text: qsTr("%1 项").arg(root.chModel.length)
+                            text: qsTr("%1 项").arg(chartList.count)
                             color: Theme.textMuted
                             font.pixelSize: Theme.fsSmall
                         }
@@ -233,15 +232,17 @@ Item {
 
                     ListView {
                         id: chartList
+                        objectName: "projectChartList"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        model: root.chModel
+                        model: project.chartModel
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {}
 
                         delegate: Rectangle {
                             id: chartRow
+                            objectName: "projectChartRow:" + modelData.path
                             required property var modelData
                             width: chartList.width
                             height: 24
@@ -314,10 +315,8 @@ Item {
                             Layout.fillWidth: true
                             visible: root.selectedChart !== ""
                             text: {
-                                var c = null
-                                for (var i = 0; i < project.charts.length; ++i)
-                                    if (project.charts[i].path === root.selectedChart) { c = project.charts[i]; break }
-                                if (c === null) return ""
+                                var c = root.selectedChartInfo
+                                if (c.path === undefined) return ""
                                 return (c.title || qsTr("(无标题)")) + " — " + (c.artist || "?")
                                        + "  ·  " + (c.genre || "?") + "  ·  " + (c.mode || "?")
                             }
@@ -328,9 +327,14 @@ Item {
                         RowLayout {
                             spacing: 6
                             BbToolButton {
-                                text: qsTr("在编辑页打开")
+                                text: qsTr("在 A 中编辑")
                                 enabled: root.selectedChart !== ""
-                                onClicked: project.openChart(root.selectedChart)
+                                onClicked: root.primaryAssignRequested(project.absolutePath(root.selectedChart))
+                            }
+                            BbToolButton {
+                                text: qsTr("在 B 中对照")
+                                enabled: root.selectedChart !== ""
+                                onClicked: root.referenceOpenRequested(project.absolutePath(root.selectedChart))
                             }
                             BbToolButton {
                                 text: qsTr("保存全部已打开")
@@ -406,7 +410,7 @@ Item {
                             onTextChanged: { root.searchText = text; root.refreshResources() }
                         }
                         Label {
-                            text: qsTr("%1 项").arg(root.resModel.length)
+                            text: qsTr("%1 项").arg(resList.count)
                             color: Theme.textMuted
                             font.pixelSize: Theme.fsSmall
                         }
@@ -430,10 +434,11 @@ Item {
 
                     ListView {
                         id: resList
+                        objectName: "projectResourceList"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        model: root.resModel
+                        model: project.resourceModel
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {}
 
@@ -449,7 +454,7 @@ Item {
                             HoverHandler { id: resHover }
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: root.selectedResource = resRow.modelData
+                                onClicked: root.selectedResource = project.selectResource(resRow.modelData.path)
                             }
 
                             RowLayout {
@@ -509,11 +514,19 @@ Item {
                             font.pixelSize: Theme.fsSmall
                             elide: Text.ElideMiddle
                         }
-                        Repeater {
-                            model: root.selectedResource === null ? [] : root.selectedResource.uses
+                        ListView {
+                            id: resourceUsesList
+                            objectName: "projectResourceUsesList"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(contentHeight, 100)
+                            clip: true
+                            visible: root.selectedResource !== null
+                            model: project.resourceUsesModel
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.vertical: ScrollBar {}
                             delegate: Label {
                                 required property var modelData
-                                Layout.fillWidth: true
+                                width: resourceUsesList.width
                                 text: "· " + modelData.chart + "  [" + modelData.source + "] "
                                       + (modelData.id !== "" ? ("#" + modelData.kind + modelData.id)
                                                              : ("#" + modelData.field))

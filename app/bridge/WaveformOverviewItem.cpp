@@ -11,6 +11,7 @@
 #include <cmath>
 
 #include "bridge/ChartSession.hpp"
+#include "bridge/ChartViewItem.hpp"
 #include "bridge/ThemeManager.hpp"
 #include "beatbench/audio/WaveformPyramid.hpp"
 
@@ -23,6 +24,7 @@ constexpr qreal kSeekThresholdPx = 2.0;  // 点击 vs 拖动阈值（拖动起�
 WaveformOverviewItem::WaveformOverviewItem(QQuickItem* parent) : QQuickPaintedItem(parent) {
     setAntialiasing(true);
     setAcceptedMouseButtons(Qt::LeftButton);
+    setKeepMouseGrab(true);  // The overview owns its whole gesture, even outside its bounds.
     setCursor(QCursor(Qt::PointingHandCursor));
     setImplicitHeight(36.0);
 }
@@ -37,6 +39,9 @@ ThemeManager* WaveformOverviewItem::themeObj() const {
 
 void WaveformOverviewItem::setSession(QObject* session) {
     if (m_session == session) return;
+    if (m_pressed) ungrabMouse();
+    m_pressed = false;
+    setScrubbing(false);
     if (auto* old = sessionObj()) disconnect(old, nullptr, this, nullptr);
     m_session = session;
     if (auto* cs = sessionObj()) {
@@ -47,6 +52,31 @@ void WaveformOverviewItem::setSession(QObject* session) {
         connect(cs, &ChartSession::contentChanged, this, [this] { update(); });
     }
     emit sessionChanged();
+    update();
+}
+
+void WaveformOverviewItem::setChartView(QObject* view) {
+    if (m_chartView == view) return;
+    for (const auto& connection : m_chartViewConnections) disconnect(connection);
+    m_chartViewConnections.clear();
+    m_chartView = view;
+    if (auto* chart = qobject_cast<ChartViewItem*>(view)) {
+        const auto repaint = [this] { update(); };
+        m_chartViewConnections = {
+            connect(chart, &ChartViewItem::scrollYChanged, this, repaint),
+            connect(chart, &ChartViewItem::contentHeightChanged, this, repaint),
+            connect(chart, &ChartViewItem::measureHeightChanged, this, repaint),
+            connect(chart, &ChartViewItem::topHighChanged, this, repaint),
+            connect(chart, &QQuickItem::heightChanged, this, repaint),
+            connect(chart, &ChartViewItem::sessionChanged, this, repaint),
+            connect(chart, &ChartViewItem::chartChanged, this, repaint),
+            connect(chart, &QObject::destroyed, this, [this] {
+                m_chartView = nullptr;
+                emit chartViewChanged();
+                update();
+            })};
+    }
+    emit chartViewChanged();
     update();
 }
 
@@ -120,36 +150,14 @@ QString WaveformOverviewItem::formatTime(double sec) {
     return QString::asprintf("%d:%02d", m, s);
 }
 
-WaveformOverviewItem::ViewWindow WaveformOverviewItem::viewWindow() const {
-    ViewWindow w{0.0, 0.0};
-    const ChartSession* cs = sessionObj();
-    if (!cs || !cs->timing() || !cs->chart()) return w;
-    if (m_contentHeight <= 0.0 || m_measureHeight <= 0.0) return w;
-    // 内容坐标（拍位）：topHigh 下内容自下而上 → 视口上下缘对应内容坐标区间。
-    // ✂️ M5.2 开头留白：contentCoord → 拍位须扣 lead（contentHeight 已含 lead；
-    //    与 ChartViewItem::measureAt 同构）。未扣则视口窗整体偏往未来（用顶/底基准都不准）。
-    const qreal cLo = m_topHigh ? (m_contentHeight - (m_scrollY + m_viewportHeight))
-                                : m_scrollY;
-    const qreal cHi = m_topHigh ? (m_contentHeight - m_scrollY) : (m_scrollY + m_viewportHeight);
-    const qreal mfLo = cLo / m_measureHeight - m_leadMeasures;
-    const qreal mfHi = cHi / m_measureHeight - m_leadMeasures;
-    // 拍位 → 秒：TimingEngine::time_us(Position{m, pos})（pos = 小节内分数，微小节精度）
-    const auto toSec = [&](qreal mf) -> double {
-        if (mf < 0.0) mf = 0.0;
-        const std::uint32_t msec = static_cast<std::uint32_t>(mf);
-        const double frac = mf - msec;
-        // Rational(num, den)：frac 乘 1e6 取整（近似足够；BPM 变化在小节内线性段）
-        const beatbench::Rational pos(static_cast<std::int64_t>(std::lround(frac * 1e6)),
-                                      1000000);
-        const beatbench::Position p{msec, pos};
-        return static_cast<double>(cs->timing()->time_us(p)) / 1e6;
-    };
-    double t0 = toSec(mfLo);
-    double t1 = toSec(mfHi);
-    if (t0 > t1) std::swap(t0, t1);
-    w.t0 = std::min(t0, t1);
-    w.t1 = std::max(t0, t1);
-    return w;
+QVariantMap WaveformOverviewItem::viewportTimeWindow() const {
+    const auto* view = qobject_cast<ChartViewItem*>(m_chartView.data());
+    // Do not independently approximate measures with base-height division, or
+    // accidentally combine B geometry with A timing. Unwired/mismatched is hidden.
+    if (!view || view->session() != m_session)
+        return {{QStringLiteral("valid"), false},
+                {QStringLiteral("t0"), 0.0}, {QStringLiteral("t1"), 0.0}};
+    return view->viewportTimeWindow();
 }
 
 void WaveformOverviewItem::requestSeek(qreal x) {
@@ -170,31 +178,49 @@ void WaveformOverviewItem::mousePressEvent(QMouseEvent* event) {
         // ⚠️ 必须 accept 以拿到鼠标捕获：否则按下后 move/release 不会派发给本 item
         // （编辑器 MouseArea 在下方 z:0，会在拖动过程中接走事件）→ 点击能跳但拖动不生效。
         event->accept();
-        const QPointF p = event->position();
-        requestSeek(m_orientation == 1 ? p.y() : p.x());
+        m_pressed = true;
+        setScrubbing(false);
+        m_pressPosition = event->position();
+        requestSeek(m_orientation == 1 ? m_pressPosition.y() : m_pressPosition.x());
+        return;  // QQuickItem's default implementation ignores the event again.
     }
     QQuickPaintedItem::mousePressEvent(event);
 }
 
 void WaveformOverviewItem::mouseMoveEvent(QMouseEvent* event) {
-    if (event->buttons() & Qt::LeftButton) {
+    if (m_pressed && (event->buttons() & Qt::LeftButton)) {
         event->accept();
-        // 拖动 = DAW 式 scrub：进入 scrubbing → ChartView 门控音频 seek（静音定位，只滚红线）
-        if (!m_scrubbing) setScrubbing(true);
         const QPointF p = event->position();
-        requestSeek(m_orientation == 1 ? p.y() : p.x());
+        if (!m_scrubbing && (p - m_pressPosition).manhattanLength() >= kSeekThresholdPx)
+            setScrubbing(true);
+        // Moves are silent; tiny click jitter must not turn a click into a scrub.
+        if (m_scrubbing) requestSeek(m_orientation == 1 ? p.y() : p.x());
+        return;
     }
     QQuickPaintedItem::mouseMoveEvent(event);
 }
 
 void WaveformOverviewItem::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton && m_scrubbing) {
-        // 拖动结束：把音频落到最终位置（无位移=单点，press 已跳，不再重复 seek）
-        const QPointF p = event->position();
-        requestSeek(m_orientation == 1 ? p.y() : p.x());
+    if (event->button() == Qt::LeftButton && m_pressed) {
+        event->accept();
+        const bool dragged = m_scrubbing;
+        m_pressed = false;
+        // End scrub BEFORE notifying QML, otherwise its audio gate drops the final seek.
+        setScrubbing(false);
+        if (dragged) {
+            const QPointF p = event->position();
+            requestSeek(m_orientation == 1 ? p.y() : p.x());
+        }
+        return;
     }
-    setScrubbing(false);
     QQuickPaintedItem::mouseReleaseEvent(event);
+}
+
+void WaveformOverviewItem::mouseUngrabEvent() {
+    // Hidden/rebound/cancelled gestures do not commit a stale release to another document.
+    m_pressed = false;
+    setScrubbing(false);
+    QQuickPaintedItem::mouseUngrabEvent();
 }
 
 void WaveformOverviewItem::paint(QPainter* p) {
@@ -274,10 +300,12 @@ void WaveformOverviewItem::paint(QPainter* p) {
     }
 
     // ---- 视口窗指示（半透明覆盖 + 可拖拽边缘感） ----
-    const auto win = viewWindow();
-    if (win.t1 > win.t0 && dur > 0.0) {
-        qreal a0 = static_cast<qreal>(win.t0 / dur);
-        qreal a1 = static_cast<qreal>(win.t1 / dur);
+    const auto win = viewportTimeWindow();
+    const double t0 = win.value(QStringLiteral("t0")).toDouble();
+    const double t1 = win.value(QStringLiteral("t1")).toDouble();
+    if (win.value(QStringLiteral("valid")).toBool() && dur > 0.0) {
+        qreal a0 = std::clamp(static_cast<qreal>(t0 / dur), qreal(0), qreal(1));
+        qreal a1 = std::clamp(static_cast<qreal>(t1 / dur), qreal(0), qreal(1));
         if (m_orientation == 1 && m_topHigh) {  // 垂直条：0s 在底部 → 窗翻转
             std::swap(a0, a1);
             a0 = 1.0 - a0;
@@ -307,10 +335,10 @@ void WaveformOverviewItem::paint(QPainter* p) {
     p->setPen(th ? th->textFaint() : QColor(QStringLiteral("#6b7484")));
     if (m_orientation == 1) {
         p->drawText(QRectF(0, h - 14, w, 14), Qt::AlignCenter,
-                    QStringLiteral("%1").arg(formatTime(win.t0)));
+                    QStringLiteral("%1").arg(formatTime(t0)));
     } else {
         p->drawText(QRectF(4, 0, w - 8, h), Qt::AlignRight | Qt::AlignVCenter,
-                    QStringLiteral("%1 / %2").arg(formatTime(win.t0)).arg(formatTime(dur)));
+                    QStringLiteral("%1 / %2").arg(formatTime(t0)).arg(formatTime(dur)));
     }
 }
 

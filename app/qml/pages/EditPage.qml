@@ -11,6 +11,19 @@ import "../components"  // BbTabButton（页面工具条等，默认皮肤组件
 
 Item {
     id: root
+    property var documentService: null
+    property bool hideSecondaryChannels: true
+    function prepareReferenceSwap() { compareSplit.prepareSwap() }
+    function abortReferenceSwap() { compareSplit.discardPreparedSwap() }
+    function openReference(documentId) { return compareSplit.openReference(documentId) }
+    signal referenceSwapRequested(string documentId)
+    readonly property bool referenceFocused: compareSplit.referenceFocused
+    function activatePrimary() { compareSplit.referenceFocused = false }
+    function finishReferenceSwap(previousId) {
+        compareSplit.selectReference(previousId)
+        compareSplit.finishSwapViewport()
+        activatePrimary()
+    }
     property var chartMeta: null
     property string chartPath: ""
     /// 元信息面板草稿脏（dirtyTick>0）；Main 把它并入关闭/新建/打开确认。
@@ -34,7 +47,10 @@ Item {
     /// 不再聚焦，focus 语义达不到「点击即亮」；用页级 propagate MouseArea 记录（accept=false
     /// 不拦截，事件继续传给下层控件）。
     property string focusRegionId: ""
-    onVisibleChanged: if (!visible) focusRegionId = ""
+    onVisibleChanged: if (!visible) {
+        focusRegionId = ""
+        compareSplit.referenceFocused = false
+    }
 
     /// 页内点击 → 区域 id（区域矩形命中判断；点中三区以外 → ""）。
     function regionAt(mx, my) {
@@ -54,6 +70,8 @@ Item {
         propagateComposedEvents: true
         onPressed: (mouse) => {
             focusRegionId = regionAt(mouse.x, mouse.y)
+            if (focusRegionId === "editLeft" || focusRegionId === "editRight")
+                compareSplit.referenceFocused = false
             mouse.accepted = false
         }
     }
@@ -364,87 +382,142 @@ Item {
                 border.color: root.focusRegionId === "editCenter" ? Theme.focusRing : Theme.border
             }
 
-            ColumnLayout {
+            ChartCompareSplit {
+                id: compareSplit
                 anchors.fill: parent
                 anchors.margins: 4
-                spacing: 0
+                documentService: root.documentService
+                hideSecondaryChannels: root.hideSecondaryChannels
+                editorTool: root.editorTool
+                showExtras: root.showExtras
+                primarySession: chartSession
+                primaryChartView: chartView
+                onSwapRequested: (id) => root.referenceSwapRequested(id)
+                onAreaPressed: root.editAreaPressed()
 
-                // 视口头（对照 preview.html .viewport-head）
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 30
-                    color: Theme.surface
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 12
-                        Label {
-                            text: qsTr("编辑工作区 · <b>%1</b> · %2/%3 snap").arg(root.modeLabel).arg(root.snapNum).arg(root.snapDen)
-                            color: Theme.textMuted
-                            font.family: Theme.fontMono
-                            font.pixelSize: Theme.fsSmall
-                            textFormat: Text.RichText
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    // 视口头（叠加模式由共享 B 控制条占用同高区域）
+                    Rectangle {
+                        visible: !compareSplit.overlayMode
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 30
+                        color: Theme.surface
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 4
+                            anchors.rightMargin: 12
+                            spacing: 12
+                            BbToolButton {
+                                objectName: "overlayModeButton"
+                                text: qsTr("同屏叠加")
+                                enabled: root.documentService !== null && chartSession !== null
+                                onClicked: compareSplit.setOverlayMode(true)
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("在 A 下方绘制半透明 B 参考音符，不计算差异；仅 A 可编辑和播放")
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                elide: Text.ElideRight
+                                text: qsTr("A · 编辑 · %1 · %2 · %3/%4 snap")
+                                      .arg(root.chartPath ? root.chartPath.replace(/\\/g, "/").split("/").pop() : qsTr("未命名"))
+                                      .arg(root.modeLabel).arg(root.snapNum).arg(root.snapDen)
+                                color: Theme.textMuted
+                                font.family: Theme.fontMono
+                                font.pixelSize: Theme.fsSmall
+                                textFormat: Text.PlainText
+                                HoverHandler { id: primaryHeaderHover }
+                                ToolTip.visible: primaryHeaderHover.hovered
+                                ToolTip.text: root.chartPath || qsTr("未命名谱面")
+                            }
+                            Label {
+                                text: root.chartMeta
+                                      ? qsTr("BPM %1").arg(root.chartMeta.BPM !== undefined ? root.chartMeta.BPM : "—")
+                                      : qsTr("打开谱面开始编辑（Ctrl+O）")
+                                color: root.chartMeta ? Theme.accent : Theme.textFaint
+                                font.family: Theme.fontMono
+                                font.pixelSize: Theme.fsSmall
+                            }
                         }
-                        Item { Layout.fillWidth: true }
-                        Label {
-                            text: root.chartMeta
-                                  ? qsTr("BPM %1").arg(root.chartMeta.BPM !== undefined ? root.chartMeta.BPM : "—")
-                                  : qsTr("打开谱面开始编辑（Ctrl+O）")
-                            color: root.chartMeta ? Theme.accent : Theme.textFaint
-                            font.family: Theme.fontMono
-                            font.pixelSize: Theme.fsSmall
+                        Rectangle {  // 下边框
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: Theme.border
                         }
                     }
-                    Rectangle {  // 下边框
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        height: 1
-                        color: Theme.border
-                    }
-                }
 
-                // 视口主体（M2 第 5 步：竖向时间轴，真数据 ChartSession）
-                ChartView {
-                    id: chartView
-                    documentSession: chartSession
-                    editable: true
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    showChannelIds: root.showChannelIds
-                    bgmExpanded: root.bgmExpanded
-                    noteSampleMode: root.noteSampleMode
-                    lnSelectMode: root.lnSelectMode
-                    showExtras: root.showExtras
-                    showGrid: root.showGrid
-                    editorTool: root.editorTool
-                    moveMode: root.moveMode
-                    // M5.2 播放头跟随：单向绑定（root.followPlayhead = chartView 的值；
-                    // 用户滚动 ChartView 内部改——此处不设值，只让 root 读）
-                    followPlayhead: root.followPlayhead
-                    sampleId: root.sampleId
-                    sampleText: root.sampleText
-                    selection: root.selection
-                    metaSelection: root.metaSelection
-                    snapNum: root.snapNum
-                    snapDen: root.snapDen
-                    zoomToCursor: root.zoomToCursor
-                    perfLog: root.perfLog
-                    onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
-                    onSelectionFinished: (refs) => root.selectionFinished(refs)
-                    onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
-                    onPlayNoteSample: (ref) => root.playNoteSample(ref)
-                    onCanvasClicked: () => root.canvasClicked()
-                    onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
-                    onNoteEditRequested: (ref) => root.noteEditRequested(ref)
-                    onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => root.moveSelectionRequested(deltaF, targetLane, sourceLane, sourceBgmLine)
-                    onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
-                    onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
-                        root.metaMoveRequested(kind, obj, deltaF, targetLane)
-                    onMetaRightDeleted: (obj) => root.metaRightDeleted(obj)
-                    onMetaEditRequested: (obj) => root.metaEditRequested(obj)
-                    onEditAreaPressed: root.editAreaPressed()
+                    // 视口主体（M2 第 5 步：竖向时间轴，真数据 ChartSession）
+                    ChartView {
+                        id: chartView
+                        documentSession: chartSession
+                        editable: true
+                        referenceSession: compareSplit.referenceSession
+                        referenceOverlayEnabled: compareSplit.overlayMode && compareSplit.overlayVisible && root.visible
+                        referenceOverlayOpacity: compareSplit.overlayOpacity
+                        referenceOverlayHideSecondaryChannels: root.hideSecondaryChannels
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        showChannelIds: root.showChannelIds
+                        bgmExpanded: root.bgmExpanded
+                        noteSampleMode: root.noteSampleMode
+                        lnSelectMode: root.lnSelectMode
+                        showExtras: root.showExtras
+                        showGrid: root.showGrid
+                        editorTool: root.editorTool
+                        moveMode: root.moveMode
+                        // M5.2 播放头跟随：单向绑定（root.followPlayhead = chartView 的值；
+                        // 用户滚动 ChartView 内部改——此处不设值，只让 root 读）
+                        followPlayhead: root.followPlayhead
+                        sampleId: root.sampleId
+                        sampleText: root.sampleText
+                        selection: root.selection
+                        metaSelection: root.metaSelection
+                        snapNum: root.snapNum
+                        snapDen: root.snapDen
+                        zoomToCursor: root.zoomToCursor
+                        perfLog: root.perfLog
+                        onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
+                        onSelectionFinished: (refs) => root.selectionFinished(refs)
+                        onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
+                        onPlayNoteSample: (ref) => root.playNoteSample(ref)
+                        onCanvasClicked: () => root.canvasClicked()
+                        onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
+                        onNoteEditRequested: (ref) => root.noteEditRequested(ref)
+                        onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => root.moveSelectionRequested(deltaF, targetLane, sourceLane, sourceBgmLine)
+                        onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
+                        onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
+                            root.metaMoveRequested(kind, obj, deltaF, targetLane)
+                        onMetaRightDeleted: (obj) => root.metaRightDeleted(obj)
+                        onMetaEditRequested: (obj) => root.metaEditRequested(obj)
+                        onEditAreaPressed: root.editAreaPressed()
+                    }
+                    // Match B's status row so equal musical anchors also share screen Y.
+                    Label {
+                        visible: compareSplit.expanded || compareSplit.overlayMode
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.preferredHeight: 20
+                        text: compareSplit.overlayMode
+                              ? qsTr("B 半透明参考 · 使用 A 拍位/轨道 · 仅 A 编辑和播放")
+                                + (chartView.referenceOverlayInfo.unmapped > 0
+                                   ? qsTr(" · %1 个音符无对应轨道").arg(chartView.referenceOverlayInfo.unmapped) : "")
+                                + (chartView.referenceOverlayInfo.hidden > 0
+                                   ? qsTr(" · %1 个次要轨道音符已隐藏").arg(chartView.referenceOverlayInfo.hidden) : "")
+                                + (!compareSplit.structureStatus.compatible ? qsTr(" · 时序/结构不同") : "")
+                              : compareSplit.synchronizeViewports
+                                ? qsTr("拍位同步 · 仅 A 播放") : qsTr("独立视口 · 仅 A 播放")
+                        HoverHandler { id: overlayStatusHover }
+                        ToolTip.visible: overlayStatusHover.hovered
+                        ToolTip.text: compareSplit.structureStatus.message || text
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.fsSmall
+                        elide: Text.ElideRight
+                    }
                 }
             }
         }

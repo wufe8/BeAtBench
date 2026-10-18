@@ -13,6 +13,8 @@
 #include <QFont>
 #include <QImage>
 #include <QQuickPaintedItem>
+#include <QPointer>
+#include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 #include <vector>
@@ -34,11 +36,18 @@ class ChartViewItem : public QQuickPaintedItem {
     QML_ELEMENT
 
     Q_PROPERTY(QObject* session READ session WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(QObject* referenceSession READ referenceSession WRITE setReferenceSession NOTIFY referenceSessionChanged)
+    Q_PROPERTY(bool referenceOverlayEnabled READ referenceOverlayEnabled WRITE setReferenceOverlayEnabled NOTIFY referenceOverlayEnabledChanged)
+    Q_PROPERTY(QColor referenceOverlayColor READ referenceOverlayColor WRITE setReferenceOverlayColor NOTIFY referenceOverlayColorChanged)
+    Q_PROPERTY(qreal referenceOverlayOpacity READ referenceOverlayOpacity WRITE setReferenceOverlayOpacity NOTIFY referenceOverlayOpacityChanged)
+    Q_PROPERTY(bool referenceOverlayHideSecondaryChannels READ referenceOverlayHideSecondaryChannels WRITE setReferenceOverlayHideSecondaryChannels NOTIFY referenceOverlayHideSecondaryChannelsChanged)
+    Q_PROPERTY(QVariantMap referenceOverlayInfo READ referenceOverlayInfo NOTIFY referenceOverlayInfoChanged)
     Q_PROPERTY(QObject* theme READ theme WRITE setTheme NOTIFY themeChanged)
     Q_PROPERTY(qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
     Q_PROPERTY(qreal rulerWidth READ rulerWidth WRITE setRulerWidth NOTIFY rulerWidthChanged)
     Q_PROPERTY(qreal laneWidth READ laneWidth WRITE setLaneWidth NOTIFY laneWidthChanged)
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollYChanged)
+    Q_PROPERTY(QVariantMap viewportAnchor READ viewportAnchor NOTIFY viewportAnchorChanged)
     Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
     /// 吸附粒度 = snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）。
@@ -55,6 +64,7 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(bool lnSelectMode READ lnSelectMode WRITE setLnSelectMode NOTIFY lnSelectModeChanged)
     /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式，doc 参考 local/doc 截图）
     Q_PROPERTY(bool showExtras READ showExtras WRITE setShowExtras NOTIFY showExtrasChanged)
+    Q_PROPERTY(bool hideSecondaryChannels READ hideSecondaryChannels WRITE setHideSecondaryChannels NOTIFY hideSecondaryChannelsChanged)
     /// 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
     /// 水平滚动（列区；轨道列超宽时用——底部滚动条 / Shift+滚轮 / Shift+拖拽）
@@ -105,6 +115,20 @@ public:
 
     QObject* session() const { return m_session; }
     void setSession(QObject* session);
+    QObject* referenceSession() const { return m_referenceSession.data(); }
+    void setReferenceSession(QObject* session);
+    bool referenceOverlayEnabled() const { return m_referenceOverlayEnabled; }
+    void setReferenceOverlayEnabled(bool enabled);
+    QColor referenceOverlayColor() const { return m_referenceOverlayColor; }
+    void setReferenceOverlayColor(const QColor& color);
+    qreal referenceOverlayOpacity() const { return m_referenceOverlayOpacity; }
+    void setReferenceOverlayOpacity(qreal opacity);
+    bool referenceOverlayHideSecondaryChannels() const { return m_referenceOverlayHideSecondaryChannels; }
+    void setReferenceOverlayHideSecondaryChannels(bool hide);
+    /// Counts are source note endpoints, not differences or viewport-culling counts.
+    /// A's columns/measure lengths remain authoritative; B may extend view-only extent.
+    QVariantMap referenceOverlayInfo() const;
+    Q_INVOKABLE QVariantMap referenceOverlayProbe(int sourceIndex) const;
     QObject* theme() const { return m_theme; }
     void setTheme(QObject* theme);
 
@@ -158,6 +182,18 @@ public:
     void setMoveSourceBgmLine(int v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
+    /// Musical position at normalized viewport y=0.9; negative lead/tail positions are valid.
+    QVariantMap viewportAnchor() const;
+    Q_INVOKABLE void applyViewportAnchor(const QVariantMap& anchor);
+    /// Compare with another ChartSession: timing/layout only, not note contents or view-local state.
+    Q_INVOKABLE QVariantMap compareStructure(QObject* other) const;
+    /// Own timing, no audio dependency. Invalid input returns -1 / {valid:false}.
+    /// Fractions are [0,1], including a measure-end boundary; seconds beyond the end clamp.
+    Q_INVOKABLE double secondsForPosition(int measure, double fraction) const;
+    Q_INVOKABLE QVariantMap positionForSeconds(double sec) const;
+    /// Visible own-timing interval using live variable-measure geometry. Lead and
+    /// decorative B tail clamp to A endpoints; valid=false means no overlap.
+    Q_INVOKABLE QVariantMap viewportTimeWindow() const;
     qreal contentHeight() const;
     bool topHigh() const { return m_topHigh; }
     void setTopHigh(bool v);
@@ -178,6 +214,8 @@ public:
     void setLnSelectMode(bool v);
     bool showExtras() const { return m_showExtras; }
     void setShowExtras(bool v);
+    bool hideSecondaryChannels() const { return m_hideSecondaryChannels; }
+    void setHideSecondaryChannels(bool v);
     bool showGrid() const { return m_showGrid; }
     void setShowGrid(bool v);
     qreal scrollX() const { return m_scrollX; }
@@ -269,6 +307,12 @@ public:
 
 signals:
     void sessionChanged();
+    void referenceSessionChanged();
+    void referenceOverlayEnabledChanged();
+    void referenceOverlayColorChanged();
+    void referenceOverlayOpacityChanged();
+    void referenceOverlayHideSecondaryChannelsChanged();
+    void referenceOverlayInfoChanged();
     void themeChanged();
     void measureHeightChanged();
     void rulerWidthChanged();
@@ -285,6 +329,7 @@ signals:
     void noteSampleModeChanged();
     void lnSelectModeChanged();
     void showExtrasChanged();
+    void hideSecondaryChannelsChanged();
     void showGridChanged();
     void scrollXChanged();
     void contentWidthChanged();
@@ -299,6 +344,8 @@ signals:
     /// 视口光标（红线）读数变化：scrollY / contentHeight / topHigh / measureHeight /
     /// 尺寸（height）任一变化 → 红线下方内容拍位变 → 状态栏时间随之刷新。
     void cursorChanged();
+    /// Coalesced until the current scroll/layout/chart update has settled.
+    void viewportAnchorChanged();
     /// 滚动上限变化（height/contentHeight/topHigh/measureHeight 任一变化）。
     void maxScrollYChanged();
     void previewNoteKindChanged();
@@ -329,6 +376,8 @@ private:
         bool stop = false;           // STOP 元事件轨（同上）
     };
 
+    void scheduleViewportAnchorChanged();
+    bool m_viewportAnchorNotificationPending = false;
     void onSessionChartChanged();
     void onSessionContentChanged();
     void updateHover(const QPointF& pos);
@@ -336,6 +385,22 @@ private:
     ThemeManager* themeObj() const;
     /// M6 预览：paint 尾部绘制 ghost note（放置 + 移动预览共用）。
     void drawPreview(QPainter* p) const;
+    struct ReferenceGeometry {
+        QString status = QStringLiteral("invalid");
+        int column = -1;
+        QRectF rect;
+        QRectF body;
+        bool mine = false;
+        bool paired = false;
+    };
+    std::vector<QRectF> columnRects() const;
+    QRectF referenceOverlayClip() const;
+    ReferenceGeometry referenceGeometry(int sourceIndex, const std::vector<QRectF>& columns,
+                                        int sourceCount = -1, int viewCount = -1) const;
+    void drawReferenceOverlay(QPainter* painter) const;
+    void invalidateReferenceOverlay();
+    void onReferenceContentChanged();
+    void rebuildReferenceExtent(const QVariantMap& anchor);
     /// 画一个半透明 ghost note（normal 矩形 / mine 菱形 / ln 有帽矩形）。
     void drawNoteGhost(QPainter* p, qreal measureFloat, const beatbench::Lane& lane,
                        const QString& noteKind, std::uint32_t sample, int subLine) const;
@@ -397,12 +462,14 @@ private:
     /// 有效小节数（2026-09 谱面从头/末尾追加）：max(编辑 floor, 真实小节数)。
     /// floor = m_editableMeasures（「加一小节」抬升）；真实小节数 = session.measureCount()。
     int effectiveCount() const;
+    /// Decorative extent only; never used to extend editable floor or hit-test bounds.
+    int viewMeasureCount() const;
     qreal measureHeightAt(int measure) const;
     /// 内容坐标（不含 scrollY，自顶向下）中某拍位的线性位置（含开头留白；topHigh 感知交 contentPosOf）。
     qreal linearPosOf(qreal measureFloat) const;
     /// linearPosOf 的逆（内容 lin 坐标 → 拍位；留白区返回负拍位）。
     qreal inverseLinearPos(qreal lin) const;
-    /// 重建每小节高度缓存（谱面/内容/缩放变化时；O(有效小节数+measure_events)）。
+    /// 重建每小节高度缓存（谱面/内容/缩放变化时；O(显示小节数+measure_events)）。
     void rebuildMeasureHeights();
     /// 尾部留白小节数（2026-09 结尾红线钳制修复）：保证红线(90%)能滚到「最后小节结尾」。
     /// = max(2, ceil(0.9·height()/measureHeight))，使尾部高度 ≈ 0.9·视口高（纯视口偏移，不改时序/渲染）。
@@ -410,7 +477,14 @@ private:
 
     void drawHint(QPainter* p, const QString& text);
 
-    QObject* m_session = nullptr;
+    QPointer<QObject> m_session;
+    std::vector<QMetaObject::Connection> m_sessionConnections;
+    QPointer<QObject> m_referenceSession;
+    std::vector<QMetaObject::Connection> m_referenceConnections;
+    bool m_referenceOverlayEnabled = false;
+    QColor m_referenceOverlayColor = QColor(QStringLiteral("#38c6b0")); // QML may bind Theme.accent2
+    qreal m_referenceOverlayOpacity = 0.45;
+    bool m_referenceOverlayHideSecondaryChannels = true;
     QObject* m_theme = nullptr;
     qreal m_measureHeight = 96.0;
     // —— 02 通道小节长度：每小节高度按拍数等比（base=4/4；变拍/长小节视觉可见） ——
@@ -442,6 +516,7 @@ private:
     int m_noteSampleMode = 0;  // note 采样标签：0=隐藏 1=id 2=文件名
     bool m_lnSelectMode = false;  // LN 选取模式（默认关）：点 LN 任一段自动返回配对
     bool m_showExtras = false;  // BGA 图层通道列（d场景更多轨道）
+    bool m_hideSecondaryChannels = false;
     bool m_showGrid = true;   // 槽位弱线显示开关（「网格」按钮）
     qreal m_scrollX = 0.0;
     bool m_perfLog = false;  // paint 帧耗时采样（--perf-log）
@@ -464,7 +539,6 @@ private:
                        qreal w, qreal h, qreal metaRight);
     bool m_debugLaneTint = false;  // 调试：打印 key 轨列底色（排查深色皮肤下 key 轨显黑）
     std::vector<Column> m_columns;
-    std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
     QFont m_rulerFont;
     QFont m_noteLabelFont;  // note 内采样标签（9px）
     // —— M7 性能：note 标签 halo 文本预渲染缓存（同一 label+色 → QImage；paint 一次

@@ -82,6 +82,7 @@ qt_add_qml_module(beatbench
         qml/components/SettingsDialog.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml
+        qml/components/ChartCompareSplit.qml
         qml/components/PropertiesPanel.qml
         qml/components/TimelinePanel.qml
         qml/components/BgaPanel.qml
