@@ -147,7 +147,11 @@ QString DocumentService::findSessionId(const QString& path) {
     return {};
 }
 
-QVariantMap DocumentService::open(const QString& path) {
+QVariantMap DocumentService::open(const QString& path) { return openDocument(path, true); }
+
+QVariantMap DocumentService::openReference(const QString& path) { return openDocument(path, false); }
+
+QVariantMap DocumentService::openDocument(const QString& path, bool activateDocument) {
     const QString absolute = normalizedPath(path);
     auto failure = [&](const QString& error) {
         QVariantMap out = result(false, {}, absolute, error);
@@ -157,7 +161,8 @@ QVariantMap DocumentService::open(const QString& path) {
     if (absolute.isEmpty()) return failure(QStringLiteral("bad_path: 文档路径为空"));
     auto& reg = beatbench::edit::session_registry();
     if (const QString existing = findSessionId(absolute); !existing.isEmpty()) {
-        QVariantMap out = activate(existing);
+        QVariantMap out = activateDocument ? activate(existing)
+            : result(true, existing, normalizedPath(qs(reg.by_id(utf8(existing))->path())));
         out.insert(QStringLiteral("reused"), out.value(QStringLiteral("ok")).toBool());
         return out;
     }
@@ -167,8 +172,8 @@ QVariantMap DocumentService::open(const QString& path) {
     do {
         id = "document-" + utf8(QUuid::createUuid().toString(QUuid::WithoutBraces));
     } while (reg.by_id(id));
-    if (!reg.create(id)) return failure(QStringLiteral("create_failed: 无法创建文档会话"));
-    // reg.create 会激活新会话；命令始终指定 id，不借 active 寻址。
+    if (!reg.create(id, activateDocument)) return failure(QStringLiteral("create_failed: 无法创建文档会话"));
+    // Background loads never transiently activate B; commands always use its explicit ID.
     auto rollback = [&] {
         reg.close(id);
         if (!oldActive.empty()) reg.activate(oldActive);
@@ -182,7 +187,7 @@ QVariantMap DocumentService::open(const QString& path) {
             rollback();
             return failure(responseError(response));
         }
-        if (!reg.activate(id)) {
+        if (activateDocument && !reg.activate(id)) {
             rollback();
             return failure(QStringLiteral("activate_failed: 无法激活文档会话"));
         }

@@ -12,11 +12,11 @@ SessionRegistry::SessionRegistry() {
     m_active = "default";
 }
 
-bool SessionRegistry::create(std::string id) {
+bool SessionRegistry::create(std::string id, bool activateNew) {
     if (id.empty()) return false;
     if (m_sessions.count(id)) return false;
     m_sessions.emplace(id, std::make_unique<EditorSession>());  // 拷贝 key（不移动，见下）
-    m_active = std::move(id);  // 创建后自动激活（GUI 新标签页即切到该会话）
+    if (activateNew) m_active = std::move(id);
     return true;
 }
 
