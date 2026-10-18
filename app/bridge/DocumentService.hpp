@@ -34,6 +34,8 @@ public:
     /// 新文档独立 session.load，失败回收新会话并恢复原 active。
     /// 返回 {ok, id, path, error, reused}；error 为稳定码前缀的人类可读字符串。
     Q_INVOKABLE QVariantMap open(const QString& path);
+    /// Same loading/reuse path, without activating or changing the primary document.
+    Q_INVOKABLE QVariantMap openReference(const QString& path);
     /// 返回 {ok, id, path, error}；空/未知 id 不得回退 active。
     Q_INVOKABLE QVariantMap activate(const QString& id);
     Q_INVOKABLE QString activeId() const;
@@ -56,6 +58,7 @@ signals:
     void currentSessionChanged();
 
 private:
+    QVariantMap openDocument(const QString& path, bool activateDocument);
     std::map<std::string, std::unique_ptr<ChartSession>> m_sessions;
     QString m_currentId;
 };

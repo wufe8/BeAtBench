@@ -21,7 +21,8 @@ public:
     SessionRegistry();
 
     /// 创建新会话（空文档）。id 重复 → 返回 false（调用方换 id 或先 close）。
-    bool create(std::string id);
+    /// activateNew=false creates a background document without changing the editing target.
+    bool create(std::string id, bool activateNew = true);
 
     /// 关闭并销毁会话。禁止关闭最后一个活动会话（至少保留一个）。
     /// 返回是否成功。

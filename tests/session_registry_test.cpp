@@ -53,6 +53,20 @@ TEST(SessionRegistry, DefaultSessionExists) {
     EXPECT_EQ(&global_editor_session(), reg.by_id("default"));
 }
 
+TEST(SessionRegistry, BackgroundCreateRetainsActive) {
+    SessionRegistry reg;
+    auto* primary = &reg.active();
+    ASSERT_TRUE(reg.create("reference", false));
+    EXPECT_EQ(reg.active_id(), "default");
+    EXPECT_EQ(&reg.active(), primary);
+    EXPECT_NE(reg.by_id("reference"), nullptr);
+    EXPECT_FALSE(reg.create("reference", false));
+    EXPECT_FALSE(reg.create("", false));
+    EXPECT_EQ(&reg.active(), primary);
+    EXPECT_TRUE(reg.close("reference"));
+    EXPECT_EQ(&reg.active(), primary);
+}
+
 TEST(SessionRegistry, CreateActivateClose) {
     auto& reg = session_registry();
     // 清理可能的残留（测试独立运行时 default 存在）

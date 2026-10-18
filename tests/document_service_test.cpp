@@ -117,6 +117,40 @@ TEST_F(DocumentServiceTest, OpensIndependentDocumentsAndPreservesDirtyUndo) {
     EXPECT_EQ(session(idOf(b))->chart().meta.at("TITLE"), "B");
 }
 
+TEST_F(DocumentServiceTest, ReferenceOpenNeverActivatesAndReusesDirtyDocument) {
+    const auto a = service_.open(aPath_);
+    ASSERT_TRUE(ok(a));
+    const auto aId = idOf(a);
+    ASSERT_TRUE(edit(aId));
+    auto* primary = service_.currentSession();
+    int changes = 0;
+    const auto connection = QObject::connect(&service_, &DocumentService::currentSessionChanged,
+                                             [&changes] { ++changes; });
+    const auto b = service_.openReference(bPath_);
+    ASSERT_TRUE(ok(b));
+    EXPECT_FALSE(b.value("reused").toBool());
+    EXPECT_EQ(service_.activeId(), aId);
+    EXPECT_EQ(service_.currentSession(), primary);
+    ASSERT_TRUE(edit(idOf(b)));
+    auto* reference = service_.session(idOf(b));
+    const auto reused = service_.openReference(bPath_);
+    ASSERT_TRUE(ok(reused));
+    EXPECT_TRUE(reused.value("reused").toBool());
+    EXPECT_EQ(idOf(reused), idOf(b));
+    EXPECT_EQ(service_.session(idOf(reused)), reference);
+    EXPECT_TRUE(session(idOf(b))->is_dirty());
+    EXPECT_EQ(session(idOf(b))->undo_depth(), 1u);
+    const auto ids = session_registry().ids();
+    EXPECT_FALSE(ok(service_.openReference(bPath_ + ".missing")));
+    EXPECT_FALSE(ok(service_.openReference({})));
+    EXPECT_EQ(session_registry().ids(), ids);
+    EXPECT_EQ(service_.activeId(), aId);
+    EXPECT_TRUE(session(aId)->is_dirty());
+    EXPECT_EQ(session(aId)->undo_depth(), 1u);
+    EXPECT_EQ(changes, 0);
+    QObject::disconnect(connection);
+}
+
 TEST_F(DocumentServiceTest, ReusesNormalizedPathWithoutReloadingDirtyDocument) {
     const auto a = service_.open(aPath_);
     ASSERT_TRUE(ok(a));
