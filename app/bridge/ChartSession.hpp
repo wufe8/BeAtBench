@@ -67,7 +67,8 @@ public:
     /// 当前谱面 id 进制（62 = 声明 #BASE 62；36 = 默认/无文档）。
     /// QML 用于 Base62 粘贴警告（目标 Base36 时两位 id 数值与来源不同）。
     Q_INVOKABLE int idBase() const {
-        return (m_chart && m_chart->id_base == beatbench::IdBase::Base62) ? 62 : 36;
+        const auto* currentChart = chart();
+        return (currentChart && currentChart->id_base == beatbench::IdBase::Base62) ? 62 : 36;
     }
 
     /// 轨道 → 实际 BMS 通道号文本（"11"=键1、"16"=皿…；属性检查器显示用；
@@ -147,12 +148,13 @@ public:
     /// QML 侧不自用（ChartSession 内部 diff），仅诊断/测试。
     Q_INVOKABLE QString renderSnapshotFingerprint() const;
 
-    /// 活动会话视图（core 所有；不可 delete；documentChanged 后须 refresh 或重取）。
-    const beatbench::Chart* chart() const { return m_chart; }
-    const beatbench::TimingEngine* timing() const { return m_timing.get(); }
+    /// Borrowed GUI-thread view of the last refreshed document. Reload/close/edit
+    /// invalidates access until refresh(); never pair a new core chart with old timing.
+    const beatbench::Chart* chart() const;
+    const beatbench::TimingEngine* timing() const { return chart() ? m_timing.get() : nullptr; }
     QString path() const { return m_path; }
     Q_INVOKABLE QString errorMessage() const { return m_error; }
-    bool hasChart() const { return m_chart != nullptr; }
+    bool hasChart() const { return chart() != nullptr; }
     QString activeSessionId() const { return QString::fromStdString(m_sessionId); }
 
     /// 小节数 = 最大事件小节 + 1（空谱 = 0）。
@@ -172,7 +174,7 @@ private:
     void resetRenderState();  ///< 换文档：丢弃 PCM/金字塔并作废 in-flight
     void syncDirty();
     std::uint64_t contentHash() const;  ///< notes + bga + 采样定义指纹
-    std::uint64_t timingHash() const;   ///< 初始 BPM + bpm/stop/measure 指纹
+    std::uint64_t timingHash() const;   ///< 初始 BPM + bpm/stop/measure + 全事件最远小节
     std::uint64_t samplesHash() const;  ///< #WAV/#BMP/#BPM/#STOP 定义表
 
     QString m_boundSessionId;
