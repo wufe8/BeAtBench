@@ -5,6 +5,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 include(FetchContent)
+include(cmake/AsioSdk.cmake)
 FetchContent_Declare(
   portaudio
   GIT_REPOSITORY https://github.com/PortAudio/portaudio.git
@@ -20,6 +21,21 @@ set(PA_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
 set(PA_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(PA_BUILD_STATIC ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(portaudio)
+if(BEATBENCH_ENABLE_ASIO AND NOT PA_USE_ASIO)
+  message(FATAL_ERROR "ASIO was requested but PortAudio did not enable it")
+endif()
+
+# Preserve all upstream notices with the exact PortAudio sources used by this build.
+set(BEATBENCH_AUDIO_NOTICES_DIR "${CMAKE_CURRENT_BINARY_DIR}/third-party"
+    CACHE INTERNAL "Audio third-party source/license materials" FORCE)
+file(MAKE_DIRECTORY "${BEATBENCH_AUDIO_NOTICES_DIR}")
+file(COPY "${portaudio_SOURCE_DIR}/"
+    DESTINATION "${BEATBENCH_AUDIO_NOTICES_DIR}/portaudio"
+    PATTERN ".git" EXCLUDE)
+if(NOT BEATBENCH_ENABLE_ASIO)
+  # Do not carry a stale SDK from an earlier enabled configuration into an OFF package.
+  file(REMOVE_RECURSE "${BEATBENCH_AUDIO_NOTICES_DIR}/asiosdk")
+endif()
 
 # 静态库（M4.1：单声道试听简化；M5 再考虑缓存/波形）
 add_library(beatbench_audio STATIC
@@ -46,5 +62,7 @@ target_link_libraries(beatbench_audio PRIVATE portaudio_static beatbench_core)
 target_include_directories(beatbench_audio PRIVATE
     ${portaudio_SOURCE_DIR}/include
     ${portaudio_SOURCE_DIR}/src/common)
+target_compile_definitions(beatbench_audio PRIVATE
+    BEATBENCH_HAS_ASIO=$<BOOL:${BEATBENCH_ENABLE_ASIO}>)
 target_compile_features(beatbench_audio PUBLIC cxx_std_20)
 beatbench_set_warnings(beatbench_audio)

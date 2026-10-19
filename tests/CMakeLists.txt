@@ -53,6 +53,23 @@ target_link_libraries(audio_test PRIVATE GTest::gtest_main)
 beatbench_set_warnings(audio_test)
 add_test(NAME audio_tests COMMAND audio_test)
 
+add_test(NAME asio_configuration_tests COMMAND ${CMAKE_COMMAND}
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/asio_configuration_test.cmake")
+
+# ASIO capability checks never initialize PortAudio or load a driver.
+add_executable(audio_backend_capability_test audio_backend_capability_test.cpp)
+target_link_libraries(audio_backend_capability_test PRIVATE beatbench_audio GTest::gtest_main)
+target_compile_definitions(audio_backend_capability_test PRIVATE
+    BEATBENCH_TEST_EXPECT_ASIO=$<BOOL:${BEATBENCH_ENABLE_ASIO}>)
+beatbench_set_warnings(audio_backend_capability_test)
+add_test(NAME audio_backend_capability_tests COMMAND audio_backend_capability_test)
+
+add_executable(asio_buffer_sizes_test asio_buffer_sizes_test.cpp)
+target_include_directories(asio_buffer_sizes_test PRIVATE ${CMAKE_SOURCE_DIR}/audio/include)
+target_link_libraries(asio_buffer_sizes_test PRIVATE GTest::gtest_main)
+beatbench_set_warnings(asio_buffer_sizes_test)
+add_test(NAME asio_buffer_sizes_tests COMMAND asio_buffer_sizes_test)
+
 # SampleCache 单测（M4.3a）：LRU/预算/并发合并/失效；注入解码器（不碰设备 I/O；
 # sample_cache.cpp 引用 decode_audio_file*（默认解码器），须链 decoder_miniaudio.cpp）。
 add_executable(sample_cache_test sample_cache_test.cpp

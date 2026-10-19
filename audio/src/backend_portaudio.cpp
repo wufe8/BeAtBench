@@ -1,142 +1,171 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// PortAudio 后端实现（doc/02 §5.1）：默认输出设备（WASAPI，共享模式）。
-// ASIO 后置：v19.7 编译时检测 ASIO SDK；找不到 → 自动禁用（WASAPI 兜底，不阻塞）。
-// 回调线程 = PortAudio 创建；回调内只写缓冲（SamplePlayer::render 无锁无分配）。
-// M4.2：start(settings) 支持设备序号/采样率/缓冲帧数（设置页）；0/负 = 设备默认。
+// PortAudio v19.7 output backend. All control operations are caller-serialized.
+// The render callback performs no locking or allocation. ASIO is opt-in at build time.
 #include "beatbench/audio/AudioBackend.hpp"
+#include "beatbench/audio/AsioBufferSizes.hpp"
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <string>
+#include <utility>
 
 #include "portaudio.h"
+#ifndef BEATBENCH_HAS_ASIO
+#define BEATBENCH_HAS_ASIO 0
+#endif
+#if BEATBENCH_HAS_ASIO
+#include "pa_asio.h"
+#endif
 
 namespace beatbench::audio {
-
 namespace {
-struct PaGlobal {
-    std::once_flag once;
-    bool ok = false;
-    std::string error;
-};
-PaGlobal& paGlobal() {
-    static PaGlobal g;
-    std::call_once(g.once, [] {
-        g.ok = (Pa_Initialize() == paNoError);
-        if (!g.ok) g.error = "PortAudio 初始化失败";
-    });
-    return g;
-}
-/// 显式终止（进程退出前）；幂等。终止后 Pa_Initialize 已不可再用（PortAudio 限制），
-/// 本进程生命周期内不重复 init——AudioEngine 全局持有，不存在二次初始化场景。
-void paTerminate() {
-    auto& g = paGlobal();
-    if (g.ok) {
-        Pa_Terminate();
-        g.ok = false;
-    }
+// PortAudio v19.7 reference-counts balanced Initialize/Terminate calls itself.
+// Keep the control-thread mutex alive through static AudioEngine destruction.
+// This one process-lifetime allocation is never touched by the audio callback.
+std::mutex& paLifecycleMutex() {
+    static auto* mutex = new std::mutex;
+    return *mutex;
 }
 
+bool fail(std::string* error, const std::string& message) {
+    if (error) *error = message;
+    return false;
+}
 struct CallbackUser {
     AudioBackend::RenderCallback cb = nullptr;
     void* user = nullptr;
-    double deviceRate = 0.0;
 };
-
 int paCallback(const void*, void* output, unsigned long frameCount,
                const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void* userData) {
     auto* u = static_cast<CallbackUser*>(userData);
     auto* out = static_cast<float*>(output);
-    if (u->cb) {
-        u->cb(u->user, out, static_cast<int>(frameCount));
-    } else {
-        std::memset(out, 0, frameCount * 2 * sizeof(float));  // 静音
-    }
+    if (u->cb) u->cb(u->user, out, static_cast<int>(frameCount));
+    else std::memset(out, 0, frameCount * 2 * sizeof(float));
     return paContinue;
 }
-}  // namespace
+AsioBufferSizes bufferSizes(const AudioDeviceCapabilities& caps) {
+    return {caps.bufferMin, caps.bufferMax, caps.bufferPreferred, caps.bufferGranularity};
+}
+} // namespace
 
 class PortAudioBackend final : public AudioBackend {
 public:
     ~PortAudioBackend() override { shutdown(); }
 
     bool init(std::string* errMsg) override {
-        auto& g = paGlobal();
-        if (!g.ok) {
-            if (errMsg) *errMsg = g.error;
-            return false;
+        if (errMsg) errMsg->clear();
+        if (m_initialized) return true;
+        std::lock_guard<std::mutex> lock(paLifecycleMutex());
+        const PaError err = Pa_Initialize();
+        if (err != paNoError)
+            return fail(errMsg, std::string("PortAudio 初始化失败：") + Pa_GetErrorText(err));
+        m_initialized = true;
+        return true; // No default-device requirement: an explicit ASIO device may work.
+    }
+
+    bool asioAvailable() const override { return BEATBENCH_HAS_ASIO != 0; }
+
+    AudioDeviceCapabilities deviceCapabilities(int device) const override {
+        AudioDeviceCapabilities caps;
+        if (!m_initialized) { caps.error = "音频后端未初始化"; return caps; }
+        if (device < 0) device = Pa_GetDefaultOutputDevice();
+        const auto* di = Pa_GetDeviceInfo(device);
+        if (!di) { caps.error = "设备不存在或不可用"; return caps; }
+        const auto* api = Pa_GetHostApiInfo(di->hostApi);
+        if (!api) { caps.error = "设备 API 信息不可用"; return caps; }
+        caps.asio = api->type == paASIO;
+        if (!caps.asio) return caps;
+#if BEATBENCH_HAS_ASIO
+        const PaError err = PaAsio_GetAvailableBufferSizes(device, &caps.bufferMin,
+            &caps.bufferMax, &caps.bufferPreferred, &caps.bufferGranularity);
+        if (err != paNoError) {
+            caps.bufferMin = caps.bufferMax = caps.bufferPreferred = caps.bufferGranularity = 0;
+            caps.error = std::string("查询 ASIO 缓冲失败：") + Pa_GetErrorText(err);
+        } else if (!validAsioBufferSizes(bufferSizes(caps))) {
+            caps.error = "ASIO 驱动报告的缓冲范围无效";
         }
-        // M4.2：设备序号校验只在 start(settings) 时做；init 只保 PortAudio 就绪
-        //（start 里的默认设备选择逻辑统一到 settings.device = -1 → 系统默认）。
-        const int defaultDev = Pa_GetDefaultOutputDevice();
-        if (defaultDev < 0) {
-            if (errMsg) *errMsg = "没有可用的输出设备";
-            return false;
-        }
-        const PaDeviceInfo* di = Pa_GetDeviceInfo(defaultDev);
-        if (!di) { if (errMsg) *errMsg = "设备信息不可用"; return false; }
-        m_defaultDevice = defaultDev;
-        m_defaultName = di->name;
-        m_defaultApi = Pa_GetHostApiInfo(di->hostApi)->name;
-        m_defaultRate = di->defaultSampleRate;
+#else
+        caps.error = "此构建未启用 ASIO";
+#endif
+        return caps;
+    }
+
+    bool showDeviceControlPanel(int device, void* nativeWindow, std::string* errMsg) override {
+        if (errMsg) errMsg->clear();
+        if (m_stream) return fail(errMsg, "请先停止并关闭音频流");
+        const auto caps = deviceCapabilities(device);
+        // Buffer metadata errors need not prevent the user repairing driver settings.
+        if (!caps.asio) return fail(errMsg, caps.error.empty() ? "设备不是 ASIO 设备" : caps.error);
+#if BEATBENCH_HAS_ASIO
+        if (device < 0) device = Pa_GetDefaultOutputDevice();
+        const PaError err = PaAsio_ShowControlPanel(device, nativeWindow);
+        if (err != paNoError)
+            return fail(errMsg, std::string("打开 ASIO 控制面板失败：") + Pa_GetErrorText(err));
         return true;
+#else
+        (void)nativeWindow;
+        return fail(errMsg, "此构建未启用 ASIO");
+#endif
     }
 
     bool start(RenderCallback cb, void* user, const AudioSettings& settings,
                std::string* errMsg) override {
-        if (m_stream) return true;  // 已在运行（重启前需 stop()）
-
-        // 设备序号解析：-1 = 系统默认；否则校验范围
-        int dev = settings.device;
-        if (dev < 0) dev = m_defaultDevice;
-        const PaDeviceInfo* di = Pa_GetDeviceInfo(dev);
-        if (!di) { if (errMsg) *errMsg = "设备不存在或不可用"; return false; }
-
-        // 采样率：0 = 设备默认；否则用设定值（PortAudio 共享模式通常按就近处理）
-        const double rate = (settings.sampleRate > 0)
-                                ? static_cast<double>(settings.sampleRate)
-                                : static_cast<double>(di->defaultSampleRate);
-
-        // 缓冲帧数：0 = 设备默认（suggestedLatency 换算）；>0 = 用设定值（稀疏帧数 → 延迟更低）
-        PaStreamParameters params;
-        std::memset(&params, 0, sizeof(params));
+        if (errMsg) errMsg->clear();
+        if (m_stream) return true; // Caller must stop before changing settings.
+        m_streamInfo = {};
+        if (!m_initialized) return fail(errMsg, "音频后端未初始化");
+        const int dev = settings.device < 0 ? Pa_GetDefaultOutputDevice() : settings.device;
+        const auto* di = Pa_GetDeviceInfo(dev);
+        if (!di) return fail(errMsg, "设备不存在或没有系统默认输出设备");
+        if (di->maxOutputChannels < 2) return fail(errMsg, "输出设备不支持立体声（需要两个声道）");
+        const auto* api = Pa_GetHostApiInfo(di->hostApi);
+        if (!api) return fail(errMsg, "设备 API 信息不可用");
+        const double rate = settings.sampleRate > 0 ? settings.sampleRate : di->defaultSampleRate;
+        if (!std::isfinite(rate) || rate <= 0 || rate > std::numeric_limits<int>::max())
+            return fail(errMsg, "采样率无效");
+        const int requestedFrames = settings.framesPerBuffer > 0 ? settings.framesPerBuffer : 0;
+        unsigned long callbackFrames = static_cast<unsigned long>(requestedFrames);
+        if (api->type == paASIO) {
+            const auto caps = deviceCapabilities(dev);
+            if (!caps.error.empty()) return fail(errMsg, caps.error);
+            const long resolved = resolveAsioBufferSize(bufferSizes(caps), requestedFrames);
+            if (resolved == 0 || resolved > std::numeric_limits<int>::max())
+                return fail(errMsg, "请求的 ASIO 缓冲帧数不在驱动支持的固定值/步长/2 的幂范围内");
+            callbackFrames = static_cast<unsigned long>(resolved); // 0 requests preferred.
+        }
+        PaStreamParameters params{};
         params.device = dev;
         params.channelCount = 2;
         params.sampleFormat = paFloat32;
-        params.hostApiSpecificStreamInfo = nullptr;
-        unsigned long framesPerBuffer = 0;  // 0 = paFramesPerBufferUnspecified（设备默认）
-        if (settings.framesPerBuffer > 0) {
-            framesPerBuffer = static_cast<unsigned long>(settings.framesPerBuffer);
-            // 设定帧数时用保守延迟建议（较小缓冲 → 低延迟；WASAPI 共享可能限制到设备默认）
-            params.suggestedLatency = static_cast<double>(settings.framesPerBuffer) / rate;
-        } else {
-            params.suggestedLatency = di->defaultLowOutputLatency;
+        params.suggestedLatency = callbackFrames > 0 ? static_cast<double>(callbackFrames) / rate
+                                                     : di->defaultLowOutputLatency;
+        const PaError formatError = Pa_IsFormatSupported(nullptr, &params, rate);
+        if (formatError != paFormatIsSupported)
+            return fail(errMsg, std::string("输出格式不支持：") + Pa_GetErrorText(formatError));
+        m_cbUser = {cb, user};
+        const PaError openError = Pa_OpenStream(&m_stream, nullptr, &params, rate, callbackFrames,
+                                               paNoFlag, &paCallback, &m_cbUser);
+        if (openError != paNoError) {
+            m_stream = nullptr;
+            m_cbUser = {};
+            return fail(errMsg, std::string("打开音频流失败：") + Pa_GetErrorText(openError));
         }
-
-        m_cbUser.cb = cb;
-        m_cbUser.user = user;
-        m_cbUser.deviceRate = rate;
-        const PaError err =
-            Pa_OpenStream(&m_stream, nullptr, &params, rate, framesPerBuffer,
-                          paNoFlag, &paCallback, &m_cbUser);
-        if (err != paNoError) {
-            if (errMsg) *errMsg = std::string("打开音频流失败：") + Pa_GetErrorText(err);
-            return false;
-        }
-        // 实际流参数（PortAudio 可能调整采样率/缓冲 → 设置页显示真实值）
-        const PaStreamInfo* si = Pa_GetStreamInfo(m_stream);
-        const double actualRate = si ? si->sampleRate : rate;
-        m_streamInfo.sampleRate = static_cast<int>(actualRate);
-        m_streamInfo.framesPerBuffer = static_cast<int>(framesPerBuffer);
-        m_streamInfo.latencySeconds = params.suggestedLatency;
-        m_streamInfo.deviceName = di->name;
-        m_streamInfo.apiName = Pa_GetHostApiInfo(di->hostApi)->name;
-        if (Pa_StartStream(m_stream) != paNoError) {
-            if (errMsg) *errMsg = "启动音频流失败";
+        const PaError startError = Pa_StartStream(m_stream);
+        if (startError != paNoError) {
             Pa_CloseStream(m_stream);
             m_stream = nullptr;
-            return false;
+            m_cbUser = {};
+            return fail(errMsg, std::string("启动音频流失败：") + Pa_GetErrorText(startError));
         }
+        const auto* si = Pa_GetStreamInfo(m_stream);
+        m_streamInfo.sampleRate = static_cast<int>(si ? si->sampleRate : rate);
+        // Never claim to know the native ASIO buffer selected internally by PortAudio.
+        m_streamInfo.framesPerBuffer = requestedFrames;
+        m_streamInfo.latencySeconds = si ? si->outputLatency : 0.0;
+        m_streamInfo.deviceName = di->name;
+        m_streamInfo.apiName = api->name;
         return true;
     }
 
@@ -146,47 +175,46 @@ public:
             Pa_CloseStream(m_stream);
             m_stream = nullptr;
         }
+        m_cbUser = {};
+        m_streamInfo = {};
     }
-
     void shutdown() override {
         stop();
-        if (m_terminated) return;
-        m_terminated = true;
-        paTerminate();  // 进程退出前唯一一次；幂等
+        if (m_initialized) {
+            std::lock_guard<std::mutex> lock(paLifecycleMutex());
+            Pa_Terminate();
+            m_initialized = false;
+        }
     }
-
     StreamInfo streamInfo() const override { return m_streamInfo; }
 
     std::vector<AudioDeviceInfo> devices() override {
         std::vector<AudioDeviceInfo> out;
-        auto& g = paGlobal();
-        if (!g.ok) return out;
+        if (!m_initialized) return out;
         const int n = Pa_GetDeviceCount();
         for (int i = 0; i < n; ++i) {
-            const PaDeviceInfo* di = Pa_GetDeviceInfo(i);
+            const auto* di = Pa_GetDeviceInfo(i);
             if (!di || di->maxOutputChannels <= 0) continue;
+            const auto* api = Pa_GetHostApiInfo(di->hostApi);
+            if (!api) continue;
             AudioDeviceInfo info;
             info.index = i;
             info.name = di->name;
             info.defaultSampleRate = static_cast<int>(di->defaultSampleRate);
             info.maxOutputChannels = di->maxOutputChannels;
-            info.apiName = Pa_GetHostApiInfo(di->hostApi)->name;
+            info.apiName = api->name;
+            info.apiType = static_cast<int>(api->type);
+            info.isAsio = api->type == paASIO;
             out.push_back(std::move(info));
         }
         return out;
     }
-
 private:
     PaStream* m_stream = nullptr;
-    int m_defaultDevice = -1;
-    std::string m_defaultName;
-    std::string m_defaultApi;
-    double m_defaultRate = 44100.0;
     CallbackUser m_cbUser;
     StreamInfo m_streamInfo;
-    bool m_terminated = false;
+    bool m_initialized = false;
 };
 
 AudioBackend* create_portaudio_backend() { return new PortAudioBackend(); }
-
-}  // namespace beatbench::audio
+} // namespace beatbench::audio
