@@ -497,27 +497,37 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 for (const auto& c : cells)
                     n_groups = std::max(n_groups, c.sub_line + 1);
                 for (std::uint32_t g = 0; g < n_groups; ++g) {
-                    // 本组 cells（sub_line == g）
+                    // 本组 cells（sub_line == g）。组内同 pos 多值沿用冲突拆行
+                    //（2026-10 复核 R25-2：别名归一后不同源子行并入同组，
+                    // 同组同拍只取 front 会静默丢音——读入 3 音首存只剩 2 音）。
                     std::map<Rational, std::vector<std::string>> by_pos;
                     for (const auto& c : cells) {
                         if (c.sub_line != g) continue;
                         by_pos[c.pos].push_back(c.text);
                     }
-                    std::int64_t n = 1;
+                    // 组内行数 = 最大同 pos 冲突数（无冲突组 = 1 行；缺失组输出全 "00" 占位）
+                    std::size_t n_rows = 1;
                     for (const auto& [pos, texts] : by_pos) {
-                        if (!texts.empty()) n = std::lcm(n, pos.den);
+                        (void)pos;
+                        n_rows = std::max(n_rows, texts.size());
                     }
-                    std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
-                    for (const auto& [pos, texts] : by_pos) {
-                        if (texts.empty()) continue;
-                        const auto idx = static_cast<std::size_t>(pos.num * n / pos.den);
-                        slots[idx] = texts.front();
+                    for (std::size_t row = 0; row < n_rows; ++row) {
+                        std::int64_t n = 1;
+                        for (const auto& [pos, texts] : by_pos) {
+                            if (texts.size() > row) n = std::lcm(n, pos.den);
+                        }
+                        std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
+                        for (const auto& [pos, texts] : by_pos) {
+                            if (texts.size() <= row) continue;
+                            const auto idx = static_cast<std::size_t>(pos.num * n / pos.den);
+                            slots[idx] = texts[row];
+                        }
+                        char head[16];
+                        std::snprintf(head, sizeof(head), "#%03u%s:", measure, channel.c_str());
+                        out += head;
+                        for (const auto& s : slots) out += s;
+                        out.push_back('\n');
                     }
-                    char head[16];
-                    std::snprintf(head, sizeof(head), "#%03u%s:", measure, channel.c_str());
-                    out += head;
-                    for (const auto& s : slots) out += s;
-                    out.push_back('\n');
                 }
                 continue;
             }

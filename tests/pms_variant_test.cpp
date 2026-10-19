@@ -508,3 +508,48 @@ TEST(PmsVariant, WriteSideRejectsUnrepresentableLanes) {
     // 7key 表不受 PMS 加固影响（Scratch 仍可表示）
     EXPECT_FALSE(bms_channel_for_mode("sp7k", scratch, false, NoteKind::Normal).empty());
 }
+
+// —— R25-2：writer 子行冲突拆行（别名归一后同组同拍不得丢音）——
+// 复核最小输入：22:01 + 22:02（同通道两子行）+ 18:03（别名归一到 22，
+// sub_line 0）→ 组 0 内 pos0 冲突 2 值；旧逻辑取 front 丢 "03"，首存只剩 2 音。
+TEST(PmsVariant, WriterSubLineConflictKeepsAllNotes) {
+    const std::string src =
+        "#BPM 120\n"
+        "#00022:01\n"
+        "#00022:02\n"
+        "#00018:03\n";
+    const auto r1 = read_pms(src);
+    ASSERT_EQ(r1.chart.notes.size(), 3u);
+    const auto r2 = read_pms(write_bms(r1.chart));
+    ASSERT_EQ(r2.chart.notes.size(), 3u) << "首次保存不得丢音";
+    // 语义集合：全部 key6 @pos0，sample 集合 {01,02,03} 保留；再存再读稳定
+    std::vector<std::uint32_t> ids;
+    for (const auto& ev : r2.chart.notes) {
+        EXPECT_EQ(ev.value.lane, (Lane{0, LaneKind::Key, 6}));
+        EXPECT_EQ(ev.pos, (Rational(0, 1)));
+        ids.push_back(ev.value.sample.id);
+    }
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids, (std::vector<std::uint32_t>{1, 2, 3}));
+    const auto r3 = read_pms(write_bms(r2.chart));
+    ASSERT_EQ(r3.chart.notes.size(), 3u);
+    EXPECT_EQ(note_sigs(r3.chart), note_sigs(r2.chart));
+}
+
+// 对照：无冲突的别名各一行，首次保存与连续三轮往返都保两音（不误报正常路径）。
+TEST(PmsVariant, WriterAliasRowsWithoutConflictRoundtrip) {
+    const std::string src =
+        "#BPM 120\n"
+        "#00022:01\n"
+        "#00018:02\n";
+    Chart chart = read_pms(src).chart;
+    ASSERT_EQ(chart.notes.size(), 2u);
+    for (int i = 0; i < 3; ++i) {
+        chart = read_pms(write_bms(chart)).chart;
+        ASSERT_EQ(chart.notes.size(), 2u) << "round " << i;
+    }
+    std::vector<std::uint32_t> ids;
+    for (const auto& ev : chart.notes) ids.push_back(ev.value.sample.id);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids, (std::vector<std::uint32_t>{1, 2}));
+}
