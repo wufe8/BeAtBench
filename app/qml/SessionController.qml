@@ -504,14 +504,21 @@ QtObject {
         const newRefs = []
         for (let i = 0; i < refs.length; i++) {
             const ref = refs[i]
-            // ⚠️ 绝对目标吸附（用户 2026-09）：落点 = 源 + delta 后**整体吸附到网格**，
+            // ⚠️ 绝对目标吸附（用户 2026-09）：纵向落点 = 源 + delta 后**整体吸附到网格**，
             // 不是只吸附位移 delta——否则 1/8 音符在 1/4 snap 下仍停在 1/8+k/4（不量化到通道）。
-            // 期望：1/8 note 在 1/4 snap 下只能到 0/4,1/4,2/4,3/4。网格对齐 note 保持「同距离」。
+            // 纯横拖（deltaF=0）保持**原始拍位**，与 ghost 同契约（2026-10 复核 R27-3：
+            // ChartViewItem ghost 对 deltaF=0 保留原位；提交路径此前无条件吸附，
+            // 离网 note 的 ghost 与实际落点不一致）。差值用精确分数（公共分母
+            // slots×pos.den），不再按 snap 分母二次舍入。
             const origMf = ref.measure + ref.pos.num / ref.pos.den
-            const snappedTarget = Math.round((origMf + deltaF) * slots) / slots
-            const d = snappedTarget - origMf
-            const dm = Math.floor(d)
-            const delta = { measure: dm, pos: { num: Math.round((d - dm) * den), den: den } }
+            let dNum = 0, dDen = 1  // 拍位差 = dNum/dDen（精确分数）
+            if (Math.abs(deltaF) >= 1e-12) {  // 同 ghost qFuzzyIsNull 阈值
+                const k = Math.round((origMf + deltaF) * slots)
+                dDen = slots * ref.pos.den
+                dNum = k * ref.pos.den - (ref.measure * ref.pos.den + ref.pos.num) * slots
+            }
+            const dm = Math.floor(dNum / dDen)
+            const delta = { measure: dm, pos: { num: dNum - dm * dDen, den: dDen } }
             const to = addPosDelta(ref, delta)
             let changedLane = false
             // 连续轨道列秩间距：noteCol = 该 note 源列下标；gap = 相对拖起列的列间距。
