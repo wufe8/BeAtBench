@@ -19,6 +19,8 @@
 #   NINJA_BIN     Ninja 可执行文件路径
 # 可选环境变量:
 #   BB_SMOKE_OPEN 冒烟时打开的谱面路径（例如 <你的谱面>.bms）
+#   BB_ENABLE_ASIO OFF（默认）或 ON；显式选择才改变发布基线
+#   BB_ASIO_SDK_ROOT 已解压官方 SDK 根；空值由 CMake 下载固定版本（仅 ON）
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -29,6 +31,12 @@ QT_ROOT="${QT_ROOT:-}"
 CXX_BIN="${CXX_BIN:-}"
 CC_BIN="${CC_BIN:-}"
 NINJA_BIN="${NINJA_BIN:-}"
+BB_ENABLE_ASIO="${BB_ENABLE_ASIO:-OFF}"
+BB_ASIO_SDK_ROOT="${BB_ASIO_SDK_ROOT:-}"
+case "$BB_ENABLE_ASIO" in
+  ON|OFF) ;;
+  *) echo "错误: BB_ENABLE_ASIO 只接受 ON 或 OFF" >&2; exit 1 ;;
+esac
 
 [ -n "$QT_ROOT" ] || { echo "错误: 请设置 QT_ROOT（Qt 安装目录）" >&2; exit 1; }
 [ -n "$CXX_BIN" ] || { echo "错误: 请设置 CXX_BIN（MinGW g++.exe 路径）" >&2; exit 1; }
@@ -64,21 +72,22 @@ done
 echo "==> 版本: $VER"
 echo "==> Qt:   $QT_ROOT"
 
-# ---- 1. 配置（首次）+ 构建 ----
-if [ ! -f "$BUILD/CMakeCache.txt" ]; then
-  echo "==> 配置 $BUILD (Release/Ninja)"
-  # CMake >= 4.0 移除 <3.5 兼容；portaudio(FetchContent).CMakeLists 仍写 VERSION 2.8，需显式放行。
-  # C 编译器同样显式指定（PortAudio 是 C）：见上方 CC_BIN 的说明。
-  CC_ARG=()
-  [ -n "$CC_BIN" ] && CC_ARG=(-DCMAKE_C_COMPILER="$CC_BIN")
-  cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH="$QT_ROOT" \
-    -DCMAKE_CXX_COMPILER="$CXX_BIN" \
-    "${CC_ARG[@]}" \
-    -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
-    -DBEATBENCH_BUILD_TESTS=OFF \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-fi
+# ---- 1. 每次配置 + 构建：不可让旧 cache 决定 ON/OFF ----
+echo "==> ASIO: $BB_ENABLE_ASIO"
+echo "==> 配置 $BUILD (Release/Ninja)"
+# CMake >= 4.0 移除 <3.5 兼容；portaudio(FetchContent).CMakeLists 仍写 VERSION 2.8，需显式放行。
+# C 编译器同样显式指定（PortAudio 是 C）：见上方 CC_BIN 的说明。
+CC_ARG=()
+[ -n "$CC_BIN" ] && CC_ARG=(-DCMAKE_C_COMPILER="$CC_BIN")
+cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$QT_ROOT" \
+  -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+  "${CC_ARG[@]}" \
+  -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
+  -DBEATBENCH_BUILD_TESTS=OFF \
+  -DBEATBENCH_ENABLE_ASIO="$BB_ENABLE_ASIO" \
+  -DBEATBENCH_ASIO_SDK_ROOT="$BB_ASIO_SDK_ROOT" \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 echo "==> 构建 beatbench / beatbench-cli"
 cmake --build "$BUILD" --target beatbench beatbench-cli --parallel
 
@@ -203,6 +212,23 @@ leftover="$(cd "$_ctrldir" && find . -mindepth 1 -maxdepth 1 -type d \
   | sed 's|^\./||' | grep -vxE 'Basic|Fusion|impl' || true)"
 [ -z "$leftover" ] || { echo "错误: 仍有未裁剪的控件样式: $leftover" >&2; exit 1; }
 
+echo "==> 音频第三方源码与许可（OFF 也包含 PortAudio）"
+AUDIO_MATERIALS="$BUILD/audio/third-party"
+for material in LICENSE.txt include/portaudio.h src/common/pa_front.c CMakeLists.txt; do
+  [ -f "$AUDIO_MATERIALS/portaudio/$material" ] || {
+    echo "错误: 缺少 PortAudio 源码/许可材料: $material" >&2; exit 1; }
+done
+cp -R "$AUDIO_MATERIALS" "$STAGE/third-party"
+if [ "$BB_ENABLE_ASIO" = ON ]; then
+  for material in LICENSE.txt README.md common/asio.h common/LICENSE.txt host/asiodrivers.cpp host/pc/asiolist.cpp; do
+    [ -f "$STAGE/third-party/asiosdk/$material" ] || {
+      echo "错误: ASIO 发布材料缺失: $material" >&2; exit 1; }
+  done
+else
+  # 同一构建树曾启用 ASIO 时，旧材料可能仍在；OFF 包不携带 SDK。
+  rm -rf "$STAGE/third-party/asiosdk"
+fi
+
 echo "==> README.txt / LICENSE"
 cat > "$STAGE/README.txt" <<EOF
 BeAtBench v$VER (M1-M6)
@@ -216,6 +242,8 @@ BeAtBench v$VER (M1-M6)
   beatbench-cli.exe   命令行工具（info / check / convert / version）
   skins/              内置皮肤（Aurora / Linear / OsuLight / Win10），菜单"视图 -> 皮肤"切换
   README.txt          本说明
+  LICENSE             BeAtBench GPL-3.0 许可全文
+  third-party/        音频第三方源码与原始许可/README（请随包保留）
   其余 DLL / qml /    运行所需的 Qt 运行时与插件，请勿删除
 
 使用方法
@@ -248,7 +276,14 @@ BeAtBench v$VER (M1-M6)
 
 许可
 ----
-  GPL-3.0（本程序源码见项目仓库 LICENSE 文件）。
+  GPL-3.0（本程序许可全文见 LICENSE）。本包 ASIO=$BB_ENABLE_ASIO。
+  对应版本源码、构建脚本与依赖获取方式：https://github.com/wufe8/BeAtBench/tree/v$VER
+  ASIO 构建/边界：https://github.com/wufe8/BeAtBench/blob/v$VER/doc/12-ASIO音频输出.md
+  PortAudio 源码与许可在 third-party/portaudio；获取版本由源码 audio/CMakeLists.txt 固定。
+  ASIO=ON 时 third-party/asiosdk 包含使用的 common/host 源码、LICENSE.txt 与 README.md：
+  SDK 采用 GPLv3 替代许可；host 辅助文件还须保留逐文件 BSD 声明。OFF 不带 ASIO SDK。
+  不附带声卡驱动或 ASIO 标志；驱动由用户从厂商获取。硬件/低延迟验收尚待人工验证。
+  分发者须同时提供与二进制匹配的完整对应源码及构建材料；仓库链接不替代 GPL 交付义务。
   内置 Qt 6 运行时按 LGPL-3.0 分发（版本随构建所用 Qt；https://www.qt.io/licensing）。
 EOF
 cp "$ROOT/LICENSE" "$STAGE/LICENSE"
