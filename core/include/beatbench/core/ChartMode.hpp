@@ -24,4 +24,8 @@ struct ChartMode {
 /// 其他模式（sp5k 等）按需追加；bmson 的 mode_line 由 codec 映射到这些 id。
 std::optional<ChartMode> chart_mode_by_id(std::string_view id);
 
+/// 模式的 1P 键轨数（sp7k/dp/battle=7、pms9k=9）：lanes 中 player 0 的 Key lane
+/// 最大 index。未知 id 返回 7（sp7k 兑底）。拖动/变换等键号上限的单一事实源。
+int chart_mode_key_count(std::string_view id);
+
 }  // namespace beatbench

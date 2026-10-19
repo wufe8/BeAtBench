@@ -209,6 +209,16 @@ public:
                 {"tailBpm", timing ? timing->bpm_at(tail) : -1.0}};
     }
     Q_INVOKABLE bool fileExists(const QString& path) const { return QFile::exists(path); }
+    Q_INVOKABLE QString pmsFixture(bool bmesp) {
+        const QString path = temp->filePath(bmesp ? "bmesp.pms" : "standard.pms");
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return {};
+        const QByteArray body = QByteArray("#TITLE PMS integration\n#BPM 130\n") +
+            (bmesp ? "#00118:01\n#00119:01\n#00116:01\n#00117:01\n"
+                   : "#00122:01\n#00123:01\n#00124:01\n#00125:01\n");
+        if (file.write(body) != body.size()) return {};
+        return path;
+    }
     Q_INVOKABLE void prepareOverlayExample() {
         auto& registry = beatbench::edit::session_registry();
         const auto put = [&](const char* id, unsigned measure, int num, int den, int lane,

@@ -14,6 +14,7 @@
 
 #include "bridge/DocumentService.hpp"
 #include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
@@ -95,6 +96,51 @@ protected:
     std::string previousActive_;
     std::vector<std::string> previousIds_;
 };
+
+TEST_F(DocumentServiceTest, CreatesSelectedModesWithoutOverwritingExistingDocuments) {
+    const auto a = service_.open(aPath_);
+    const auto b = service_.openReference(bPath_);
+    ASSERT_TRUE(ok(a)); ASSERT_TRUE(ok(b)); ASSERT_TRUE(edit(idOf(a)));
+    auto* aCore = session(idOf(a)); auto* bCore = session(idOf(b));
+    const auto aNotes = aCore->chart().notes;
+    const auto aUndo = aCore->undo_depth();
+    for (const auto* mode : {"sp7k", "dp", "battle", "pms9k"}) {
+        ASSERT_TRUE(ok(service_.activate(idOf(a))));
+        const auto count = service_.instances().size();
+        const auto created = service_.create(QString::fromLatin1(mode));
+        ASSERT_TRUE(ok(created)) << created.value("error").toString().toStdString();
+        const auto id = idOf(created);
+        ASSERT_NE(id, idOf(a)); ASSERT_NE(id, idOf(b));
+        ASSERT_NE(session(id), nullptr);
+        EXPECT_EQ(service_.instances().size(), count + 1);
+        EXPECT_EQ(session(id)->chart().mode_id.value_or(""), mode);
+        EXPECT_EQ(service_.activeId(), id);
+        EXPECT_EQ(aCore->chart().notes, aNotes);
+        EXPECT_EQ(aCore->undo_depth(), aUndo);
+        EXPECT_TRUE(aCore->is_dirty()); EXPECT_FALSE(bCore->is_dirty());
+        EXPECT_EQ(bCore->chart().meta.at("TITLE"), "B");
+        EXPECT_EQ(service_.session(id)->playKeyCount(), std::string(mode) == "pms9k" ? 9 : 7);
+        EXPECT_FALSE(service_.session(id)->codecModes().contains("pms9k-bmesp"));
+        ASSERT_TRUE(edit(id));
+        const auto target = temporary_->filePath(QString::fromLatin1(mode) +
+            (std::string(mode) == "pms9k" ? ".pms" : ".bms"));
+        ASSERT_TRUE(ok(service_.save(id, target)));
+        const auto reopened = beatbench::bms::read_bms_file(target.toUtf8().toStdString());
+        EXPECT_EQ(reopened.chart.mode_id.value_or(""), mode);
+        EXPECT_EQ(reopened.chart.notes.size(), 1u);
+        EXPECT_EQ(service_.activeId(), id);
+    }
+    ASSERT_TRUE(ok(service_.activate(idOf(a))));
+    const auto ids = session_registry().ids();
+    for (const auto* mode : {"invalid", "pms9k-bmesp"}) {
+        const auto rejected = service_.create(QString::fromLatin1(mode));
+        EXPECT_FALSE(ok(rejected));
+        EXPECT_EQ(session_registry().ids(), ids);
+        EXPECT_EQ(service_.activeId(), idOf(a));
+        EXPECT_EQ(aCore->chart().notes, aNotes); EXPECT_EQ(aCore->undo_depth(), aUndo);
+        EXPECT_EQ(bCore->chart().meta.at("TITLE"), "B");
+    }
+}
 
 TEST_F(DocumentServiceTest, OpensIndependentDocumentsAndPreservesDirtyUndo) {
     const auto a = service_.open(aPath_);

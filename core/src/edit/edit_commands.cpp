@@ -10,6 +10,7 @@
 //     的完整状态（含 ln_pair 指向的伙伴快照），invert 用快照精确恢复。
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/Selection.hpp"
+#include "beatbench/core/ChartMode.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"  // c36/c62 id 转换（LNOBJ 文本 → 数值 id）
 
 #include <algorithm>
@@ -900,13 +901,45 @@ std::string CompositeCommand::name() const {
 }
 
 void CompositeCommand::apply(Chart& chart) {
-    for (auto& c : m_commands) c->apply(chart);
+    for (std::size_t begin = 0; begin < m_commands.size();) {
+        auto* transform = dynamic_cast<TransformNoteCommand*>(m_commands[begin].get());
+        if (!transform) {
+            m_commands[begin++]->apply(chart);
+            continue;
+        }
+        // 连续变换构成一个批次：先在未改写的容器上认领源，再统一写目标。
+        // 只改 lane 不增删/重排 notes，因此读写之间索引稳定。
+        std::unordered_set<std::size_t> claimed;
+        std::size_t end = begin;
+        for (; end < m_commands.size(); ++end) {
+            auto* c = dynamic_cast<TransformNoteCommand*>(m_commands[end].get());
+            if (!c) break;
+            c->bind_source(chart, claimed);
+        }
+        for (; begin < end; ++begin) {
+            static_cast<TransformNoteCommand*>(m_commands[begin].get())->apply_bound(chart);
+        }
+    }
 }
 
 void CompositeCommand::invert(Chart& chart) {
-    // 逆序反转
-    for (auto it = m_commands.rbegin(); it != m_commands.rend(); ++it) {
-        (*it)->invert(chart);
+    for (std::size_t end = m_commands.size(); end > 0;) {
+        if (!dynamic_cast<TransformNoteCommand*>(m_commands[end - 1].get())) {
+            m_commands[--end]->invert(chart);
+            continue;
+        }
+        // 其它命令的逆操作可能改变同拍顺序，撤销同样先统一定位再写回。
+        std::unordered_set<std::size_t> claimed;
+        std::size_t begin = end;
+        while (begin > 0) {
+            auto* c = dynamic_cast<TransformNoteCommand*>(m_commands[begin - 1].get());
+            if (!c) break;
+            c->bind_target(chart, claimed);
+            --begin;
+        }
+        while (end > begin) {
+            static_cast<TransformNoteCommand*>(m_commands[--end].get())->invert_bound(chart);
+        }
     }
 }
 
@@ -1387,54 +1420,107 @@ std::string QuantizeNoteCommand::describe() const {
 
 // ---------- TransformNoteCommand ----------
 
-namespace {
-
-// 变换 lane：mirror = key i ↔ key (max-i+1)；rotate = key 循环移位。返回变换后 lane。
+// 变换 lane（见 EditorSession.hpp 声明）：mirror = key i ↔ key (max+1-i)；
+// rotate = key 循环移位。键号上限由调用方按谱面模式传入（chart_mode_key_count）——
+// pms9k 镜像键1↔键9、7key 镜像键1↔键7；DP 两侧各自变换（player 保留，只动 index）。
 // 非 Key lane（scratch/pedal/bgm）不参与（LR2 惯例：镜像/旋转只动按键轨）。
-Lane transform_lane(const Lane& lane, bool mirror, int rotate) {
+Lane transform_lane(const Lane& lane, bool mirror, int rotate, int max_key) {
     if (lane.kind != LaneKind::Key) return lane;
-    // 键号上限：按模式？——命令不感知模式（模式是 Chart.mode_id 的呈现层概念）。
-    // 这里用保守的 1..7（sp7k/dp 的键号区间；pms9k 键 1..9 超出部分不参与）。
-    // 镜像：i → 8-i（1↔7, 2↔6, 3↔5, 4↔4）
-    constexpr int kMaxKey = 7;
     int idx = lane.index;
-    if (mirror) idx = kMaxKey + 1 - idx;
+    if (mirror) idx = max_key + 1 - idx;
     if (rotate != 0) {
-        // 循环移位：1→2→3→…→7→1（rotate 步）
-        idx = ((idx - 1 + rotate) % kMaxKey + kMaxKey) % kMaxKey + 1;
+        // 循环移位：1→2→…→max_key→1（rotate 步）
+        idx = ((idx - 1 + rotate) % max_key + max_key) % max_key + 1;
     }
-    // 超出 1..7 的键号（pms9k 的 8/9）镜像后回落到 0/负 → 夹回
+    // 超出 1..max_key 的键号（异常输入）夹回
     if (idx < 1) idx = 1;
-    if (idx > kMaxKey) idx = kMaxKey;
+    if (idx > max_key) idx = max_key;
     Lane out = lane;
     out.index = static_cast<std::uint8_t>(idx);
     return out;
 }
 
-}  // namespace
-
 TransformNoteCommand::TransformNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
-                                           std::uint32_t sample, bool mirror, int rotate)
+                                           std::uint32_t sample, bool mirror, int rotate,
+                                           std::uint32_t sub_line)
     : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_mirror(mirror),
-      m_rotate(rotate) {}
+      m_rotate(rotate), m_sub_line(sub_line) {}
+
+void TransformNoteCommand::bind_source(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+    m_index.reset();
+    m_new_lane.reset();
+    m_source.reset();
+    // 与 find_note 一致，只对 measure 二分；同小节 pos 可能无序，必须线性扫描。
+    auto it = std::lower_bound(chart.notes.begin(), chart.notes.end(), m_measure,
+                               [](const Event<Note>& e, std::uint32_t m) {
+                                   return e.measure < m;
+                               });
+    for (; it != chart.notes.end() && it->measure == m_measure; ++it) {
+        const auto& e = *it;
+        const auto i = static_cast<std::size_t>(it - chart.notes.begin());
+        if (e.pos != m_pos || e.value.lane != m_lane ||
+            e.value.sample.id != m_sample || e.value.sub_line != m_sub_line ||
+            claimed.contains(i)) continue;
+        m_index = i;
+        m_source = e.value;
+        claimed.insert(i);
+        break;
+    }
+}
+
+void TransformNoteCommand::bind_target(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+    m_index.reset();
+    if (!m_new_lane || !m_source) return;
+    auto it = std::lower_bound(chart.notes.begin(), chart.notes.end(), m_measure,
+                               [](const Event<Note>& e, std::uint32_t m) {
+                                   return e.measure < m;
+                               });
+    for (; it != chart.notes.end() && it->measure == m_measure; ++it) {
+        const auto& e = *it;
+        const auto i = static_cast<std::size_t>(it - chart.notes.begin());
+        // ln_pair 是重建的派生索引，不参与身份；其余物件特征必须完全一致。
+        if (e.pos != m_pos || e.value.lane != *m_new_lane ||
+            e.value.sample != m_source->sample || e.value.kind != m_source->kind ||
+            e.value.ln_channel != m_source->ln_channel ||
+            e.value.sub_line != m_source->sub_line ||
+            claimed.contains(i)) continue;
+        m_index = i;
+        claimed.insert(i);
+        break;
+    }
+}
 
 void TransformNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample);
-    if (!idx) return;
-    m_new_lane = transform_lane(m_lane, m_mirror, m_rotate);
+    std::unordered_set<std::size_t> claimed;
+    bind_source(chart, claimed);
+    apply_bound(chart);
+}
+
+void TransformNoteCommand::apply_bound(Chart& chart) {
+    if (!m_index) return;
+    // 键号上限按谱面模式（apply 时刻的 chart.mode_id；undo 侧恢复原 lane 不重算）
+    const int max_key =
+        chart_mode_key_count(chart.mode_id.value_or("sp7k"));
+    m_new_lane = transform_lane(m_lane, m_mirror, m_rotate, max_key);
     if (*m_new_lane == m_lane) {
         m_new_lane.reset();  // 无变化 → invert 无操作
         return;
     }
-    chart.notes[*idx].value.lane = *m_new_lane;
+    chart.notes[*m_index].value.lane = *m_new_lane;
 }
 
 void TransformNoteCommand::invert(Chart& chart) {
-    if (!m_new_lane) return;
-    // 恢复原 lane（用新 lane 定位——apply 后 note 在 m_new_lane）
-    const auto idx = find_note(chart.notes, m_measure, m_pos, *m_new_lane, m_sample);
-    if (idx) chart.notes[*idx].value.lane = m_lane;
+    std::unordered_set<std::size_t> claimed;
+    bind_target(chart, claimed);
+    invert_bound(chart);
+}
+
+void TransformNoteCommand::invert_bound(Chart& chart) {
+    if (!m_new_lane || !m_index) return;
+    chart.notes.at(*m_index).value.lane = m_lane;
     m_new_lane.reset();
+    m_index.reset();
+    m_source.reset();
 }
 
 std::string TransformNoteCommand::describe() const {

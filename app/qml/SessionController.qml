@@ -509,15 +509,17 @@ QtObject {
         const newRefs = []
         for (let i = 0; i < refs.length; i++) {
             const ref = refs[i]
-            // ⚠️ 绝对目标吸附（用户 2026-09）：落点 = 源 + delta 后**整体吸附到网格**，
-            // 不是只吸附位移 delta——否则 1/8 音符在 1/4 snap 下仍停在 1/8+k/4（不量化到通道）。
-            // 期望：1/8 note 在 1/4 snap 下只能到 0/4,1/4,2/4,3/4。网格对齐 note 保持「同距离」。
+            // 与 ghost 的 qFuzzyIsNull 契约一致：纯横拖保留离网原拍位。
+            // 纵向直接以整数槽表示绝对目标，再由现有有理数工具归一化；
+            // 不把「吸附目标 - 离网源」按 snap 分母再量化（会产生二次位移）。
             const origMf = ref.measure + ref.pos.num / ref.pos.den
-            const snappedTarget = Math.round((origMf + deltaF) * slots) / slots
-            const d = snappedTarget - origMf
-            const dm = Math.floor(d)
-            const delta = { measure: dm, pos: { num: Math.round((d - dm) * den), den: den } }
-            const to = addPosDelta(ref, delta)
+            const targetSlotF = (origMf + deltaF) * slots
+            // 与 ghost 的 std::round 一致，负半槽也向远离零方向舍入。
+            const targetSlot = targetSlotF < 0 ? -Math.round(-targetSlotF) : Math.round(targetSlotF)
+            const to = Math.abs(deltaF) <= 1e-12
+                ? { measure: ref.measure, pos: ref.pos }
+                : addPosDelta({ measure: 0, pos: { num: 0, den: 1 } },
+                              { measure: 0, pos: { num: targetSlot, den: slots } })
             let changedLane = false
             // 连续轨道列秩间距：noteCol = 该 note 源列下标；gap = 相对拖起列的列间距。
             // 用于 key→key / play→bgm / bgm→key 任一跨族平移——同一变换，天然保相对间距。
@@ -551,7 +553,10 @@ QtObject {
                 to.lane = { player: targetLane.lanePlayer, kind: targetLane.laneKind,
                             index: targetLane.laneIndex }
                 if (targetLane.laneKind === "key") {
-                    to.lane.index = Math.max(1, Math.min(7, targetLane.laneIndex + gap))
+                    // 键号上限按当前谱面模式（playKeyCount：sp7k/battle=7、pms9k=9；
+                    // 2026-10 复核：硬编码 7 会把 PMS 键8/9 夹回键7）。越界夹边。
+                    const maxKey = chartSession.playKeyCount()
+                    to.lane.index = Math.max(1, Math.min(maxKey, targetLane.laneIndex + gap))
                 }
                 changedLane = true
             }
@@ -632,8 +637,9 @@ QtObject {
         }
     }
     /// 变换：镜像（mirror=true）/ 旋转（rotate=±1）；note.transform；一个 undo 步。
-    /// 变换后**保持选中**（selectionRefs 的 key 轨道更新为镜像/旋转后的下标；相对位置不变）。
-    /// ⚠️ 只处理 key 轨（镜像/旋转不影响皿/踏板/BGM）；按 7key 映射（key i ↔ key 8-i）。
+    /// 变换后**保持选中**：直接采用协议返回的 selection（core 用与命令同一 transform_lane
+    /// 计算，键号上限按谱面模式——QML 不再独立计算 7 键映射，2026-10 复核修正）。
+    /// ⚠️ 只处理 key 轨（镜像/旋转不影响皿/踏板/BGM）。
     function transformSelection(mirror, rotate) {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（点击/框选）再变换"))
@@ -644,12 +650,13 @@ QtObject {
         if (rotate !== 0) args.rotate = rotate
         var r = sessionCmd("note.transform", args)
         if (r) {
-            window.selectionRefs = window.selectionRefs.map(function(ref) {
-                if (ref.lane.kind !== "key") return ref   // 非 key 轨不变
-                const idx = ref.lane.index
-                const nidx = mirror ? (8 - idx) : (((idx - 1 + rotate) % 7 + 7) % 7 + 1)
-                return { measure: ref.measure, pos: ref.pos,
-                         lane: { player: ref.lane.player, kind: "key", index: nidx },
+            const sel = r.selection || []
+            window.selectionRefs = window.selectionRefs.map(function(ref, i) {
+                const nl = sel[i]
+                if (!nl || ref.lane.kind !== "key") return ref   // 非 key 轨不变（协议同序）
+                return { measure: nl.measure, pos: nl.pos,
+                         lane: { player: nl.lane.player, kind: nl.lane.kind,
+                                 index: nl.lane.index },
                          sample: ref.sample, sub_line: ref.sub_line }
             })
             setStatus(mirror ? qsTr("已镜像 %1 个 note").arg(r.notes)
@@ -988,7 +995,7 @@ QtObject {
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
             window.chartPath = r.output
             project.refreshOpenStates()  // 干净文档直接保存也要从“未修改”更新为“已保存”
-            var msg = qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes)
+            var msg = qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes) + pmsSuffixWarning(r.output)
             if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
             setStatus(msg)
             return true
@@ -1013,6 +1020,12 @@ QtObject {
                   ? qsTr("元信息已保存 %1 处（写文件时随整体保存落盘）").arg(n)
                   : qsTr("元信息无改动"))
     }
+    function pmsSuffixWarning(path) {
+        // parser 只由 .pms 后缀自动识别 9key；#PLAYER/内容不能恢复 PMS 模式。
+        return window.isPmsChart && !String(path).toLowerCase().endsWith(".pms")
+            ? qsTr(" · ⚠ 非 .pms 后缀：重新打开无法自动恢复 PMS 9key，通道可能被解释为 SP/DP；请使用 .pms 后缀")
+            : ""
+    }
     function saveChartAs(path) {
         if (typeof editPage !== "undefined" && editPage) {
             const edits = editPage.collectMetaEdits()
@@ -1025,7 +1038,9 @@ QtObject {
             project.refreshOpenStates()
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
             window.chartPath = r.path
-            setStatus(qsTr("已另存为：%1").arg(r.path))
+            var msg = qsTr("已另存为：%1").arg(r.path) + pmsSuffixWarning(r.path)
+            if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
+            setStatus(msg)
             return true
         }
         setStatus(r.error)

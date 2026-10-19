@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "beatbench/core/Version.hpp"
+#include "beatbench/core/ChartMode.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChartCheck.hpp"
@@ -502,17 +503,38 @@ namespace {
 
 // JSON → Lane：{player, kind, index}；kind 字符串 "key"/"scratch"/"pedal"/"bgm"
 Lane lane_from_json(const Json& j) {
+    if (!j.is_object()) throw CommandError("bad_args", "lane 应为对象");
     Lane l;
-    if (const Json* p = j.find("player")) l.player = static_cast<std::uint8_t>(p->as_i64());
-    if (const Json* i = j.find("index")) l.index = static_cast<std::uint8_t>(i->as_i64());
+    const auto bounded_byte = [](const Json& v, std::int64_t max, const char* name) {
+        if (!v.is_int() || v.as_i64() < 0 || v.as_i64() > max)
+            throw CommandError("bad_args", std::string("lane.") + name + " 超出范围或不是整数");
+        return static_cast<std::uint8_t>(v.as_i64());
+    };
+    if (const Json* p = j.find("player")) l.player = bounded_byte(*p, 1, "player");
+    if (const Json* i = j.find("index")) l.index = bounded_byte(*i, 255, "index");
     if (const Json* k = j.find("kind")) {
-        const auto& s = k->as_str();
+        if (!k->is_string()) throw CommandError("bad_args", "lane.kind 应为字符串");
+        auto s = k->as_str();
+        for (auto& c : s) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (s != "key" && s != "scratch" && s != "pedal" && s != "bgm" &&
+            s != "normal" && s != "ln" && s != "mine")
+            throw CommandError("bad_args", "未知 lane.kind");
         if (s == "scratch") l.kind = LaneKind::Scratch;
         else if (s == "pedal") l.kind = LaneKind::Pedal;
         else if (s == "bgm") l.kind = LaneKind::Bgm;
         else l.kind = LaneKind::Key;
     }
     return l;
+}
+
+// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）
+const char* lane_kind_str(LaneKind k) {
+    switch (k) {
+        case LaneKind::Scratch: return "scratch";
+        case LaneKind::Pedal: return "pedal";
+        case LaneKind::Bgm: return "bgm";
+        default: return "key";
+    }
 }
 
 // 从 args 读 (measure, pos)（"measure": int, "pos": {"num":n,"den":d} 或 [n,d]）
@@ -967,6 +989,7 @@ public:
         std::vector<CopyCell> cells;
         cells.reserve(refs.size());
         std::vector<std::size_t> selected_idx;
+        std::set<std::size_t> claimed;
         for (const auto& ref : refs) {
             const Event<Note>* found = nullptr;
             std::size_t found_i = 0;
@@ -974,9 +997,12 @@ public:
                 const auto& ev = chart.notes[i];
                 if (ev.measure == ref.measure && ev.pos == ref.pos &&
                     ev.value.lane == ref.lane && ev.value.sample.id == ref.sample &&
-                    ev.value.sub_line == ref.sub_line) {
+                    ev.value.sub_line == ref.sub_line && !claimed.contains(i)) {
+                    // 别名收敛后两个合法物件可能拥有完全相同的引用值；逐一认领，
+                    // 否则完整LN选择也会反复命中第一端、被误判为半选。
                     found = &ev;
                     found_i = i;
+                    claimed.insert(i);
                     break;
                 }
             }
@@ -1011,16 +1037,28 @@ public:
         for (const auto& [key, grp] : groups) {
             const auto& [measure, channel, sub_line] = key;
             (void)sub_line;
-            std::int64_t n = 1;
-            for (const auto& c : grp) n = std::lcm(n, c.ref.pos.den);
-            std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
+            // PMS 别名归一后可能同子行同拍有多个值，逐行拆分而非覆盖旧槽位。
+            std::map<Rational, std::vector<std::string>> by_pos;
+            std::size_t n_rows = 1;
             for (const auto& c : grp) {
-                const auto idx = static_cast<std::size_t>(c.ref.pos.num * n / c.ref.pos.den);
-                slots[idx] = fmt_id_text(chart, c.ref.sample);
+                auto& values = by_pos[c.ref.pos];
+                values.push_back(fmt_id_text(chart, c.ref.sample));
+                n_rows = std::max(n_rows, values.size());
             }
-            std::string line = "#" + pad3(measure) + channel + ":";
-            for (const auto& s : slots) line += s;
-            lines.push_back(std::move(line));
+            for (std::size_t row = 0; row < n_rows; ++row) {
+                std::int64_t n = 1;
+                for (const auto& [pos, values] : by_pos)
+                    if (values.size() > row) n = std::lcm(n, pos.den);
+                std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
+                for (const auto& [pos, values] : by_pos) {
+                    if (values.size() <= row) continue;
+                    const auto idx = static_cast<std::size_t>(pos.num * n / pos.den);
+                    slots[idx] = values[row];
+                }
+                std::string line = "#" + pad3(measure) + channel + ":";
+                for (const auto& s : slots) line += s;
+                lines.push_back(std::move(line));
+            }
         }
         Json out = Json::object();
         out.set("lines", std::move(lines));
@@ -1319,6 +1357,21 @@ public:
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         beatbench::Chart chart;  // 空谱面（0 小节）
+        // 可选 mode（2026-10 模式系统阶段一，issue #26）：显式指定新建谱面的游玩模式，
+        // 编辑下限/写回/check 全链路按 chart.mode_id 跟随（消除 value_or("sp7k") 兑底分裂）。
+        // 缺省不设 → 沿用现行兑底行为（协议向后兼容）；传了就必须是合法非空字符串
+        //（类型错/空串 bad_args，会话不变——2026-10 复核：非法参数不得静默清空会话）。
+        // 值域 = chart_mode_by_id 可识别 id（pms9k-bmesp 变体是读侧探测产物，不在配置表 →
+        // 天然被拒）。
+        if (const Json* m = args.find("mode")) {
+            if (!m->is_string() || m->as_str().empty()) {
+                throw CommandError("bad_args", "mode 必须为非空字符串（不传 = 兑底行为）");
+            }
+            if (!chart_mode_by_id(m->as_str())) {
+                throw CommandError("bad_args", "未知游玩模式: " + m->as_str());
+            }
+            chart.mode_id = m->as_str();
+        }
         session.load(std::move(chart), "");
         // 注入 BMS 持久化钩子（另存为/自动保存用）
         if (const Codec* bms = global_codec_registry().by_id("bms"))
@@ -1523,7 +1576,9 @@ public:
             if (const Json* lj = args.find("lane")) {
                 if (lj->is_object()) return lane_from_json(*lj);
                 if (lj->is_number()) {
-                    // 兼容：直接给数字（索引）→ 默认 key lane
+                    // 兼容：直接给数字（索引）→ 默认 key lane；先校验，避免窄化回绕。
+                    if (!lj->is_int() || lj->as_i64() < 1 || lj->as_i64() > 9)
+                        throw CommandError("bad_args", "lane 键号应为 1..9 的整数");
                     return Lane{0, LaneKind::Key, static_cast<std::uint8_t>(lj->as_i64())};
                 }
                 throw CommandError("bad_args", "lane 应为对象 {player,kind,index}");
@@ -1557,6 +1612,10 @@ public:
         // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
         // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
         // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
+        if (bms::bms_channel_for_mode(session.chart().mode_id.value_or("sp7k"),
+                                      lane, ln_kind, kind).empty()) {
+            throw CommandError("bad_args", "该轨道/音符类型无法表示为当前模式的 BMS 通道");
+        }
         if (ln_kind && !lane_can_ln(session.chart(), lane)) {
             throw CommandError("bad_args",
                                "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
@@ -1775,12 +1834,36 @@ public:
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
             comp->add(std::make_unique<edit::TransformNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, mirror, rotate));
+                r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line));
         }
         const bool ok = session.exec(std::move(comp));
+        // 返回变换后的选择引用（QML 直接采用，不再独立计算映射——单一事实源在 core；
+        // 键号上限按谱面模式，与命令 apply 同一 transform_lane）。
+        const std::string mode =
+            session.has_chart() ? session.chart().mode_id.value_or("sp7k") : "sp7k";
+        const int max_key = chart_mode_key_count(mode);
+        Json sel = Json::array();
+        for (const auto& r : refs) {
+            const Lane nl = edit::transform_lane(r.lane, mirror, rotate, max_key);
+            Json o = Json::object();
+            o.set("measure", static_cast<std::int64_t>(r.measure));
+            Json p = Json::object();
+            p.set("num", static_cast<std::int64_t>(r.pos.num));
+            p.set("den", static_cast<std::int64_t>(r.pos.den));
+            o.set("pos", std::move(p));
+            Json l = Json::object();
+            l.set("player", static_cast<std::int64_t>(nl.player));
+            l.set("kind", lane_kind_str(nl.kind));
+            l.set("index", static_cast<std::int64_t>(nl.index));
+            o.set("lane", std::move(l));
+            o.set("sample", static_cast<std::int64_t>(r.sample));
+            o.set("sub_line", static_cast<std::int64_t>(r.sub_line));
+            sel.push_back(std::move(o));
+        }
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
+        out.set("selection", std::move(sel));
         out.set("mirror", mirror);
         out.set("rotate", static_cast<std::int64_t>(rotate));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));

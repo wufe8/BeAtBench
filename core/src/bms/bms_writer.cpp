@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -135,6 +136,21 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                                   std::end(kMetaOrder);
             (is_known ? known : unknown).push_back(up);
         }
+        // #PLAYER 派生（2026-10 模式系统阶段一）：显式元信息优先；缺失/空且模式推导值
+        // 非默认时补写（dp=3、battle=4）——session.new{mode:dp/battle} 新建谱面保存即落
+        // 正确 PLAYER（重开不退回 sp7k）。sp7k/pms9k 推导值 = 默认 1，省略不写（零破坏：
+        // 打开无 PLAYER 的普通谱保存不新增行，meta 往返相等；pms9k 重开靠 .pms 后缀）。
+        const auto meta_player = chart.meta.find("PLAYER");
+        std::optional<std::string> derived_player;
+        if (meta_player == chart.meta.end() || meta_player->second.empty()) {
+            if (chart.mode_id) {
+                if (*chart.mode_id == "dp") derived_player = "3";
+                else if (*chart.mode_id == "battle") derived_player = "4";
+            }
+        }
+        if (derived_player) {
+            known.push_back("PLAYER");  // kMetaOrder 已含 PLAYER，排序自然归位
+        }
         std::sort(known.begin(), known.end(),
                   [](const std::string& a, const std::string& b) {
                       std::size_t ia = 0, ib = 0;
@@ -146,7 +162,13 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                   });
         for (const auto& k : known) {
             if (const auto it = chart.meta.find(k); it != chart.meta.end()) {
-                append_line(out, k, it->second);
+                if (k == "PLAYER" && it->second.empty() && derived_player) {
+                    append_line(out, k, *derived_player);  // PLAYER 空串且有推导值 → 推导
+                } else {
+                    append_line(out, k, it->second);  // 空值照常输出（无尾随空格，原有行为）
+                }
+            } else if (k == "PLAYER" && derived_player) {
+                append_line(out, k, *derived_player);
             }
         }
         std::sort(unknown.begin(), unknown.end());
@@ -371,11 +393,16 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         // 即使模型异常残留 ln_channel/配对，也按普通背景 note 写回（绝不丢数据）。
         const bool want_ln =
             !lntype2 && (is_head || is_tail) && n.lane.kind != LaneKind::Bgm;
-        const auto channel =
-            bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
+        auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
+        // 部分遗留 PMS 2P 仅有 LN 通道而无普通通道。孤儿也保留源 LN 标记，
+        // 不能降级成会读成1P的普通通道，更不能因缺少配对而静默丢弃。
+        if (channel.empty() && n.ln_channel)
+            channel = bms_channel_for_mode(mode, n.lane, true, n.kind);
         if (channel.empty()) continue;  // 无法表示的 Lane（罕见）→ 丢弃并依赖诊断
         std::string slot_text;
-        if (is_tail && lntype2 && n.lane.kind != LaneKind::Bgm) {
+        const auto output_rule = bms_channel_rule_for(mode, channel);
+        const bool rdm_channel = output_rule && output_rule->ln_channel;
+        if (is_tail && lntype2 && !rdm_channel && n.lane.kind != LaneKind::Bgm) {
             slot_text = lnobj_text;
         } else {
             slot_text = fmt_id(chart, n.sample.id);
@@ -503,21 +530,30 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                         if (c.sub_line != g) continue;
                         by_pos[c.pos].push_back(c.text);
                     }
-                    std::int64_t n = 1;
+                    // 不同源通道的别名可收敛到同一输出通道/子行；同拍值仍须拆行，
+                    // 不能只取 front()。空子行也保留一行，既有 BGM 空层语义不变。
+                    std::size_t n_rows = 1;
                     for (const auto& [pos, texts] : by_pos) {
-                        if (!texts.empty()) n = std::lcm(n, pos.den);
+                        (void)pos;
+                        n_rows = std::max(n_rows, texts.size());
                     }
-                    std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
-                    for (const auto& [pos, texts] : by_pos) {
-                        if (texts.empty()) continue;
-                        const auto idx = static_cast<std::size_t>(pos.num * n / pos.den);
-                        slots[idx] = texts.front();
+                    for (std::size_t row = 0; row < n_rows; ++row) {
+                        std::int64_t n = 1;
+                        for (const auto& [pos, texts] : by_pos) {
+                            if (texts.size() > row) n = std::lcm(n, pos.den);
+                        }
+                        std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
+                        for (const auto& [pos, texts] : by_pos) {
+                            if (texts.size() <= row) continue;
+                            const auto idx = static_cast<std::size_t>(pos.num * n / pos.den);
+                            slots[idx] = texts[row];
+                        }
+                        char head[16];
+                        std::snprintf(head, sizeof(head), "#%03u%s:", measure, channel.c_str());
+                        out += head;
+                        for (const auto& s : slots) out += s;
+                        out.push_back('\n');
                     }
-                    char head[16];
-                    std::snprintf(head, sizeof(head), "#%03u%s:", measure, channel.c_str());
-                    out += head;
-                    for (const auto& s : slots) out += s;
-                    out.push_back('\n');
                 }
                 continue;
             }

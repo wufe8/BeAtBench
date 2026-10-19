@@ -110,13 +110,14 @@ void DocumentService::refresh() {
     emit instancesChanged();
 }
 
-QVariantMap DocumentService::create() {
+QVariantMap DocumentService::create(const QString& mode) {
     auto& reg = beatbench::edit::session_registry();
     const std::string previous = reg.active_id();
     const std::string id = "document-" + utf8(QUuid::createUuid().toString(QUuid::WithoutBraces));
     if (!reg.create(id)) return result(false, {}, {}, QStringLiteral("create_failed"));
     Json args = Json::object();
     args.set("session_id", id);
+    if (!mode.isEmpty()) args.set("mode", utf8(mode));
     const Json response = dispatch("session.new", std::move(args));
     if (!responseOk(response)) {
         reg.close(id);

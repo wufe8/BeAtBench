@@ -359,3 +359,217 @@ TEST(Command, GlobalRegistryLazyBuiltins) {
     EXPECT_NE(reg.find("convert"), nullptr);
     EXPECT_NE(reg.find("version"), nullptr);
 }
+
+// —— session.new 的 mode 参数（2026-10 模式系统阶段一，issue #26）——
+
+TEST(Command, SessionNewModeValidation) {
+    auto& reg = beatbench::cmd::global_registry();
+
+    // 合法 id → ok
+    Json args = Json::object();
+    args.set("mode", "dp");
+    EXPECT_TRUE(reg.dispatch(request("session.new", std::move(args))).at("ok").as_bool());
+
+    // 未知模式 / 读侧探测产物变体（不在 chart_mode_by_id 配置表）→ bad_args
+    for (const char* bad : {"frobnicate", "pms9k-bmesp"}) {
+        Json a = Json::object();
+        a.set("mode", bad);
+        const Json r = reg.dispatch(request("session.new", std::move(a)));
+        ASSERT_FALSE(r.at("ok").as_bool());
+        EXPECT_EQ(r.at("error").at("code").as_str(), "bad_args");
+    }
+
+    // 缺省不传 → 现行行为（协议向后兼容）
+    EXPECT_TRUE(reg.dispatch(request("session.new", Json::object())).at("ok").as_bool());
+}
+
+TEST(Command, SessionNewModeDrivesChannelTable) {
+    auto& reg = beatbench::cmd::global_registry();
+    // 同一 lane 语义在不同模式表下落不同通道：dp 2P键1 → 21；pms9k 1P键6 → 22（7key 表
+    // 下键6 是 18——能区分模式表是否真实驱动写回映射）。逐例：new{mode} → note.put →
+    // save → 检查文本通道。
+    const struct {
+        const char* mode;
+        std::int64_t player;
+        std::int64_t index;
+        const char* channel;
+    } cases[] = {
+        {"dp", 1, 1, "#00021"},
+        {"pms9k", 0, 6, "#00022"},
+    };
+    for (const auto& c : cases) {
+        Json a = Json::object();
+        a.set("mode", c.mode);
+        ASSERT_TRUE(reg.dispatch(request("session.new", std::move(a))).at("ok").as_bool());
+
+        Json put = Json::object();
+        put.set("measure", static_cast<std::int64_t>(0));
+        Json lane = Json::object();
+        lane.set("player", c.player);
+        lane.set("kind", "Key");
+        lane.set("index", c.index);
+        put.set("lane", std::move(lane));
+        put.set("sample", static_cast<std::int64_t>(1));
+        ASSERT_TRUE(reg.dispatch(request("note.put", std::move(put))).at("ok").as_bool());
+
+        const auto path = (temp_dir() / "new-mode-out.bms").string();
+        Json sv = Json::object();
+        sv.set("path", path);
+        sv.set("overwrite", true);
+        ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv))).at("ok").as_bool());
+
+        std::ifstream in(path, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_NE(text.find(c.channel), std::string::npos)
+            << "mode=" << c.mode << " 应写出通道 " << c.channel;
+    }
+}
+
+// 2026-10 复核：非法 mode（类型错/空串）→ bad_args 且会话不变（不得静默清空谱面）。
+TEST(Command, SessionNewInvalidModeKeepsSession) {
+    auto& reg = beatbench::cmd::global_registry();
+
+    // 先建一个 DP 谱面作为“现场”
+    Json a = Json::object();
+    a.set("mode", "dp");
+    ASSERT_TRUE(reg.dispatch(request("session.new", std::move(a))).at("ok").as_bool());
+
+    // 非法 mode：非字符串（int/null/数组）与空串 → bad_args
+    const Json bads[] = {Json(static_cast<std::int64_t>(42)), Json(), Json::array()};
+    for (const auto& bad : bads) {
+        Json args = Json::object();
+        args.set("mode", bad);
+        const Json r = reg.dispatch(request("session.new", std::move(args)));
+        ASSERT_FALSE(r.at("ok").as_bool());
+        EXPECT_EQ(r.at("error").at("code").as_str(), "bad_args");
+    }
+    {
+        Json args = Json::object();
+        args.set("mode", "");
+        const Json r = reg.dispatch(request("session.new", std::move(args)));
+        ASSERT_FALSE(r.at("ok").as_bool());
+        EXPECT_EQ(r.at("error").at("code").as_str(), "bad_args");
+    }
+
+    // 会话不变：非法调用后原 DP 谱仍在——2P 键1 仍能放置（被清空过的空谱也能放，
+    // 再用 channel 表区分：读模式经 note.put → save → 检查 21 通道在，
+    // 若谱面被静默重建为无 mode 空谱则写出 2P 键1 为 21 但 mode 缺失 → 用 DP 专属
+    // 2P 键6 = 28（7key 表下 2P 键6 同为 28，不可区分；改用 PLAYER 推导验证：
+    // DP 谱保存应含 #PLAYER 3，空谱不会）。
+    Json put = Json::object();
+    put.set("measure", static_cast<std::int64_t>(0));
+    Json lane = Json::object();
+    lane.set("player", static_cast<std::int64_t>(1));
+    lane.set("kind", "Key");
+    lane.set("index", static_cast<std::int64_t>(1));
+    put.set("lane", std::move(lane));
+    put.set("sample", static_cast<std::int64_t>(1));
+    ASSERT_TRUE(reg.dispatch(request("note.put", std::move(put))).at("ok").as_bool());
+
+    const auto path = (temp_dir() / "invalid-mode-keeps-session.bms").string();
+    Json sv = Json::object();
+    sv.set("path", path);
+    sv.set("overwrite", true);
+    ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv))).at("ok").as_bool());
+    std::ifstream in(path, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("#PLAYER 3"), std::string::npos)
+        << "非法 mode 调用后原 DP 谱面应仍在（PLAYER 仍按 dp 推导为 3）";
+}
+
+// 2026-10 复核：PLAYER 由 writer 推导（显式元信息优先；dp=3/battle=4 非默认值时补写；
+// sp7k/pms9k 推导值 = 默认 1，不新增行），保存重开不退回 SP。
+TEST(Command, PlayerDerivedFromModeOnSave) {
+    auto& reg = beatbench::cmd::global_registry();
+    const struct {
+        const char* mode;
+        const char* player_line;  // nullptr = 断言不新增 PLAYER 行（推导值为默认 1）
+    } cases[] = {{"dp", "#PLAYER 3"}, {"battle", "#PLAYER 4"}, {"pms9k", nullptr}};
+    for (const auto& c : cases) {
+        Json a = Json::object();
+        a.set("mode", c.mode);
+        ASSERT_TRUE(reg.dispatch(request("session.new", std::move(a))).at("ok").as_bool());
+        // pms9k 用 .pms 后缀（parser 按后缀先验模式；.bms 空谱本就无法区分 sp7k/pms9k）
+        const std::string ext = std::string(c.mode) == "pms9k" ? ".pms" : ".bms";
+        const auto path = (temp_dir() / (std::string("player-") + c.mode + ext)).string();
+        Json sv = Json::object();
+        sv.set("path", path);
+        sv.set("overwrite", true);
+        ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv))).at("ok").as_bool());
+        std::ifstream in(path, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (c.player_line) {
+            EXPECT_NE(text.find(c.player_line), std::string::npos)
+                << "mode=" << c.mode << " 应推导 " << c.player_line;
+        } else {
+            EXPECT_EQ(text.find("#PLAYER"), std::string::npos)
+                << "mode=" << c.mode << " 推导值为默认 1，不应新增 PLAYER 行";
+        }
+
+        // 保存重开再保存：mode 不退回（PLAYER 推导依赖 mode_id——若重开退回 sp7k，
+        // 第二次保存会写 #PLAYER 1；维护者复现场景的闭环）
+        Json op = Json::object();
+        op.set("path", path);
+        ASSERT_TRUE(reg.dispatch(request("session.load", std::move(op))).at("ok").as_bool());
+        const auto path2 =
+            (temp_dir() / (std::string("player-reopen-") + c.mode + ext)).string();
+        Json sv2 = Json::object();
+        sv2.set("path", path2);
+        sv2.set("overwrite", true);
+        ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv2))).at("ok").as_bool());
+        std::ifstream in2(path2, std::ios::binary);
+        std::string text2((std::istreambuf_iterator<char>(in2)),
+                          std::istreambuf_iterator<char>());
+        if (c.player_line) {
+            EXPECT_NE(text2.find(c.player_line), std::string::npos)
+                << "mode=" << c.mode << " 保存重开后再保存，PLAYER 不应退回";
+        } else {
+            EXPECT_EQ(text2.find("#PLAYER"), std::string::npos)
+                << "mode=" << c.mode << " 重开后再保存不应新增 PLAYER 行";
+        }
+    }
+}
+
+// 2026-10 复核：note.transform 返回变换后 selection（键号上限按谱面模式）；
+// pms9k 镜像键1 → 键9（不再是 7key 的键7）。
+TEST(Command, TransformReturnsModeAwareSelection) {
+    auto& reg = beatbench::cmd::global_registry();
+    Json a = Json::object();
+    a.set("mode", "pms9k");
+    ASSERT_TRUE(reg.dispatch(request("session.new", std::move(a))).at("ok").as_bool());
+
+    Json put = Json::object();
+    put.set("measure", static_cast<std::int64_t>(0));
+    Json lane = Json::object();
+    lane.set("player", static_cast<std::int64_t>(0));
+    lane.set("kind", "Key");
+    lane.set("index", static_cast<std::int64_t>(1));
+    put.set("lane", std::move(lane));
+    put.set("sample", static_cast<std::int64_t>(1));
+    ASSERT_TRUE(reg.dispatch(request("note.put", std::move(put))).at("ok").as_bool());
+
+    Json t = Json::object();
+    Json ref = Json::object();
+    ref.set("measure", static_cast<std::int64_t>(0));
+    Json pos = Json::object();
+    pos.set("num", static_cast<std::int64_t>(0));
+    pos.set("den", static_cast<std::int64_t>(1));
+    ref.set("pos", std::move(pos));
+    Json rl = Json::object();
+    rl.set("player", static_cast<std::int64_t>(0));
+    rl.set("kind", "key");
+    rl.set("index", static_cast<std::int64_t>(1));
+    ref.set("lane", std::move(rl));
+    ref.set("sample", static_cast<std::int64_t>(1));
+    Json refs = Json::array();
+    refs.push_back(std::move(ref));
+    t.set("selection", std::move(refs));
+    t.set("mirror", true);
+    const Json r = reg.dispatch(request("note.transform", std::move(t)));
+    ASSERT_TRUE(r.at("ok").as_bool());
+    ASSERT_TRUE(r.at("result").find("selection") != nullptr);
+    const auto& sel = r.at("result").at("selection").as_array();
+    ASSERT_EQ(sel.size(), 1u);
+    EXPECT_EQ(sel[0].at("lane").at("index").as_i64(), 9)
+        << "pms9k 镜像键1 应得键9";
+}
