@@ -4,8 +4,8 @@
 // 参照 SettingsDialog 的 header/footer 主题化模式；geometry 约定（2026-09 实测踩坑）：
 // - contentItem **不 anchors.fill**（其父级 = 整窗含 header/footer，fill 会压到 footer 下面）；
 //   内容用内边距 12，与标题文字对齐；
-// - Dialog **高度必须显式给**（自定义 header/footer + contentItem 时隐式高度计算不可靠，
-//   内容会溢出）。
+// - Dialog 高度显式给；紧凑表单用 height: naturalHeight（计入正文/标题/页脚），
+//   不再用固定高度挤压正文。旧的大型弹窗仍可自行指定高度。
 // 用法：BbDialog { width: 320; height: 186; title: qsTr("…"); 内容直接写子项 }
 // （子项自动进内容 ColumnLayout；取消按钮可经 showCancel 隐藏）。
 import QtQuick
@@ -25,6 +25,10 @@ Dialog {
     /// 内容子项（默认 property：直接写子项即可）。
     default property alias content: bodyColumn.data
     readonly property int contentPadding: 12
+    // Opt-in for compact forms: include the actual rows, wrapping, header and footer.
+    // Fixed legacy heights otherwise squeeze ColumnLayout below its implicit minimum.
+    readonly property real naturalHeight: header.height + footer.height + 2 * spacing
+                                          + topPadding + bottomPadding + contentItem.implicitHeight
 
     background: Rectangle {
         color: Theme.surface

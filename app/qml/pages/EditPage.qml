@@ -296,7 +296,7 @@ Item {
             id: handleItem
             color: Theme.border
             implicitWidth: 4
-            HoverHandler { id: handleHover }
+            HoverHandler { id: handleHover; cursorShape: parent.enabled ? Qt.SplitHCursor : Qt.ArrowCursor }
             Rectangle {
                 anchors.fill: parent
                 color: handleHover.hovered ? Theme.accent : "transparent"

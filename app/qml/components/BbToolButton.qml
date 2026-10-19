@@ -13,6 +13,12 @@ import QtQuick.Controls
 ToolButton {
     id: root
 
+    // Passive cursor feedback: leave clicks, grabs and keyboard focus to the control.
+    HoverHandler {
+        objectName: "semanticCursor"
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+
     // 2026-09 快捷键纪律：点击不抢焦点（Space/方向键不被按钮吞掉）；Tab 导航仍可达。
     // 同类：BbCheckBox / BbTabButton / BbTabStrip 内按钮。
     focusPolicy: Qt.TabFocus

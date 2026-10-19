@@ -119,6 +119,7 @@ Dialog {
                         MouseArea {
                             anchors.fill: parent
                             hoverEnabled: true
+                            cursorShape: root.enabled && parent.enabled && enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: root.currentSection = modelData.id
                         }
                         // 未实现分区：淡化 + 标记（不是禁用点击——点击显示占位页）
@@ -352,6 +353,7 @@ Dialog {
                                 spacing: 8
                                 Slider {
                                     id: volSlider
+                                    HoverHandler { cursorShape: parent.enabled ? Qt.SizeHorCursor : Qt.ArrowCursor }
                                     from: 0; to: 100; stepSize: 1
                                     value: audioEngine.masterVolume
                                     Layout.fillWidth: true
@@ -509,6 +511,7 @@ Dialog {
                             }
                             MouseArea {
                                 anchors.fill: parent
+                                cursorShape: root.enabled && parent.enabled && enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                                 onClicked: {
                                     shortcutHint.text = ""
                                     shortcutList.captureId = modelData
