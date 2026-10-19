@@ -26,6 +26,7 @@ std::optional<ChartMode> chart_mode_by_id(std::string_view id);
 
 /// 模式的 1P 键轨数（sp7k/dp/battle=7、pms9k=9）：lanes 中 player 0 的 Key lane
 /// 最大 index。未知 id 返回 7（sp7k 兑底）。拖动/变换等键号上限的单一事实源。
+/// 探测产物变体（pms9k 前缀，如 pms9k-bmesp）按 pms9k 家族归一，不算未知 id。
 int chart_mode_key_count(std::string_view id);
 
 }  // namespace beatbench

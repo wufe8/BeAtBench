@@ -82,6 +82,10 @@ std::optional<ChartMode> chart_mode_by_id(std::string_view id) {
 }
 
 int chart_mode_key_count(std::string_view id) {
+    // 读侧探测产物变体（如 pms9k-bmesp）不在 chart_mode_by_id 配置表——
+    // 「不可作为新建选项」≠「未知布局」（2026-10 复核 R27-1）：键数按家族归一，
+    // 否则变换/旋转/playKeyCount/ghost 的键号上限回退 7，把 9 键夹坏。
+    if (id.rfind("pms9k", 0) == 0) id = "pms9k";
     const auto m = chart_mode_by_id(id);
     if (!m) return 7;  // 未知 id：sp7k 兑底
     int max_key = 1;

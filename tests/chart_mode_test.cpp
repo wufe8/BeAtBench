@@ -44,6 +44,17 @@ TEST(ChartMode, UnknownIdNullopt) {
     EXPECT_FALSE(chart_mode_by_id("").has_value());
 }
 
+// R27-1（上游复核）：探测产物变体不可作为新建选项（session.new 值域只认配置表），
+// 但不是「未知布局」——键数按 pms9k 家族归一，否则 9 键被 7 键上限夹坏。
+TEST(ChartMode, KeyCountPmsVariantFamilyNormalized) {
+    EXPECT_EQ(chart_mode_key_count("pms9k"), 9);
+    EXPECT_EQ(chart_mode_key_count("pms9k-bmesp"), 9);
+    EXPECT_EQ(chart_mode_key_count("pms9k-future-variant"), 9);
+    // 非本家族未知 id 仍兑底 7
+    EXPECT_EQ(chart_mode_key_count("nope"), 7);
+    EXPECT_EQ(chart_mode_key_count(""), 7);
+}
+
 TEST(ChartMode, Sp7kContainsScratchAndPedal) {
     const auto sp = chart_mode_by_id("sp7k");
     bool has_scratch = false, has_pedal = false;
