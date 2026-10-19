@@ -8,6 +8,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQuick.Shapes
 import "components"
 import "pages"
 
@@ -321,6 +322,13 @@ ApplicationWindow {
 
     // ---------- 菜单栏（固定全局；doc/09：从 uiActions 注册表查表） ----------
     menuBar: MenuBar {
+        objectName: "mainMenuBar"
+        delegate: MenuBarItem {
+            HoverHandler {
+                objectName: "semanticCursor"
+                cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
+        }
         // 菜单栏底 = 主题 token（启动即深色；Fusion 默认/平台 palette 兜底不可靠）。
         // ⚠️ 字体色：Fusion MenuBarItem 标题取 **palette.text**（非 windowText——上轮设错角色
         // 导致深灰字体）；palette.text 同步作用于弹出的菜单项文字。
@@ -329,6 +337,12 @@ ApplicationWindow {
         palette.windowText: Theme.text
         palette.buttonText: Theme.text
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("文件")
             // 枚举渲染（doc/09 §7 验收 2）：文件菜单动作按注册表 idsByCategory("file") 生成，
             // 分隔线由注册表 isSeparator(id) 判定（addSeparator 建模）。
@@ -339,6 +353,10 @@ ApplicationWindow {
             Repeater {
                 model: uiActions.idsByCategory("file")
                 delegate: MenuItem {
+                    HoverHandler {
+                        objectName: "semanticCursor"
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
                     id: fileItem
                     required property string modelData
                     readonly property bool isSep: uiActions.isSeparator(modelData)
@@ -370,11 +388,21 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("编辑")
             enabled: chartMeta !== null
             Repeater {
                 model: uiActions.idsByCategory("edit")
                 delegate: MenuItem {
+                    HoverHandler {
+                        objectName: "semanticCursor"
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
                     id: editItem
                     required property string modelData
                     readonly property bool isSep: uiActions.isSeparator(modelData)
@@ -398,8 +426,18 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("视图")
             MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 objectName: "hideReferenceSecondaryChannelsMenuItem"
                 text: qsTr("隐藏 B 侧次要通道与波形")
                 checkable: true
@@ -410,8 +448,18 @@ ApplicationWindow {
             // 列出「默认」+ 内置皮肤，当前生效项打勾；点击即运行时切换（Theme.applySkinByName）。
             // ⚠️ 运行时切肤同时应用该皮肤目录的 keymap.json（doc/10 §4 待改进）——默认皮肤清除覆写。
             Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
                 title: qsTr("皮肤")
                 MenuItem {
+                    HoverHandler {
+                        objectName: "semanticCursor"
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
                     text: qsTr("默认")
                     checkable: true
                     checked: Theme.activeSkin === ""
@@ -420,6 +468,10 @@ ApplicationWindow {
                 Repeater {
                     model: Theme.skinNames()
                     delegate: MenuItem {
+                        HoverHandler {
+                            objectName: "semanticCursor"
+                            cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
                         required property string modelData
                         text: modelData
                         checkable: true
@@ -430,23 +482,59 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("工作区")
-            MenuItem { text: uiActions.label("view.page.edit"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.edit"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.edit")
                        onTriggered: uiActions.invoke("view.page.edit") }
-            MenuItem { text: uiActions.label("view.page.slice"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.slice"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.slice")
                        onTriggered: uiActions.invoke("view.page.slice") }
-            MenuItem { text: uiActions.label("view.page.test"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.test"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.test")
                        onTriggered: uiActions.invoke("view.page.test") }
-            MenuItem { text: uiActions.label("view.page.project"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.project"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.project")
                        onTriggered: uiActions.invoke("view.page.project") }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("设置")
             MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 // 2026-09：走注册表（app.settings）——改绑后菜单提示同步（与 Ctrl+, 同源）。
                 text: qsTr("首选项…") + (uiActions.shortcutRevision >= 0 && uiActions.shortcut("app.settings")
                                          ? "    " + uiActions.shortcut("app.settings") : "")
@@ -454,8 +542,18 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("帮助")
             MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 text: qsTr("关于")
                 onTriggered: aboutDialog.open()
             }
@@ -583,12 +681,53 @@ ApplicationWindow {
                                }
                                ToolTip.visible: hovered
                                ToolTip.text: qsTr("设循环终点 B（红线/播放头位置；再点解除）") }
-                BbToolButton { text: audioEngine && audioEngine.playing ? qsTr("⏸") : qsTr("▶")
-                               enabled: chartMeta !== null
-                               onClicked: togglePlayback()
-                               highlighted: audioEngine && audioEngine.playing
-                               ToolTip.visible: hovered
-                               ToolTip.text: qsTr("播放/暂停（Space）") }
+                BbToolButton {
+                    id: editPlaybackButton
+                    objectName: "editPlaybackButton"
+                    // Draw monochrome geometry instead of font-dependent emoji glyphs.
+                    readonly property bool playing: audioEngine && audioEngine.playing
+                    implicitWidth: 36
+                    implicitHeight: 28
+                    Layout.minimumWidth: 36
+                    Layout.maximumWidth: 36
+                    Layout.minimumHeight: 28
+                    Layout.maximumHeight: 28
+                    enabled: chartMeta !== null
+                    active: playing
+                    Accessible.name: playing ? qsTr("暂停") : qsTr("播放")
+                    onClicked: togglePlayback()
+                    contentItem: Item {
+                        implicitWidth: 16
+                        implicitHeight: 16
+                        Item {
+                            width: 16; height: 16
+                            anchors.centerIn: parent
+                            Shape {
+                                anchors.fill: parent
+                                visible: !editPlaybackButton.playing
+                                ShapePath {
+                                    strokeWidth: 0
+                                    fillColor: editPlaybackButton.lit ? Theme.primary : Theme.textMuted
+                                    startX: 3; startY: 1
+                                    PathLine { x: 14; y: 8 }
+                                    PathLine { x: 3; y: 15 }
+                                    PathLine { x: 3; y: 1 }
+                                }
+                            }
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 4
+                                visible: editPlaybackButton.playing
+                                Repeater {
+                                    model: 2
+                                    Rectangle { width: 4; height: 14; color: Theme.primary }
+                                }
+                            }
+                        }
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("播放/暂停（Space）")
+                }
                 Label { text: window.modeLabel(); color: Theme.accent; font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall; padding: 4 }
             }
@@ -725,6 +864,7 @@ ApplicationWindow {
 
         // 页面内容区（切页 = 切视图，doc/05 §2）
         StackLayout {
+            objectName: "mainPageStack"
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: window.currentPage
@@ -2001,34 +2141,36 @@ ApplicationWindow {
 
     BbDialog {
         id: aboutDialog
+        objectName: "aboutDialog"
         title: qsTr("关于 BeAtBench")
         width: 360
-        height: 148
+        height: naturalHeight
         showCancel: false
         Label { text: "BeAtBench " + beatbench.versionString(); font.bold: true; color: Theme.text }
         Label { text: qsTr("BMS 谱面编辑器 · GPL-3.0"); font.pixelSize: Theme.fsSmall; color: Theme.text }
-        Label { text: qsTr("© 2026 wufe8"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
     }
 
     // 编辑区双击 note → 改引用采样 id（切音手工版；note.setSample）
     BbDialog {
         id: noteSampleDialog
+        objectName: "noteSampleDialog"
         title: qsTr("编辑对象")
         width: 320
-        height: 176
+        // Four rows plus spacing exceeded the old 176px box after header/footer.
+        height: naturalHeight
         property var ref: null
         readonly property string posText: ref ? qsTr("小节 %1 · %2/%3")
                                                  .arg(ref.measure).arg(ref.pos.num).arg(ref.pos.den) : ""
         readonly property string curText: ref ? qsTr("#WAV%1").arg(chartSession.idTextOf(ref.sample)) : ""
         onOpened: noteIdInput.forceActiveFocus()
         Label { text: qsTr("note 引用采样"); color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
-        Label { text: noteSampleDialog.posText + qsTr("　当前 %1").arg(noteSampleDialog.curText);
+        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
+                text: noteSampleDialog.posText + qsTr("　当前 %1").arg(noteSampleDialog.curText);
                 color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsTiny }
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
-            Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny;
-                    Layout.preferredWidth: 56 }
+            Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
             BbTextField {
                 id: noteIdInput
                 Layout.fillWidth: true
@@ -2039,7 +2181,8 @@ ApplicationWindow {
                 escapeHandler: function() { noteSampleDialog.reject() }
             }
         }
-        Label { text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
+        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
+                text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
                 font.pixelSize: Theme.fsTiny }
         onAccepted: {
             const r = noteSampleDialog.ref
@@ -2062,9 +2205,10 @@ ApplicationWindow {
     // ---- 视口双击编辑 BGA/BPM/STOP 对象（2026-09）：编辑内容（BMP id / 值）；位置用拖拽移动） ----
     BbDialog {
         id: metaEditDialog
+        objectName: "metaEditDialog"
         title: qsTr("编辑对象")
         width: 300
-        height: 190
+        height: naturalHeight
         property string kind: ""   // bga / bpm / stop
         property var base: null    // 原对象（measure/pos/layer/sample/value）
         readonly property string layerText: base ? ["base","poor","layer","layer2"][base.layer] : ""
@@ -2090,7 +2234,8 @@ ApplicationWindow {
         onOpened: meContentField.forceActiveFocus()
 
         Label { id: meLabel; color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
-        Label { id: mePosLabel; color: Theme.textFaint; font.family: Theme.fontMono;
+        Label { id: mePosLabel; Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
+                color: Theme.textFaint; font.family: Theme.fontMono;
                 font.pixelSize: Theme.fsTiny }
         RowLayout { id: meLayerRow; spacing: 6; Layout.fillWidth: true
             Label { id: meLayerLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
@@ -2098,7 +2243,7 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
-            Label { id: meContentLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 56 }
+            Label { id: meContentLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
             BbTextField {
                 id: meContentField
                 Layout.fillWidth: true

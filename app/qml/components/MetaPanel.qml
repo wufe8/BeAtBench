@@ -287,6 +287,10 @@ ColumnLayout {
                     }
                     ComboBox {
                         id: combo
+                        HoverHandler {
+                            objectName: "semanticCursor"
+                            cursorShape: combo.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
                         visible: !!root.comboOptions(modelData.key, modelData.value)
                         model: root.comboOptions(modelData.key, modelData.value)
                         textRole: "label"
@@ -368,6 +372,11 @@ ColumnLayout {
                                 model: combo.model
                                 currentIndex: combo.highlightedIndex
                                 delegate: ItemDelegate {
+                                    enabled: combo.enabled
+                                    HoverHandler {
+                                        objectName: "semanticCursor"
+                                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    }
                                     width: combo.popup ? combo.popup.width - 8 : combo.width
                                     required property int index
                                     contentItem: Label {
@@ -424,6 +433,10 @@ ColumnLayout {
                         }
                         ComboBox {
                             id: combo
+                            HoverHandler {
+                                objectName: "semanticCursor"
+                                cursorShape: combo.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
                             visible: !!root.comboOptions(modelData.key, modelData.value)
                             model: root.comboOptions(modelData.key, modelData.value)
                             textRole: "label"
@@ -497,6 +510,11 @@ ColumnLayout {
                                     model: combo.model
                                     currentIndex: combo.highlightedIndex
                                     delegate: ItemDelegate {
+                                        enabled: combo.enabled
+                                        HoverHandler {
+                                            objectName: "semanticCursor"
+                                            cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        }
                                         width: combo.popup ? combo.popup.width - 8 : combo.width
                                         required property int index
                                         contentItem: Label {

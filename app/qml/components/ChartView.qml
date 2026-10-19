@@ -678,7 +678,12 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
         // select = 箭头（框选/点选）；pan = 手（拖动滚动）；note = 十字（点击放置）
-        cursorShape: root.editable && root.editorTool === "note" ? Qt.CrossCursor
+        objectName: "chartInteractionArea"
+        cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor
+                     : root._panning || ((pressedButtons & Qt.LeftButton) !== 0 && root.editorTool === "pan")
+                       ? Qt.ClosedHandCursor
+                     : pressed && root._moving && root._dragged ? Qt.SizeAllCursor
+                     : root.editable && root.editorTool === "note" ? Qt.CrossCursor
                      : root.editorTool === "pan" ? Qt.OpenHandCursor
                      : Qt.ArrowCursor
 
@@ -735,6 +740,10 @@ Item {
             if (mouse.button === Qt.RightButton) return
             root.handleRelease(mouse.x, mouse.y)
         }
+        onCanceled: {
+            root._panning = false
+            root._lastY = -1
+        }
         onDoubleClicked: (mouse) => {
             // 双击命中 note / BGA / BPM / STOP（select 工具）→ 编辑（note 改采样；bga 改 BMP/图层；
             // bpm/stop 改值；Main 弹对话框）
@@ -784,6 +793,7 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
+            cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor : pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             property real grabOffset: 0
             onPressed: (mouse) => {
                 grabOffset = mouse.y - vthumb.y
@@ -826,6 +836,7 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
+            cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor : pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             property real grabOffset: 0
             onPressed: (mouse) => {
                 grabOffset = mouse.x - thumb.x

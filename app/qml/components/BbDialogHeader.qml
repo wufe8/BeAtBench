@@ -28,7 +28,8 @@ Rectangle {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
         preventStealing: true
-        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+        objectName: "dialogDragArea"
+        cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor : pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
         onPressed: function(mouse) { root.positioner.beginDrag(this, mouse.x, mouse.y) }
         onPositionChanged: function(mouse) {
             if (pressed) root.positioner.moveDrag(this, mouse.x, mouse.y)

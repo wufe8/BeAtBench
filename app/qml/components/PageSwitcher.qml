@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 底部页面条（Resolve 式页面切换）：[编辑 | 切音 | 测试]。
+// 底部页面条（Resolve 式页面切换）：[项目 | 编辑 | 切音 | 测试]。
 // 纯布局组件，不碰逻辑（doc/05 §4.1：位置可配置，默认底部）。
 // 按钮样式对照 .seg.active（主色底 + 白字，doc/beatbench-ui-preview.html）。
 import QtQuick
@@ -24,18 +24,24 @@ Rectangle {
 
         Repeater {
             model: [
-                { label: qsTr("编辑"), hint: qsTr("调整谱面") },
-                { label: qsTr("切音"), hint: qsTr("对音 / MIDI / key 音（占位）") },
-                { label: qsTr("测试"), hint: qsTr("试玩 / 预览（占位）") },
-                { label: qsTr("项目"), hint: qsTr("谱面 / 资源索引") }
+                // Visual order is independent of Main's stable logical page indices.
+                { page: 3, label: qsTr("项目"), hint: qsTr("谱面 / 资源索引") },
+                { page: 0, label: qsTr("编辑"), hint: qsTr("调整谱面") },
+                { page: 1, label: qsTr("切音"), hint: qsTr("对音 / MIDI / key 音（占位）") },
+                { page: 2, label: qsTr("测试"), hint: qsTr("试玩 / 预览（占位）") }
             ]
             Button {
                 id: pageBtn
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: pageBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 width: 112
                 height: 26
-                highlighted: index === root.currentPage
+                objectName: "pageTab" + modelData.page
+                highlighted: modelData.page === root.currentPage
                 text: modelData.label + " · " + modelData.hint
-                onClicked: root.pageRequested(index)
+                onClicked: root.pageRequested(modelData.page)
 
                 background: Rectangle {
                     radius: Theme.radiusSm

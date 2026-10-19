@@ -7,6 +7,11 @@ import QtQuick.Controls
 TextField {
     id: root
 
+    HoverHandler {
+        objectName: "semanticCursor"
+        cursorShape: root.enabled ? Qt.IBeamCursor : Qt.ArrowCursor
+    }
+
     font.pixelSize: Theme.fsBase
     font.family: Theme.fontSans
     color: Theme.text

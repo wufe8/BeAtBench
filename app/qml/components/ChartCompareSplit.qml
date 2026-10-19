@@ -110,6 +110,7 @@ Item {
             Slider {
                 visible: root.overlayMode
                 objectName: "overlayOpacitySlider"
+                HoverHandler { objectName: "semanticCursor"; cursorShape: parent.enabled ? Qt.SizeHorCursor : Qt.ArrowCursor }
                 Layout.preferredWidth: 90
                 from: 0.1; to: 0.8; stepSize: 0.05
                 value: root.overlayOpacity
@@ -339,7 +340,7 @@ Item {
         handle: Rectangle {
             implicitWidth: 4
             color: Theme.border
-            HoverHandler { id: hover; cursorShape: Qt.SplitHCursor }
+            HoverHandler { id: hover; cursorShape: parent.enabled ? Qt.SplitHCursor : Qt.ArrowCursor }
             Rectangle {
                 anchors.fill: parent
                 color: Theme.accent

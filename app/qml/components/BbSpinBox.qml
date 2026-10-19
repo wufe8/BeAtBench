@@ -59,6 +59,10 @@ SpinBox {
 
     // 内容（文本；右侧给箭头留白；TextInput 无 verticalAlignment → 用 anchors 垂直居中）
     contentItem: TextInput {
+        HoverHandler {
+            objectName: "semanticCursor"
+            cursorShape: root.enabled && root.editable ? Qt.IBeamCursor : Qt.ArrowCursor
+        }
         anchors.left: parent.left
         anchors.leftMargin: 8
         anchors.right: parent.right
@@ -112,6 +116,8 @@ SpinBox {
         }
         MouseArea {
             anchors.fill: parent
+            objectName: "spinStepArea"
+            cursorShape: root.enabled && enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: root.adjustSpin(1)
         }
     }
@@ -136,6 +142,8 @@ SpinBox {
         }
         MouseArea {
             anchors.fill: parent
+            objectName: "spinStepArea"
+            cursorShape: root.enabled && enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: root.adjustSpin(-1)
         }
     }

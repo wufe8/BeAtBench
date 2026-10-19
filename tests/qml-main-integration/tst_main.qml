@@ -29,6 +29,7 @@ TestCase {
         const beforeA = mainFixture.snapshot(a), beforeB = mainFixture.snapshot(b)
         main = mainComponent.createObject(null)
         verify(main !== null)
+        compare(main.currentPage, 0) // Visual Project-first order must not change default Edit.
         mainFixture.bind(main)
         main.requestActivate()
         main.adoptChart(mainFixture.snapshot(a).path)
@@ -797,6 +798,130 @@ TestCase {
         verify(mainFixture.snapshot(a).undo < sa.undo)
         compare(mainFixture.snapshot(b), sb)
     }
+    function test_editPlayback_geometryStableAcrossStateChanges() {
+        start(false)
+        const button = mainFixture.objectNamed(main, "editPlaybackButton")
+        verify(button !== null)
+        const geometry = function() {
+            const p = button.mapToItem(main.contentItem, 0, 0)
+            return [p.x, p.y, button.width, button.height,
+                    button.implicitWidth, button.implicitHeight, button.parent.height]
+        }
+        const stopped = geometry()
+        compare(button.text, "") // No platform emoji/font fallback metrics.
+        compare(button.playing, false)
+        for (let i = 0; i < 4; ++i) {
+            audioEngine.playing = true
+            tryCompare(button, "playing", true)
+            wait(0)
+            compare(geometry(), stopped)
+            audioEngine.playing = false
+            tryCompare(button, "playing", false)
+            wait(0)
+            compare(geometry(), stopped)
+        }
+        // Only publish fake audio state: do not start playback/rendering in a layout test.
+        compare(audioEngine.playbackCalls, 0)
+    }
+    function test_pageTabs_projectFirst_preserveLogicalIndices() {
+        start(false)
+        main.clearTextFocus()
+        const stack = mainFixture.objectNamed(main, "mainPageStack")
+        verify(stack !== null)
+        const order = [3, 0, 1, 2]
+        const tabs = order.map(i => mainFixture.objectNamed(main, "pageTab" + i))
+        for (let i = 0; i < tabs.length; ++i) {
+            verify(tabs[i] !== null)
+            if (i > 0) verify(tabs[i - 1].x < tabs[i].x)
+        }
+        compare(main.currentPage, 0)
+        compare(stack.currentIndex, 0)
+        compare(tabs[1].highlighted, true)
+        for (let i = 0; i < order.length; ++i) {
+            mouseClick(tabs[i], tabs[i].width / 2, tabs[i].height / 2)
+            tryCompare(main, "currentPage", order[i])
+            compare(stack.currentIndex, order[i])
+            compare(main.chartEditingAllowed, order[i] === 0)
+            for (let j = 0; j < tabs.length; ++j)
+                compare(tabs[j].highlighted, j === i)
+            // Stack children remain Edit / Slice / Test / Project, not visual tab order.
+            compare(stack.children[0].visible, order[i] === 0)
+            compare(stack.children[1].visible, order[i] === 1)
+            compare(stack.children[2].visible, order[i] === 2)
+            compare(stack.children[3].visible, order[i] === 3)
+            compare(stack.children[1].kbdPageActive, order[i] === 1)
+        }
+        // Programmatic logical navigation must also highlight the correct visual button.
+        main.currentPage = 0
+        tryCompare(tabs[1], "highlighted", true)
+    }
+    function assertDialogContentBounds(dialog) {
+        verify(dialog !== null)
+        tryCompare(dialog, "opened", true)
+        wait(0) // Let wrapped labels and ColumnLayout settle.
+        const body = dialog.contentItem
+        verify(body.height + 1 >= body.implicitHeight, "Dialog body squeezed below content height")
+        let textCount = 0
+        function inspect(item) {
+            if (!item.visible) return
+            if (item.text !== undefined && item.font !== undefined && item.text !== "") {
+                ++textCount
+                const p = item.mapToItem(body, 0, 0)
+                verify(p.x >= -1 && p.y >= -1, "Text begins outside dialog body: " + item.text)
+                verify(p.x + item.width <= body.width + 1, "Text crosses body right edge: " + item.text)
+                verify(p.y + item.height <= body.height + 1, "Text overlaps footer: " + item.text)
+                if (item.contentHeight !== undefined)
+                    verify(item.contentHeight <= item.height + 1, "Text vertically clipped: " + item.text)
+                if (item.contentWidth !== undefined && item.selectByMouse === undefined)
+                    verify(item.contentWidth <= item.width + 1, "Label horizontally clipped: " + item.text)
+                verify(item.text.indexOf("©") < 0 && item.text.indexOf("wufe8") < 0)
+            }
+            const children = item.children || []
+            for (let i = 0; i < children.length; ++i) inspect(children[i])
+        }
+        inspect(body)
+        verify(textCount >= 2, "Expected actual production dialog text")
+        const bottom = body.mapToItem(dialog.footer, 0, body.height)
+        verify(bottom.y <= 1, "Body overlaps footer")
+    }
+    function test_editObjectDialog_contentBounds_data() {
+        return [{tag: "note", kind: "note"}, {tag: "bpm", kind: "bpm"},
+                {tag: "stop", kind: "stop"}, {tag: "bga", kind: "bga"}]
+    }
+    function test_editObjectDialog_contentBounds(data) {
+        start(false)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const ref = {measure: 1, pos: {num: 0, den: 1}, sample: 1,
+                     lane: {player: 0, kind: "key", index: 1},
+                     kind: data.kind, layer: 3, value: data.kind === "bpm" ? 180 : 96}
+        if (data.kind === "note") {
+            main.selectionRefs = [ref]
+            wait(0)
+            clickButton(main, "修改采样…")
+        } else {
+            main.metaSelection = [ref]
+            wait(0)
+            clickButton(main, "编辑事件…")
+        }
+        const dialog = mainFixture.objectNamed(main, data.kind === "note" ? "noteSampleDialog" : "metaEditDialog")
+        assertDialogContentBounds(dialog)
+        verify(mainFixture.screenshot()) // BB_MAIN_SCREENSHOT opt-in: production popup evidence.
+        // Also exercise wrapped hint/position text without relying on a specific system font.
+        dialog.width = 260
+        assertDialogContentBounds(dialog)
+        keyClick(Qt.Key_Escape)
+        tryCompare(dialog, "visible", false)
+        unchanged(sa, sb)
+    }
+    function test_about_genericContentBounds() {
+        start(false)
+        main.debugOpenDialog = "about"
+        const dialog = mainFixture.objectNamed(main, "aboutDialog")
+        assertDialogContentBounds(dialog)
+        verify(mainFixture.screenshot())
+        compare(dialog.showCancel, false)
+        dialog.close()
+    }
     function test_draftSaveFailure_doesNotSwap() {
         start(true)
         draft()
@@ -811,4 +936,34 @@ TestCase {
         compare(main.metaDraftDirty, true)
         compare(mainFixture.snapshot(b), sb)
     }
+    function test_mainMenuCursors_preserveEnabledAndDisabledSemantics() {
+        start(false)
+        const bar = main.menuBar
+        verify(bar !== null)
+        const title = bar.itemAt(0)
+        verify(title !== null)
+        const titleCursor = mainFixture.objectNamed(title, "semanticCursor")
+        verify(titleCursor !== null)
+        compare(titleCursor.cursorShape, Qt.PointingHandCursor)
+        // The fixture registers edit actions only; the production View menu has static items.
+        const menu = bar.menuAt(2)
+        verify(menu.count > 0)
+        let enabledCount = 0
+        for (let i = 0; i < menu.count; ++i) {
+            const item = menu.itemAt(i)
+            if (!item) continue
+            const cursor = mainFixture.objectNamed(item, "semanticCursor")
+            verify(cursor !== null)
+            compare(cursor.cursorShape, item.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor)
+            if (item.enabled) enabledCount++
+        }
+        verify(enabledCount > 0)
+        const action = menu.itemAt(0)
+        const cursor = mainFixture.objectNamed(action, "semanticCursor")
+        action.enabled = false
+        compare(cursor.cursorShape, Qt.ArrowCursor)
+        action.enabled = true
+        compare(cursor.cursorShape, Qt.PointingHandCursor)
+    }
+
 }

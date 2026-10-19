@@ -647,7 +647,7 @@ Item {
             // 避开 SplitHandle.hovered 的附加属性作用域坑（详见 EditPage handle 注释）。
             handle: Rectangle {
                 implicitWidth: 4
-                HoverHandler { id: sliceHandleHover }
+                HoverHandler { id: sliceHandleHover; cursorShape: parent.enabled ? Qt.SplitHCursor : Qt.ArrowCursor }
                 color: sliceHandleHover.hovered ? Theme.accent : Theme.border
             }
 
@@ -810,6 +810,9 @@ Item {
                                         anchors.fill: parent
                                         spacing: 4
                                         CheckBox {
+                                            HoverHandler {
+                                                cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            }
                                             checked: modelData.enabled
                                             onToggled: sliceWorkspace.setSliceEnabled(modelData.index, checked)
                                             implicitHeight: 20
