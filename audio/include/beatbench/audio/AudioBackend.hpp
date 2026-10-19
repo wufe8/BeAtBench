@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 音频后端薄抽象（doc/02 §5.1）：枚举设备/开关流/回调/缓冲参数。
-// 实现 = PortAudio（WASAPI 默认；ASIO 后置，见 backend_portaudio.cpp）。
+// 实现 = PortAudio；系统默认输出不自动切换到 ASIO。
 // 注意：本接口零 Qt；回调线程为 PortAudio 创建，回调内必须无锁无分配
 // （voice 混音见 SamplePlayer，用短临界区/无锁结构）。
 //
-// M4.2 扩展（设置页）：init 打开默认设备 → devices() 枚举 → start(params)
+// 生命周期：init 初始化库 → devices() 枚举 → start(params) 解析并打开设备
 // 按【设备序号 + 采样率 + 缓冲帧数】打开流（默认值聚合到 AudioSettings；
 // 失败由调用方（AudioEngine）回退，见其重开流逻辑）。
 #pragma once
@@ -22,16 +22,29 @@ struct AudioDeviceInfo {
     int defaultSampleRate = 0;   ///< 设备默认采样率
     int maxOutputChannels = 0;
     std::string apiName;         ///< "WASAPI" / "ASIO" / "DirectSound" 等
+    int apiType = 0;             ///< 数值 PaHostApiTypeId，不依赖 PortAudio 头文件
+    bool isAsio = false;
+};
+
+/// ASIO 原生缓冲能力（帧）；非 ASIO 为 false/全零；查询失败见 error。
+struct AudioDeviceCapabilities {
+    bool asio = false;
+    long bufferMin = 0;
+    long bufferMax = 0;
+    long bufferPreferred = 0;
+    long bufferGranularity = 0;  ///< 0 固定；-1 为 2 的幂；正数为从 min 起的步长
+    std::string error;
 };
 
 /// 输出流参数（设置页可编辑项；0/负 = 用设备默认值）。
 struct AudioSettings {
     int device = -1;         ///< 设备序号（AudioDeviceInfo.index；-1 = 系统默认）
     int sampleRate = 0;      ///< 目标采样率（0 = 设备默认；常用 44100/48000）
-    int framesPerBuffer = 0; ///< 缓冲帧数（0 = 设备默认；常用 128/256/512；-1 = 0 别名）
+    int framesPerBuffer = 0; ///< 请求回调帧数（0 默认/ASIO preferred；-1 = 0 别名）
 };
 
-/// 输出后端（init 打开默认输出设备；start 启动回调）。一次 init 对应一个流。
+/// 输出后端（init 不要求默认输出存在；start 打开立体声输出并启动回调）。
+/// 非回调方法由调用方串行调用；设备索引仅在本次 PortAudio 初始化内有效。
 class AudioBackend {
 public:
     virtual ~AudioBackend() = default;
@@ -57,18 +70,33 @@ public:
     /// 设备枚举（设置页下拉；含 index/api/默认采样率）。
     virtual std::vector<AudioDeviceInfo> devices() { return {}; }
 
-    /// 当前活动流信息（采样率/缓冲/延迟，设置页实况显示）。
+    /// 此音频目标是否编译了 ASIO 支持；不初始化后端，也不代表存在驱动/设备。
+    virtual bool asioAvailable() const { return false; }
+
+    /// 查询设备能力；-1 为系统默认。ASIO 数值是初始化时的驱动快照。
+    virtual AudioDeviceCapabilities deviceCapabilities(int /*device*/) const { return {}; }
+
+    /// 显示 ASIO 驱动面板；调用方必须先停止并关闭流。
+    /// v19.7 缓冲能力为缓存；面板改动后可能需要完全 shutdown/init 或重启程序。
+    /// nativeWindow 为 Windows HWND（可为空）；非 ASIO 返回 false。
+    virtual bool showDeviceControlPanel(int /*device*/, void* /*nativeWindow*/,
+                                        std::string* errMsg) {
+        if (errMsg) *errMsg = "ASIO control panel is not supported";
+        return false;
+    }
+
+    /// 当前活动流信息；停止/失败后全零/空字符串。
     struct StreamInfo {
         int sampleRate = 0;
-        int framesPerBuffer = 0;
-        double latencySeconds = 0.0;
+        int framesPerBuffer = 0;    ///< 请求的回调帧数（0 未指定），不是原生缓冲大小
+        double latencySeconds = 0.0; ///< Pa_GetStreamInfo 的实际 outputLatency
         std::string deviceName;
         std::string apiName;
     };
     virtual StreamInfo streamInfo() const { return {}; }
 };
 
-/// 创建 PortAudio 后端（共享库按需加载；ASIO 后缀可用时自动使用，否则 WASAPI）。
+/// 创建 PortAudio 后端；ASIO 仅在构建启用且用户显式选择对应设备时使用。
 AudioBackend* create_portaudio_backend();
 
 }  // namespace beatbench::audio
