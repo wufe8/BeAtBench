@@ -80,6 +80,38 @@ Dialog {
         { id: "shortcut", label: qsTr("快捷键"), done: true  }
     ]
     property string currentSection: "audio"
+    property int apiFilterIndex: 0
+    // These queries always describe the engine's accepted device, never a filtered row.
+    readonly property var currentCapabilities: audioEngine.deviceCapabilities(audioEngine.deviceIndex)
+    readonly property var currentBufferOptions: audioEngine.bufferOptions(audioEngine.deviceIndex)
+    readonly property bool hasAsioDevices: {
+        for (var i = 0; i < audioEngine.devices.length; ++i)
+            if (audioEngine.devices[i].isAsio) return true
+        return false
+    }
+    readonly property string defaultRateText: {
+        for (var i = 0; i < audioEngine.devices.length; ++i) {
+            var d = audioEngine.devices[i]
+            if (audioEngine.deviceIndex >= 0 && d.index === audioEngine.deviceIndex)
+                return qsTr("设备默认（%1 Hz）").arg(d.sampleRate)
+        }
+        return qsTr("设备默认")
+    }
+    function deviceSelectionIndex() {
+        for (var i = 0; i < deviceCombo.model.length; ++i)
+            if (deviceCombo.model[i].index === audioEngine.deviceIndex) return i
+        return -1
+    }
+    function rateSelectionIndex() {
+        for (var i = 0; i < rateCombo.model.length; ++i)
+            if (rateCombo.model[i].value === audioEngine.sampleRate) return i
+        return -1
+    }
+    function bufferSelectionIndex() {
+        for (var i = 0; i < bufferCombo.model.length; ++i)
+            if (bufferCombo.model[i].value === audioEngine.framesPerBuffer) return i
+        return -1
+    }
 
     onOpened: keymapDraft = uiActions.userKeymapSnapshot()
 
@@ -194,15 +226,20 @@ Dialog {
                     Rectangle {
                         Layout.fillWidth: true
                         visible: audioEngine.errorText !== "" || !audioEngine.available
-                        height: visible ? 36 : 0
+                        objectName: "audioErrorBar"
+                        implicitHeight: visible ? audioErrorLabel.implicitHeight + 16 : 0
+                        Layout.preferredHeight: implicitHeight
                         radius: Theme.radiusSm
-                        color: Theme.danger
-                        opacity: 0.15  // 淡红底（文字用 danger 色）
+                        // Tint only the background; keep the wrapped error text fully opaque.
+                        color: Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.15)
                         Label {
-                            anchors.fill: parent
+                            id: audioErrorLabel
+                            objectName: "audioErrorText"
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
-                            verticalAlignment: Text.AlignVCenter
                             text: audioEngine.errorText !== ""
                                   ? audioEngine.errorText
                                   : qsTr("音频不可用（后端初始化失败）——试听/测试音无效")
@@ -227,6 +264,7 @@ Dialog {
                                 // API 筛选（全部 / WASAPI / DirectSound / ASIO / MME / … 从设备列表去重）
                                 BbComboBox {
                                     id: apiFilterCombo
+                                    objectName: "audioApiFilter"
                                     Layout.preferredWidth: 130
                                     model: {
                                         var arr = [qsTr("全部")]
@@ -237,16 +275,18 @@ Dialog {
                                         }
                                         return arr
                                     }
-                                    currentIndex: window.apiFilterIndex
-                                    onActivated: (index) => window.apiFilterIndex = index
+                                    currentIndex: root.apiFilterIndex
+                                    onActivated: (index) => root.apiFilterIndex = index
                                 }
                                 // 设备下拉（按 API 筛选后；文本 elide 显示完整开头）
                                 BbComboBox {
                                     id: deviceCombo
+                                    objectName: "audioDeviceCombo"
                                     Layout.fillWidth: true
                                     model: {
                                         // 按 apiFilterIndex 过滤（0 = 全部）
-                                        var arr = []
+                                        var arr = apiFilterCombo.currentIndex === 0
+                                                ? [{ index: -1, name: qsTr("系统默认输出设备") }] : []
                                         var api = apiFilterCombo.model[apiFilterCombo.currentIndex]
                                         for (var i = 0; i < audioEngine.devices.length; ++i) {
                                             if (apiFilterCombo.currentIndex === 0 ||
@@ -256,22 +296,13 @@ Dialog {
                                         return arr
                                     }
                                     textRole: "name"
-                                    // 当前设备 index（audioEngine.deviceIndex；-1 = 默认 → 匹配设备 0 或"默认"项）
-                                    currentIndex: {
-                                        var idx = audioEngine.deviceIndex
-                                        if (idx < 0) {
-                                            // 默认设备：找第一个样本率匹配（实际由 activeDeviceText 显示）
-                                            return Math.max(0, 0)
-                                        }
-                                        for (var i = 0; i < deviceCombo.model.length; ++i)
-                                            if (deviceCombo.model[i].index === idx) return i
-                                        return 0
-                                    }
+                                    currentIndex: root.deviceSelectionIndex()
                                     onActivated: (index) => {
                                         var d = deviceCombo.model[index]
                                         if (d) audioEngine.applySettings(d.index, audioEngine.sampleRate,
-                                                                         audioEngine.framesPerBuffer,
+                                                                         0,
                                                                          audioEngine.masterVolume)
+                                        deviceCombo.currentIndex = Qt.binding(function() { return root.deviceSelectionIndex() })
                                     }
                                 }
                             }
@@ -283,68 +314,96 @@ Dialog {
                                 Layout.fillWidth: true
                             }
 
+                            Label {
+                                objectName: "asioAvailabilityText"
+                                text: !audioEngine.asioCompiled
+                                      ? qsTr("此版本未编译 ASIO 支持。")
+                                      : (!root.hasAsioDevices
+                                         ? qsTr("已编译 ASIO 支持，但未发现兼容的 ASIO 输出设备。")
+                                         : qsTr("ASIO 输出仅使用驱动的前 2 个通道。"))
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.fsTiny
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                objectName: "asioCapabilitiesError"
+                                visible: !!root.currentCapabilities.error
+                                text: root.currentCapabilities.error || ""
+                                color: Theme.danger
+                                font.pixelSize: Theme.fsTiny
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
+                            }
+                            BbToolButton {
+                                objectName: "asioControlPanelButton"
+                                text: qsTr("打开 ASIO 驱动控制面板…")
+                                // Keep the panel available to repair rejected driver/stream settings.
+                                enabled: audioEngine.asioCompiled && !!root.currentCapabilities.asio
+                                // Engine owns pause/close/panel/reopen and error reporting; no success toast.
+                                onClicked: audioEngine.showDeviceControlPanel()
+                            }
+                            Label {
+                                objectName: "asioControlPanelWarning"
+                                text: qsTr("打开控制面板将停止播放并重新打开音频流；之后需手动重新播放。PortAudio 19.7 在初始化时缓存缓冲限制，修改驱动设置后可能需要重启应用。")
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.fsTiny
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
+                            }
+
                             // 采样率
                             Label { text: qsTr("采样率"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
                             BbComboBox {
                                 id: rateCombo
+                                objectName: "audioRateCombo"
                                 Layout.fillWidth: true
                                 model: [
-                                    { text: qsTr("设备默认（%1 Hz）").arg(audioEngine.devices.length > 0
-                                                                          ? audioEngine.devices[0].sampleRate : "?"), value: 0 },
+                                    { text: root.defaultRateText, value: 0 },
                                     { text: "44100 Hz", value: 44100 },
                                     { text: "48000 Hz", value: 48000 }
                                 ]
                                 textRole: "text"
-                                currentIndex: {
-                                    var r = audioEngine.sampleRate
-                                    if (r === 0) return 0
-                                    if (r === 44100) return 1
-                                    if (r === 48000) return 2
-                                    return 0
-                                }
+                                currentIndex: root.rateSelectionIndex()
                                 onActivated: (index) => {
                                     var v = rateCombo.model[index].value
                                     audioEngine.applySettings(audioEngine.deviceIndex, v,
                                                               audioEngine.framesPerBuffer,
                                                               audioEngine.masterVolume)
+                                    rateCombo.currentIndex = Qt.binding(function() { return root.rateSelectionIndex() })
                                 }
                             }
 
-                            // 缓冲大小（samples）+ 延迟实况
-                            Label { text: qsTr("缓冲大小"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
+                            // C++ 提供合法的回调帧数；不在 QML 推导 ASIO 驱动限制。
+                            Label { text: qsTr("回调缓冲请求（frames / 帧）"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
                             RowLayout {
                                 spacing: 8
                                 BbComboBox {
                                     id: bufferCombo
-                                    model: [
-                                        { text: qsTr("设备默认"), value: 0 },
-                                        { text: "64 samples", value: 64 },
-                                        { text: "128 samples", value: 128 },
-                                        { text: "256 samples", value: 256 },
-                                        { text: "512 samples", value: 512 },
-                                        { text: "1024 samples", value: 1024 }
-                                    ]
+                                    objectName: "audioBufferCombo"
+                                    model: root.currentBufferOptions
                                     textRole: "text"
                                     Layout.preferredWidth: 150
-                                    currentIndex: {
-                                        var b = audioEngine.framesPerBuffer
-                                        if (b === 0) return 0
-                                        if (b === 64) return 1
-                                        if (b === 128) return 2
-                                        if (b === 256) return 3
-                                        if (b === 512) return 4
-                                        if (b === 1024) return 5
-                                        return 0
-                                    }
+                                    currentIndex: root.bufferSelectionIndex()
                                     onActivated: (index) => {
                                         var v = bufferCombo.model[index].value
                                         audioEngine.applySettings(audioEngine.deviceIndex,
                                                                   audioEngine.sampleRate, v,
                                                                   audioEngine.masterVolume)
+                                        bufferCombo.currentIndex = Qt.binding(function() { return root.bufferSelectionIndex() })
                                     }
                                 }
-                                Label { text: qsTr("延迟 %1 ms").arg(audioEngine.latencyMs.toFixed(1))
+                                Label { text: qsTr("报告输出延迟 %1 ms").arg(audioEngine.latencyMs.toFixed(1))
                                         color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                            }
+
+                            Label {
+                                objectName: "audioBufferExplanation"
+                                text: qsTr("帧数是音频回调的请求大小，并非已知的硬件缓冲大小。输出延迟由驱动报告，不是实测往返延迟。")
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.fsTiny
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
                             }
 
                             // 主音量
@@ -353,6 +412,7 @@ Dialog {
                                 spacing: 8
                                 Slider {
                                     id: volSlider
+                                    objectName: "audioVolumeSlider"
                                     HoverHandler { cursorShape: parent.enabled ? Qt.SizeHorCursor : Qt.ArrowCursor }
                                     from: 0; to: 100; stepSize: 1
                                     value: audioEngine.masterVolume
@@ -361,6 +421,7 @@ Dialog {
                                         audioEngine.applySettings(audioEngine.deviceIndex,
                                                                   audioEngine.sampleRate,
                                                                   audioEngine.framesPerBuffer, value)
+                                        volSlider.value = Qt.binding(function() { return audioEngine.masterVolume })
                                     }
                                 }
                                 Label { text: Math.round(audioEngine.masterVolume) + "%"
@@ -401,7 +462,7 @@ Dialog {
                                     anchors.leftMargin: 8
                                     anchors.rightMargin: 8
                                     verticalAlignment: Text.AlignVCenter
-                                    text: qsTr("当前：%1 · %2 Hz · %3 ms")
+                                    text: qsTr("当前：%1 · %2 Hz · 报告输出延迟 %3 ms")
                                           .arg(audioEngine.activeDeviceText)
                                           .arg(audioEngine.actualRate)
                                           .arg(audioEngine.latencyMs.toFixed(1))

@@ -21,6 +21,16 @@ class DialogTestAudio : public QQmlPropertyMap {
     Q_OBJECT
 public:
     DialogTestAudio() : QQmlPropertyMap(this, nullptr) {}
+    Q_INVOKABLE QVariantMap deviceCapabilities(int) const {
+        return {{QStringLiteral("asio"), false}, {QStringLiteral("error"), QString{}}};
+    }
+    Q_INVOKABLE QVariantList bufferOptions(int) const {
+        return {QVariantMap{{QStringLiteral("text"), QStringLiteral("Device default")},
+                            {QStringLiteral("value"), 0}},
+                QVariantMap{{QStringLiteral("text"), QStringLiteral("512 frames")},
+                            {QStringLiteral("value"), 512}}};
+    }
+    Q_INVOKABLE bool showDeviceControlPanel() { return false; }
 };
 
 class DialogTestSetup : public QObject {
@@ -30,6 +40,7 @@ public:
         audio.insert(QStringLiteral("errorText"), QString{});
         audio.insert(QStringLiteral("available"), false);
         audio.insert(QStringLiteral("devices"), QVariantList{});
+        audio.insert(QStringLiteral("asioCompiled"), false);
         audio.insert(QStringLiteral("deviceIndex"), -1);
         audio.insert(QStringLiteral("sampleRate"), 44100);
         audio.insert(QStringLiteral("actualRate"), 44100);
