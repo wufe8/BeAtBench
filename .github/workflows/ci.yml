@@ -58,11 +58,20 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=OFF -DBEATBENCH_ENABLE_ASIO=OFF
       - name: Build
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      # Baseline full tests above are OFF; reuse the toolchain/dependencies, not a new Qt matrix.
+      - name: Configure optional ASIO ON
+        run: cmake -S . -B build -DBEATBENCH_ENABLE_ASIO=ON
+      - name: Build ASIO capability and buffer tests only
+        run: cmake --build build --target audio_backend_capability_test asio_buffer_sizes_test --parallel
+      - name: Test ASIO ON (no driver required)
+        # tests/CMakeLists.txt sets BEATBENCH_TEST_EXPECT_ASIO from the option (OFF above, ON here).
+        run: ctest --test-dir build --output-on-failure --no-tests=error -R "^(audio_backend_capability_tests|asio_buffer_sizes_tests)$"
 
   # ---------- 带 Qt：全量 + GUI 无头冒烟 ----------
   linux-full:
@@ -224,7 +233,7 @@ jobs:
         shell: bash
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON \
+            -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DBEATBENCH_ENABLE_ASIO=OFF \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
@@ -259,6 +268,17 @@ jobs:
             smoke-windows.png
             beatbench-qml-errors.log
           if-no-files-found: ignore
+
+      # Must follow the full OFF build/tests AND GUI smoke: the GUI executable is still OFF.
+      # These steps rebuild only the two hardware-independent test executables, not the GUI.
+      - name: Configure optional ASIO ON (after OFF GUI smoke)
+        shell: bash
+        run: cmake -S . -B build -DBEATBENCH_ENABLE_ASIO=ON
+      - name: Build ASIO capability and buffer tests only
+        run: cmake --build build --target audio_backend_capability_test asio_buffer_sizes_test --parallel
+      - name: Test ASIO ON (no driver required)
+        # Expected bool is supplied by BEATBENCH_TEST_EXPECT_ASIO in tests/CMakeLists.txt.
+        run: ctest --test-dir build --output-on-failure --no-tests=error -R "^(audio_backend_capability_tests|asio_buffer_sizes_tests)$"
 
   # ---------- 汇总：把被 continue-on-error 洗掉的 macOS 真实结论翻出来 ----------
   # needs.<job>.result 在 continue-on-error 下恒为 success，故经 API 取实际 conclusion：
