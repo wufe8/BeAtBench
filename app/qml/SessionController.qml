@@ -1030,11 +1030,14 @@ QtObject {
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
             window.chartPath = r.output
             var msg = qsTr("已另存为：%1").arg(r.output)
-            // 错误扩展名提示（2026-10 复核验收项）：PMS 谱存成 .bms 后缀，重开时
-            // parser 只能靠内容探测（无法从后缀先验 pms9k），提示用户。
+            // 错误扩展名提示（2026-10 复核验收项 R27-4）：所有 PMS 变体存任何非 .pms
+            // 后缀都提示（含 .bme/.bml）——parser 只有 .pms 后缀先验识别 PMS，
+            // 无法根据 #PLAYER 自动恢复 9key（如标准 key8=24 另存 .bme 重开会被
+            // 读成 2P 键4，不是只丢模式标签）。
             const p = String(r.output).toLowerCase()
-            if (window.chartMode === "pms9k" && p.endsWith(".bms")) {
-                msg += qsTr(" · ⚠ PMS 谱面保存为 .bms 后缀，重新打开时将按内容推断模式")
+            if (window.chartMode && String(window.chartMode).startsWith("pms9k") &&
+                    !p.endsWith(".pms")) {
+                msg += qsTr(" · ⚠ PMS（9 键）谱面保存为非 .pms 后缀，重新打开时无法自动恢复 9 键模式")
             }
             if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
             setStatus(msg)

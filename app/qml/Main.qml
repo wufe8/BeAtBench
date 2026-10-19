@@ -1192,8 +1192,9 @@ ApplicationWindow {
         title: qsTr("另存为 BMS 谱面")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("BMS 谱面 (*.bms *.bml *.bme *.pms)"), qsTr("所有文件 (*)")]
-        // PMS 谱默认 .pms 后缀（parser 按后缀推断模式；2026-10 复核验收项）
-        defaultSuffix: window.chartMode === "pms9k" ? "pms" : "bms"
+        // PMS 谱默认 .pms 后缀（parser 按后缀推断模式；2026-10 复核验收项）。
+        // 所有 PMS 变体（pms9k 前缀，含探测产物 pms9k-bmesp）都默认 .pms（R27-4）。
+        defaultSuffix: (window.chartMode && String(window.chartMode).startsWith("pms9k")) ? "pms" : "bms"
         onAccepted: {
             const ok = saveChartAs(urlToPath(selectedFile))
             if (window.pendingDocAction !== "") {
