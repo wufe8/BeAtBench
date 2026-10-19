@@ -6,6 +6,7 @@
 // 只依赖 Qt6::Core（无 GUI / 无 core 模型）；QML 经上下文属性 editUtils 调用。
 #pragma once
 
+#include <QFileInfo>
 #include <QObject>
 #include <QString>
 #include <QVariantMap>
@@ -40,6 +41,14 @@ public:
     /// "chart"（.bms/.bml/.bme/.pms）/ "audio"（.wav/.ogg/.oga/.mp3/.flac）/
     /// "midi"（.mid/.midi）/ "unknown"。大小写不敏感，只按后缀判定（不探内容、不查存在性）。
     Q_INVOKABLE QString classifyExternalFile(const QString& path) const;
+
+    /// PMS 写入非 .pms 后缀前需确认（两种 PMS 模式均适用；后缀大小写不敏感）。
+    /// 空路径尚无保存目标，交给另存为流程；inline 供文档服务共用，不增加链接依赖。
+    Q_INVOKABLE static bool pmsSuffixNeedsConfirmation(const QString& mode, const QString& path) {
+        return (mode == QStringLiteral("pms9k") || mode == QStringLiteral("pms9k-bmesp")) &&
+               !path.isEmpty() &&
+               QFileInfo(path).suffix().compare(QStringLiteral("pms"), Qt::CaseInsensitive) != 0;
+    }
 };
 
 }  // namespace beatbench::app

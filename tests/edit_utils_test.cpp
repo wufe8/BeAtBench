@@ -5,6 +5,8 @@
 
 #include <QVariantMap>
 
+#include <string>
+
 #include "bridge/EditUtils.hpp"
 
 using beatbench::app::EditUtils;
@@ -122,6 +124,39 @@ TEST(EditUtils, TextUsesBase62Ids) {
     EXPECT_FALSE(u.textUsesBase62Ids(QStringLiteral("#00102:0.75")));
     EXPECT_FALSE(u.textUsesBase62Ids(QStringLiteral("#TITLE lowercase title")));
     EXPECT_FALSE(u.textUsesBase62Ids(QString()));
+}
+
+TEST(EditUtils, PmsSuffixNeedsConfirmationMatrix) {
+    // mode 是稳定 ID；两种 PMS 方言均需保护，非 PMS 不因后缀而误报。
+    for (const auto* mode : {"pms9k", "pms9k-bmesp"}) {
+        for (const auto* path : {"song.bms", "song.BME", "song.bml", "song", "song.pms.bms",
+                                 "dir.pms/song.bms", "song.pms "}) {
+            SCOPED_TRACE(std::string(mode) + ":" + path);
+            EXPECT_TRUE(EditUtils::pmsSuffixNeedsConfirmation(QString::fromLatin1(mode),
+                                                              QString::fromLatin1(path)));
+        }
+        for (const auto* path : {"song.pms", "song.PMS", "song.PmS", "dir/song.v2.pms", ".pms", ""}) {
+            SCOPED_TRACE(std::string(mode) + ":" + path);
+            EXPECT_FALSE(EditUtils::pmsSuffixNeedsConfirmation(QString::fromLatin1(mode),
+                                                               QString::fromLatin1(path)));
+        }
+    }
+    for (const auto* mode : {"", "sp7k", "dp", "battle", "pms", "pms9k-other"}) {
+        for (const auto* path : {"song.bms", "song.pms", "song", ""}) {
+            SCOPED_TRACE(std::string(mode) + ":" + path);
+            EXPECT_FALSE(EditUtils::pmsSuffixNeedsConfirmation(QString::fromLatin1(mode),
+                                                               QString::fromLatin1(path)));
+        }
+    }
+}
+
+TEST(EditUtils, PmsSuffixNeedsConfirmationIsInvokable) {
+    EditUtils utils;
+    bool needsConfirmation = false;
+    ASSERT_TRUE(QMetaObject::invokeMethod(&utils, "pmsSuffixNeedsConfirmation", Qt::DirectConnection,
+        Q_RETURN_ARG(bool, needsConfirmation), Q_ARG(QString, QStringLiteral("pms9k")),
+        Q_ARG(QString, QStringLiteral("song.bms"))));
+    EXPECT_TRUE(needsConfirmation);
 }
 
 TEST(EditUtils, ClassifyExternalFile) {

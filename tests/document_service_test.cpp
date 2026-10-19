@@ -462,6 +462,125 @@ TEST_F(DocumentServiceTest, SaveDirtyNamedReportsUnresolvedUnnamedThenCompletes)
     EXPECT_TRUE(complete.value("unnamed").toList().isEmpty());
 }
 
+TEST_F(DocumentServiceTest, ConfirmationSkipsInactivePmsAndStillSavesSafeNamedDocuments) {
+    const auto a = service_.open(aPath_);
+    ASSERT_TRUE(ok(a));
+    const QString aId = idOf(a);
+    auto chart = session(aId)->chart();
+    chart.mode_id = "pms9k";
+    session(aId)->load(std::move(chart), aPath_.toUtf8().toStdString());
+    ASSERT_TRUE(edit(aId));
+    const auto diskA = readBytes(aPath_);
+    const auto notesA = session(aId)->chart().notes;
+    const auto undoA = session(aId)->undo_depth();
+    const auto b = service_.open(bPath_);
+    ASSERT_TRUE(ok(b));
+    ASSERT_TRUE(edit(idOf(b)));
+    const auto diskB = readBytes(bPath_);
+    const auto unnamed = service_.create(QStringLiteral("pms9k"));
+    ASSERT_TRUE(ok(unnamed));
+    ASSERT_TRUE(edit(idOf(unnamed)));
+    ASSERT_TRUE(ok(service_.activate(idOf(b))));
+
+    const auto saved = service_.saveDirtyNamed(true);
+    EXPECT_FALSE(ok(saved));
+    EXPECT_EQ(saved.value("saved").toInt(), 1);
+    EXPECT_TRUE(saved.value("errors").toList().isEmpty());
+    const auto confirmation = saved.value("confirmation").toList();
+    ASSERT_EQ(confirmation.size(), 1);
+    const auto pending = confirmation.front().toMap();
+    EXPECT_EQ(pending.value("id").toString(), aId);
+    EXPECT_EQ(pending.value("path").toString(), DocumentService::normalizedPath(aPath_));
+    EXPECT_EQ(pending.value("label").toString(), QStringLiteral("A.bms"));
+    const auto unnamedDocs = saved.value("unnamed").toList();
+    ASSERT_EQ(unnamedDocs.size(), 1);
+    EXPECT_TRUE(containsId(unnamedDocs, idOf(unnamed)));
+    EXPECT_FALSE(containsId(confirmation, idOf(unnamed)));
+    EXPECT_TRUE(session(aId)->is_dirty());
+    EXPECT_FALSE(session(aId)->saved_since_load());
+    EXPECT_EQ(session(aId)->chart().notes, notesA);
+    EXPECT_EQ(session(aId)->undo_depth(), undoA);
+    EXPECT_EQ(readBytes(aPath_), diskA);
+    EXPECT_FALSE(session(idOf(b))->is_dirty());
+    EXPECT_NE(readBytes(bPath_), diskB);
+    EXPECT_EQ(service_.activeId(), idOf(b));
+
+    const auto stillPending = service_.saveDirtyNamed(true);
+    EXPECT_FALSE(ok(stillPending));
+    EXPECT_EQ(stillPending.value("saved").toInt(), 0);
+    EXPECT_TRUE(containsId(stillPending.value("confirmation").toList(), aId));
+    EXPECT_EQ(readBytes(aPath_), diskA);
+    // 调用方确认后走独立保存；直到 unnamed 也处理完，整个批次才能成功。
+    ASSERT_TRUE(ok(service_.save(aId)));
+    EXPECT_FALSE(ok(service_.saveDirtyNamed(true)));
+    ASSERT_TRUE(ok(service_.save(idOf(unnamed), temporary_->filePath("new.pms"))));
+    const auto complete = service_.saveDirtyNamed(true);
+    EXPECT_TRUE(ok(complete));
+    EXPECT_TRUE(complete.value("confirmation").toList().isEmpty());
+    EXPECT_TRUE(complete.value("unnamed").toList().isEmpty());
+    EXPECT_EQ(service_.activeId(), idOf(b));
+}
+
+TEST_F(DocumentServiceTest, ConfirmationUsesEachDocumentsPmsDialectAndCaseInsensitiveSuffix) {
+    const auto safePath = temporary_->filePath(QStringLiteral("safe.PmS"));
+    ASSERT_TRUE(writeChart(safePath, "Safe"));
+    const auto a = service_.open(safePath);
+    const auto b = service_.openReference(bPath_);
+    ASSERT_TRUE(ok(a)); ASSERT_TRUE(ok(b));
+    auto aChart = session(idOf(a))->chart();
+    aChart.mode_id = "pms9k";
+    session(idOf(a))->load(std::move(aChart), safePath.toUtf8().toStdString());
+    auto bChart = session(idOf(b))->chart();
+    bChart.mode_id = "pms9k-bmesp";
+    session(idOf(b))->load(std::move(bChart), bPath_.toUtf8().toStdString());
+    ASSERT_TRUE(edit(idOf(a))); ASSERT_TRUE(edit(idOf(b)));
+    const auto diskA = readBytes(safePath), diskB = readBytes(bPath_);
+    const auto saved = service_.saveDirtyNamed(true);
+    EXPECT_FALSE(ok(saved));
+    EXPECT_EQ(saved.value("saved").toInt(), 1);
+    EXPECT_TRUE(saved.value("errors").toList().isEmpty());
+    EXPECT_TRUE(saved.value("unnamed").toList().isEmpty());
+    const auto confirmation = saved.value("confirmation").toList();
+    ASSERT_EQ(confirmation.size(), 1);
+    EXPECT_TRUE(containsId(confirmation, idOf(b)));
+    EXPECT_FALSE(session(idOf(a))->is_dirty());
+    EXPECT_NE(readBytes(safePath), diskA);
+    EXPECT_TRUE(session(idOf(b))->is_dirty());
+    EXPECT_EQ(session(idOf(b))->undo_depth(), 1u);
+    EXPECT_EQ(readBytes(bPath_), diskB);
+    EXPECT_EQ(service_.activeId(), idOf(a));
+}
+
+TEST_F(DocumentServiceTest, DefaultAndExplicitFalseKeepSavingPmsWithNonPmsSuffixes) {
+    const auto a = service_.open(aPath_);
+    const auto b = service_.open(bPath_);
+    ASSERT_TRUE(ok(a)); ASSERT_TRUE(ok(b));
+    auto aChart = session(idOf(a))->chart();
+    aChart.mode_id = "pms9k";
+    session(idOf(a))->load(std::move(aChart), aPath_.toUtf8().toStdString());
+    auto bChart = session(idOf(b))->chart();
+    bChart.mode_id = "pms9k-bmesp";
+    session(idOf(b))->load(std::move(bChart), bPath_.toUtf8().toStdString());
+    const auto diskA = readBytes(aPath_), diskB = readBytes(bPath_);
+    ASSERT_TRUE(edit(idOf(a))); ASSERT_TRUE(edit(idOf(b)));
+    const auto saved = service_.saveDirtyNamed();
+    EXPECT_TRUE(ok(saved));
+    EXPECT_EQ(saved.value("saved").toInt(), 2);
+    EXPECT_TRUE(saved.value("confirmation").toList().isEmpty());
+    EXPECT_FALSE(session(idOf(a))->is_dirty()); EXPECT_FALSE(session(idOf(b))->is_dirty());
+    EXPECT_NE(readBytes(aPath_), diskA); EXPECT_NE(readBytes(bPath_), diskB);
+    EXPECT_EQ(service_.activeId(), idOf(b));
+
+    ASSERT_TRUE(session(idOf(a))->undo()); ASSERT_TRUE(session(idOf(b))->undo());
+    ASSERT_TRUE(session(idOf(a))->is_dirty()); ASSERT_TRUE(session(idOf(b))->is_dirty());
+    const auto explicitFalse = service_.saveDirtyNamed(false);
+    EXPECT_TRUE(ok(explicitFalse));
+    EXPECT_EQ(explicitFalse.value("saved").toInt(), 2);
+    EXPECT_TRUE(explicitFalse.value("confirmation").toList().isEmpty());
+    EXPECT_FALSE(session(idOf(a))->is_dirty()); EXPECT_FALSE(session(idOf(b))->is_dirty());
+    EXPECT_EQ(service_.activeId(), idOf(b));
+}
+
 TEST_F(DocumentServiceTest, SaveDirtyNamedReportsFailureAndContinuesOtherDocuments) {
     const auto a = service_.open(aPath_);
     ASSERT_TRUE(ok(a));

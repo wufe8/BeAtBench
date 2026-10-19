@@ -217,7 +217,8 @@ function makeMainContext() {
     const events = [];
     const context = vm.createContext({
         window: { pendingDocAction: '', pendingOpenPath: '', pendingOriginalDocument: '',
-                  pendingNewMode: '', metaDraftDirty: false },
+                  pendingNewMode: '', metaDraftDirty: false,
+                  pmsSaveConfirmationPending: false, saveAsDocumentId: '' },
         documents: { activeId: () => 'old-A', create: mode => {
             events.push(['create', mode]); return { ok: true, id: 'new-A' };
         } },
