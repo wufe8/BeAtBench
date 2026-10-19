@@ -133,6 +133,20 @@ add_test(NAME reference_track_tests COMMAND reference_track_test)
 # 配置（gtest 走 FetchContent）。
 find_package(Qt6 COMPONENTS Core QUIET)
 if (Qt6Core_FOUND)
+    # Settings rollback uses an injected backend and synthetic PCM; Qt Core only, no devices.
+    add_executable(audio_engine_test audio_engine_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(audio_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(audio_engine_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(audio_engine_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(audio_engine_test)
+    add_test(NAME audio_engine_tests COMMAND audio_engine_test)
+    set_tests_properties(audio_engine_tests PROPERTIES TIMEOUT 20)
+
     # 项目控制器：异步快照/取消/销毁与打开路由（无窗口/音频）。
     add_executable(project_controller_test project_controller_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.cpp

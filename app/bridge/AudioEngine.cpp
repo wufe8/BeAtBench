@@ -18,6 +18,7 @@
 #include <QVariant>
 
 #include <cmath>
+#include <utility>
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/SampleCache.hpp"
@@ -47,61 +48,27 @@ beatbench::audio::DecodedSample* makeTestToneSample() {
 }  // namespace
 
 AudioEngine::AudioEngine(QObject* parent)
+    : AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend>(
+                      beatbench::audio::create_portaudio_backend()), parent) {}
+
+AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend,
+                         QObject* parent)
     : QObject(parent),
+      m_backend(std::move(backend)),
       m_playback(&m_player, 44100.0),
       m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot) {
-    // 1) 加载持久化设置（设备/采样率/缓冲/音量）
     loadSettings();
-    m_player.setMasterVolume(static_cast<float>(masterVolume()));
-
-    // 2) 初始化后端并开流（用 m_settings；失败 → 回退默认设备，状态栏提示）
-    std::string err;
-    m_backend.reset(beatbench::audio::create_portaudio_backend());
     m_renderCtx.player = &m_player;
-    if (m_backend && m_backend->init(&err)) {
-        if (m_backend->start(
-                [](void* user, float* out, int frames) {
-                    auto* ctx = static_cast<RenderCtx*>(user);
-                    ctx->player->render(out, frames, ctx->deviceRate.load());
-                },
-                &m_renderCtx, m_settings, &err)) {
-            // 设备采样率 = 流实际参数（streamInfo 在 start 成功后有效）
-            m_renderCtx.deviceRate.store(
-                static_cast<double>(m_backend->streamInfo().sampleRate));
-            m_playback.setDeviceRate(
-                static_cast<double>(m_backend->streamInfo().sampleRate));
-            m_refPlayback.setDeviceRate(
-                static_cast<double>(m_backend->streamInfo().sampleRate));
-            m_initialized = true;
+    std::string err;
+    if (!startStream(m_settings, err)) {
+        beatbench::audio::AudioSettings fallback;
+        if (m_backendReady && startStream(fallback, err)) {
+            m_settings = fallback;
+            m_statusText = QStringLiteral("指定设备不可用，已回退默认设备");
         } else {
-            // 启动失败（可能设置里设备/采样率不可用）：回退默认（手动再试一次）
-            qWarning("AudioEngine: 启动音频流失败 %s，回退默认设备",
-                     qPrintable(QString::fromStdString(err)));
-            beatbench::audio::AudioSettings fallback;
-            if (m_backend->start(
-                    [](void* user, float* out, int frames) {
-                        auto* ctx = static_cast<RenderCtx*>(user);
-                        ctx->player->render(out, frames, ctx->deviceRate.load());
-                    },
-                    &m_renderCtx, fallback, &err)) {
-                m_settings = fallback;  // 用回退值（设置页显示真实）
-                m_renderCtx.deviceRate.store(
-                    static_cast<double>(m_backend->streamInfo().sampleRate));
-                m_playback.setDeviceRate(
-                    static_cast<double>(m_backend->streamInfo().sampleRate));
-                m_refPlayback.setDeviceRate(
-                    static_cast<double>(m_backend->streamInfo().sampleRate));
-                m_initialized = true;
-                m_statusText = QStringLiteral("指定设备不可用，已回退默认设备");
-            } else {
-                qWarning("AudioEngine: 回退也失败 %s",
-                         qPrintable(QString::fromStdString(err)));
-                m_initialized = false;
-            }
+            m_errorText = QStringLiteral("音频不可用：%1").arg(QString::fromStdString(err));
+            m_statusText = m_errorText;
         }
-    } else {
-        qWarning("AudioEngine: 后端不可用 %s", qPrintable(QString::fromStdString(err)));
-        m_initialized = false;
     }
     rebuildDevices();
     emit availableChanged();
@@ -246,82 +213,92 @@ void AudioEngine::playTestTone() {
 
 bool AudioEngine::applySettings(int device, int sampleRate, int framesPerBuffer,
                                 qreal masterVolumePercent) {
-    // 保存新设置（试探性）
-    const beatbench::audio::AudioSettings old = m_settings;
-    beatbench::audio::AudioSettings next;
-    next.device = device;
-    next.sampleRate = sampleRate;
-    next.framesPerBuffer = framesPerBuffer;
-    m_player.setMasterVolume(
-        static_cast<float>(masterVolumePercent) * 0.01f);  // 百分比 → 0-1
-
-    if (next.device == old.device && next.sampleRate == old.sampleRate &&
-        next.framesPerBuffer == old.framesPerBuffer) {
-        // 只改音量：无需重开流
+    const auto old = m_settings;
+    const float oldVolume = m_player.masterVolume();
+    const beatbench::audio::AudioSettings next{device, sampleRate, framesPerBuffer};
+    const bool sameStream = next.device == old.device && next.sampleRate == old.sampleRate &&
+                            next.framesPerBuffer == old.framesPerBuffer;
+    // An unavailable stream must be retried even when only the volume changed.
+    if (!sameStream || !m_initialized) {
+        const bool wasAvailable = m_initialized;
+        std::string error;
+        if (!startStream(next, error)) {
+            std::string restoreError;
+            const bool restored = startStream(old, restoreError);
+            m_player.setMasterVolume(oldVolume);
+            m_errorText = restored
+                ? QStringLiteral("设置应用失败，已恢复原音频流：%1")
+                      .arg(QString::fromStdString(error))
+                : QStringLiteral("设置应用失败，恢复原音频流也失败，音频不可用：%1；%2")
+                      .arg(QString::fromStdString(error), QString::fromStdString(restoreError));
+            m_statusText = m_errorText;
+            emit errorTextChanged();
+            emit statusTextChanged();
+            if (wasAvailable != m_initialized) emit availableChanged();
+            emit settingsChanged();
+            return false;  // Never persist a rejected attempt (including its volume).
+        }
         m_settings = next;
-        saveSettings();
-        emit settingsChanged();
-        return true;
+        if (wasAvailable != m_initialized) emit availableChanged();
     }
-
-    m_settings = next;
-    if (!reopenStream()) {
-        // 失败：回退旧设置 + 旧音量
-        m_settings = old;
-        m_player.setMasterVolume(
-            static_cast<float>(masterVolumePercent) * 0.01f);
-        m_errorText = QStringLiteral("设置应用失败，已回退原设置（设备/采样率可能不支持）");
-        m_statusText = m_errorText;
-        emit errorTextChanged();
-        emit statusTextChanged();
-        emit settingsChanged();
-        saveSettings();
-        return false;
-    }
-    m_errorText.clear();
-    emit errorTextChanged();
+    m_player.setMasterVolume(static_cast<float>(masterVolumePercent) * 0.01f);
+    clearSettingsError();
     saveSettings();
     emit settingsChanged();
     return true;
 }
 
-bool AudioEngine::reopenStream() {
-    if (!m_backend || !m_initialized) return false;
-    std::string err;
-    m_backend->stop();  // 停旧流（回调线程退出）
-    const beatbench::audio::AudioSettings old = m_settings;
-    if (m_backend->start(
-            [](void* user, float* out, int frames) {
-                auto* ctx = static_cast<RenderCtx*>(user);
-                ctx->player->render(out, frames, ctx->deviceRate.load());
-            },
-            &m_renderCtx, m_settings, &err)) {
-        m_renderCtx.deviceRate.store(
-            static_cast<double>(m_backend->streamInfo().sampleRate));
-        m_playback.setDeviceRate(
-            static_cast<double>(m_backend->streamInfo().sampleRate));
-        m_refPlayback.setDeviceRate(
-            static_cast<double>(m_backend->streamInfo().sampleRate));
-        return true;
-    }
-    // 失败：回退旧设置重开
-    if (m_backend->start(
-            [](void* user, float* out, int frames) {
-                auto* ctx = static_cast<RenderCtx*>(user);
-                ctx->player->render(out, frames, ctx->deviceRate.load());
-            },
-            &m_renderCtx, old, &err)) {
-        m_settings = old;
-        m_renderCtx.deviceRate.store(
-            static_cast<double>(m_backend->streamInfo().sampleRate));
-        m_refPlayback.setDeviceRate(
-            static_cast<double>(m_backend->streamInfo().sampleRate));
-        return false;  // 回退成功但应用失败
-    }
-    // 回退也失败：保持未启动（不崩溃；playPreview 会提示不可用）
+bool AudioEngine::startStream(const beatbench::audio::AudioSettings& settings,
+                              std::string& error) {
+    error.clear();
     m_initialized = false;
-    emit availableChanged();
-    return false;
+    if (!m_backend) {
+        error = "音频后端不存在";
+        return false;
+    }
+    if (!m_backendReady) {
+        m_backendReady = m_backend->init(&error);
+        if (!m_backendReady) return false;
+    }
+    m_backend->stop();
+    if (!m_backend->start(
+            [](void* user, float* out, int frames) {
+                auto* ctx = static_cast<RenderCtx*>(user);
+                ctx->player->render(out, frames, ctx->deviceRate.load());
+            }, &m_renderCtx, settings, &error)) return false;
+    const double rate = static_cast<double>(m_backend->streamInfo().sampleRate);
+    m_renderCtx.deviceRate.store(rate);
+    m_playback.setDeviceRate(rate);
+    m_refPlayback.setDeviceRate(rate);
+    m_initialized = true;
+    return true;
+}
+
+void AudioEngine::clearSettingsError() {
+    if (m_errorText.isEmpty()) return;
+    if (m_statusText == m_errorText) {
+        m_statusText.clear();
+        emit statusTextChanged();
+    }
+    m_errorText.clear();
+    emit errorTextChanged();
+}
+
+bool AudioEngine::reopenStream() {
+    const bool wasAvailable = m_initialized;
+    std::string error;
+    const bool ok = startStream(m_settings, error);
+    if (ok) {
+        clearSettingsError();
+    } else {
+        m_errorText = QStringLiteral("音频不可用：%1").arg(QString::fromStdString(error));
+        m_statusText = m_errorText;
+        emit errorTextChanged();
+        emit statusTextChanged();
+    }
+    if (wasAvailable != m_initialized) emit availableChanged();
+    emit settingsChanged();
+    return ok;
 }
 
 void AudioEngine::setSourceDir(const QString& dir) {
@@ -515,7 +492,7 @@ QString AudioEngine::deviceDescription() const {
 }
 
 QString AudioEngine::activeDeviceText() const {
-    if (!m_backend) return QString();
+    if (!m_backend || !m_initialized) return QString();
     const auto info = m_backend->streamInfo();
     if (info.deviceName.empty()) return QString();
     return QStringLiteral("%1（%2）")
@@ -539,7 +516,7 @@ void AudioEngine::saveSettings() const {
     s.setValue(QStringLiteral("audio/sampleRate"), m_settings.sampleRate);
     s.setValue(QStringLiteral("audio/framesPerBuffer"), m_settings.framesPerBuffer);
     s.setValue(QStringLiteral("audio/masterVolume"),
-               static_cast<int>(m_player.masterVolume() * 100.0f));
+               static_cast<int>(std::lround(m_player.masterVolume() * 100.0f)));
 }
 
 void AudioEngine::rebuildDevices() {
