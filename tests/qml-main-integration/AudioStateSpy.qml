@@ -6,6 +6,10 @@ QtObject {
     readonly property bool available: false
     readonly property string errorText: "integration test: no audio device"
     readonly property var devices: []
+    readonly property bool asioCompiled: false
+    function deviceCapabilities(index) { return { asio: false, error: "" } }
+    function bufferOptions(index) { return [{ text: "Device default", value: 0 }, { text: "512 frames", value: 512 }] }
+    function showDeviceControlPanel() { unexpected(); return false }
     readonly property int deviceIndex: -1
     readonly property int sampleRate: 44100
     readonly property int actualRate: 44100

@@ -16,6 +16,7 @@
 #include <QStringList>
 #include <QThreadPool>
 #include <QVariantList>
+#include <QVariantMap>
 #include <atomic>
 #include <memory>
 
@@ -34,6 +35,7 @@ class AudioEngine : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
+    Q_PROPERTY(bool asioCompiled READ asioCompiled CONSTANT)
 
     // ---- M5 播放状态（QML 绑定：播放/暂停按钮、状态栏时间） ----
     Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
@@ -79,6 +81,10 @@ public:
 
     /// 用当前已接受的设置重开流（也可在流不可用时重试）。供测试/诊断。
     Q_INVOKABLE bool reopenStream();
+    bool asioCompiled() const { return m_backend && m_backend->asioAvailable(); }
+    Q_INVOKABLE QVariantMap deviceCapabilities(int device) const;
+    Q_INVOKABLE QVariantList bufferOptions(int device) const;
+    Q_INVOKABLE bool showDeviceControlPanel();
 
     /// 设置谱面目录（相对路径解析基准；openChart 后调用）。
     Q_INVOKABLE void setSourceDir(const QString& dir);
@@ -215,15 +221,24 @@ private:
     void rebuildDevices();
     bool startStream(const beatbench::audio::AudioSettings& settings, std::string& error);
     void clearSettingsError();
+    bool ensureBackend(std::string& error);
+    void resolveSavedDevice();
+    void pauseForStreamChange();
+    void setSettingsError(const QString& error);
 
     /// 回调上下文（render 直达内核；deviceRate 更新一次，原子读）
     struct RenderCtx {
         beatbench::audio::SamplePlayer* player = nullptr;
         std::atomic<double> deviceRate{48000.0};
+        std::atomic<bool> ready{false};
     };
 
     std::unique_ptr<beatbench::audio::AudioBackend> m_backend;
     bool m_backendReady = false;
+    std::vector<beatbench::audio::AudioDeviceInfo> m_deviceSnapshot;
+    QString m_savedDeviceName;
+    int m_savedDeviceApiType = 0;
+    bool m_hasSavedDeviceIdentity = false;
     beatbench::audio::SamplePlayer m_player;
     beatbench::audio::SampleCache m_cache;  ///< 采样解码缓存（M4.3a：LRU+预算+合并）
     RenderCtx m_renderCtx;

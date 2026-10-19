@@ -7,7 +7,10 @@
 #include <QSettings>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <deque>
+#include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -18,6 +21,7 @@
 namespace beatbench::app {
 // Only synthetic PCM setup needs private access; assertions use observable clocks/output.
 struct AudioEngineTestAccess {
+    static void queueWait(AudioEngine& engine) { engine.m_waitRender = true; }
     static bool playMain(AudioEngine& engine,
                          std::shared_ptr<const std::vector<float>> pcm) {
         engine.m_playback.load(std::move(pcm), 48000.0);
@@ -40,6 +44,31 @@ public:
     int initCalls = 0;
     bool initOk = true;
     bool running = false;
+    bool panelOk = true;
+    int panelCalls = 0;
+    int panelDevice = -99;
+    int stopCalls = 0;
+    bool compiledAsio = true;
+    static std::vector<beatbench::audio::AudioDeviceInfo> defaultDevices() {
+        return {{"Fake output", 2, 48000, 2, "Fake API", 1, false},
+                {"Requested output", 7, 48000, 2, "Fake API", 1, false},
+                {"Other output", 8, 48000, 2, "Fake API", 1, false}};
+    }
+    std::vector<beatbench::audio::AudioDeviceInfo> deviceList = defaultDevices();
+    std::map<int, beatbench::audio::AudioDeviceCapabilities> capabilities;
+    std::vector<beatbench::audio::AudioDeviceInfo> devices() override { return deviceList; }
+    bool asioAvailable() const override { return compiledAsio; }
+    beatbench::audio::AudioDeviceCapabilities deviceCapabilities(int device) const override {
+        const auto found = capabilities.find(device);
+        return found == capabilities.end() ? beatbench::audio::AudioDeviceCapabilities{} : found->second;
+    }
+    bool showDeviceControlPanel(int device, void*, std::string* error) override {
+        EXPECT_FALSE(running);
+        ++panelCalls;
+        panelDevice = device;
+        if (!panelOk) *error = "fake panel failure";
+        return panelOk;
+    }
 
     bool init(std::string* error) override {
         ++initCalls;
@@ -65,9 +94,13 @@ public:
         user_ = user;
         info_ = {rate, settings.framesPerBuffer, 0.012, "Fake output", "Fake API"};
         running = true;
+        // PortAudio may call synchronously before start returns/streamInfo is consumed.
+        std::vector<float> early(64, 123.0f);
+        cb(user, early.data(), 32);
+        EXPECT_TRUE(std::all_of(early.begin(), early.end(), [](float v) { return v == 0.0f; }));
         return true;
     }
-    void stop() override { running = false; }
+    void stop() override { ++stopCalls; running = false; }
     void shutdown() override {}
     StreamInfo streamInfo() const override { return info_; } // Deliberately stale after stop.
     std::vector<float> render(int frames) {
@@ -89,15 +122,19 @@ protected:
         settings.setFallbacksEnabled(false);
         settings.clear();
         settings.setValue("audio/deviceIndex", 2);
+        settings.setValue("audio/deviceName", "Fake output");
+        settings.setValue("audio/deviceApiType", 1);
         settings.setValue("audio/sampleRate", 44100);
         settings.setValue("audio/framesPerBuffer", 256);
         settings.setValue("audio/masterVolume", 35);
         settings.sync();
         ASSERT_EQ(settings.status(), QSettings::NoError);
     }
-    std::unique_ptr<AudioEngine> makeEngine(std::deque<int> outcomes = {48000}) {
+    std::unique_ptr<AudioEngine> makeEngine(std::deque<int> outcomes = {48000},
+            std::vector<beatbench::audio::AudioDeviceInfo> devices = FakeBackend::defaultDevices()) {
         auto backend = std::make_unique<FakeBackend>();
         backend->outcomes = std::move(outcomes);
+        backend->deviceList = std::move(devices);
         fake = backend.get();
         return std::make_unique<AudioEngine>(std::move(backend));
     }
@@ -250,6 +287,232 @@ TEST_F(AudioEngineTest, BothClocksUseActualRateAfterSuccessAndRestoration) {
                         0.00001f);
         }
     }
+}
+TEST_F(AudioEngineTest, IdentityResolvesReorderedIndexBeforeFirstStart) {
+    auto devices = FakeBackend::defaultDevices();
+    devices[0].index = 42;
+    devices[1].index = 2; // Old index now names a different output: must not be used.
+    auto engine = makeEngine({48000}, devices);
+    ASSERT_EQ(fake->starts.size(), 1u);
+    EXPECT_EQ(fake->starts[0].device, 42);
+    EXPECT_EQ(engine->deviceIndex(), 42);
+    EXPECT_TRUE(engine->errorText().isEmpty());
+    ASSERT_TRUE(engine->applySettings(42, 44100, 256, 60));
+    QSettings settings;
+    EXPECT_EQ(settings.value("audio/deviceIndex").toInt(), 42);
+    EXPECT_EQ(settings.value("audio/deviceName").toString(), QStringLiteral("Fake output"));
+    EXPECT_EQ(settings.value("audio/deviceApiType").toInt(), 1);
+}
+
+TEST_F(AudioEngineTest, MissingAmbiguousOrUnverifiedIdentityUsesSystemDefaultWithWarning) {
+    for (const int scenario : {0, 1, 2, 3}) {
+        SCOPED_TRACE(scenario);
+        SetUp();
+        auto devices = FakeBackend::defaultDevices();
+        if (scenario == 0) devices.erase(devices.begin()); // Disappeared.
+        if (scenario == 1) { // Duplicate exact identities cannot be disambiguated by old index.
+            auto duplicate = devices[0];
+            duplicate.index = 9;
+            devices.push_back(duplicate);
+        }
+        if (scenario == 2) {
+            QSettings settings;
+            settings.remove("audio/deviceName");
+            settings.remove("audio/deviceApiType");
+        }
+        if (scenario == 3) devices[0].apiType = 99; // Same name on another API is not same device.
+        auto engine = makeEngine({48000}, devices);
+        ASSERT_EQ(fake->starts.size(), 1u);
+        EXPECT_EQ(fake->starts[0].device, -1);
+        EXPECT_EQ(engine->deviceIndex(), -1);
+        EXPECT_FALSE(engine->errorText().isEmpty());
+        EXPECT_TRUE(engine->statusText().contains(QStringLiteral("系统默认")));
+    }
+}
+
+TEST_F(AudioEngineTest, SystemDefaultRemainsSemanticDefaultAndRemovesIdentityOnSave) {
+    {
+        QSettings settings;
+        settings.setValue("audio/deviceIndex", -1); // Ignore even a valid obsolete identity.
+    }
+    auto engine = makeEngine();
+    EXPECT_EQ(fake->starts[0].device, -1);
+    EXPECT_TRUE(engine->errorText().isEmpty());
+    ASSERT_TRUE(engine->applySettings(-1, 44100, 256, 60));
+    QSettings settings;
+    EXPECT_EQ(settings.value("audio/deviceIndex").toInt(), -1);
+    EXPECT_FALSE(settings.contains("audio/deviceName"));
+    EXPECT_FALSE(settings.contains("audio/deviceApiType"));
+}
+
+TEST_F(AudioEngineTest, CapabilityAndDeviceMapsExposeBuildAndApiIdentity) {
+    auto devices = FakeBackend::defaultDevices();
+    devices[0].isAsio = true;
+    devices[0].apiType = 3;
+    QSettings settings;
+    settings.setValue("audio/deviceApiType", 3);
+    auto engine = makeEngine({48000}, devices);
+    fake->capabilities[2] = {true, 48, 1008, 240, 48, ""};
+    EXPECT_TRUE(engine->asioCompiled());
+    const auto row = engine->devices().front().toMap();
+    EXPECT_TRUE(row.value("isAsio").toBool());
+    EXPECT_EQ(row.value("apiType").toInt(), 3);
+    const auto caps = engine->deviceCapabilities(2);
+    EXPECT_TRUE(caps.value("asio").toBool());
+    EXPECT_EQ(caps.value("bufferMin").toInt(), 48);
+    EXPECT_EQ(caps.value("bufferMax").toInt(), 1008);
+    EXPECT_EQ(caps.value("bufferPreferred").toInt(), 240);
+    EXPECT_EQ(caps.value("bufferGranularity").toInt(), 48);
+    EXPECT_TRUE(caps.value("error").toString().isEmpty());
+}
+
+TEST_F(AudioEngineTest, BufferModelsStayBoundedAndOnlyOfferLegalSizes) {
+    auto engine = makeEngine();
+    auto values = [](const QVariantList& options) {
+        std::vector<int> result;
+        for (const auto& option : options) {
+            EXPECT_FALSE(option.toMap().value("text").toString().isEmpty());
+            result.push_back(option.toMap().value("value").toInt());
+        }
+        return result;
+    };
+    EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0, 64, 128, 256, 512, 1024}));
+    fake->capabilities[2] = {true, 48, 1008, 240, 48, ""};
+    EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0, 48, 240, 1008}));
+    fake->capabilities[2] = {true, 64, 1024, 256, -1, ""};
+    EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0, 64, 128, 256, 512, 1024}));
+    fake->capabilities[2] = {true, 192, 192, 192, 0, ""};
+    EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0, 192}));
+    fake->capabilities[2] = {true, 1, std::numeric_limits<int>::max(), 257, 1, ""};
+    EXPECT_LE(engine->bufferOptions(2).size(), 9); // Never enumerate billions of sizes.
+    fake->capabilities[2].error = "query failed";
+    EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0}));
+}
+
+TEST_F(AudioEngineTest, InvalidRequestsNeverCloseWorkingStreamOrPersistAttempt) {
+    auto engine = makeEngine();
+    const int stops = fake->stopCalls;
+    for (const double volume : {-1.0, 101.0, std::numeric_limits<double>::quiet_NaN(),
+                                std::numeric_limits<double>::infinity()})
+        EXPECT_FALSE(engine->applySettings(2, 44100, 256, volume));
+    EXPECT_FALSE(engine->applySettings(-2, 44100, 256, 35));
+    EXPECT_FALSE(engine->applySettings(2, -1, 256, 35));
+    EXPECT_FALSE(engine->applySettings(2, 44100, -2, 35));
+    EXPECT_FALSE(engine->applySettings(99, 44100, 256, 35));
+    fake->capabilities[2] = {true, 64, 1024, 256, -1, ""};
+    EXPECT_FALSE(engine->applySettings(2, 44100, 192, 35));
+    EXPECT_EQ(fake->starts.size(), 1u);
+    EXPECT_EQ(fake->stopCalls, stops);
+    EXPECT_TRUE(engine->available());
+    expectOldPersistence();
+}
+
+TEST_F(AudioEngineTest, ActivePlaybackPausesAndPreservesPositionAcrossRateChange) {
+    for (const bool reference : {false, true}) {
+        SetUp();
+        auto engine = makeEngine({48000, 32000});
+        if (reference) {
+            engine->setReferencePcm(pcm(), 48000);
+            ASSERT_TRUE(engine->refTogglePlay());
+        } else {
+            ASSERT_TRUE(AudioEngineTestAccess::playMain(*engine, pcm()));
+        }
+        fake->render(4800);
+        ASSERT_NEAR(reference ? engine->refPositionSec() : engine->positionSec(), 0.1, 1e-9);
+        ASSERT_TRUE(engine->applySettings(7, 32000, 128, 35));
+        EXPECT_FALSE(engine->playing());
+        EXPECT_FALSE(engine->refPlaying());
+        EXPECT_NEAR(reference ? engine->refPositionSec() : engine->positionSec(), 0.1, 1e-9);
+        fake->render(3200);
+        EXPECT_NEAR(reference ? engine->refPositionSec() : engine->positionSec(), 0.1, 1e-9);
+    }
+}
+
+TEST_F(AudioEngineTest, PanelStopsStreamPausesPlaybackAndAlwaysReopensEvenWhenPanelFails) {
+    for (const bool panelOk : {false, true}) {
+        SetUp();
+        auto engine = makeEngine({48000, 48000});
+        fake->capabilities[2] = {true, 64, 1024, 256, -1, ""};
+        fake->panelOk = panelOk;
+        ASSERT_TRUE(AudioEngineTestAccess::playMain(*engine, pcm()));
+        fake->render(4800);
+        engine->setReferencePcm(pcm(), 48000);
+        ASSERT_TRUE(engine->refTogglePlay());
+        fake->render(4800);
+        AudioEngineTestAccess::queueWait(*engine);
+        engine->playTestTone();
+        EXPECT_EQ(engine->showDeviceControlPanel(), panelOk);
+        EXPECT_EQ(fake->panelCalls, 1);
+        EXPECT_EQ(fake->panelDevice, 2);
+        EXPECT_EQ(fake->starts.size(), 2u);
+        EXPECT_TRUE(engine->available());
+        EXPECT_FALSE(engine->refPlaying());
+        EXPECT_FALSE(engine->playing());
+        EXPECT_NEAR(engine->positionSec(), 0.1, 1e-9);
+        const auto afterPanel = fake->render(256);
+        EXPECT_TRUE(std::all_of(afterPanel.begin(), afterPanel.end(), [](float v) { return v == 0.0f; }));
+        EXPECT_FALSE(engine->waitRender());
+        EXPECT_NEAR(engine->refPositionSec(), 0.1, 1e-9);
+        if (!panelOk) EXPECT_TRUE(engine->errorText().contains(QStringLiteral("打开失败")));
+        else EXPECT_TRUE(engine->statusText().contains(QStringLiteral("重启")));
+    }
+}
+
+TEST_F(AudioEngineTest, PanelReopenFallsBackToPreferredAndSavesOnlyAcceptedBuffer) {
+    auto engine = makeEngine({48000, 0, 48000});
+    fake->capabilities[2] = {true, 64, 1024, 256, -1, ""};
+    ASSERT_TRUE(engine->showDeviceControlPanel());
+    ASSERT_EQ(fake->starts.size(), 3u);
+    EXPECT_EQ(fake->starts[1].framesPerBuffer, 256);
+    EXPECT_EQ(fake->starts[2].framesPerBuffer, 0);
+    EXPECT_EQ(engine->framesPerBuffer(), 0);
+    EXPECT_TRUE(engine->errorText().contains(QStringLiteral("回退")));
+    QSettings settings;
+    EXPECT_EQ(settings.value("audio/framesPerBuffer").toInt(), 0);
+    EXPECT_EQ(settings.value("audio/deviceIndex").toInt(), 2);
+}
+
+TEST_F(AudioEngineTest, PanelDoubleReopenFailureReportsUnavailableAndDoesNotSaveFallback) {
+    auto engine = makeEngine({48000, 0, 0, 48000});
+    fake->capabilities[2] = {true, 64, 1024, 256, -1, ""};
+    EXPECT_FALSE(engine->showDeviceControlPanel());
+    EXPECT_FALSE(engine->available());
+    EXPECT_EQ(engine->actualRate(), 0);
+    EXPECT_EQ(engine->framesPerBuffer(), 256);
+    EXPECT_TRUE(engine->errorText().contains(QStringLiteral("音频不可用")));
+    expectOldPersistence();
+    fake->capabilities[2].error = "invalid cached buffer metadata";
+    ASSERT_TRUE(engine->showDeviceControlPanel());
+    EXPECT_EQ(fake->panelCalls, 2);
+    EXPECT_EQ(fake->panelDevice, 2);
+    EXPECT_EQ(fake->starts.back().device, 2);
+    EXPECT_TRUE(engine->available());
+    EXPECT_TRUE(engine->errorText().isEmpty());
+}
+
+TEST_F(AudioEngineTest, PanelCanRepairMetadataAfterRejectedSettingsWithRetainedError) {
+    auto engine = makeEngine({48000, 48000});
+    fake->capabilities[2] = {true, 64, 1024, 256, -1, "invalid cached buffer metadata"};
+    ASSERT_FALSE(engine->applySettings(2, 44100, 192, 35));
+    ASSERT_FALSE(engine->errorText().isEmpty());
+    ASSERT_TRUE(engine->showDeviceControlPanel());
+    EXPECT_EQ(fake->panelCalls, 1);
+    EXPECT_EQ(fake->panelDevice, 2);
+    EXPECT_EQ(fake->starts.back().device, 2);
+    EXPECT_TRUE(engine->available());
+    EXPECT_TRUE(engine->errorText().isEmpty());
+}
+
+TEST_F(AudioEngineTest, PanelPrecheckNeverStopsNonAsioOrUncompiledBackend) {
+    auto engine = makeEngine();
+    const int stops = fake->stopCalls;
+    EXPECT_FALSE(engine->showDeviceControlPanel());
+    fake->capabilities[2] = {true, 64, 1024, 256, -1, "query failed"};
+    fake->compiledAsio = false;
+    EXPECT_FALSE(engine->showDeviceControlPanel());
+    EXPECT_EQ(fake->panelCalls, 0);
+    EXPECT_EQ(fake->stopCalls, stops);
+    EXPECT_TRUE(engine->available());
 }
 }  // namespace
 
