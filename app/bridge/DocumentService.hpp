@@ -45,9 +45,11 @@ public:
     /// 不改变 active，返回 {ok, id, path, error}。
     Q_INVOKABLE QVariantMap save(const QString& id, const QString& path = {});
     /// 保存全部已命名脏文档；空路径不隐式另存为，放入 unnamed 待调用方处理。
-    /// 返回 {ok, saved:int, errors:[{id,path,error}], unnamed:[{id,path,label}]}。
-    /// ok 仅当所有脏文档已保存（包括没有待解决的 unnamed）才为 true。
-    Q_INVOKABLE QVariantMap saveDirtyNamed();
+    /// requirePmsConfirmation=true 时，PMS 模式的非 .pms 目标不写盘，交给调用方确认后独立 save。
+    /// 返回 {ok, saved:int, errors:[{id,path,error}], unnamed:[{id,path,label}],
+    ///       confirmation:[{id,path,label}]}；默认 false 保持直接保存行为。
+    /// ok 仅当所有脏文档已保存（包括没有待解决的 unnamed/confirmation）才为 true。
+    Q_INVOKABLE QVariantMap saveDirtyNamed(bool requirePmsConfirmation = false);
 
     /// 项目徽标/切音寻址也使用同一身份规则，不依赖 active。
     static QString normalizedPath(const QString& path);

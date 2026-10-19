@@ -741,6 +741,413 @@ TestCase {
         assertPmsPrimary(data.mode, id)
         unchanged(sa, sb)
     }
+    // PMS suffix tests exercise production Main and its real modal. The accepted
+    // handler is the FileDialog's shared entry, not a test of the native chooser.
+    function pmsProfileData() {
+        return [{tag: "standard", bmesp: false, mode: "pms9k"},
+                {tag: "bme-sp", bmesp: true, mode: "pms9k-bmesp"}]
+    }
+    function openPmsFixture(profile) {
+        const path = mainFixture.pmsFixture(profile.bmesp)
+        verify(path.length > 0)
+        main.requestDocumentAction("open", path)
+        const id = documents.activeId()
+        verify(id !== a && id !== b)
+        assertPmsPrimary(profile.mode, id)
+        return id
+    }
+    function seedPmsHistory(id) {
+        for (const edit of [{key: "GENRE", value: "PMS history"},
+                            {key: "ARTIST", value: "PMS redo"}]) {
+            const result = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+                session_id: id, edits: [edit]
+            }})))
+            verify(result.ok)
+        }
+        const undone = JSON.parse(beatbench.dispatch(JSON.stringify({command: "session.undo", args: {
+            session_id: id
+        }})))
+        verify(undone.ok)
+        documents.refresh()
+        const state = mainFixture.snapshot(id)
+        verify(state.dirty && state.undo > 0 && state.redo > 0)
+    }
+    function draftTitleFor(id) {
+        const title = mainFixture.snapshot(id).meta.TITLE
+        const field = mainFixture.textEditor(main, title)
+        verify(field !== null, "Missing TITLE editor for " + id)
+        main.requestActivate()
+        mouseClick(field, field.width / 2, field.height / 2)
+        field.forceActiveFocus()
+        tryCompare(field, "activeFocus", true)
+        wait(100) // 原生Windows首次激活异步完成，不能把按键注入到尚未激活的窗口。
+        field.selectAll()
+        keyClick(Qt.Key_D)
+        tryCompare(main, "metaDraftDirty", true)
+        compare(mainFixture.snapshot(id).meta.TITLE, title)
+        verify(field.text !== title)
+        return field.text
+    }
+    function pmsSaveState(id) {
+        return {document: mainFixture.snapshot(id), a: mainFixture.snapshot(a), b: mainFixture.snapshot(b),
+                disk: mainFixture.disk(id), diskA: mainFixture.disk(a), diskB: mainFixture.disk(b),
+                path: main.chartPath, mode: main.chartMode, draft: main.metaDraftDirty,
+                edits: JSON.stringify(mainFixture.findProperty(main, "primaryKeys").collectEdits())}
+    }
+    function pmsDialog() {
+        let dialog = null
+        // saveChart[As] queues its modal with Qt.callLater; do not assert synchronously.
+        tryVerify(function() {
+            dialog = mainFixture.objectNamed(main, "pmsSuffixConfirmDialog")
+            return dialog !== null && dialog.visible
+        })
+        tryCompare(dialog, "opened", true)
+        compare(dialog.title, "PMS 保存后缀警告")
+        compare(dialog.modal, true)
+        verify(mainFixture.button(dialog, "仍按此后缀保存") !== null)
+        verify(mainFixture.button(dialog, "取消保存") !== null)
+        return dialog
+    }
+    function acceptPmsSave() { clickButton(pmsDialog(), "仍按此后缀保存") }
+    function acceptedSaveAs(path) {
+        // Simulate only the captured ID from openSaveAsDialog, without opening a
+        // platform-native chooser in an automated QML test. Production consumes it.
+        main.saveAsDocumentId = documents.activeId()
+        const result = main.handleSaveAsAccepted(path)
+        compare(main.saveAsDocumentId, "")
+        return result
+    }
+    function savePmsToDangerousPath(id, path) {
+        compare(documents.activeId(), id)
+        compare(main.saveChartAs(path), undefined)
+        acceptPmsSave()
+        tryCompare(main, "chartPath", path)
+        compare(mainFixture.snapshot(id).dirty, false)
+        verify(mainFixture.fileExists(path))
+    }
+    function test_pmsDangerousSaveAs_cancelThenConfirm_data() {
+        const rows = []
+        for (const profile of pmsProfileData())
+            for (const suffix of ["bms", "bme", "bml"])
+                rows.push({tag: profile.tag + "-" + suffix, bmesp: profile.bmesp,
+                           mode: profile.mode, suffix: suffix})
+        return rows
+    }
+    function test_pmsDangerousSaveAs_cancelThenConfirm(data) {
+        start(true)
+        const id = openPmsFixture(data)
+        seedPmsHistory(id)
+        const title = draftTitleFor(id)
+        const before = pmsSaveState(id), output = before.path + ".save." + data.suffix
+        compare(mainFixture.fileExists(output), false)
+        // At least one row enters through the exact FileDialog accepted handler.
+        if (data.suffix === "bms") compare(acceptedSaveAs(output), undefined)
+        else compare(main.saveChartAs(output), undefined)
+        compare(mainFixture.fileExists(output), false)
+        compare(pmsSaveState(id), before) // No draft commit before the queued modal.
+        const dialog = pmsDialog()
+        compare(mainFixture.fileExists(output), false)
+        compare(pmsSaveState(id), before)
+        if (data.mode === "pms9k" && data.suffix === "bms") {
+            wait(50)
+            verify(mainFixture.screenshot())
+        }
+        clickButton(dialog, "取消保存")
+        tryCompare(dialog, "visible", false)
+        compare(main.pendingDocAction, "")
+        compare(mainFixture.fileExists(output), false)
+        compare(pmsSaveState(id), before) // Complete snapshot/history/revision, both disks and draft.
+        compare(documents.activeId(), id)
+        compare(main.saveChartAs(output), undefined)
+        pmsDialog()
+        compare(mainFixture.fileExists(output), false)
+        compare(pmsSaveState(id), before)
+        acceptPmsSave()
+        tryCompare(main, "chartPath", output)
+        const saved = mainFixture.snapshot(id)
+        verify(mainFixture.fileExists(output))
+        compare(saved.meta.TITLE, title)
+        compare(saved.notes, before.document.notes)
+        compare(saved.dirty, false)
+        compare(saved.undo, before.document.undo + 1)
+        compare(saved.redo, 0)
+        verify(mainFixture.disk(id).indexOf("#TITLE " + title) >= 0)
+        assertPmsPrimary(data.mode, id) // Saving .bms/.bme/.bml must NOT reparse/downgrade memory.
+        unchanged(before.a, before.b)
+        compare(mainFixture.disk(a), before.diskA)
+        compare(mainFixture.disk(b), before.diskB)
+    }
+    function test_pmsSuffixEscape_cancelsBeforeAnyWrite() {
+        start(true)
+        const id = openPmsFixture(pmsProfileData()[0])
+        seedPmsHistory(id)
+        draftTitleFor(id)
+        const before = pmsSaveState(id), output = before.path + ".escape.bms"
+        compare(main.saveChartAs(output), undefined)
+        const dialog = pmsDialog()
+        keyClick(Qt.Key_Escape)
+        tryCompare(dialog, "visible", false)
+        compare(main.pmsSaveConfirmationPending, false)
+        compare(mainFixture.fileExists(output), false)
+        compare(pmsSaveState(id), before)
+    }
+    function test_pmsUppercaseSuffix_doesNotWarn_data() { return pmsProfileData() }
+    function test_pmsUppercaseSuffix_doesNotWarn(data) {
+        start(true)
+        const id = openPmsFixture(data)
+        const title = draftTitleFor(id), before = pmsSaveState(id)
+        const output = before.path + ".PMS"
+        verify(main.saveChartAs(output))
+        wait(0)
+        const dialog = mainFixture.objectNamed(main, "pmsSuffixConfirmDialog")
+        verify(dialog !== null && !dialog.visible)
+        verify(mainFixture.fileExists(output))
+        compare(mainFixture.snapshot(id).meta.TITLE, title)
+        compare(mainFixture.snapshot(id).dirty, false)
+        assertPmsPrimary(data.mode, id)
+        unchanged(before.a, before.b)
+        compare(mainFixture.disk(a), before.diskA)
+        compare(mainFixture.disk(b), before.diskB)
+    }
+    function test_spSaveAs_doesNotWarn_data() {
+        return ["bms", "bme", "bml"].map(s => ({tag: s, suffix: s}))
+    }
+    function test_spSaveAs_doesNotWarn(data) {
+        start(true)
+        const title = draftTitleFor(a), sb = mainFixture.snapshot(b), diskB = mainFixture.disk(b)
+        const output = main.chartPath + ".save." + data.suffix
+        acceptedSaveAs(output)
+        wait(0)
+        const dialog = mainFixture.objectNamed(main, "pmsSuffixConfirmDialog")
+        verify(dialog !== null && !dialog.visible)
+        verify(mainFixture.fileExists(output))
+        compare(mainFixture.snapshot(a).meta.TITLE, title)
+        compare(mainFixture.snapshot(a).dirty, false)
+        compare(main.chartMode, "sp7k")
+        compare(main.metaDraftDirty, false)
+        compare(mainFixture.snapshot(b), sb)
+        compare(mainFixture.disk(b), diskB)
+    }
+    function test_pmsDangerousCurrentPath_saveChart_data() { return pmsProfileData() }
+    function test_pmsDangerousCurrentPath_saveChart(data) {
+        start(true)
+        const id = openPmsFixture(data), output = main.chartPath + ".save.bms"
+        savePmsToDangerousPath(id, output)
+        seedPmsHistory(id)
+        const title = draftTitleFor(id), before = pmsSaveState(id)
+        compare(main.saveChart(), undefined)
+        pmsDialog()
+        compare(pmsSaveState(id), before)
+        clickButton(pmsDialog(), "取消保存")
+        compare(pmsSaveState(id), before)
+        compare(main.saveChart(), undefined)
+        acceptPmsSave()
+        compare(mainFixture.snapshot(id).meta.TITLE, title)
+        compare(mainFixture.snapshot(id).dirty, false)
+        verify(mainFixture.disk(id).indexOf("#TITLE " + title) >= 0)
+        assertPmsPrimary(data.mode, id)
+        unchanged(before.a, before.b)
+        compare(mainFixture.disk(a), before.diskA)
+        compare(mainFixture.disk(b), before.diskB)
+    }
+    function test_pmsPendingAction_cancelOrSaveBeforeContinuing_data() {
+        const rows = []
+        for (const action of ["new", "close"])
+            for (const accept of [false, true])
+                rows.push({tag: action + (accept ? "-confirm" : "-cancel"), action: action, accept: accept})
+        return rows
+    }
+    function test_pmsPendingAction_cancelOrSaveBeforeContinuing(data) {
+        start(true)
+        // start(true) deliberately leaves A/B dirty with history. Close must not
+        // accidentally test their background saves instead of the PMS decision.
+        verify(documents.save(a).ok)
+        verify(documents.save(b).ok)
+        const id = openPmsFixture(pmsProfileData()[0]), output = main.chartPath + ".save.bms"
+        savePmsToDangerousPath(id, output)
+        const title = draftTitleFor(id), before = pmsSaveState(id)
+        const count = documents.instances.length
+        if (data.action === "new") main.newChartAs("sp7k")
+        else main.close() // Actual Window.onClosing gate, no allowClose test shortcut.
+        compare(main.pendingDocAction, data.action)
+        confirmButton("保存")
+        const dialog = pmsDialog()
+        compare(main.pendingDocAction, data.action)
+        compare(documents.activeId(), id)
+        compare(documents.instances.length, count)
+        compare(main.visible, true)
+        compare(main.allowClose, false)
+        compare(pmsSaveState(id), before)
+        clickButton(dialog, data.accept ? "仍按此后缀保存" : "取消保存")
+        tryCompare(main, "pendingDocAction", "")
+        if (!data.accept) {
+            compare(documents.activeId(), id)
+            compare(documents.instances.length, count)
+            compare(main.visible, true)
+            compare(main.allowClose, false)
+            compare(pmsSaveState(id), before)
+        } else {
+            compare(mainFixture.snapshot(id).meta.TITLE, title)
+            compare(mainFixture.snapshot(id).dirty, false)
+            verify(mainFixture.disk(id).indexOf("#TITLE " + title) >= 0)
+            if (data.action === "new") {
+                compare(documents.instances.length, count + 1)
+                verify(documents.activeId() !== id)
+                compare(main.chartMode, "sp7k")
+                compare(main.visible, true)
+            } else tryCompare(main, "visible", false)
+            unchanged(before.a, before.b)
+            compare(mainFixture.disk(a), before.diskA)
+            compare(mainFixture.disk(b), before.diskB)
+        }
+    }
+    function test_pmsSuffixConfirm_rejectsChangedDocumentId() {
+        start(true)
+        const id = openPmsFixture(pmsProfileData()[0])
+        draftTitleFor(id)
+        const original = mainFixture.snapshot(id), disk = mainFixture.disk(id)
+        const output = main.chartPath + ".save.bms"
+        acceptedSaveAs(output)
+        const dialog = pmsDialog()
+        verify(documents.activate(b).ok)
+        main.adoptChart(mainFixture.snapshot(b).path)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        clickButton(dialog, "仍按此后缀保存")
+        tryCompare(dialog, "visible", false)
+        compare(mainFixture.fileExists(output), false)
+        compare(mainFixture.snapshot(id), original)
+        compare(mainFixture.disk(id), disk)
+        unchanged(sa, sb)
+        compare(mainFixture.disk(a), diskA)
+        compare(mainFixture.disk(b), diskB)
+        compare(documents.activeId(), b)
+        compare(main.pendingDocAction, "")
+    }
+    function test_pmsQueuedConfirmation_freezesTargetAndBlocksReentry() {
+        start(true)
+        const id = openPmsFixture(pmsProfileData()[0])
+        const title = draftTitleFor(id), before = pmsSaveState(id)
+        const output = main.chartPath + ".save.bms", other = main.chartPath + ".PMS"
+        compare(acceptedSaveAs(output), undefined)
+        // Lock exists even BEFORE the deferred modal is visible.
+        compare(main.pmsSaveConfirmationPending, true)
+        compare(main.pendingPmsSaveDocumentId, id)
+        compare(main.pendingPmsSavePath, output)
+        compare(main.pendingPmsSaveAs, true)
+        main.saveChartAs(other)
+        main.saveChart()
+        main.saveAllDocuments()
+        main.newChartAs("sp7k")
+        main.close()
+        compare(main.pendingDocAction, "")
+        compare(main.pendingPmsSaveDocumentId, id)
+        compare(main.pendingPmsSavePath, output)
+        compare(main.pendingPmsSaveAs, true)
+        compare(main.visible, true)
+        compare(mainFixture.fileExists(output), false)
+        compare(mainFixture.fileExists(other), false)
+        compare(pmsSaveState(id), before)
+        acceptPmsSave()
+        compare(main.pmsSaveConfirmationPending, false)
+        compare(main.chartPath, output)
+        compare(mainFixture.snapshot(id).meta.TITLE, title)
+        verify(mainFixture.fileExists(output))
+        compare(mainFixture.fileExists(other), false)
+        const saved = pmsSaveState(id)
+        // Stale accept callbacks cannot reuse the authorization or commit twice.
+        compare(main.confirmPmsSuffixSave(), false)
+        compare(main.handleSaveAsAccepted(other), false)
+        compare(pmsSaveState(id), saved)
+        compare(mainFixture.fileExists(other), false)
+    }
+    function test_saveAsAccepted_rejectsFrozenIdAfterSwitch() {
+        start(true)
+        const id = openPmsFixture(pmsProfileData()[0])
+        const original = mainFixture.snapshot(id), disk = mainFixture.disk(id)
+        const output = main.chartPath + ".save.bms"
+        // Same capture/consume contract as the native dialog, without testing its UI.
+        main.saveAsDocumentId = id
+        verify(documents.activate(b).ok)
+        main.adoptChart(mainFixture.snapshot(b).path)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        compare(main.handleSaveAsAccepted(output), false)
+        compare(main.saveAsDocumentId, "")
+        wait(0)
+        compare(main.pmsSaveConfirmationPending, false)
+        const dialog = mainFixture.objectNamed(main, "pmsSuffixConfirmDialog")
+        verify(dialog !== null && !dialog.visible)
+        compare(mainFixture.fileExists(output), false)
+        compare(mainFixture.snapshot(id), original)
+        compare(mainFixture.disk(id), disk)
+        unchanged(sa, sb)
+        compare(mainFixture.disk(a), diskA)
+        compare(mainFixture.disk(b), diskB)
+        compare(documents.activeId(), b)
+    }
+    function test_saveAll_inactivePms_requiresEachConfirmation_data() {
+        return [{tag: "cancel-first", cancel: true}, {tag: "confirm-both", cancel: false}]
+    }
+    function test_saveAll_inactivePms_requiresEachConfirmation(data) {
+        start(true)
+        verify(documents.save(a).ok)
+        verify(documents.save(b).ok)
+        const ids = []
+        for (const profile of pmsProfileData()) {
+            const id = openPmsFixture(profile)
+            savePmsToDangerousPath(id, main.chartPath + ".save.bms")
+            seedPmsHistory(id)
+            ids.push(id)
+        }
+        verify(documents.activate(a).ok)
+        main.adoptChart(mainFixture.snapshot(a).path)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        const snapshots = ids.map(id => mainFixture.snapshot(id))
+        const disks = ids.map(id => mainFixture.disk(id))
+        main.saveAllDocuments()
+        pmsDialog()
+        compare(main.pendingDocAction, "saveAll")
+        for (let i = 0; i < ids.length; ++i) {
+            compare(mainFixture.snapshot(ids[i]), snapshots[i])
+            compare(mainFixture.disk(ids[i]), disks[i])
+        }
+        if (data.cancel) {
+            clickButton(pmsDialog(), "取消保存")
+            tryCompare(main, "pendingDocAction", "")
+            for (let i = 0; i < ids.length; ++i) {
+                compare(mainFixture.snapshot(ids[i]), snapshots[i])
+                compare(mainFixture.disk(ids[i]), disks[i])
+            }
+        } else {
+            acceptPmsSave()
+            pmsDialog()
+            compare(main.pendingDocAction, "saveAll")
+            compare(ids.filter(id => !mainFixture.snapshot(id).dirty).length, 1)
+            const remaining = ids.findIndex(id => mainFixture.snapshot(id).dirty)
+            compare(mainFixture.snapshot(ids[remaining]), snapshots[remaining])
+            compare(mainFixture.disk(ids[remaining]), disks[remaining])
+            acceptPmsSave()
+            tryCompare(main, "pendingDocAction", "")
+            for (let i = 0; i < ids.length; ++i) {
+                const saved = mainFixture.snapshot(ids[i])
+                compare(saved.dirty, false)
+                compare(saved.meta, snapshots[i].meta)
+                compare(saved.notes, snapshots[i].notes)
+                compare(saved.undo, snapshots[i].undo)
+                compare(saved.redo, snapshots[i].redo)
+                compare(documents.session(ids[i]).chartMode(), pmsProfileData()[i].mode)
+                verify(mainFixture.disk(ids[i]).indexOf("#GENRE PMS history") >= 0)
+            }
+        }
+        compare(documents.activeId(), a)
+        unchanged(sa, sb)
+        compare(mainFixture.disk(a), diskA)
+        compare(mainFixture.disk(b), diskB)
+        compare(main.visible, true)
+        compare(main.allowClose, false)
+    }
     function test_newDirectModes_doNotInjectPlayerOrChangeOldDocuments_data() {
         return [{tag: "sp", mode: "sp7k"}, {tag: "dp", mode: "dp"}, {tag: "battle", mode: "battle"}]
     }

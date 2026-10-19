@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "DocumentService.hpp"
+#include "EditUtils.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -262,9 +263,9 @@ QVariantMap DocumentService::save(const QString& id, const QString& path) {
     }
 }
 
-QVariantMap DocumentService::saveDirtyNamed() {
+QVariantMap DocumentService::saveDirtyNamed(bool requirePmsConfirmation) {
     const QVariantList documents = dirtyDocuments();  // 固定本次需要处理的文档集合
-    QVariantList errors, unnamed;
+    QVariantList errors, unnamed, confirmation;
     int saved = 0;
     for (const QVariant& value : documents) {
         const QVariantMap doc = value.toMap();
@@ -272,13 +273,22 @@ QVariantMap DocumentService::saveDirtyNamed() {
             unnamed.push_back(doc);
             continue;
         }
-        const QVariantMap response = save(doc.value(QStringLiteral("id")).toString());
+        const QString id = doc.value(QStringLiteral("id")).toString();
+        const auto* document = beatbench::edit::session_registry().by_id(utf8(id));
+        if (requirePmsConfirmation && document && document->has_chart() &&
+            EditUtils::pmsSuffixNeedsConfirmation(qs(document->chart().mode_id.value_or("")),
+                                                 doc.value(QStringLiteral("path")).toString())) {
+            confirmation.push_back(doc);
+            continue;
+        }
+        const QVariantMap response = save(id);
         if (response.value(QStringLiteral("ok")).toBool()) ++saved;
         else errors.push_back(response);
     }
-    return {{QStringLiteral("ok"), errors.isEmpty() && unnamed.isEmpty() && dirtyDocuments().isEmpty()},
+    return {{QStringLiteral("ok"), errors.isEmpty() && unnamed.isEmpty() && confirmation.isEmpty() &&
+                                  dirtyDocuments().isEmpty()},
             {QStringLiteral("saved"), saved}, {QStringLiteral("errors"), errors},
-            {QStringLiteral("unnamed"), unnamed}};
+            {QStringLiteral("unnamed"), unnamed}, {QStringLiteral("confirmation"), confirmation}};
 }
 
 }  // namespace beatbench::app
