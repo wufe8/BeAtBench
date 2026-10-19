@@ -932,6 +932,7 @@ ApplicationWindow {
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
                 onPlayNoteSample: (ref) => session.playNoteSample(ref)
                 onCanvasClicked: () => window.onCanvasClicked()
+                onSamplePreviewStopRequested: session.stopNoteSample()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onNoteEditRequested: (ref) => editNoteSample(ref)
                 onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => moveSelection(deltaF, targetLane, sourceLane, sourceBgmLine)
@@ -2326,7 +2327,12 @@ ApplicationWindow {
         uiActions.setChecked("view.page.project", currentPage === 3)
     }
     onChartMetaChanged: { updateActionStates(); updateCheckedStates() }
-    onSelectionRefsChanged: { updateActionStates(); updateCheckedStates() }
+    onSelectionRefsChanged: {
+        // Selection replacement/removal invalidates the previous note audition only.
+        if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.stopPreview()
+        updateActionStates()
+        updateCheckedStates()
+    }
     onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
     onCurrentPageChanged: {
         updateActionStates()

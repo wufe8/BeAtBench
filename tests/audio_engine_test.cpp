@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// No device IO, decoding, GUI application, or user preferences.
+// No device IO, GUI application, or user preferences; preview decoders are injected.
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEvent>
+#include <QFile>
+#include <QFileInfo>
+#include <QSemaphore>
+#include <QThread>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -21,6 +26,33 @@
 namespace beatbench::app {
 // Only synthetic PCM setup needs private access; assertions use observable clocks/output.
 struct AudioEngineTestAccess {
+    using Results = decltype(AudioEngine::m_previewResults);
+    static void decoder(AudioEngine& engine, beatbench::audio::SampleCache::DecodeFn fn) {
+        engine.m_cache.setDecoders(fn, [fn](const std::wstring& path) {
+            return fn(QString::fromStdWString(path).toStdString());
+        });
+    }
+    static bool wait(AudioEngine& engine) { return engine.m_previewPool.waitForDone(5000); }
+    static void complete(AudioEngine& engine) { engine.completePreviewDecodes(); }
+    static Results defer(AudioEngine& engine) {
+        std::lock_guard<std::mutex> lock(engine.m_previewResultsMutex);
+        Results results;
+        results.swap(engine.m_previewResults);
+        return results;
+    }
+    static void deliver(AudioEngine& engine, Results results) {
+        {
+            std::lock_guard<std::mutex> lock(engine.m_previewResultsMutex);
+            engine.m_previewResults.swap(results);
+        }
+        engine.completePreviewDecodes();
+    }
+    static void reclaim(AudioEngine& engine) {
+        engine.m_cache.clear();
+        engine.m_player.drainReclaimed();
+    }
+    static int voices(const AudioEngine& engine) { return engine.m_player.activeCount(); }
+
     static void queueWait(AudioEngine& engine) { engine.m_waitRender = true; }
     static bool playMain(AudioEngine& engine,
                          std::shared_ptr<const std::vector<float>> pcm) {
@@ -153,6 +185,33 @@ protected:
     }
     static std::shared_ptr<const std::vector<float>> pcm() {
         return std::make_shared<const std::vector<float>>(48000 * 4, 0.25f);
+    }
+    static QString previewBase() {
+        const auto base = QFileInfo(QString::fromUtf8(__FILE__)).absoluteDir()
+                              .absoluteFilePath(QStringLiteral("../local/tmp"));
+        QDir().mkpath(base);
+        return base;
+    }
+    static QString previewFile(const QTemporaryDir& dir, const QString& name) {
+        const auto path = QDir(dir.path()).filePath(name);
+        QFile file(path);
+        EXPECT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write("injected decoder input");
+        return path;
+    }
+    static beatbench::audio::DecodeResult decoded(float amplitude,
+            std::weak_ptr<const std::vector<float>>* weak = nullptr) {
+        auto* guiThread = QCoreApplication::instance()->thread();
+        auto data = std::shared_ptr<const std::vector<float>>(
+            new const std::vector<float>(96000, amplitude), [guiThread](const auto* p) {
+                EXPECT_EQ(QThread::currentThread(), guiThread);
+                delete p;
+            });
+        if (weak) *weak = data;
+        auto* sample = new beatbench::audio::DecodedSample;
+        sample->sampleRate = 48000;
+        sample->sharedPcm = std::move(data);
+        return {true, sample, {}};
     }
     FakeBackend* fake = nullptr; // Borrowed; engine owns it.
 };
@@ -513,6 +572,130 @@ TEST_F(AudioEngineTest, PanelPrecheckNeverStopsNonAsioOrUncompiledBackend) {
     EXPECT_EQ(fake->panelCalls, 0);
     EXPECT_EQ(fake->stopCalls, stops);
     EXPECT_TRUE(engine->available());
+}
+TEST_F(AudioEngineTest, StopPreviewAtNextCallbackPreservesMainAndReference) {
+    auto engine = makeEngine();
+    QTemporaryDir dir(QDir(previewBase()).filePath("preview-XXXXXX"));
+    ASSERT_TRUE(dir.isValid());
+    const auto file = previewFile(dir, "audition.wav");
+    AudioEngineTestAccess::decoder(*engine, [](const auto&) { return decoded(0.5f); });
+    engine->setReferencePcm(pcm(), 48000);
+    ASSERT_TRUE(engine->refTogglePlay());
+    // Public reference transport intentionally pauses main playback. Start main
+    // directly afterward so this mixer-isolation test has both PCM slots live.
+    ASSERT_TRUE(AudioEngineTestAccess::playMain(*engine, pcm()));
+    ASSERT_TRUE(engine->playPreview(file));
+    ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
+    AudioEngineTestAccess::complete(*engine);
+    fake->render(512);
+    ASSERT_EQ(AudioEngineTestAccess::voices(*engine), 3);
+    const auto before = engine->positionSec();
+    engine->stopPreview();
+    EXPECT_FALSE(engine->busy());
+    const auto output = fake->render(512);
+    EXPECT_EQ(AudioEngineTestAccess::voices(*engine), 2);
+    EXPECT_TRUE(engine->playing());
+    EXPECT_TRUE(engine->refPlaying());
+    EXPECT_GT(engine->positionSec(), before);
+    EXPECT_GT(output[600], 0.01f);
+}
+
+TEST_F(AudioEngineTest, CancelWhileDecoderBlockedCannotStartLaterAndReleasesOnGui) {
+    auto engine = makeEngine();
+    QTemporaryDir dir(QDir(previewBase()).filePath("preview-XXXXXX"));
+    ASSERT_TRUE(dir.isValid());
+    const auto file = previewFile(dir, "blocked.wav");
+    QSemaphore entered, proceed;
+    std::weak_ptr<const std::vector<float>> ref;
+    AudioEngineTestAccess::decoder(*engine, [&](const auto&) {
+        entered.release();
+        const bool released = proceed.tryAcquire(1, 5000);
+        EXPECT_TRUE(released);
+        return decoded(0.5f, &ref);
+    });
+    ASSERT_TRUE(engine->playPreview(file));
+    const bool started = entered.tryAcquire(1, 5000);
+    EXPECT_TRUE(started);
+    for (int i = 0; i < 20; ++i) engine->stopPreview();
+    EXPECT_FALSE(engine->busy());
+    proceed.release();
+    ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
+    QCoreApplication::sendPostedEvents(engine.get(), QEvent::MetaCall);
+    const auto output = fake->render(512);
+    EXPECT_EQ(AudioEngineTestAccess::voices(*engine), 0);
+    EXPECT_TRUE(std::all_of(output.begin(), output.end(), [](float v) { return v == 0; }));
+    EXPECT_FALSE(engine->busy());
+    AudioEngineTestAccess::reclaim(*engine);
+    EXPECT_TRUE(ref.expired());
+}
+
+TEST_F(AudioEngineTest, DeferredOldDecodeCompletionCannotReplaceNewPreview) {
+    auto engine = makeEngine();
+    QTemporaryDir dir(QDir(previewBase()).filePath("preview-XXXXXX"));
+    ASSERT_TRUE(dir.isValid());
+    const auto oldFile = previewFile(dir, "old.wav");
+    const auto newFile = previewFile(dir, "new.wav");
+    std::weak_ptr<const std::vector<float>> oldRef, newRef;
+    AudioEngineTestAccess::decoder(*engine, [&](const std::string& path) {
+        return path.find("old.wav") != std::string::npos ? decoded(0.8f, &oldRef)
+                                                      : decoded(0.2f, &newRef);
+    });
+    ASSERT_TRUE(engine->playPreview(oldFile));
+    ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
+    // Delay old GUI delivery until after the newer result has actually started.
+    auto oldCompletion = AudioEngineTestAccess::defer(*engine);
+    ASSERT_TRUE(engine->playPreview(newFile));
+    ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
+    AudioEngineTestAccess::complete(*engine);
+    auto output = fake->render(512);
+    EXPECT_NEAR(output[600], 0.2f * 0.35f, 0.0001f);
+    AudioEngineTestAccess::deliver(*engine, std::move(oldCompletion));
+    output = fake->render(512);
+    EXPECT_NEAR(output[600], 0.2f * 0.35f, 0.0001f);
+    EXPECT_EQ(AudioEngineTestAccess::voices(*engine), 1);
+    EXPECT_TRUE(engine->busy());
+    for (int i = 0; i < 20; ++i) engine->stopPreview();
+    fake->render(512);
+    AudioEngineTestAccess::reclaim(*engine);
+    EXPECT_TRUE(oldRef.expired());
+    EXPECT_TRUE(newRef.expired());
+}
+
+TEST_F(AudioEngineTest, StopAllStreamChangeAndTestToneInvalidatePendingDecodes) {
+    for (int action = 0; action < 3; ++action) {
+        auto engine = makeEngine(action == 1 ? std::deque<int>{48000, 48000}
+                                            : std::deque<int>{48000});
+        QTemporaryDir dir(QDir(previewBase()).filePath("preview-XXXXXX"));
+        ASSERT_TRUE(dir.isValid());
+        const auto file = previewFile(dir, "pending.wav");
+        std::weak_ptr<const std::vector<float>> ref;
+        AudioEngineTestAccess::decoder(*engine, [&](const auto&) { return decoded(0.8f, &ref); });
+        ASSERT_TRUE(engine->playPreview(file));
+        ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
+        if (action == 0) engine->stopAll();
+        if (action == 1) ASSERT_TRUE(engine->reopenStream());
+        if (action == 2) engine->playTestTone();
+        QCoreApplication::sendPostedEvents(engine.get(), QEvent::MetaCall);
+        fake->render(512);
+        EXPECT_EQ(AudioEngineTestAccess::voices(*engine), action == 2 ? 1 : 0);
+        engine->stopPreview();
+        fake->render(512);
+        AudioEngineTestAccess::reclaim(*engine);
+        EXPECT_TRUE(ref.expired());
+    }
+}
+
+TEST_F(AudioEngineTest, DestructorReleasesUndeliveredWorkerResultsOnGui) {
+    auto engine = makeEngine();
+    QTemporaryDir dir(QDir(previewBase()).filePath("preview-XXXXXX"));
+    ASSERT_TRUE(dir.isValid());
+    const auto file = previewFile(dir, "undelivered.wav");
+    std::weak_ptr<const std::vector<float>> ref;
+    AudioEngineTestAccess::decoder(*engine, [&](const auto&) { return decoded(0.5f, &ref); });
+    ASSERT_TRUE(engine->playPreview(file));
+    ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
+    engine.reset();  // No queued GUI delivery: destructor must own/release the result.
+    EXPECT_TRUE(ref.expired());
 }
 }  // namespace
 

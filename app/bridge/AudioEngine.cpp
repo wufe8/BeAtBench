@@ -72,6 +72,7 @@ AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend
       m_backend(std::move(backend)),
       m_playback(&m_player, 44100.0),
       m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot) {
+    m_previewPool.setMaxThreadCount(2);
     loadSettings();
     m_renderCtx.player = &m_player;
     std::string err;
@@ -97,7 +98,7 @@ AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend
         int slot = -1;
         while ((slot = m_player.drainEndedEvents()) != -1) {
             // 试听槽结束：busy = false（QML 状态栏复位）
-            if (slot == beatbench::audio::SamplePlayer::kPreviewVoice) {
+            if (slot == beatbench::audio::SamplePlayer::kPreviewVoice && !m_previewDecoding) {
                 m_busy = false;
                 emit busyChanged();
             }
@@ -132,6 +133,14 @@ AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend
 }
 
 AudioEngine::~AudioEngine() {
+    ++m_previewGeneration;
+    m_previewPool.clear();
+    m_previewPool.waitForDone();
+    // No worker can touch this/cache after this point. Queued notifications own
+    // no sample references; results are released here on the GUI thread.
+    for (const auto& pending : m_previewResults)
+        beatbench::audio::decoded_sample_release(pending.result.sample);
+    m_previewResults.clear();
     // 1) 停回调流（Pa_StopStream 返回 = 回调已停，线程安全）
     m_renderCtx.ready.store(false, std::memory_order_release);
     if (m_backend) m_backend->stop();
@@ -143,6 +152,8 @@ AudioEngine::~AudioEngine() {
 }
 
 bool AudioEngine::playPreview(const QString& file) {
+    stopPreview();
+    const auto generation = m_previewGeneration;
     if (!m_initialized) {
         m_statusText = QStringLiteral("音频不可用（后端初始化失败）");
         emit statusTextChanged();
@@ -169,11 +180,12 @@ bool AudioEngine::playPreview(const QString& file) {
     // 异步解码（不卡 UI；**走 SampleCache**——同一文件重复播放不重复解码）：
     // get_w 命中返回（+1 引用，调用方持有）；未命中 = 本线程解码（QThreadPool
     // worker 线程，阻塞其自身）→ 缓存持有 + 调用方持有。完成后回 UI 线程启动 voice。
+    m_previewDecoding = true;
     m_busy = true;
     emit busyChanged();
     const QString pathCopy = absPath;
     qInfo("AudioEngine: playPreview %s", qPrintable(pathCopy));  // 冒烟日志
-    QThreadPool::globalInstance()->start([this, pathCopy] {
+    m_previewPool.start([this, pathCopy, generation] {
         // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）——
         // 窄字符 fopen 走 ANSI 代码页（GBK）打不开日文谱面目录（2026-09 用户实测）。
         // 跨平台：Windows 用 toStdWString；其它平台窄字符（注释见 AudioDecoder.hpp）。
@@ -185,30 +197,54 @@ bool AudioEngine::playPreview(const QString& file) {
         const beatbench::audio::SampleCacheResult r =
             m_cache.get(pathCopy.toStdString());
 #endif
-        QMetaObject::invokeMethod(this, [this, r] {
-            if (!r.ok) {
-                m_statusText = QStringLiteral("解码失败：%1").arg(
-                    QString::fromStdString(r.message));
-                m_busy = false;
-                emit statusTextChanged();
-                emit busyChanged();
-                return;
-            }
-            // 启动 voice（试听槽；连点 = 停旧播新）。
-            // 引用协议：SampleCache 持有 1 份（缓存），调用方持有 1 份（get 返回，
-            // 计数 1 = 调用方持有）；playPreview 所有权转移调用方那份给内核。
-            // voice 结束回调 unref → 归零 → 回收队列 → UI 线程 delete（drainReclaimed
-            // 定时器）——**缓存持有的那份仍存**（除非被逐出/失效，此时释放缓存持有；
-            // 正被播放的 voice 持有独立引用 → 生命周期不受影响）。
-            m_player.playPreview(r.sample, 1.0f);
-            m_statusText = QStringLiteral("试听中…");
-            emit statusTextChanged();
-        }, Qt::QueuedConnection);
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultsMutex);
+            m_previewResults.push_back({generation, r});
+        }
+        QMetaObject::invokeMethod(this, [this] { completePreviewDecodes(); },
+                                  Qt::QueuedConnection);
     });
     return true;
 }
 
+void AudioEngine::completePreviewDecodes() {
+    std::vector<PreviewDecode> results;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultsMutex);
+        results.swap(m_previewResults);
+    }
+    for (const auto& pending : results) {
+        const auto& r = pending.result;
+        if (pending.generation != m_previewGeneration) {
+            beatbench::audio::decoded_sample_release(r.sample);
+            continue;
+        }
+        m_previewDecoding = false;
+        if (!r.ok) {
+            beatbench::audio::decoded_sample_release(r.sample);
+            m_busy = false;
+            m_statusText = QStringLiteral("解码失败：%1").arg(QString::fromStdString(r.message));
+        } else {
+            // Transfer the returned cache reference, including on queue failure.
+            m_busy = m_player.playPreview(r.sample, 1.0f);
+            m_statusText = m_busy ? QStringLiteral("试听中…") : QStringLiteral("试听队列已满");
+        }
+        emit statusTextChanged();
+        emit busyChanged();
+    }
+}
+
+void AudioEngine::stopPreview() {
+    ++m_previewGeneration;
+    m_previewPool.clear();  // Discard jobs not yet started; running decodes publish stale results.
+    m_previewDecoding = false;
+    m_player.stopPreview();
+    m_busy = false;
+    emit busyChanged();
+}
+
 void AudioEngine::stopAll() {
+    stopPreview();
     m_player.stopAll();
     // M6.1 参考音频同步状态（内核 voice 已停；状态机复位为停止）
     if (m_refPlayback.playing()) {
@@ -220,9 +256,11 @@ void AudioEngine::stopAll() {
 }
 
 void AudioEngine::playTestTone() {
+    stopPreview();
     if (!m_initialized) { return; }
     // 合成 440Hz（计数 1；playPreview 转移）
-    m_player.playPreview(makeTestToneSample(), 1.0f);
+    m_busy = m_player.playPreview(makeTestToneSample(), 1.0f);
+    emit busyChanged();
     m_statusText = QStringLiteral("测试音 440Hz");
     emit statusTextChanged();
 }
@@ -266,6 +304,7 @@ void AudioEngine::resolveSavedDevice() {
 }
 
 void AudioEngine::pauseForStreamChange() {
+    stopPreview();
     // Freeze both positions using the OLD rate before resetting the stream's clock scale.
     m_playback.pause();
     m_refPlayback.pause();
@@ -504,11 +543,13 @@ bool AudioEngine::reopenStream() {
 }
 
 void AudioEngine::setSourceDir(const QString& dir) {
+    if (m_sourceDir != dir) stopPreview();
     m_sourceDir = dir;
 }
 
 /// 设置谱面路径（AudioEngine 内部解析目录；QML 传 r.result.path）。
 void AudioEngine::setChartPath(const QString& path) {
+    stopPreview();
     if (path.isEmpty()) {
         m_sourceDir.clear();
         return;
@@ -521,6 +562,7 @@ void AudioEngine::setChartPath(const QString& path) {
 /// 装载渲染 PCM（ChartSession 渲染完成时调用；session 为 PCM 来源）。
 void AudioEngine::setChartSession(QObject* session) {
     if (m_chartSession == qobject_cast<ChartSession*>(session)) return;
+    stopPreview();
     // 当前文档别名改变时，不能让上一实例的 PCM/等待播放状态泄漏给下一谱。
     m_playback.stop();
     m_playback.load(nullptr, 0.0);

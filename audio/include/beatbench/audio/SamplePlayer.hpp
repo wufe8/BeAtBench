@@ -56,6 +56,12 @@ public:
             m_tail.store(t + 1, std::memory_order_release);
             return true;
         }
+        // Producer-side capacity check (consumer may only increase available space).
+        std::size_t availableCapacity() const {
+            const auto h = m_head.load(std::memory_order_relaxed);
+            const auto t = m_tail.load(std::memory_order_acquire);
+            return N - (h - t);
+        }
         bool empty() const {
             return m_head.load(std::memory_order_acquire) ==
                    m_tail.load(std::memory_order_acquire);
@@ -90,6 +96,10 @@ public:
     /// 试听专用：停掉试听槽现有 voice 再启动（同采样连点 = 重播）。
     /// 所有权转移同上；volume = 1.0（设定页音量后置）。
     bool playPreview(DecodedSample* sample, float volume = 1.0f);
+
+    /// Cancel only audition, including queued starts. Always succeeds even with a full ring.
+    /// Takes effect by the next callback; no locks or allocation on the callback.
+    bool stopPreview();
 
     /// 停掉全部 voice（换谱面/关文档时调用）。
     bool stopAll();
@@ -144,11 +154,13 @@ private:
         double startSec = 0.0;
         int slot = -1;                    ///< 目标槽位（-1 = 任意空闲；kPreviewVoice=试听槽）
         double sampleRate = 0.0;          ///< StartSharedPcm：共享 PCM 采样率
+        std::uint32_t previewGeneration = 0;
     };
     enum class EventType : std::uint8_t { Started, Ended };
     struct Event {
         EventType type = EventType::Ended;
         int slot = 0;
+        std::uint32_t previewGeneration = 0;
     };
 
     struct Voice {
@@ -161,6 +173,7 @@ private:
         float volume = 1.0f;
         float env = 0.0f;                ///< 0..1 包络（起止防爆音）
         bool active = false;
+        std::uint32_t previewGeneration = 0;
     };
 
     // 回调线程私有：voice 快照（命令处理 + 混音都在回调线程，UI 线程不触碰）
@@ -169,7 +182,9 @@ private:
 
     SpscRing<Command, 256> m_cmdRing;               ///< UI → 回调
     SpscRing<Event, 64> m_eventRing;                ///< 回调 → UI
-    SpscRing<DecodedSample*, 128> m_reclaimRing;    ///< 回调 → UI（归还；UI 线程 delete）
+    std::atomic<std::uint32_t> m_previewGeneration{0};
+    // Enough for a full command batch plus all active voices awaiting GUI reclamation.
+    SpscRing<DecodedSample*, 1024> m_reclaimRing;    ///< 回调 → UI（归还；UI 线程 delete）
     std::atomic<int> m_activeCount{0};
     std::atomic<float> m_masterVolume{1.0f};        ///< 主音量（UI 写/回调读）
     /// M5 时钟：回调整体输出帧数（所有 render 调用累计）。

@@ -74,18 +74,30 @@ bool SamplePlayer::playSharedPcm(std::shared_ptr<const std::vector<float>> pcm,
 }
 
 bool SamplePlayer::playPreview(DecodedSample* sample, float volume) {
-    // 先停再启（试听槽独占）；停/启动命令在 ring 内保持顺序（SPSC FIFO）。
-    Command stop;
-    stop.type = CmdType::Stop;
-    stop.slot = kPreviewVoice;
-    if (!m_cmdRing.push(stop)) {
-        if (sample) decoded_sample_release(sample);  // 停失败：归还调用方
+    stopPreview();
+    if (!sample) return false;
+    Command cmd;
+    cmd.type = CmdType::Start;
+    cmd.slot = kPreviewVoice;
+    cmd.sample = sample;
+    cmd.volume = std::clamp(volume, 0.0f, 1.0f);
+    cmd.previewGeneration = m_previewGeneration.load(std::memory_order_acquire);
+    if (!m_cmdRing.push(cmd)) {
+        decoded_sample_release(sample);
         return false;
     }
-    return play(sample, volume, 0.0);
+    return true;
+}
+
+bool SamplePlayer::stopPreview() {
+    // Out-of-band cancellation cannot be lost to queue saturation. Starts carry
+    // their generation, so an already queued audition cannot resurrect later.
+    m_previewGeneration.fetch_add(1, std::memory_order_acq_rel);
+    return true;
 }
 
 bool SamplePlayer::stopAll() {
+    stopPreview();
     Command cmd;
     cmd.type = CmdType::StopAll;
     cmd.slot = -1;
@@ -105,6 +117,8 @@ void SamplePlayer::shutdown() {
         m_voices[i].active = false;
         m_activeCount.fetch_sub(1, std::memory_order_relaxed);
     }
+    // GUI thread owns the stopped player: make room for every queued command.
+    drainReclaimed();
     // 清掉残留命令（不再有回调消费）
     Command cmd;
     while (m_cmdRing.pop(cmd)) {
@@ -120,9 +134,25 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
     if (frames <= 0) return;
     if (deviceRate > 0) m_deviceRate = deviceRate;
 
-    // 1) 处理命令（回调线程；仅本线程消费，无竞争）
+    const auto cancelStalePreview = [this] {
+        auto& v = m_voices[kPreviewVoice];
+        if (!v.active || v.previewGeneration ==
+                m_previewGeneration.load(std::memory_order_acquire)) return;
+        if (v.sample && v.sample->unref()) m_reclaimRing.push(v.sample);
+        v.sample = nullptr;
+        v.active = false;
+        m_activeCount.fetch_sub(1, std::memory_order_relaxed);
+        Event ev; ev.type = EventType::Ended; ev.slot = kPreviewVoice;
+        ev.previewGeneration = v.previewGeneration;
+        m_eventRing.push(ev);
+    };
+    cancelStalePreview();
+
+    // Keep capacity reserved for ALL active voices finishing/canceling. If the
+    // GUI has not drained reclamation, defer commands rather than leak a ref or
+    // delete on the callback. Preview cancellation above remains unconditional.
     Command cmd;
-    while (m_cmdRing.pop(cmd)) {
+    while (m_reclaimRing.availableCapacity() > kMaxVoices && m_cmdRing.pop(cmd)) {
         if (cmd.type == CmdType::StopAll) {
             for (int i = 0; i < kMaxVoices; ++i) {
                 if (!m_voices[i].active) continue;
@@ -147,6 +177,7 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
                 v.active = false;
                 m_activeCount.fetch_sub(1, std::memory_order_relaxed);
                 Event ev; ev.type = EventType::Ended; ev.slot = cmd.slot;
+                ev.previewGeneration = v.previewGeneration;
                 m_eventRing.push(ev);
                 // M5 时钟：停掉 PCM 槽 → 基线复位
                 if (cmd.slot == kPcmSlot) {
@@ -154,14 +185,20 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
                 }
             }
         } else if (cmd.type == CmdType::Start || cmd.type == CmdType::StartSharedPcm) {
+            cancelStalePreview();
+            if (cmd.slot == kPreviewVoice && cmd.previewGeneration !=
+                    m_previewGeneration.load(std::memory_order_acquire)) {
+                if (cmd.sample && cmd.sample->unref()) m_reclaimRing.push(cmd.sample);
+                continue;
+            }
             int slot = -1;
-            if (cmd.slot >= 0 && cmd.slot < kMaxVoices && !m_voices[cmd.slot].active)
-                slot = cmd.slot;
-            else {
+            if (cmd.slot >= 0 && cmd.slot < kMaxVoices) {
+                if (!m_voices[cmd.slot].active) slot = cmd.slot;
+            } else {
                 for (int i = 0; i < kMaxVoices; ++i)
                     // ⚠️ 普通 play（slot=-1）跳过 PCM 播放专用槽（6 = 谱面、5 = 参考音轨；
                     // 避免被 keysound/试听抢占——否则 playSharedPcm 的「停旧启新」会误杀）
-                    if (i != kPcmSlot && i != kRefPcmSlot && !m_voices[i].active) {
+                    if (i != kPcmSlot && i != kRefPcmSlot && i != kPreviewVoice && !m_voices[i].active) {
                         slot = i;
                         break;
                     }
@@ -188,6 +225,7 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             v.volume = cmd.volume;
             v.env = 0.0f;
             v.active = true;
+            v.previewGeneration = cmd.previewGeneration;
             m_activeCount.fetch_add(1, std::memory_order_relaxed);
             Event ev; ev.type = EventType::Started; ev.slot = slot;
             m_eventRing.push(ev);
@@ -201,6 +239,8 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             }
         }
     }
+
+    cancelStalePreview();
 
     // 2) 混音（零分配；线性插值重采样 + 5ms 包络）
     std::memset(out, 0, static_cast<std::size_t>(frames) * 2 * sizeof(float));
@@ -253,6 +293,7 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             v.active = false;
             m_activeCount.fetch_sub(1, std::memory_order_relaxed);
             Event ev; ev.type = EventType::Ended; ev.slot = s;
+            ev.previewGeneration = v.previewGeneration;
             m_eventRing.push(ev);
             // M5 时钟：PCM 播完 → 基线复位
             if (s == kPcmSlot) {
@@ -267,8 +308,13 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
 
 int SamplePlayer::drainEndedEvents() {
     Event ev;
-    if (!m_eventRing.pop(ev)) return -1;
-    return ev.slot;
+    while (m_eventRing.pop(ev)) {
+        if (ev.type != EventType::Ended) continue;
+        if (ev.slot == kPreviewVoice && ev.previewGeneration !=
+                m_previewGeneration.load(std::memory_order_acquire)) continue;
+        return ev.slot;
+    }
+    return -1;
 }
 
 void SamplePlayer::drainReclaimed() {

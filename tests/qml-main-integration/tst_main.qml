@@ -14,6 +14,9 @@ TestCase {
     readonly property string b: "main-integration-b"
     Component { id: mainComponent; Production.Main {} }
     function start(named, modeFields) {
+        audioEngine.allowPreview = false
+        audioEngine.previewFiles = []
+        audioEngine.previewStops = 0
         audioEngine.playing = false
         audioEngine.hasPcm = false
         audioEngine.positionSec = 0
@@ -1401,6 +1404,69 @@ TestCase {
         assertDialogContentBounds(dialog)
         keyClick(Qt.Key_Escape)
         tryCompare(dialog, "visible", false)
+        unchanged(sa, sb)
+    }
+    function auditionPoint(view, wantNote) {
+        const columns = view.probe(0, 40).columns
+        for (let c = 0; c < columns.length; ++c) {
+            const x = columns[c].x + columns[c].w / 2
+            if (x <= view.viewportItem.rulerWidth || x >= view.width - 10) continue
+            for (let y = 30; y < view.height - 25; y += 2) {
+                const hit = view.viewportItem.hitTest(x, y)
+                if (!hit.valid || hit.laneKind !== "key") continue
+                const object = view.viewportItem.objectAt(x, y)
+                if (wantNote ? object.valid && object.sample === 1 : !object.valid)
+                    return {x: x, y: y}
+            }
+        }
+        fail("No audition fixture point: " + wantNote)
+    }
+    function test_noteAudition_deselectAndBlankStopOnlyPreview_data() {
+        return [{tag: "default-pan", tool: "pan"}, {tag: "select", tool: "select"}]
+    }
+    function test_noteAudition_deselectAndBlankStopOnlyPreview(data) {
+        start(false)
+        const bound = JSON.parse(beatbench.dispatch(JSON.stringify({command: "sample.setFile", args: {
+            session_id: a, id: "01", file: "preview-test.wav", kind: "wav"
+        }})))
+        verify(bound.ok)
+        documents.refresh()
+        audioEngine.allowPreview = true
+        audioEngine.playing = true
+        audioEngine.hasPcm = true
+        main.editorTool = data.tool
+        const primary = mainFixture.primaryView(main)
+        primary.viewportItem.scrollToStart()
+        wait(0)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const note = auditionPoint(primary, true), blank = auditionPoint(primary, false)
+        mouseClick(primary, note.x, note.y)
+        compare(audioEngine.previewFiles.length, 1)
+        compare(main.selectionRefs.length, 1)
+        wait(Qt.styleHints.mouseDoubleClickInterval + 20)
+        const beforeCtrl = audioEngine.previewStops
+        mouseClick(primary, note.x, note.y, Qt.LeftButton, Qt.ControlModifier)
+        compare(main.selectionRefs.length, 0)
+        verify(audioEngine.previewStops > beforeCtrl)
+        compare(audioEngine.previewFiles.length, 1) // Deselection must not re-audition.
+        wait(Qt.styleHints.mouseDoubleClickInterval + 20)
+        mouseClick(primary, note.x, note.y)
+        compare(audioEngine.previewFiles.length, 2)
+        const beforeBlank = audioEngine.previewStops
+        mousePress(primary, blank.x, blank.y)
+        verify(audioEngine.previewStops > beforeBlank) // Stop on press, not delayed to release.
+        mouseRelease(primary, blank.x, blank.y)
+        compare(main.selectionRefs.length, 0)
+        // Also cancel when selection was already empty (e.g. sample-panel audition).
+        const beforeEmpty = audioEngine.previewStops
+        mouseClick(primary, blank.x, blank.y)
+        verify(audioEngine.previewStops > beforeEmpty)
+        const beforeB = audioEngine.previewStops
+        const refBlank = auditionPoint(split.referenceView, false)
+        mouseClick(split.referenceView, refBlank.x, refBlank.y)
+        compare(audioEngine.previewStops, beforeB) // B cannot silence A audio.
+        compare(audioEngine.playing, true)
+        compare(audioEngine.playbackCalls, 0)
         unchanged(sa, sb)
     }
     function test_about_genericContentBounds() {
