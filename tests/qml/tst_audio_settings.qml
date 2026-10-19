@@ -7,7 +7,7 @@ import "../../app/qml/components" as Components
 Item {
     id: window
     width: 1000
-    height: 1100
+    height: 760
     // Creation-context mock shadows the shared context engine, never opens OS audio.
     QtObject {
         id: audioEngine
@@ -28,6 +28,9 @@ Item {
         property bool rejectSettings: false
         property var lastApply: []
         property int panelCalls: 0
+        property int toneCalls: 0
+        function playTestTone() { toneCalls++ }
+        function setWaitRenderSetting(value) { waitRenderSetting = value }
         function deviceCapabilities(index) {
             return { asio: index === 7 || (index === -1 && defaultAsio),
                      bufferMin: 96, bufferMax: 288, bufferPreferred: 192,
@@ -60,7 +63,7 @@ Item {
             return false
         }
     }
-    Component { id: dialogComponent; Components.SettingsDialog { height: 1000 } }
+    Component { id: dialogComponent; Components.SettingsDialog {} }
     TestCase {
         name: "AudioSettingsUI"
         when: windowShown
@@ -70,7 +73,16 @@ Item {
             verify(result !== null, name)
             return result
         }
+        function reveal(item) {
+            const scroll = control("audioScrollView")
+            const view = scroll.contentItem
+            const y = item.mapToItem(control("audioSettingsColumn"), 0, 0).y
+            view.contentY = Math.max(0, Math.min(view.contentHeight - view.height,
+                                                y - (view.height - item.height) / 2))
+            waitForRendering(scroll)
+        }
         function selectRow(combo, row) {
+            reveal(combo)
             mouseClick(combo)
             tryCompare(combo.popup, "opened", true)
             const list = combo.popup.contentItem
@@ -96,6 +108,8 @@ Item {
             audioEngine.rejectSettings = false
             audioEngine.lastApply = []
             audioEngine.panelCalls = 0
+            audioEngine.toneCalls = 0
+            audioEngine.activeDeviceText = "Accepted device"
             dialog = createTemporaryObject(dialogComponent, window)
             verify(dialog !== null)
             dialog.open()
@@ -172,6 +186,7 @@ Item {
         }
         function test_volume_rollback_restores_accepted_value() {
             const volume = control("audioVolumeSlider")
+            reveal(volume)
             volume.forceActiveFocus()
             keyClick(Qt.Key_Right)
             compare(audioEngine.masterVolume, 74)
@@ -195,6 +210,7 @@ Item {
             tryCompare(dialog, "opened", true)
             const panel = control("asioControlPanelButton")
             compare(panel.enabled, true)
+            reveal(panel)
             mouseClick(panel)
             compare(audioEngine.panelCalls, 1)
             compare(panel.enabled, true)
@@ -221,16 +237,154 @@ Item {
             audioEngine.asioCompiled = true
             compare(control("asioAvailabilityText").text, "已编译 ASIO 支持，但未发现兼容的 ASIO 输出设备。")
         }
+        function assertHorizontallyContained(item) {
+            const scroll = control("audioScrollView")
+            const point = item.mapToItem(scroll, 0, 0)
+            verify(point.x >= -1, item.objectName + " starts outside viewport")
+            verify(point.x + item.width <= scroll.availableWidth + 1,
+                   item.objectName + " ends outside viewport")
+            verify(item.width > 0, item.objectName + " has usable width")
+        }
+        function assertBottomVisible() {
+            const scroll = control("audioScrollView")
+            const footer = control("settingsFooter")
+            for (const name of ["audioTestToneButton", "audioActualStatus"]) {
+                const item = control(name)
+                const point = item.mapToItem(scroll, 0, 0)
+                verify(point.y >= -1, name + " above viewport")
+                verify(point.y + item.height <= scroll.availableHeight + 1, name + " below viewport")
+                const bottom = item.mapToItem(footer, 0, item.height)
+                verify(bottom.y <= 0, name + " overlaps footer")
+                assertHorizontallyContained(item)
+            }
+            verify(control("audioActualStatusText").text.indexOf("48000 Hz") !== -1)
+            verify(control("audioActualStatusText").text.indexOf("4.5 ms") !== -1)
+        }
+        function wheelToBottom() {
+            const scroll = control("audioScrollView")
+            const view = scroll.contentItem
+            // Send real wheel events over blank space, not a Slider/ComboBox that consumes them.
+            // Ten-notch bursts keep travel bounded even with small platform wheel steps.
+            const initialY = view.contentY
+            for (let i = 0; i < 40 && view.contentY < view.contentHeight - view.height - 1; ++i) {
+                mouseWheel(scroll, scroll.availableWidth - 2, scroll.height / 2, 0, -1200)
+                wait(40)
+            }
+            tryVerify(function() { return view.contentY >= view.contentHeight - view.height - 1 })
+            verify(view.contentY > initialY || initialY >= view.contentHeight - view.height - 1,
+                   "Actual wheel input must move overflowing content")
+            tryCompare(view, "moving", false)
+            waitForRendering(scroll)
+        }
+        function test_default_and_narrow_layout_data() {
+            return [{ tag: "default", width: 680 }, { tag: "narrow", width: 520 }]
+        }
+        function test_default_and_narrow_layout(data) {
+            compare(dialog.width, 680)
+            compare(dialog.height, 520)
+            dialog.width = data.width
+            const longName = "Long manufacturer output device / ".repeat(5)
+            audioEngine.devices = [{ index: 3, name: longName, api: "WASAPI", apiType: 13,
+                                     isAsio: false, sampleRate: 48000 }]
+            audioEngine.deviceIndex = 3
+            audioEngine.activeDeviceText = longName
+            const scroll = control("audioScrollView")
+            const column = control("audioSettingsColumn")
+            tryCompare(column, "width", scroll.availableWidth)
+            compare(scroll.contentWidth, scroll.availableWidth)
+            tryVerify(function() { return scroll.contentHeight > scroll.availableHeight })
+            compare(scroll.contentHeight, column.implicitHeight)
+            const bar = control("audioVerticalScrollBar")
+            compare(bar.policy, ScrollBar.AlwaysOn)
+            tryVerify(function() { return bar.visible && bar.opacity > 0 })
+            for (const name of ["audioApiFilter", "audioDeviceCombo", "audioRateCombo",
+                                "audioBufferCombo", "audioVolumeSlider", "audioVolumePercent",
+                                "asioAvailabilityText", "asioControlPanelWarning", "audioBufferExplanation"])
+                assertHorizontallyContained(control(name))
+            const percent = control("audioVolumePercent")
+            compare(percent.text, "73%")
+            verify(percent.width >= percent.implicitWidth)
+            reveal(percent)
+            const point = percent.mapToItem(scroll, 0, 0)
+            verify(point.y >= 0 && point.y + percent.height <= scroll.availableHeight)
+            scroll.forceActiveFocus()
+            keyClick(Qt.Key_Home)
+            tryCompare(scroll.contentItem, "contentY", 0)
+            // Real wheel input must reach the actual status and clickable test tone.
+            wheelToBottom()
+            assertBottomVisible()
+            mouseClick(control("audioTestToneButton"))
+            compare(audioEngine.toneCalls, 1, "tone enabled=" + control("audioTestToneButton").enabled
+                    + " geometry=" + control("audioTestToneButton").width + "x" + control("audioTestToneButton").height
+                    + " moving=" + control("audioScrollView").contentItem.moving)
+        }
+        function test_scrollbar_and_keyboard_reach_bottom() {
+            const scroll = control("audioScrollView")
+            const bar = control("audioVerticalScrollBar")
+            const view = scroll.contentItem
+            waitForRendering(scroll)
+            tryVerify(function() { return bar.size > 0 && bar.size < 1 })
+            tryVerify(function() { return Math.abs(bar.height - scroll.availableHeight) <= 1 },
+                      5000, "Scrollbar track must span the viewport, not remain thumb-sized")
+            // Drag the actual thumb, rather than assigning position/contentY.
+            const thumbY = bar.topPadding + (bar.visualPosition + bar.visualSize / 2) * bar.availableHeight
+            mouseDrag(bar, bar.width / 2, thumbY, 0, bar.availableHeight - thumbY - 1, Qt.LeftButton)
+            tryVerify(function() { return view.contentY >= view.contentHeight - view.height - 1 })
+            assertBottomVisible()
+            scroll.forceActiveFocus()
+            keyClick(Qt.Key_Home)
+            tryCompare(view, "contentY", 0)
+            keyClick(Qt.Key_Down)
+            tryVerify(function() { return view.contentY > 0 })
+            keyClick(Qt.Key_Home)
+            tryCompare(view, "contentY", 0)
+            keyClick(Qt.Key_PageDown)
+            tryVerify(function() { return view.contentY > 0 })
+            keyClick(Qt.Key_End)
+            tryVerify(function() { return view.contentY >= view.contentHeight - view.height - 1 })
+            assertBottomVisible()
+        }
         function test_long_rollback_error_wraps_without_fixed_height() {
-            audioEngine.errorText = ("Audio stream reopen failed; rollback also failed. ").repeat(12)
+            // Multiline records guarantee overflow even with the smallest skin font;
+            // each record is also long enough to exercise width-dependent wrapping.
+            audioEngine.errorText = (("Audio stream reopen failed; rollback also failed. ").repeat(4) + "\n").repeat(16)
             const bar = control("audioErrorBar")
             const label = control("audioErrorText")
-            tryVerify(function() { return label.implicitHeight > 36 })
-            verify(bar.height >= label.implicitHeight + 16)
+            const scroll = control("audioScrollView")
+            waitForRendering(scroll)
+            tryVerify(function() { return label.implicitHeight > scroll.availableHeight })
+            tryVerify(function() { return bar.height >= label.implicitHeight + 16 })
+            verify(scroll.availableHeight > 200, "Error must scroll, not consume the viewport")
             compare(bar.opacity, 1)
             compare(label.opacity, 1)
             verify(Math.abs(bar.color.a - 0.15) < 0.01)
             verify(label.color.a > 0.99)
+            assertHorizontallyContained(bar)
+            wheelToBottom()
+            assertBottomVisible()
+            mouseClick(control("audioTestToneButton"))
+            compare(audioEngine.toneCalls, 1)
+        }
+        function test_capture_default_settings() {
+            // Opt in by selecting this exact QuickTest function on the command line.
+            // No production screenshot hook or environment dependency is needed.
+            if (Qt.application.arguments.indexOf("AudioSettingsUI::test_capture_default_settings") < 0)
+                skip("Select AudioSettingsUI::test_capture_default_settings to save acceptance images")
+            compare(dialog.width, 680)
+            compare(dialog.height, 520)
+            let path = decodeURIComponent(Qt.resolvedUrl("../../local/screenshot/").toString().replace(/^file:\/\//, ""))
+            if (/^\/[A-Za-z]:/.test(path)) path = path.substring(1)
+            waitForRendering(dialog.contentItem)
+            const topImage = grabImage(dialog.contentItem.parent)
+            compare(topImage.width, 680)
+            compare(topImage.height, 520)
+            topImage.save(path + "audio-settings-default.png")
+            wheelToBottom()
+            assertBottomVisible()
+            const bottomImage = grabImage(dialog.contentItem.parent)
+            compare(bottomImage.width, 680)
+            compare(bottomImage.height, 520)
+            bottomImage.save(path + "audio-settings-default-bottom.png")
         }
     }
 }

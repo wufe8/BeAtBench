@@ -29,6 +29,7 @@ Dialog {
     // Dialog 未定制 header/footer → 用系统默认浅色样式，与暗色内容区割裂）。
     header: BbDialogHeader { dialog: root; positioner: dialogPositioner }
     footer: Rectangle {
+        objectName: "settingsFooter"
         width: root.width
         height: 44
         color: Theme.surface2
@@ -164,6 +165,7 @@ Dialog {
         // —— 右侧内容 ——
         Rectangle {
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
             Layout.fillHeight: true
             color: Theme.surface2
             border.color: Theme.border
@@ -189,6 +191,8 @@ Dialog {
                         BbComboBox {
                             id: skinCombo
                             Layout.preferredWidth: 220
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             model: {
                                 // 默认 + 内置皮肤（Theme.skinNames）
                                 var arr = [qsTr("默认")]
@@ -214,262 +218,343 @@ Dialog {
                         }
                     }
                     Label { text: qsTr("皮肤 = 颜色/字号/字体/圆角/note 造型（L1）；布局结构 L2 后置。")
-                            color: Theme.textFaint; font.pixelSize: Theme.fsTiny; wrapMode: Text.Wrap }
+                            color: Theme.textFaint; font.pixelSize: Theme.fsTiny; wrapMode: Text.Wrap
+                            Layout.fillWidth: true; Layout.minimumWidth: 0 }
                 }
 
                 // ---- 音频页（beatoraja + Ableton 融合设计） ----
-                ColumnLayout {
-                    spacing: 10
-                    // ⚠️ 错误提示条（M4.2 用户问询：错误在哪提醒——不只状态栏！
-                    // 设置页顶部就地显示，避免状态栏被 hover 信息覆盖）。
-                    // 来源：audioEngine.errorText（applySettings 失败回退）+ 后端不可用。
-                    Rectangle {
-                        Layout.fillWidth: true
-                        visible: audioEngine.errorText !== "" || !audioEngine.available
-                        objectName: "audioErrorBar"
-                        implicitHeight: visible ? audioErrorLabel.implicitHeight + 16 : 0
-                        Layout.preferredHeight: implicitHeight
-                        radius: Theme.radiusSm
-                        // Tint only the background; keep the wrapped error text fully opaque.
-                        color: Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.15)
-                        Label {
-                            id: audioErrorLabel
-                            objectName: "audioErrorText"
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            text: audioEngine.errorText !== ""
-                                  ? audioEngine.errorText
-                                  : qsTr("音频不可用（后端初始化失败）——试听/测试音无效")
-                            color: Theme.danger
-                            font.pixelSize: Theme.fsSmall
-                            wrapMode: Text.Wrap
-                        }
+                ScrollView {
+                    id: audioScroll
+                    objectName: "audioScrollView"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: 0
+                    Layout.minimumHeight: 0
+                    clip: true
+                    // A ScrollView reparents its child to a Flickable content item, whose
+                    // width is NOT the viewport. Never size this column from parent.width.
+                    rightPadding: audioScrollBar.width + 4
+                    contentWidth: availableWidth
+                    contentHeight: audioColumn.implicitHeight
+                    Component.onCompleted: {
+                        contentItem.boundsBehavior = Flickable.StopAtBounds
+                        contentItem.flickableDirection = Flickable.VerticalFlick
                     }
-                    // 滚动容器（对话框固定高度，内容可能超）
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ColumnLayout {
-                            width: parent.width - 8
-                            spacing: 8
-
-                            // 输出设备（API 筛选：同一声卡多个 API 混列不便查找（M4.2 用户反馈））
-                            Label { text: qsTr("输出设备"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
-                            RowLayout {
-                                spacing: 8
-                                // API 筛选（全部 / WASAPI / DirectSound / ASIO / MME / … 从设备列表去重）
-                                BbComboBox {
-                                    id: apiFilterCombo
-                                    objectName: "audioApiFilter"
-                                    Layout.preferredWidth: 130
-                                    model: {
-                                        var arr = [qsTr("全部")]
-                                        var seen = {}
-                                        for (var i = 0; i < audioEngine.devices.length; ++i) {
-                                            var api = audioEngine.devices[i].api
-                                            if (!seen[api]) { seen[api] = true; arr.push(api) }
-                                        }
-                                        return arr
-                                    }
-                                    currentIndex: root.apiFilterIndex
-                                    onActivated: (index) => root.apiFilterIndex = index
-                                }
-                                // 设备下拉（按 API 筛选后；文本 elide 显示完整开头）
-                                BbComboBox {
-                                    id: deviceCombo
-                                    objectName: "audioDeviceCombo"
-                                    Layout.fillWidth: true
-                                    model: {
-                                        // 按 apiFilterIndex 过滤（0 = 全部）
-                                        var arr = apiFilterCombo.currentIndex === 0
-                                                ? [{ index: -1, name: qsTr("系统默认输出设备") }] : []
-                                        var api = apiFilterCombo.model[apiFilterCombo.currentIndex]
-                                        for (var i = 0; i < audioEngine.devices.length; ++i) {
-                                            if (apiFilterCombo.currentIndex === 0 ||
-                                                    audioEngine.devices[i].api === api)
-                                                arr.push(audioEngine.devices[i])
-                                        }
-                                        return arr
-                                    }
-                                    textRole: "name"
-                                    currentIndex: root.deviceSelectionIndex()
-                                    onActivated: (index) => {
-                                        var d = deviceCombo.model[index]
-                                        if (d) audioEngine.applySettings(d.index, audioEngine.sampleRate,
-                                                                         0,
-                                                                         audioEngine.masterVolume)
-                                        deviceCombo.currentIndex = Qt.binding(function() { return root.deviceSelectionIndex() })
-                                    }
-                                }
-                            }
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical: ScrollBar {
+                        id: audioScrollBar
+                        objectName: "audioVerticalScrollBar"
+                        // Explicit track geometry also works with styles that leave a
+                        // custom attached scrollbar at its implicit (thumb-sized) height.
+                        parent: audioScroll
+                        x: audioScroll.width - width
+                        y: audioScroll.topPadding
+                        height: audioScroll.availableHeight
+                        interactive: true
+                        policy: audioScroll.contentHeight > audioScroll.availableHeight
+                                ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                    }
+                    Keys.onPressed: (event) => {
+                        const view = audioScroll.contentItem
+                        const maxY = Math.max(0, view.contentHeight - view.height)
+                        if (event.key === Qt.Key_Home) view.contentY = 0
+                        else if (event.key === Qt.Key_End) view.contentY = maxY
+                        else if (event.key === Qt.Key_PageDown) view.contentY = Math.min(maxY, view.contentY + view.height)
+                        else if (event.key === Qt.Key_PageUp) view.contentY = Math.max(0, view.contentY - view.height)
+                        else return
+                        event.accepted = true
+                    }
+                    ColumnLayout {
+                        id: audioColumn
+                        objectName: "audioSettingsColumn"
+                        width: audioScroll.availableWidth
+                        height: implicitHeight
+                        spacing: 8
+                        // ⚠️ 错误提示条（M4.2 用户问询：错误在哪提醒——不只状态栏！
+                        // 设置页顶部就地显示，避免状态栏被 hover 信息覆盖）。
+                        // 来源：audioEngine.errorText（applySettings 失败回退）+ 后端不可用。
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            visible: audioEngine.errorText !== "" || !audioEngine.available
+                            objectName: "audioErrorBar"
+                            implicitHeight: visible ? audioErrorLabel.implicitHeight + 16 : 0
+                            Layout.preferredHeight: implicitHeight
+                            radius: Theme.radiusSm
+                            // Tint only the background; keep the wrapped error text fully opaque.
+                            color: Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.15)
                             Label {
-                                text: audioEngine.activeDeviceText
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.fsTiny
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-
-                            Label {
-                                objectName: "asioAvailabilityText"
-                                text: !audioEngine.asioCompiled
-                                      ? qsTr("此版本未编译 ASIO 支持。")
-                                      : (!root.hasAsioDevices
-                                         ? qsTr("已编译 ASIO 支持，但未发现兼容的 ASIO 输出设备。")
-                                         : qsTr("ASIO 输出仅使用驱动的前 2 个通道。"))
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.fsTiny
-                                wrapMode: Text.Wrap
-                                Layout.fillWidth: true
-                            }
-                            Label {
-                                objectName: "asioCapabilitiesError"
-                                visible: !!root.currentCapabilities.error
-                                text: root.currentCapabilities.error || ""
+                                id: audioErrorLabel
+                                objectName: "audioErrorText"
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                text: audioEngine.errorText !== ""
+                                      ? audioEngine.errorText
+                                      : qsTr("音频不可用（后端初始化失败）——试听/测试音无效")
                                 color: Theme.danger
-                                font.pixelSize: Theme.fsTiny
+                                font.pixelSize: Theme.fsSmall
                                 wrapMode: Text.Wrap
-                                Layout.fillWidth: true
                             }
-                            BbToolButton {
-                                objectName: "asioControlPanelButton"
-                                text: qsTr("打开 ASIO 驱动控制面板…")
-                                // Keep the panel available to repair rejected driver/stream settings.
-                                enabled: audioEngine.asioCompiled && !!root.currentCapabilities.asio
-                                // Engine owns pause/close/panel/reopen and error reporting; no success toast.
-                                onClicked: audioEngine.showDeviceControlPanel()
-                            }
-                            Label {
-                                objectName: "asioControlPanelWarning"
-                                text: qsTr("打开控制面板将停止播放并重新打开音频流；之后需手动重新播放。PortAudio 19.7 在初始化时缓存缓冲限制，修改驱动设置后可能需要重启应用。")
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.fsTiny
-                                wrapMode: Text.Wrap
-                                Layout.fillWidth: true
-                            }
+                        }
 
-                            // 采样率
-                            Label { text: qsTr("采样率"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
+                        // 输出设备（API 筛选：同一声卡多个 API 混列不便查找（M4.2 用户反馈））
+                        Label { text: qsTr("输出设备"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted
+                                Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 8
+                            // API 筛选（全部 / WASAPI / DirectSound / ASIO / MME / … 从设备列表去重）
                             BbComboBox {
-                                id: rateCombo
-                                objectName: "audioRateCombo"
-                                Layout.fillWidth: true
-                                model: [
-                                    { text: root.defaultRateText, value: 0 },
-                                    { text: "44100 Hz", value: 44100 },
-                                    { text: "48000 Hz", value: 48000 }
-                                ]
-                                textRole: "text"
-                                currentIndex: root.rateSelectionIndex()
-                                onActivated: (index) => {
-                                    var v = rateCombo.model[index].value
-                                    audioEngine.applySettings(audioEngine.deviceIndex, v,
-                                                              audioEngine.framesPerBuffer,
-                                                              audioEngine.masterVolume)
-                                    rateCombo.currentIndex = Qt.binding(function() { return root.rateSelectionIndex() })
-                                }
-                            }
-
-                            // C++ 提供合法的回调帧数；不在 QML 推导 ASIO 驱动限制。
-                            Label { text: qsTr("回调缓冲请求（frames / 帧）"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
-                            RowLayout {
-                                spacing: 8
-                                BbComboBox {
-                                    id: bufferCombo
-                                    objectName: "audioBufferCombo"
-                                    model: root.currentBufferOptions
-                                    textRole: "text"
-                                    Layout.preferredWidth: 150
-                                    currentIndex: root.bufferSelectionIndex()
-                                    onActivated: (index) => {
-                                        var v = bufferCombo.model[index].value
-                                        audioEngine.applySettings(audioEngine.deviceIndex,
-                                                                  audioEngine.sampleRate, v,
-                                                                  audioEngine.masterVolume)
-                                        bufferCombo.currentIndex = Qt.binding(function() { return root.bufferSelectionIndex() })
+                                id: apiFilterCombo
+                                objectName: "audioApiFilter"
+                                Layout.preferredWidth: 130
+                                Layout.minimumWidth: 0
+                                model: {
+                                    var arr = [qsTr("全部")]
+                                    var seen = {}
+                                    for (var i = 0; i < audioEngine.devices.length; ++i) {
+                                        var api = audioEngine.devices[i].api
+                                        if (!seen[api]) { seen[api] = true; arr.push(api) }
                                     }
+                                    return arr
                                 }
-                                Label { text: qsTr("报告输出延迟 %1 ms").arg(audioEngine.latencyMs.toFixed(1))
-                                        color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                                currentIndex: root.apiFilterIndex
+                                onActivated: (index) => root.apiFilterIndex = index
                             }
+                            // 设备下拉（按 API 筛选后；文本 elide 显示完整开头）
+                            BbComboBox {
+                                id: deviceCombo
+                                objectName: "audioDeviceCombo"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                model: {
+                                    // 按 apiFilterIndex 过滤（0 = 全部）
+                                    var arr = apiFilterCombo.currentIndex === 0
+                                            ? [{ index: -1, name: qsTr("系统默认输出设备") }] : []
+                                    var api = apiFilterCombo.model[apiFilterCombo.currentIndex]
+                                    for (var i = 0; i < audioEngine.devices.length; ++i) {
+                                        if (apiFilterCombo.currentIndex === 0 ||
+                                                audioEngine.devices[i].api === api)
+                                            arr.push(audioEngine.devices[i])
+                                    }
+                                    return arr
+                                }
+                                textRole: "name"
+                                currentIndex: root.deviceSelectionIndex()
+                                onActivated: (index) => {
+                                    var d = deviceCombo.model[index]
+                                    if (d) audioEngine.applySettings(d.index, audioEngine.sampleRate,
+                                                                     0,
+                                                                     audioEngine.masterVolume)
+                                    deviceCombo.currentIndex = Qt.binding(function() { return root.deviceSelectionIndex() })
+                                }
+                            }
+                        }
+                        Label {
+                            text: audioEngine.activeDeviceText
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fsTiny
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
 
+                        Label {
+                            objectName: "asioAvailabilityText"
+                            text: !audioEngine.asioCompiled
+                                  ? qsTr("此版本未编译 ASIO 支持。")
+                                  : (!root.hasAsioDevices
+                                     ? qsTr("已编译 ASIO 支持，但未发现兼容的 ASIO 输出设备。")
+                                     : qsTr("ASIO 输出仅使用驱动的前 2 个通道。"))
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fsTiny
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                        Label {
+                            objectName: "asioCapabilitiesError"
+                            visible: !!root.currentCapabilities.error
+                            text: root.currentCapabilities.error || ""
+                            color: Theme.danger
+                            font.pixelSize: Theme.fsTiny
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                        BbToolButton {
+                            objectName: "asioControlPanelButton"
+                            text: qsTr("打开 ASIO 驱动控制面板…")
+                            // Keep the panel available to repair rejected driver/stream settings.
+                            enabled: audioEngine.asioCompiled && !!root.currentCapabilities.asio
+                            // Engine owns pause/close/panel/reopen and error reporting; no success toast.
+                            onClicked: audioEngine.showDeviceControlPanel()
+                        }
+                        Label {
+                            objectName: "asioControlPanelWarning"
+                            text: qsTr("打开控制面板将停止播放并重新打开音频流；之后需手动重新播放。PortAudio 19.7 在初始化时缓存缓冲限制，修改驱动设置后可能需要重启应用。")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fsTiny
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+
+                        // 采样率
+                        Label { text: qsTr("采样率"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted
+                                Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
+                        BbComboBox {
+                            id: rateCombo
+                            objectName: "audioRateCombo"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            model: [
+                                { text: root.defaultRateText, value: 0 },
+                                { text: "44100 Hz", value: 44100 },
+                                { text: "48000 Hz", value: 48000 }
+                            ]
+                            textRole: "text"
+                            currentIndex: root.rateSelectionIndex()
+                            onActivated: (index) => {
+                                var v = rateCombo.model[index].value
+                                audioEngine.applySettings(audioEngine.deviceIndex, v,
+                                                          audioEngine.framesPerBuffer,
+                                                          audioEngine.masterVolume)
+                                rateCombo.currentIndex = Qt.binding(function() { return root.rateSelectionIndex() })
+                            }
+                        }
+
+                        // C++ 提供合法的回调帧数；不在 QML 推导 ASIO 驱动限制。
+                        Label { text: qsTr("回调缓冲请求（frames / 帧）"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted
+                                Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 8
+                            BbComboBox {
+                                id: bufferCombo
+                                objectName: "audioBufferCombo"
+                                model: root.currentBufferOptions
+                                textRole: "text"
+                                Layout.preferredWidth: 150
+                                Layout.minimumWidth: 0
+                                currentIndex: root.bufferSelectionIndex()
+                                onActivated: (index) => {
+                                    var v = bufferCombo.model[index].value
+                                    audioEngine.applySettings(audioEngine.deviceIndex,
+                                                              audioEngine.sampleRate, v,
+                                                              audioEngine.masterVolume)
+                                    bufferCombo.currentIndex = Qt.binding(function() { return root.bufferSelectionIndex() })
+                                }
+                            }
+                            Label { text: qsTr("报告输出延迟 %1 ms").arg(audioEngine.latencyMs.toFixed(1))
+                                    color: Theme.textMuted; font.pixelSize: Theme.fsSmall
+                                    Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
+                        }
+
+                        Label {
+                            objectName: "audioBufferExplanation"
+                            text: qsTr("帧数是音频回调的请求大小，并非已知的硬件缓冲大小。输出延迟由驱动报告，不是实测往返延迟。")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fsTiny
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+
+                        // 主音量
+                        Label { text: qsTr("主音量"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted
+                                Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 8
+                            Slider {
+                                id: volSlider
+                                objectName: "audioVolumeSlider"
+                                HoverHandler { cursorShape: parent.enabled ? Qt.SizeHorCursor : Qt.ArrowCursor }
+                                from: 0; to: 100; stepSize: 1
+                                value: audioEngine.masterVolume
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                onMoved: {
+                                    audioEngine.applySettings(audioEngine.deviceIndex,
+                                                              audioEngine.sampleRate,
+                                                              audioEngine.framesPerBuffer, value)
+                                    volSlider.value = Qt.binding(function() { return audioEngine.masterVolume })
+                                }
+                            }
+                            Label { objectName: "audioVolumePercent"
+                                    text: Math.round(audioEngine.masterVolume) + "%"
+                                    color: Theme.text; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 40 }
+                        }
+
+                        // M5 播放策略：Space 等待渲染完成后播放（默认关 = 播放优先）
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 8
+                            BbCheckBox {
+                                id: waitRenderCheck
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                contentItem: Label {
+                                    text: waitRenderCheck.text
+                                    color: waitRenderCheck.textColor
+                                    font.family: Theme.fontSans
+                                    font.pixelSize: Theme.fsSmall
+                                    leftPadding: waitRenderCheck.indicator.width + waitRenderCheck.spacing
+                                    wrapMode: Text.Wrap
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                checked: audioEngine.waitRenderSetting
+                                text: qsTr("播放前等待渲染完成（默认关：Space 立即播放当前的渲染版本）")
+                                onToggled: audioEngine.setWaitRenderSetting(checked)
+                            }
+                        }
+
+                        // 测试音（Ableton 测试区）
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 8
+                            BbToolButton {
+                                objectName: "audioTestToneButton"
+                                text: qsTr("播放测试音 440Hz")
+                                onClicked: audioEngine.playTestTone()
+                            }
+                            Label { text: qsTr("验证当前设备/采样率/缓冲输出")
+                                    color: Theme.textFaint; font.pixelSize: Theme.fsTiny
+                                    Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
+                        }
+
+                        // 状态行（实况：设备/率/延迟）
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            objectName: "audioActualStatus"
+                            implicitHeight: actualStatusLabel.implicitHeight + 12
+                            radius: Theme.radiusSm
+                            color: Theme.surface
+                            border.color: Theme.border
                             Label {
-                                objectName: "audioBufferExplanation"
-                                text: qsTr("帧数是音频回调的请求大小，并非已知的硬件缓冲大小。输出延迟由驱动报告，不是实测往返延迟。")
-                                color: Theme.textFaint
+                                id: actualStatusLabel
+                                objectName: "audioActualStatusText"
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                verticalAlignment: Text.AlignVCenter
+                                text: qsTr("当前：%1 · %2 Hz · 报告输出延迟 %3 ms")
+                                      .arg(audioEngine.activeDeviceText)
+                                      .arg(audioEngine.actualRate)
+                                      .arg(audioEngine.latencyMs.toFixed(1))
+                                color: Theme.textMuted
                                 font.pixelSize: Theme.fsTiny
                                 wrapMode: Text.Wrap
-                                Layout.fillWidth: true
-                            }
-
-                            // 主音量
-                            Label { text: qsTr("主音量"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
-                            RowLayout {
-                                spacing: 8
-                                Slider {
-                                    id: volSlider
-                                    objectName: "audioVolumeSlider"
-                                    HoverHandler { cursorShape: parent.enabled ? Qt.SizeHorCursor : Qt.ArrowCursor }
-                                    from: 0; to: 100; stepSize: 1
-                                    value: audioEngine.masterVolume
-                                    Layout.fillWidth: true
-                                    onMoved: {
-                                        audioEngine.applySettings(audioEngine.deviceIndex,
-                                                                  audioEngine.sampleRate,
-                                                                  audioEngine.framesPerBuffer, value)
-                                        volSlider.value = Qt.binding(function() { return audioEngine.masterVolume })
-                                    }
-                                }
-                                Label { text: Math.round(audioEngine.masterVolume) + "%"
-                                        color: Theme.text; font.pixelSize: Theme.fsSmall; Layout.preferredWidth: 40 }
-                            }
-
-                            // M5 播放策略：Space 等待渲染完成后播放（默认关 = 播放优先）
-                            RowLayout {
-                                spacing: 8
-                                BbCheckBox {
-                                    id: waitRenderCheck
-                                    checked: audioEngine.waitRenderSetting
-                                    text: qsTr("播放前等待渲染完成（默认关：Space 立即播放当前的渲染版本）")
-                                    onToggled: audioEngine.setWaitRenderSetting(checked)
-                                }
-                            }
-
-                            // 测试音（Ableton 测试区）
-                            RowLayout {
-                                spacing: 8
-                                BbToolButton {
-                                    text: qsTr("播放测试音 440Hz")
-                                    onClicked: audioEngine.playTestTone()
-                                }
-                                Label { text: qsTr("验证当前设备/采样率/缓冲输出")
-                                        color: Theme.textFaint; font.pixelSize: Theme.fsTiny }
-                            }
-
-                            // 状态行（实况：设备/率/延迟）
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 24
-                                radius: Theme.radiusSm
-                                color: Theme.surface
-                                border.color: Theme.border
-                                Label {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 8
-                                    anchors.rightMargin: 8
-                                    verticalAlignment: Text.AlignVCenter
-                                    text: qsTr("当前：%1 · %2 Hz · 报告输出延迟 %3 ms")
-                                          .arg(audioEngine.activeDeviceText)
-                                          .arg(audioEngine.actualRate)
-                                          .arg(audioEngine.latencyMs.toFixed(1))
-                                    color: Theme.textMuted
-                                    font.pixelSize: Theme.fsTiny
-                                    elide: Text.ElideRight
-                                }
                             }
                         }
                     }
@@ -478,7 +563,8 @@ Dialog {
                 // ---- 编辑器（占位） ----
                 ColumnLayout {
                     Label { text: qsTr("编辑器设置（占位）——snap 默认、行为偏好等，后置。")
-                            color: Theme.textFaint; font.pixelSize: Theme.fsSmall }
+                            color: Theme.textFaint; font.pixelSize: Theme.fsSmall
+                            Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
                 }
 
                 // ---- 快捷键 ----
@@ -489,6 +575,7 @@ Dialog {
                         color: Theme.textMuted
                         font.pixelSize: Theme.fsSmall
                         wrapMode: Text.WordWrap
+                        Layout.minimumWidth: 0
                         Layout.fillWidth: true
                     }
                     Label {
@@ -497,6 +584,7 @@ Dialog {
                         font.pixelSize: Theme.fsTiny
                         font.family: Theme.fontMono
                         wrapMode: Text.WrapAnywhere
+                        Layout.minimumWidth: 0
                         Layout.fillWidth: true
                     }
                     Label {
@@ -505,6 +593,7 @@ Dialog {
                         color: Theme.danger
                         font.pixelSize: Theme.fsTiny
                         wrapMode: Text.WordWrap
+                        Layout.minimumWidth: 0
                         Layout.fillWidth: true
                     }
                     // 作用域说明（2026-09 快捷键收尾）：编辑页/切音页各自的空间键不冲突；
@@ -514,6 +603,7 @@ Dialog {
                         color: Theme.textFaint
                         font.pixelSize: Theme.fsTiny
                         wrapMode: Text.WordWrap
+                        Layout.minimumWidth: 0
                         Layout.fillWidth: true
                     }
                     ListView {
