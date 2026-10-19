@@ -3,6 +3,8 @@
 // 那是 codec 层按格式 × 模式索引的映射，见 core/src/codec/bms_channel_maps.cpp。
 #include "beatbench/core/ChartMode.hpp"
 
+#include <algorithm>
+
 namespace beatbench {
 namespace {
 
@@ -77,6 +79,20 @@ std::optional<ChartMode> chart_mode_by_id(std::string_view id) {
     if (id == "battle") return make_battle();
     if (id == "pms9k") return make_pms9k();
     return std::nullopt;
+}
+
+int chart_mode_key_count(std::string_view id) {
+    // 写回 profile 不是新建模式选项；BME-SP 变体沿用 PMS 的九键布局。
+    if (id == "pms9k-bmesp") id = "pms9k";
+    const auto m = chart_mode_by_id(id);
+    if (!m) return 7;  // 未知 id：sp7k 兑底
+    int max_key = 1;
+    for (const auto& l : m->lanes) {
+        if (l.player == 0 && l.kind == LaneKind::Key) {
+            max_key = std::max(max_key, static_cast<int>(l.index));
+        }
+    }
+    return max_key;
 }
 
 }  // namespace beatbench

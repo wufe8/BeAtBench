@@ -368,7 +368,9 @@ ColumnLayout {
     }
     function laneCh(ref) {
         const ch = chartSession.laneChannel(ref.lane.player, ref.lane.kind, ref.lane.index)
-        return ch !== "" ? " · ch" + ch : ""
+        // 显示的是规范化**写出通道**（保存时按当前模式约定落盘的通道号；2026-10 复核：
+        // 与列头/悬停同源，明示语义避免与源通道混淆）
+        return ch !== "" ? " · " + qsTr("写出ch") + ch : ""
     }
     function laneType(ref) {
         if (ref.lane.kind === "key") return qsTr("键音")

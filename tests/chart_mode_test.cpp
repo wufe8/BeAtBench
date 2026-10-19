@@ -84,16 +84,18 @@ TEST(BmsChannelMaps, SevenKeyMatchesDefaultTable) {
 }
 
 TEST(BmsChannelMaps, Pms9kTableNoScratchPedal) {
-    // 9key：11-19 全为键1-9（无皿/踏板）
+    // 9key 读侧统一别名表（2026-10 读写分离）：物理键固定、不依赖探测。
+    // 11-15=键1-5；16-19=键8/9/6/7（BME-SP 别名）；22-25=键6-9（标准别名）。
     EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "11")->lane, (Lane{0, LaneKind::Key, 1}));
-    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "16")->lane, (Lane{0, LaneKind::Key, 6}));
-    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "17")->lane, (Lane{0, LaneKind::Key, 7}));
-    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "19")->lane, (Lane{0, LaneKind::Key, 9}));
-    // LN / 地雷同构
-    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "56")->lane, (Lane{0, LaneKind::Key, 6}));
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "16")->lane, (Lane{0, LaneKind::Key, 8}));
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "17")->lane, (Lane{0, LaneKind::Key, 9}));
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "19")->lane, (Lane{0, LaneKind::Key, 7}));
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "24")->lane, (Lane{0, LaneKind::Key, 8}));
+    // LN / 地雷同构（标准别名 62-65/E2-E5；BME-SP 别名 56-59/D6-D9）
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "56")->lane, (Lane{0, LaneKind::Key, 8}));
     EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "56")->ln_channel, true);
     EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "D9")->note_kind, NoteKind::Landmine);
-    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "E4")->lane, (Lane{1, LaneKind::Key, 4}));
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "E4")->lane, (Lane{0, LaneKind::Key, 8}));
     // BGA/控制通道不变
     EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "04")->semantics,
               bms::ChannelSemantics::Bga);
@@ -113,13 +115,13 @@ TEST(BmsChannelMaps, ReverseByMode) {
               "22");
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 9}, false, NoteKind::Normal),
               "25");
-    // 9key 2P（BME-DP）：键6-9 → 28/29/26/27
-    EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 6}, false, NoteKind::Normal),
-              "28");
-    EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 9}, false, NoteKind::Normal),
-              "27");
+    // 单面9key不注册28/27，不能将不支持的2P普通键宣称可保真写出。
+    EXPECT_TRUE(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 6}, false,
+                                        NoteKind::Normal).empty());
+    EXPECT_TRUE(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 9}, false,
+                                        NoteKind::Normal).empty());
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 7}, true, NoteKind::Normal),
-              "57");
+              "63");
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 3}, false,
                                         NoteKind::Landmine),
               "D3");

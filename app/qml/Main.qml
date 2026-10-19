@@ -74,12 +74,15 @@ ApplicationWindow {
     property string chartEncoding: ""
     /// 游玩模式（info 的 mode；"" = 未打开/未知，显示 SP 7K 缺省）。
     property string chartMode: ""
+    readonly property bool isPmsChart: chartMode === "pms9k" || chartMode === "pms9k-bmesp"
     function modeLabel() {
         const m = window.chartMode
         if (m === "sp7k" || m === "") return "SP7K"
         if (m === "dp") return "DP7K"
         if (m === "pms") return "PMS"
         if (m === "bms14") return "BMS14"
+        // BME-SP 型变体（读侧探测产物）与 pms9k 同呈现，标签不区分
+        if (m === "pms9k-bmesp") return "PMS9K"
         return m.toUpperCase()
     }
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换经下方 Connections 同路径翻转）
@@ -383,6 +386,19 @@ ApplicationWindow {
                             visible: fileItem.isSep && !fileItem.highlighted
                             color: Theme.border
                         }
+                    }
+                }
+            }
+            // 「新建为模式」子菜单（2026-10 阶段一 issue #26）：直建指定模式（跳过对话框），
+            // 未保存确认仍走。模式列表同源 codecModes()，与新建对话框一致。
+            Menu {
+                title: qsTr("新建为模式")
+                Repeater {
+                    model: chartSession.codecModes()
+                    delegate: MenuItem {
+                        required property string modelData
+                        text: window.modeDisplayName(modelData)
+                        onTriggered: window.newChartAs(modelData)
                     }
                 }
             }
@@ -1370,9 +1386,12 @@ ApplicationWindow {
     // 另存为（文件 → 另存为… / Ctrl+Shift+S）
     FileDialog {
         id: saveAsDialog
+        objectName: "saveAsDialog"
         title: qsTr("另存为 BMS 谱面")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("BMS 谱面 (*.bms *.bml *.bme *.pms)"), qsTr("所有文件 (*)")]
+        // 所有 PMS 写出 profile 均需 .pms 后缀，重开才能自动识别 9key。
+        defaultSuffix: window.isPmsChart ? "pms" : "bms"
         onAccepted: {
             const ok = saveChartAs(urlToPath(selectedFile))
             if (window.pendingDocAction !== "") {
@@ -1395,6 +1414,8 @@ ApplicationWindow {
     property string pendingDocAction: ""   // "" | "close" | "new" | "open" | "switch" | "assign" | "swap" (target ID in pendingOpenPath)
     property string pendingOpenPath: ""
     property string pendingOriginalDocument: ""
+    /// 空模式走选择对话框；「新建为模式」直建指定模式。
+    property string pendingNewMode: ""
     property bool allowClose: false
 
     function documentIsDirty() {
@@ -1445,7 +1466,11 @@ ApplicationWindow {
             window.allowClose = true
             window.close()
         } else if (action === "new") {
-            performNewChart()
+            // M7 新建独立文档，不替换/丢弃旧文档；草稿确认后再选模式。
+            const mode = window.pendingNewMode
+            window.pendingNewMode = ""
+            if (mode !== "") performNewChart(mode)
+            else newChartDialog.open()
         } else if (action === "saveAll") {
             restoreDocument(original)
             project.refreshOpenStates()
@@ -1475,6 +1500,7 @@ ApplicationWindow {
         window.pendingDocAction = ""
         window.pendingOpenPath = ""
         window.pendingOriginalDocument = ""
+        window.pendingNewMode = ""
         window.allowClose = false
         restoreDocument(original)
     }
@@ -1546,7 +1572,7 @@ ApplicationWindow {
                 text: (window.pendingDocAction === "close"
                        ? qsTr("以下文档有未保存更改：%1\n\n保存全部后退出，全部不保存，或取消。")
                        : (window.pendingDocAction === "new"
-                          ? qsTr("「%1」有未保存的更改。保存后新建，放弃当前更改，或取消。")
+                          ? qsTr("「%1」有未保存的面板草稿。保存后新建，放弃草稿，或取消。会话内修改仍保留。")
                           : qsTr("「%1」有未保存的面板草稿。保存后继续，放弃草稿，或取消。会话内修改仍保留。")))
                       .arg(window.pendingDirtyLabel()) + qsTr("\n切音工作区不随谱面保存。")
                 color: Theme.text
@@ -1657,6 +1683,68 @@ ApplicationWindow {
         setStatus(qsTr("已在 A 侧打开：%1").arg(result.path || path))
     }
 
+    // 新建谱面对话框（2026-10 阶段一 issue #26）：Ctrl+N 未保存确认后弹出，选游玩模式再建。
+    // 模式列表同源 chartSession.codecModes()（Codec::modes / capabilities）；默认第一项 sp7k。
+    BbDialog {
+        id: newChartDialog
+        title: qsTr("新建谱面")
+        width: 400
+        height: 200
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 8
+            Label {
+                text: qsTr("选择游玩模式（决定轨道布局与保存通道表）：")
+                color: Theme.text
+                font.pixelSize: Theme.fsSmall
+            }
+            BbComboBox {
+                id: newModeCombo
+                objectName: "newModeCombo"
+                Layout.preferredWidth: 240
+                Layout.fillWidth: true
+                textRole: "label"
+                model: {
+                    var arr = []
+                    const modes = chartSession.codecModes()
+                    for (var i = 0; i < modes.length; ++i)
+                        arr.push({ label: modeDisplayName(modes[i]), value: modes[i] })
+                    return arr
+                }
+                currentIndex: 0
+            }
+            Item { Layout.fillHeight: true }
+        }
+        footer: Rectangle {
+            width: newChartDialog.width
+            height: 42
+            color: Theme.surface2
+            border.color: Theme.borderStrong
+            border.width: 1
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 5
+                anchors.rightMargin: 8
+                spacing: 8
+                Item { Layout.fillWidth: true }
+                BbToolButton {
+                    text: qsTr("新建")
+                    onClicked: {
+                        const m = newModeCombo.model[newModeCombo.currentIndex].value
+                        newChartDialog.close()
+                        performNewChart(m)
+                    }
+                }
+                BbToolButton {
+                    text: qsTr("取消")
+                    onClicked: newChartDialog.reject()
+                }
+            }
+        }
+    }
+
+
     /// 外部文件路由（拖拽入窗口 / 拖到 exe 图标 / 双击关联）：分类 → 打开并切到对应页。
     /// 后缀分类在 EditUtils（C++ 纯函数，单测覆盖），QML 只做分流，避免后缀表两处维护。
     /// 返回是否已接受该文件（供 DropArea 决定 acceptProposedAction）。
@@ -1715,7 +1803,6 @@ ApplicationWindow {
                  : { ok: true, result: { format: "bms", mode: "", diagnostics: [] } }
         if (ri.ok) {
             window.chartFormat = ri.result.format !== undefined ? ri.result.format : ""
-            window.chartMode = ri.result.mode !== undefined ? ri.result.mode : ""
             var enc = ""
             if (ri.result.diagnostics) {
                 for (var di = 0; di < ri.result.diagnostics.length; ++di) {
@@ -1729,6 +1816,8 @@ ApplicationWindow {
             }
             window.chartEncoding = enc
         }
+        // 模式取固定文档桥的内存态；未命名文档/未落盘模式不能被旧磁盘 info 覆盖。
+        window.chartMode = chartSession.chartMode()
         window.pendingLnHead = null
         window.currentSampleId = ""
         window.currentBmpId = ""
@@ -1869,12 +1958,27 @@ ApplicationWindow {
     function editTiming(kind, measure, num, den, value, ref) { return session.editTiming(kind, measure, num, den, value, ref) }
     /// 2026-09「加一小节」：编辑态有效小节数下限 +1（可放内容的新小节；用不到的保存时被 BMS 丢弃）。
     function addMeasure() { editPage.extendMeasures(); setStatus(qsTr("已加一小节（保存时未用到的空小节会被舍弃）")) }
-    /// 2026-09 新建空谱面：chartSession.newChart() → 重置编辑器状态 + seed 编辑 floor=1（可放小节 0）。
+    /// 新建空谱面：草稿确认 → 选模式（对话框）→ DocumentService.create(mode) 独立文档。
+    /// 2026-10 阶段一（issue #26）：Ctrl+N 不再直建 sp7k，先选模式（新谳 PMS/DP 不再受阻）。
     function newChart() {
+        window.pendingNewMode = ""
         requestDocumentAction("new")
     }
-    function performNewChart() {
-        const created = documents.create()
+    /// 「新建为模式」子菜单直建：跳过模式对话框（模式已定），未保存确认仍走。
+    function newChartAs(mode) {
+        window.pendingNewMode = mode
+        requestDocumentAction("new")
+    }
+    /// 模式 id → 中文展示名（与 chart_mode_by_id 配置表及 codecModes() 同源；仅展示层映射）。
+    function modeDisplayName(mode) {
+        if (mode === "sp7k") return qsTr("SP 7键")
+        if (mode === "dp") return qsTr("DP 7键")
+        if (mode === "battle") return qsTr("Battle")
+        if (mode === "pms9k") return qsTr("PMS 9键")
+        return mode
+    }
+    function performNewChart(mode) {
+        const created = documents.create(mode || "sp7k")
         if (!created.ok) {
             setStatus(qsTr("新建空谱面失败：%1").arg(created.error))
             statusClearTimer.restart()
@@ -1882,11 +1986,13 @@ ApplicationWindow {
         }
         window.chartPath = ""
         window.chartFormat = "bms"
-        window.chartMode = "sp7k"
+        window.chartMode = mode || "sp7k"
         window.chartEncoding = "utf8"
-        // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）
+        // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）。
+        // ⚠️ 不预设 PLAYER（2026-10 复核）：草稿回填 "1" 会覆盖模式推导——DP/Battle 新建
+        // 保存后 PLAYER 由 writer 按 mode_id 推导（dp=3/battle=4），重开不再退回 SP。
         window.chartMeta = { "TITLE": "", "ARTIST": "", "GENRE": "", "SUBTITLE": "",
-                             "BPM": "130", "PLAYER": "1", "PLAYLEVEL": "", "RANK": "",
+                             "BPM": "130", "PLAYLEVEL": "", "RANK": "",
                              "TOTAL": "", "DIFFICULTY": "" }
         window.currentBpmValue = 130
         window.pendingLnHead = null

@@ -679,6 +679,89 @@ TestCase {
         compare(mainFixture.snapshot(a).meta.PLAYER, "4")
         compare(main.metaDraftDirty, false)
     }
+    function assertPmsPrimary(mode, id) {
+        compare(main.chartMode, mode)
+        compare(main.isPmsChart, true)
+        compare(main.metaDraftDirty, false)
+        compare(chartSession.sessionId, id)
+        compare(chartSession.chartMode(), mode)
+        const primary = mainFixture.primaryView(main)
+        compare(primary.documentSession.sessionId, id)
+        const viewport = primary.viewportItem
+        tryVerify(() => viewport.columnIndexForRef({lane: {player: 0, kind: "key", index: 9}}) >= 0)
+        compare(viewport.columnIndexForRef({lane: {player: 0, kind: "key", index: 10}}), -1)
+        compare(mainFixture.objectNamed(main, "saveAsDialog").defaultSuffix, "pms")
+        compare(split.referenceDocumentId, b)
+        compare(split.referenceView.documentSession.sessionId, b)
+        compare(split.referenceView.ownsPlayback, false)
+    }
+    function test_newModeDialog_createsIndependentPms_andRetainsModeAfterSwitch() {
+        start(false)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        // 调用Ctrl+N同源处理函数，再操作真实弹窗和新建按钮；不等同于原生快捷键验收。
+        main.newChart()
+        const dialog = mainFixture.dialog(main, "新建谱面")
+        verify(dialog !== null)
+        const combo = mainFixture.objectNamed(main, "newModeCombo")
+        verify(combo !== null)
+        let index = -1
+        for (let i = 0; i < combo.model.length; ++i)
+            if (combo.model[i].value === "pms9k") index = i
+        verify(index >= 0)
+        combo.currentIndex = index
+        clickButton(dialog, "新建")
+        const id = documents.activeId()
+        verify(id !== a && id !== b)
+        compare(main.chartPath, "")
+        assertPmsPrimary("pms9k", id)
+        unchanged(sa, sb)
+        verify(documents.activate(a).ok)
+        main.adoptChart(mainFixture.snapshot(a).path)
+        compare(documents.activeId(), a)
+        verify(documents.activate(id).ok)
+        main.adoptChart(mainFixture.snapshot(id).path)
+        assertPmsPrimary("pms9k", id)
+        unchanged(sa, sb)
+    }
+    function test_pmsProfileSwitch_retainsMemoryMode_data() {
+        return [{tag: "standard", bmesp: false, mode: "pms9k"},
+                {tag: "bme-sp", bmesp: true, mode: "pms9k-bmesp"}]
+    }
+    function test_pmsProfileSwitch_retainsMemoryMode(data) {
+        start(false)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        main.requestDocumentAction("open", mainFixture.pmsFixture(data.bmesp))
+        const id = documents.activeId()
+        verify(id !== a && id !== b)
+        assertPmsPrimary(data.mode, id)
+        verify(documents.activate(a).ok)
+        main.adoptChart(mainFixture.snapshot(a).path)
+        verify(documents.activate(id).ok)
+        main.adoptChart(mainFixture.snapshot(id).path)
+        assertPmsPrimary(data.mode, id)
+        unchanged(sa, sb)
+    }
+    function test_newDirectModes_doNotInjectPlayerOrChangeOldDocuments_data() {
+        return [{tag: "sp", mode: "sp7k"}, {tag: "dp", mode: "dp"}, {tag: "battle", mode: "battle"}]
+    }
+    function test_newDirectModes_doNotInjectPlayerOrChangeOldDocuments(data) {
+        start(false)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        main.newChartAs(data.mode)
+        const id = documents.activeId()
+        verify(id !== a && id !== b)
+        compare(main.chartMode, data.mode)
+        compare(chartSession.chartMode(), data.mode)
+        compare(main.metaDraftDirty, false)
+        verify(main.chartMeta.PLAYER === undefined)
+        compare(mainFixture.primaryView(main).documentSession.sessionId, id)
+        verify(documents.activate(a).ok)
+        main.adoptChart(mainFixture.snapshot(a).path)
+        verify(documents.activate(id).ok)
+        main.adoptChart(mainFixture.snapshot(id).path)
+        compare(main.chartMode, data.mode)
+        unchanged(sa, sb)
+    }
     function test_unnamedSwap_preservesIdentityAndHistory() {
         start(false)
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)

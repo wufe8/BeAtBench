@@ -17,9 +17,12 @@ enum class DetectedEncoding { Utf8, ShiftJis };
 struct BmsReadOptions {
     BmsEncoding encoding = BmsEncoding::Auto;
     bool preserve_comments = true;  ///< 保留注释块以便写回
-    /// 显式游玩模式覆盖（"sp7k"/"dp"/"battle"/"pms9k"；空/"auto" = 推断）。
+    /// 显式游玩模式覆盖（"sp7k"/"dp"/"battle"/"pms9k"/"pms9k-bmesp"；空/"auto" = 推断）。
     /// read_bms（文本层）按 #PLAYER 推断；read_bms_file 先按扩展名（.pms → pms9k）
-    /// 再按 #PLAYER。写回用 chart.mode_id 决定通道反向表。
+    /// 再按 #PLAYER。"pms9k" 传入后仍参与 BME-SP 写回约定探测（parser 预扫描 0c，
+    /// 纯 BME-SP 别名证据时升级为 "pms9k-bmesp"）；显式传 "pms9k-bmesp" 则跳过探测。
+    /// 读侧键位按统一别名表固定（不依赖探测）；写回用 chart.mode_id 决定约定 profile
+    /// （约定跟随保号）。
     std::string mode;
 };
 

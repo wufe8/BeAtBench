@@ -292,6 +292,36 @@ TEST_F(DocumentInstancesTest, RevisionGuardRejectsSameAddressEditsUntilRefresh) 
     EXPECT_EQ(bridge.timing()->time_us({1, beatbench::Rational(0, 1)}), 2000000);
 }
 
+TEST_F(DocumentInstancesTest, ModeHelpersUseBoundLiveDocumentAcrossReloadAndClose) {
+    auto& reg = session_registry();
+    const std::string aId = "mode-helper-a", bId = "mode-helper-b";
+    ASSERT_TRUE(reg.create(aId));
+    beatbench::Chart a; a.mode_id = "pms9k"; reg.by_id(aId)->load(a);
+    ChartSession fixed; fixed.setSessionId(QString::fromStdString(aId));
+    EXPECT_EQ(fixed.chartMode(), "pms9k"); EXPECT_EQ(fixed.playKeyCount(), 9);
+    EXPECT_EQ(fixed.laneChannel(0, "key", 8), "24");
+    ASSERT_TRUE(reg.create(bId));
+    beatbench::Chart b; b.mode_id = "pms9k-bmesp"; reg.by_id(bId)->load(b);
+    ChartSession reference; reference.setSessionId(QString::fromStdString(bId));
+    EXPECT_EQ(reference.chartMode(), "pms9k-bmesp");
+    EXPECT_EQ(reference.playKeyCount(), 9); EXPECT_EQ(reference.laneChannel(0, "key", 8), "16");
+    EXPECT_EQ(fixed.chartMode(), "pms9k"); // 活动切换不偷读B
+    // 替换对象后refresh之前，缓存不能解引用，也不能回退活动文档B。
+    a.mode_id = "dp"; reg.by_id(aId)->load(a);
+    EXPECT_EQ(fixed.chartMode(), ""); EXPECT_EQ(fixed.playKeyCount(), 7);
+    EXPECT_EQ(fixed.laneChannel(0, "key", 8), "");
+    fixed.refresh(); EXPECT_EQ(fixed.chartMode(), "dp");
+    // 旧newChart兼容接口同样必须传固定文档ID与mode，不修改当前活动B。
+    ASSERT_TRUE(fixed.newChart("battle"));
+    EXPECT_EQ(reg.active_id(), bId); EXPECT_EQ(fixed.chartMode(), "battle");
+    EXPECT_EQ(reference.chartMode(), "pms9k-bmesp");
+    ASSERT_TRUE(reg.close(aId));
+    EXPECT_EQ(fixed.chartMode(), ""); EXPECT_EQ(fixed.playKeyCount(), 7);
+    fixed.refresh();
+    EXPECT_FALSE(fixed.hasChart()); EXPECT_EQ(fixed.chartMode(), "");
+    EXPECT_EQ(reference.chartMode(), "pms9k-bmesp");
+}
+
 TEST_F(DocumentInstancesTest, AttachedIdentitySurvivesActiveSwitchButNotCoreClose) {
     auto& reg = session_registry();
     const std::string aId = "bridge-lifetime-follow-a", bId = "bridge-lifetime-follow-b";

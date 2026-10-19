@@ -28,7 +28,7 @@ public:
     Q_INVOKABLE ChartSession* session(const QString& id);
     Q_INVOKABLE void refresh();
     /// 新建也是集合中的新实例，不覆盖已有活动谱面。
-    Q_INVOKABLE QVariantMap create();
+    Q_INVOKABLE QVariantMap create(const QString& mode = {});
 
     /// 标准化绝对路径匹配已加载文档（Windows 忽略大小写）；复用不重载。
     /// 新文档独立 session.load，失败回收新会话并恢复原 active。
