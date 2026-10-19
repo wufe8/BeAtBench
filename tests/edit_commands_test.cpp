@@ -549,6 +549,69 @@ TEST(EditCommands, CompositeInvertReverseOrder) {
 
 // —— 剪贴板（BMS 原始行文本） ——
 
+// R25-3（上游复核）：同键别名同拍两音 copy 不得同槽覆盖——
+// pms9k 下 22/18 归一同通道 22，旧逻辑返回 ok 却只出 1 行。
+TEST(EditCommands, ClipboardCopySameSlotConflictKeepsBoth) {
+    using beatbench::cmd::global_registry;
+    auto& session = beatbench::edit::global_editor_session();
+    Chart c;
+    c.mode_id = "pms9k";
+    c.meta["BPM"] = "120";
+    for (const std::uint32_t id : {1u, 2u}) {
+        Event<Note> ev;
+        ev.measure = 1;
+        ev.pos = Rational(0, 1);
+        ev.value.lane = Lane{0, LaneKind::Key, 6};
+        ev.value.sample.id = id;
+        c.notes.push_back(ev);
+    }
+    session.load(c);
+    const std::size_t before = session.chart().notes.size();
+
+    Json args = Json::object();
+    Json sel = Json::array();
+    for (const auto& e : session.chart().notes) {
+        Json item = Json::object();
+        item.set("measure", static_cast<std::int64_t>(e.measure));
+        Json pos = Json::object();
+        pos.set("num", e.pos.num);
+        pos.set("den", e.pos.den);
+        item.set("pos", std::move(pos));
+        Json lane = Json::object();
+        lane.set("player", 0);
+        lane.set("index", 6);
+        lane.set("kind", "key");
+        item.set("lane", std::move(lane));
+        item.set("sample", static_cast<std::int64_t>(e.value.sample.id));
+        sel.push_back(std::move(item));
+    }
+    args.set("selection", std::move(sel));
+    Json req = Json::object();
+    req.set("command", "clipboard.copy");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("result").at("count").as_i64(), 2);
+    const auto& lines = resp.at("result").at("lines").as_array();
+    ASSERT_EQ(lines.size(), 2u) << "同拍同通道冲突必须拆两行";
+    EXPECT_EQ(lines[0].as_str(), "#00122:01");
+    EXPECT_EQ(lines[1].as_str(), "#00122:02");
+
+    // paste 往返：两行 → 两枚独立键音
+    Json pargs = Json::object();
+    std::string text;
+    for (const auto& l : lines) text += l.as_str() + "\n";
+    pargs.set("text", text);
+    pargs.set("target_measure", 5);
+    Json preq = Json::object();
+    preq.set("command", "clipboard.paste");
+    preq.set("args", std::move(pargs));
+    const Json presp = global_registry().dispatch(preq);
+    ASSERT_TRUE(presp.at("ok").as_bool()) << presp.dump();
+    EXPECT_EQ(presp.at("result").at("notes").as_i64(), 2);
+    EXPECT_EQ(session.chart().notes.size(), before + 2);
+}
+
 TEST(EditCommands, ClipboardCopyRoundtrip) {
     // copy 选中 note → 文本行；paste 回 → note 集合一致
     using beatbench::cmd::global_registry;

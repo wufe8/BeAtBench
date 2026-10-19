@@ -1010,16 +1010,31 @@ public:
         for (const auto& [key, grp] : groups) {
             const auto& [measure, channel, sub_line] = key;
             (void)sub_line;
-            std::int64_t n = 1;
-            for (const auto& c : grp) n = std::lcm(n, c.ref.pos.den);
-            std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
-            for (const auto& c : grp) {
-                const auto idx = static_cast<std::size_t>(c.ref.pos.num * n / c.ref.pos.den);
-                slots[idx] = fmt_id_text(chart, c.ref.sample);
+            // 同 pos 多值拆多行（2026-10 复核 R25-3：别名归一后同槽直接覆盖
+            // 会丢音符——copy 两音返回 ok 只出 1 行）。「同键别名同拍 = 两枚
+            // 独立键音保留」约定需贯穿复制/粘贴与保存，与 writer 冲突拆行同约定。
+            std::map<Rational, std::vector<const CopyCell*>> by_pos;
+            for (const auto& c : grp) by_pos[c.ref.pos].push_back(&c);
+            std::size_t n_rows = 1;
+            for (const auto& [pos, grp_row] : by_pos) {
+                (void)pos;
+                n_rows = std::max(n_rows, grp_row.size());
             }
-            std::string line = "#" + pad3(measure) + channel + ":";
-            for (const auto& s : slots) line += s;
-            lines.push_back(std::move(line));
+            for (std::size_t row = 0; row < n_rows; ++row) {
+                std::int64_t n = 1;
+                for (const auto& [pos, grp_row] : by_pos) {
+                    if (grp_row.size() > row) n = std::lcm(n, pos.den);
+                }
+                std::vector<std::string> slots(static_cast<std::size_t>(n), "00");
+                for (const auto& [pos, grp_row] : by_pos) {
+                    if (grp_row.size() <= row) continue;
+                    const auto idx = static_cast<std::size_t>(pos.num * n / pos.den);
+                    slots[idx] = fmt_id_text(chart, grp_row[row]->ref.sample);
+                }
+                std::string line = "#" + pad3(measure) + channel + ":";
+                for (const auto& s : slots) line += s;
+                lines.push_back(std::move(line));
+            }
         }
         Json out = Json::object();
         out.set("lines", std::move(lines));
