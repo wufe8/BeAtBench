@@ -164,6 +164,97 @@ TEST(PmsIntegrity, RetainedSecondSideLnAndMinesRoundTripIncludingOrphan) {
     }
 }
 
+TEST(PmsIntegrity, TransformRejectsUnwritableSecondSideAtomically) {
+    cmd::Registry registry; cmd::register_builtin_commands(registry);
+    auto& session = edit::global_editor_session();
+    for (const auto* mode : {"pms9k", "pms9k-bmesp"}) {
+        for (const auto* channel : {"66", "E6", "61", "E1", "67"}) {
+          for (const auto* slots : {"0101", "01"}) {
+            SCOPED_TRACE(::testing::Message() << mode << " channel=" << channel << " slots=" << slots);
+            const bool mirror = std::string(channel).back() == '6';
+            const int rotate = mirror ? 0 : (std::string(channel).back() == '7' ? -2 : 1);
+            Chart chart = read_pms_integrity(std::string("#BPM 120\n#00011:01\n#001") +
+                                            channel + ":" + slots + "\n");
+            chart.mode_id = mode;
+            session.load(chart);
+            // Leave both undo and redo history, and a clean document, before rejection.
+            ASSERT_TRUE(session.exec(std::make_unique<edit::MetaEditCommand>("TITLE", "keep")));
+            ASSERT_TRUE(session.exec(std::make_unique<edit::MetaEditCommand>("ARTIST", "redo")));
+            ASSERT_TRUE(session.undo());
+            session.mark_clean();
+            const auto before = bms::write_bms(session.chart());
+            const auto pairs = pair_signatures(session.chart());
+            const auto undo = session.undo_depth(), redo = session.redo_depth();
+            int persisted = 0;
+            session.set_path("transform-test.pms");
+            session.set_persist_hook([&](const Chart&, const std::string&, std::string*) {
+                ++persisted; return true;
+            });
+            Json args = Json::object(); args.set("selection", selection_json(session.chart()));
+            args.set("mirror", mirror); args.set("rotate", rotate);
+            const auto selection = args.at("selection").dump();
+            const auto response = call(registry, "note.transform", args);
+            EXPECT_FALSE(response.at("ok").as_bool()) << response.dump();
+            if (!response.at("ok").as_bool()) {
+                EXPECT_EQ(response.at("error").at("code").as_str(), "bad_args");
+                EXPECT_EQ(response.find("result"), nullptr);  // no replacement selection
+            }
+            EXPECT_EQ(args.at("selection").dump(), selection);
+            EXPECT_EQ(bms::write_bms(session.chart()), before);
+            EXPECT_EQ(pair_signatures(session.chart()), pairs);
+            EXPECT_EQ(session.undo_depth(), undo); EXPECT_EQ(session.redo_depth(), redo);
+            EXPECT_FALSE(session.is_dirty()); EXPECT_EQ(persisted, 0);
+            // Direct EditCommand callers must not bypass the safety check.
+            const auto& source = chart.notes.back();
+            EXPECT_FALSE(session.exec(std::make_unique<edit::TransformNoteCommand>(
+                source.measure, source.pos, source.value.lane, source.value.sample.id,
+                mirror, rotate, source.value.sub_line)));
+            EXPECT_EQ(bms::write_bms(session.chart()), before);
+            EXPECT_EQ(session.undo_depth(), undo); EXPECT_EQ(session.redo_depth(), redo);
+            EXPECT_FALSE(session.is_dirty()); EXPECT_EQ(persisted, 0);
+            session.set_persist_hook({}); session.set_path("");
+          }
+        }
+    }
+}
+
+TEST(PmsIntegrity, WritableSecondSideAndDpTransformsStillRoundTrip) {
+    cmd::Registry registry; cmd::register_builtin_commands(registry);
+    auto& session = edit::global_editor_session();
+    for (const auto* mode : {"pms9k", "pms9k-bmesp", "dp"}) {
+        for (const bool mirror : {false, true}) {
+          for (const auto* header : {"#BPM 120\n", "#BPM 120\n#LNTYPE 2\n#LNOBJ ZZ\n"}) {
+            const bool pms = std::string(mode) != "dp";
+            if (!pms && std::string(header).find("LNTYPE") != std::string::npos) continue;
+            bms::BmsReadOptions opts; opts.mode = mode;
+            // Include a PMS orphan: its 2P lane needs the writer's LN fallback,
+            // even when no pair exists or LNTYPE 2 prefers ordinary channels.
+            Chart chart = bms::read_bms(std::string(header) +
+                "#00061:0101\n#001E1:01\n" + (pms ? "#00261:01\n" : ""), opts).chart;
+            session.load(chart);
+            Json args = Json::object(); args.set("selection", selection_json(chart));
+            args.set("mirror", mirror); args.set("rotate", mirror ? 0 : -1);
+            const auto response = call(registry, "note.transform", args);
+            ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
+            ASSERT_TRUE(response.at("result").at("ok").as_bool());
+            const int key = pms ? 9 : 7;
+            for (const auto& e : session.chart().notes) {
+                EXPECT_EQ(e.value.lane.player, 1); EXPECT_EQ(e.value.lane.index, key);
+            }
+            for (const auto& ref : response.at("result").at("selection").as_array())
+                EXPECT_EQ(ref.at("lane").at("index").as_i64(), key);
+            const auto changed = signatures(session.chart());
+            const auto changed_pairs = pair_signatures(session.chart());
+            const auto reopened = bms::read_bms(bms::write_bms(session.chart()), opts).chart;
+            EXPECT_EQ(signatures(reopened), changed);
+            EXPECT_EQ(pair_signatures(reopened), changed_pairs);
+            ASSERT_TRUE(session.undo()); EXPECT_EQ(signatures(session.chart()), signatures(chart));
+            ASSERT_TRUE(session.redo()); EXPECT_EQ(signatures(session.chart()), changed);
+          }
+        }
+    }
+}
+
 TEST(PmsIntegrity, LaneKindCaseCompatibilityAndPmsSecondSideValidation) {
     cmd::Registry registry; cmd::register_builtin_commands(registry);
     auto& session = edit::global_editor_session();

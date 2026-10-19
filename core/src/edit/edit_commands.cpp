@@ -11,6 +11,7 @@
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/Selection.hpp"
 #include "beatbench/core/ChartMode.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"  // c36/c62 id 转换（LNOBJ 文本 → 数值 id）
 
 #include <algorithm>
@@ -1461,6 +1462,18 @@ void TransformNoteCommand::bind_source(const Chart& chart, std::unordered_set<st
         if (e.pos != m_pos || e.value.lane != m_lane ||
             e.value.sample.id != m_sample || e.value.sub_line != m_sub_line ||
             claimed.contains(i)) continue;
+        // Validate while binding, before any lane in a transform batch is written.
+        // PMS retains some legacy 2P LN/mine lanes, but not every nine-key target
+        // has a BMS representation. Include ln_channel even for orphan LN notes:
+        // the writer can retain those using its LN-channel fallback.
+        const auto mode = chart.mode_id.value_or("sp7k");
+        const auto target = transform_lane(m_lane, m_mirror, m_rotate,
+                                           chart_mode_key_count(mode));
+        if (target != m_lane &&
+            bms::bms_channel_for_mode(mode, target, e.value.ln_channel,
+                                      e.value.kind).empty()) {
+            throw std::invalid_argument("Transform target cannot be represented in this chart mode");
+        }
         m_index = i;
         m_source = e.value;
         claimed.insert(i);

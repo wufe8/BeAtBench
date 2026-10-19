@@ -13,7 +13,9 @@
 #include <numeric>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
 #include "beatbench/core/Version.hpp"
@@ -1832,9 +1834,18 @@ public:
             throw CommandError("bad_args", "至少指定 mirror 或 rotate 之一");
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
+        std::unordered_set<std::size_t> claimed;
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::TransformNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line));
+            auto command = std::make_unique<edit::TransformNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line);
+            // Preflight against the unchanged chart. Invalid targets must return
+            // a protocol error, not success with a replacement selection.
+            try {
+                command->preflight(session.chart(), claimed);
+            } catch (const std::invalid_argument& e) {
+                throw CommandError("bad_args", e.what());
+            }
+            comp->add(std::move(command));
         }
         const bool ok = session.exec(std::move(comp));
         // 返回变换后的选择引用（QML 直接采用，不再独立计算映射——单一事实源在 core；

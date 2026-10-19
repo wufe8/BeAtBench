@@ -271,6 +271,11 @@ class TransformNoteCommand : public EditCommand {
 public:
     TransformNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
                          bool mirror, int rotate, std::uint32_t sub_line = 0);
+    /// Validate targets against an unchanged chart; throws invalid_argument if unwritable.
+    /// Shared claimed set gives protocol preflight the same duplicate-source semantics as apply.
+    void preflight(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+        bind_source(chart, claimed);
+    }
     std::string name() const override { return "note.transform"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
