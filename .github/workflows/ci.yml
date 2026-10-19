@@ -265,6 +265,8 @@ jobs:
   # 阻塞四 job 任一失败 → 本 job 红；macOS 失败 → warning 标注（run 绿灯不含 macOS）。
   summary:
     name: ci-summary
+    permissions:
+      actions: read
     needs: [linux-core, linux-full, macos-full, windows-msvc-core, windows-mingw-full]
     if: always()
     runs-on: ubuntu-24.04
@@ -273,16 +275,29 @@ jobs:
       - name: 汇总各 job 实际结论
         env:
           GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
-            --jq '.jobs | map({(.name): .conclusion}) | add' > jobs.json
-          cat jobs.json
+          # These four jobs do not use continue-on-error. Their dependency results
+          # are authoritative; the jobs REST API can lag or omit inherited jobs
+          # during a failed-job rerun, and must not turn success into a false red.
           fail=""
           for j in linux-core linux-full windows-msvc-core windows-mingw-full; do
-            c=$(jq -r --arg j "$j" '.[$j]' jobs.json)
+            c=$(jq -r --arg j "$j" '.[$j].result' <<< "$NEEDS_JSON")
+            echo "$j = $c"
             if [ "$c" != "success" ]; then echo "::error::阻塞 job 失败：$j = $c"; fail=1; fi
           done
-          m=$(jq -r '.["macos-full"]' jobs.json)
+          # macOS uses continue-on-error, so needs cannot reveal its real result.
+          # Bound retries for REST propagation; unknown is never reported as pass.
+          m="unknown"
+          for attempt in 1 2 3 4 5 6; do
+            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100&refresh=$(date +%s)-$attempt" \
+                --jq '.jobs | map(select(.name == "macos-full")) | first | .conclusion // "unknown"' > macos-result.txt; then
+              m=$(cat macos-result.txt)
+            fi
+            [ "$m" != "unknown" ] && break
+            [ "$attempt" = 6 ] || sleep 5
+          done
+          echo "macos-full actual conclusion = $m"
           if [ "$m" != "success" ]; then
             echo "::warning::macos-full 实际结论：$m（非阻塞门禁——本 run 绿灯不含 macOS）"
           fi
