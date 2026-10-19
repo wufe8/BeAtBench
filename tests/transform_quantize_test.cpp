@@ -405,6 +405,26 @@ TEST(TransformQuantize, BatchRotateNoTargetCollision) {
     EXPECT_EQ(s.chart().notes[1].value.lane, (Lane{0, LaneKind::Key, 3}));
 }
 
+// R27-1+R27-2 组合探针（上游复核场景）：BME-SP 变体 mode_id 的 chart 直接构造
+// （#25 探测产物；#27 单分支与两分支组合态下均可跑）——变换键号上限必须按
+// 家族归一取 9：mirror key8 → key2（若回退 7 则错成 key1）。
+TEST(TransformQuantize, BatchMirrorPmsBmespVariantKeyCount) {
+    auto& s = beatbench::edit::global_editor_session();
+    Chart c;
+    c.meta["TITLE"] = "bmesp probe";
+    c.meta["BPM"] = "120";
+    c.mode_id = "pms9k-bmesp";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Key, 8};
+    n.value.sample.id = 1;
+    c.notes = {n};
+    s.load(c);
+    const Json resp = global_registry().dispatch(
+        transform_request({ref_for(s.chart().notes[0])}, true));
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(s.chart().notes[0].value.lane, (Lane{0, LaneKind::Key, 2}));
+}
+
 TEST(TransformQuantize, BatchMirrorRoundtripFileStable) {
     // 变换后保存重开：模型语义稳定，LN 两端同 lane（key9 = 标准 65 通道）仍成对
     auto& s = beatbench::edit::global_editor_session();
