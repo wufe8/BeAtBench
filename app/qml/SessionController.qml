@@ -304,7 +304,11 @@ QtObject {
             audioEngine.playPreview(file)
         }
     }
+    function stopNoteSample() {
+        if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.stopPreview()
+    }
     function onCanvasClicked() {
+        stopNoteSample()
         if (window.selectionRefs.length > 0) window.selectionRefs = []
         if (window.metaSelection.length > 0) window.metaSelection = []
     }

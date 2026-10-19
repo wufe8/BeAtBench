@@ -19,6 +19,7 @@
 #include <QVariantMap>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "beatbench/audio/AudioBackend.hpp"
 #include "beatbench/audio/PcmPlayback.hpp"
@@ -67,6 +68,9 @@ public:
     /// 试听一个采样文件（相对 = 谱面目录；绝对路径直接用）。
     /// 返回 false = 立即失败（文件缺失/格式不支持/无文档）；解码失败异步报 statusText。
     Q_INVOKABLE bool playPreview(const QString& file);
+
+    /// Cancel pending decode and audition only; main/reference playback is preserved.
+    Q_INVOKABLE void stopPreview();
 
     /// 停掉所有试听/播放（换谱面/关文档；幂等）。
     Q_INVOKABLE void stopAll();
@@ -225,6 +229,7 @@ private:
     void resolveSavedDevice();
     void pauseForStreamChange();
     void setSettingsError(const QString& error);
+    void completePreviewDecodes();
 
     /// 回调上下文（render 直达内核；deviceRate 更新一次，原子读）
     struct RenderCtx {
@@ -241,6 +246,16 @@ private:
     bool m_hasSavedDeviceIdentity = false;
     beatbench::audio::SamplePlayer m_player;
     beatbench::audio::SampleCache m_cache;  ///< 采样解码缓存（M4.3a：LRU+预算+合并）
+    // Workers only publish owned results; GUI drains or releases them, including at teardown.
+    struct PreviewDecode {
+        std::uint64_t generation;
+        beatbench::audio::SampleCacheResult result;
+    };
+    QThreadPool m_previewPool;
+    std::mutex m_previewResultsMutex;
+    std::vector<PreviewDecode> m_previewResults;
+    std::uint64_t m_previewGeneration = 0;
+    bool m_previewDecoding = false;
     RenderCtx m_renderCtx;
     QString m_sourceDir;         ///< 谱面目录（绝对路径；空 = 未打开）
     std::atomic<bool> m_busy{false};

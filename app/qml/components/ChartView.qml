@@ -92,6 +92,7 @@ Item {
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
+    signal samplePreviewStopRequested()       // blank press cancels audition before a drag/release
     signal playNoteSample(var ref)          // 点击 note（按下→释放无拖动）→ 播放该采样（M4.3 前端）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
@@ -494,6 +495,8 @@ Item {
                 return
             }
         }
+        // Cancel only this viewport's audition immediately; B has no audio connection.
+        if (y > 18 && x >= view.rulerWidth) root.samplePreviewStopRequested()
         // select 工具空白 = 框选（拖动）；pan 工具 = 滚动（拖动）；note/ln/mine 空白 = 点击放置
         _boxSelect = root.editorTool === "select"
         if (_boxSelect) {
@@ -647,6 +650,8 @@ Item {
         }
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (_dragged || moved > 4) return
+        if (root.editorTool === "pan" && y > 18 && x >= view.rulerWidth &&
+                !view.objectAt(x, y).valid) root.canvasClicked()
         // 点击：放置工具（note / ln / mine）→ hitTest → hitPlaceRequested（Main 按工具定 kind）。
         // M3 note.put 已接 kind（normal/ln/mine）→ 三种工具都真实放置。
         if (root.editable && (root.editorTool === "note" || root.editorTool === "ln" ||

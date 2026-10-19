@@ -107,6 +107,8 @@ TEST_F(AudioLibTest, RenderBasicMixing) {
     ASSERT_TRUE(player.play(s, 1.0f, 0.0));  // 转移所有权
     std::vector<float> out(44100 * 2, 0.0f);
     player.render(out.data(), 44100, 44100.0);
+    float tail[2];
+    player.render(tail, 1, 44100.0);  // Observe natural end, not a Started event.
     // 输出应有非零样本
     float peak = 0.0f;
     for (const float v : out) peak = std::max(peak, std::fabs(v));
@@ -300,6 +302,75 @@ TEST_F(AudioLibTest, MasterVolumeClamps) {
     EXPECT_FLOAT_EQ(player.masterVolume(), 1.0f);
     player.setMasterVolume(-0.5f);
     EXPECT_FLOAT_EQ(player.masterVolume(), 0.0f);
+}
+
+TEST_F(AudioLibTest, PreviewUsesSlotSevenAndOrdinaryVoicesCannotOccupyIt) {
+    SamplePlayer player;
+    std::vector<float> out(1024);
+    for (int i = 0; i < 6; ++i)
+        ASSERT_TRUE(player.play(makeTestSample(48000, 48000), 0.1f, 0));
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), 5);  // 0..4 only; PCM/ref/audition reserved.
+    ASSERT_TRUE(player.playPreview(makeTestSample(48000, 48000)));
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), 6);
+    ASSERT_TRUE(player.stopPreview());
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), 5);
+    // Canceled generation events must not clear a newer audition busy state.
+    EXPECT_EQ(player.drainEndedEvents(), -1);
+    player.shutdown();
+    player.drainReclaimed();
+}
+
+TEST_F(AudioLibTest, PreviewNaturalEndReportsReservedSlotAndReplacementIgnoresOldEnd) {
+    SamplePlayer player;
+    std::vector<float> out(1024);
+    ASSERT_TRUE(player.playPreview(makeTestSample(48000, 48000)));
+    player.render(out.data(), 512, 48000);
+    ASSERT_TRUE(player.playPreview(makeTestSample(48000, 256)));
+    player.render(out.data(), 128, 48000);
+    EXPECT_EQ(player.activeCount(), 1);
+    EXPECT_EQ(player.drainEndedEvents(), -1);  // Old canceled generation, not new end.
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), 0);
+    EXPECT_EQ(player.drainEndedEvents(), SamplePlayer::kPreviewVoice);
+    player.shutdown();
+    player.drainReclaimed();
+}
+
+TEST_F(AudioLibTest, PreviewCancellationPreservesOtherVoicesWithSaturatedQueue) {
+    SamplePlayer player;
+    auto pcm = std::make_shared<const std::vector<float>>(48000 * 2, 0.1f);
+    ASSERT_TRUE(player.playSharedPcm(pcm, 48000, 1, 0));
+    ASSERT_TRUE(player.playSharedPcm(pcm, 48000, 1, 0, beatbench::audio::kRefPcmSlot));
+    ASSERT_TRUE(player.play(makeTestSample(48000, 48000, 0.1f), 1, 0));
+    ASSERT_TRUE(player.playPreview(makeTestSample(48000, 48000)));
+    std::vector<float> out(1024);
+    player.render(out.data(), 512, 48000);
+    ASSERT_EQ(player.activeCount(), 4);
+    const auto baseline = player.pcmBaselineFrame();
+    std::vector<std::weak_ptr<const std::vector<float>>> refs;
+    for (int i = 0; i < 256; ++i) {
+        auto owned = std::make_shared<const std::vector<float>>(1024, 0.2f);
+        refs.push_back(owned);
+        auto* sample = new DecodedSample;
+        sample->sampleRate = 48000;
+        sample->sharedPcm = std::move(owned);
+        ASSERT_TRUE(player.playPreview(sample));
+    }
+    EXPECT_FALSE(player.playPreview(makeTestSample(48000, 48000)));
+    for (int i = 0; i < 20; ++i) EXPECT_TRUE(player.stopPreview());
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), 3);
+    EXPECT_EQ(player.pcmBaselineFrame(), baseline);
+    EXPECT_GT(out[600], 0.05f);  // Main/reference/ordinary output survived.
+    player.drainReclaimed();
+    for (const auto& ref : refs) EXPECT_TRUE(ref.expired());
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), 3);  // No queued preview resurrection.
+    player.shutdown();
+    player.drainReclaimed();
 }
 
 }  // namespace

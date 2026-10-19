@@ -37,7 +37,15 @@ QtObject {
     function pause() { unexpected() }
     function stopPlay() { unexpected() }
     function seekSeconds(sec) { unexpected() }
-    function playPreview(file) { unexpected() }
+    property bool allowPreview: false
+    property var previewFiles: []
+    property int previewStops: 0
+    function stopPreview() { previewStops++ }
+    function playPreview(file) {
+        if (!allowPreview) { unexpected(); return false }
+        previewFiles = previewFiles.concat([file])
+        return true
+    }
     function refTogglePlay() { unexpected() }
     function refStop() { unexpected() }
     function refSeek(sec) { unexpected() }
