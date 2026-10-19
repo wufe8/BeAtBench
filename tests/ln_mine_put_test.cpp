@@ -479,4 +479,85 @@ TEST(LnMinePut, LnType2CrossChannelNoPair) {
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 }
 
+// —— R25-1：入口可表示性预检（映射为空 = 拒绝）——
+// 此前 note.put 对 Key10/255 照单全收，Chart 留存无法写出的 lane（复核实测）。
+
+namespace {
+
+Chart make_pms_chart() {
+    Chart c = make_chart();
+    c.mode_id = "pms9k";
+    return c;
+}
+
+Json put_request(int index, const char* kind = "normal", int player = 0,
+                 const char* lane_kind = "key") {
+    Json req = Json::object();
+    req.set("command", "note.put");
+    Json args = Json::object();
+    args.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", player);
+    lane.set("kind", lane_kind);
+    lane.set("index", index);
+    args.set("lane", std::move(lane));
+    args.set("sample", 1);
+    args.set("kind", kind);
+    req.set("args", std::move(args));
+    return req;
+}
+
+}  // namespace
+
+TEST(LnMinePut, ProtocolPutRejectsUnrepresentableLanes) {
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_pms_chart());
+    // normal：Key10 / Key255 / Key0 / Scratch / 非法 player → bad_args，Chart 不变
+    struct BadCase {
+        int index;
+        int player;
+        const char* lane_kind;
+    };
+    for (const BadCase& c : std::vector<BadCase>{{10, 0, "key"},
+                                                 {255, 0, "key"},
+                                                 {0, 0, "key"},
+                                                 {0, 0, "scratch"},
+                                                 {1, 2, "key"}}) {
+        const Json resp =
+            global_registry().dispatch(put_request(c.index, "normal", c.player, c.lane_kind));
+        EXPECT_FALSE(resp.at("ok").as_bool())
+            << "index=" << c.index << " player=" << c.player
+            << " kind=" << c.lane_kind;
+    }
+    EXPECT_TRUE(session.chart().notes.empty());
+    // mine 同样拒绝（地雷走 D/E 通道，越界同样不可表示）
+    EXPECT_FALSE(global_registry().dispatch(put_request(10, "mine")).at("ok").as_bool());
+    // ln：Key10 的 LN 通道映射为空 → 拒绝（原 lane_can_ln 路径收编）
+    EXPECT_FALSE(global_registry().dispatch(put_request(10, "ln")).at("ok").as_bool());
+    // BGM 放 LN 语义保持（2026-09）：BGM 无 LN 表示 → 拒绝
+    EXPECT_FALSE(global_registry().dispatch(put_request(0, "ln", 0, "bgm")).at("ok").as_bool());
+    // 7key 同源收紧：Key10 不在 7key 表 → 同样拒绝（旧代码放行、写出丢弃）
+    session.load(make_chart());
+    EXPECT_FALSE(global_registry().dispatch(put_request(10, "normal")).at("ok").as_bool());
+    EXPECT_TRUE(session.chart().notes.empty());
+}
+
+TEST(LnMinePut, ProtocolPutPmsBoundariesStillOk) {
+    auto& session = beatbench::edit::global_editor_session();
+    session.load(make_pms_chart());
+    // 合法域照常放置：1P 键1/键9、2P 键1
+    for (const std::pair<int, int> c : std::vector<std::pair<int, int>>{{1, 0}, {9, 0}, {1, 1}}) {
+        const Json resp = global_registry().dispatch(put_request(c.first, "normal", c.second));
+        ASSERT_TRUE(resp.at("ok").as_bool()) << "index=" << c.first;
+    }
+    EXPECT_EQ(session.chart().notes.size(), 3u);
+    // BGM 普通音仍可放（ch01）
+    EXPECT_TRUE(global_registry().dispatch(put_request(0, "normal", 0, "bgm")).at("ok").as_bool());
+    EXPECT_EQ(session.chart().notes.size(), 4u);
+}
+
 

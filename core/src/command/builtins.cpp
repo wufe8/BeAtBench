@@ -1539,12 +1539,18 @@ public:
                 }
             }
         }
-        // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
-        // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
-        // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
-        if (ln_kind && !lane_can_ln(session.chart(), lane)) {
+        // 入口可表示性预检（2026-10 复核 R25-1）：与映射层同源——lane+kind 映射为空
+        // = 该模式下无法写出的通道（PMS 的 Key0/10/255、Scratch/Pedal、非法 player），
+        // 入口直接拒绝，避免生成保存即丢的脏数据。LN 沿用 2026-09 语义：
+        // BGM/无 LN 通道表示的轨道不能放 LN（ln 映射为空，本预检覆盖）；
+        // 前端已阻止，此处协议层兜底。
+        const std::string put_mode = session.chart().mode_id.value_or("sp7k");
+        if (bms::bms_channel_for_mode(put_mode, lane, ln_kind, kind).empty()) {
             throw CommandError("bad_args",
-                               "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
+                               ln_kind
+                                   ? "该轨道不能放置 LN（格式映射中无 LN 通道表示）"
+                                   : "该 lane 在当前模式下无法表示为 BMS 通道"
+                                     "（kind/player/键号超出可表示域）");
         }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
             measure, pos, lane, sample, ln_kind, kind, sub_line));

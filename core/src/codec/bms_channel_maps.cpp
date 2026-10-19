@@ -232,6 +232,14 @@ std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool l
     if (is_pms9k_mode(mode)) {
         // 9key（PMS）写侧：profile 按 mode_id 分派（读侧两套别名并存、物理键固定，
         // 见文件头注释）。读入什么约定，写回什么约定（约定跟随保号）。
+        // 可表示域（2026-10 复核 R25-1）：PMS 仅 Key 轨 × 键 1..9 × 双玩家；
+        // Scratch/Pedal/Key0/键号>9/非法 player 返回空（与 7key lane_slot 查不到
+        // 同契约），杜绝键 6-9 表越界下标。调用方各自处理：note.put 入口拒绝、
+        // copy 报 unsupported、writer 丢弃 + check 诊断。
+        if (lane.kind != LaneKind::Key || lane.player > 1 || lane.index < 1 ||
+            lane.index > 9) {
+            return {};
+        }
         const bool bmesp = mode == "pms9k-bmesp";
         if (lane.player == 0) {
             if (lane.index <= 5) {

@@ -464,3 +464,47 @@ TEST(PmsVariant, Sp7DpIsolation) {
                                    NoteKind::Normal),
               "16");
 }
+
+// —— R25-1：写侧可表示域（映射层加固）——
+// PMS 仅 Key 轨 × 键 1..9 × 双玩家可表示；Key0/10/255、Scratch/Pedal、非法
+// player 返回空，不越键 6-9 表下标（此前 Key10 越界读 4 项表，复核实测
+// note.put 可达）。7key 表路径不受影响。
+TEST(PmsVariant, WriteSideRejectsUnrepresentableLanes) {
+    const Lane key0{0, LaneKind::Key, 0};
+    const Lane key10{0, LaneKind::Key, 10};
+    const Lane key255{0, LaneKind::Key, 255};
+    const Lane scratch{0, LaneKind::Scratch, 0};
+    const Lane pedal{0, LaneKind::Pedal, 0};
+    const Lane p2_key1{1, LaneKind::Key, 1};
+    const Lane p2_key10{1, LaneKind::Key, 10};
+    for (const std::string mode : {"pms9k", "pms9k-bmesp"}) {
+        for (const bool ln : {false, true}) {
+            EXPECT_TRUE(bms_channel_for_mode(mode, key0, ln, NoteKind::Normal).empty());
+            EXPECT_TRUE(bms_channel_for_mode(mode, key10, ln, NoteKind::Normal).empty());
+            EXPECT_TRUE(bms_channel_for_mode(mode, key255, ln, NoteKind::Normal).empty());
+            EXPECT_TRUE(
+                bms_channel_for_mode(mode, key10, ln, NoteKind::Landmine).empty());
+            EXPECT_TRUE(bms_channel_for_mode(mode, scratch, ln, NoteKind::Normal).empty());
+            EXPECT_TRUE(bms_channel_for_mode(mode, pedal, ln, NoteKind::Normal).empty());
+            EXPECT_TRUE(
+                bms_channel_for_mode(mode, p2_key10, ln, NoteKind::Normal).empty());
+        }
+        // 合法域边界不受影响：1P 键1/键9、2P 键1（BME-DP 记法恒 21）
+        EXPECT_FALSE(
+            bms_channel_for_mode(mode, Lane{0, LaneKind::Key, 1}, false, NoteKind::Normal)
+                .empty());
+        EXPECT_FALSE(
+            bms_channel_for_mode(mode, Lane{0, LaneKind::Key, 9}, false, NoteKind::Normal)
+                .empty());
+        EXPECT_EQ(bms_channel_for_mode(mode, p2_key1, false, NoteKind::Normal), "21");
+    }
+    // 键9 仍按 profile 分派（std 25 / bmesp 17）
+    EXPECT_EQ(bms_channel_for_mode("pms9k", Lane{0, LaneKind::Key, 9}, false,
+                                   NoteKind::Normal),
+              "25");
+    EXPECT_EQ(bms_channel_for_mode("pms9k-bmesp", Lane{0, LaneKind::Key, 9}, false,
+                                   NoteKind::Normal),
+              "17");
+    // 7key 表不受 PMS 加固影响（Scratch 仍可表示）
+    EXPECT_FALSE(bms_channel_for_mode("sp7k", scratch, false, NoteKind::Normal).empty());
+}

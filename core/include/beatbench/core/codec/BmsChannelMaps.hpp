@@ -19,6 +19,8 @@ std::optional<BmsChannelRule> bms_channel_rule_for(std::string_view mode,
 
 /// 按游玩模式反向映射（Lane + 物件属性 → BMS 通道字符串；写回/统计用）。
 /// 语义与 bms_channel_for 相同，mode 决定用哪张表（pms9k → 9key，其余 → 7key）。
+/// lane 在该模式下不可表示时返回空串（如 PMS 的 Scratch/Pedal/键号越界），
+/// 调用方以此判定可表示性（入口拒绝 / copy 报 unsupported / writer 丢弃+诊断）。
 std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool ln,
                                  NoteKind kind);
 
