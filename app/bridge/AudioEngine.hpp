@@ -57,6 +57,9 @@ class AudioEngine : public QObject {
 
 public:
     explicit AudioEngine(QObject* parent = nullptr);
+    /// Injected backend uses the same initialization/settings path as production.
+    explicit AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend,
+                         QObject* parent = nullptr);
     ~AudioEngine() override;
 
     /// 试听一个采样文件（相对 = 谱面目录；绝对路径直接用）。
@@ -74,7 +77,7 @@ public:
     Q_INVOKABLE bool applySettings(int device, int sampleRate, int framesPerBuffer,
                                    qreal masterVolumePercent);
 
-    /// 重新打开流（启动/换设备后；用当前 m_settings；失败回退）。供测试/诊断。
+    /// 用当前已接受的设置重开流（也可在流不可用时重试）。供测试/诊断。
     Q_INVOKABLE bool reopenStream();
 
     /// 设置谱面目录（相对路径解析基准；openChart 后调用）。
@@ -161,11 +164,11 @@ public:
     }
     /// 实际流采样率（设备可能调整；显示真实值）。
     int actualRate() const {
-        return m_backend ? m_backend->streamInfo().sampleRate : 0;
+        return m_backend && m_initialized ? m_backend->streamInfo().sampleRate : 0;
     }
     /// 实际延迟（ms；设置页显示）。
     qreal latencyMs() const {
-        return m_backend ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
+        return m_backend && m_initialized ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
                          : 0.0;
     }
     /// 当前活动设备描述（"设备名（API）"；空 = 无）。
@@ -199,6 +202,7 @@ signals:
     void waitRenderSettingChanged();
 
 private:
+    friend struct AudioEngineTestAccess;  // Deterministic synthetic PCM clock tests.
     /// 音频路径解析 + **扩展名回退**：原路径存在 → 用它；否则按相同 basename
     /// 试其它音频扩展名；全无 → 空串。BMS 播放器惯例（beatoraja 同款）。
     static QString resolveAudioPath(const QString& resolved);
@@ -209,6 +213,8 @@ private:
     void saveSettings() const;
     /// 重建设备列表（devices() 快照；设置页下拉）。
     void rebuildDevices();
+    bool startStream(const beatbench::audio::AudioSettings& settings, std::string& error);
+    void clearSettingsError();
 
     /// 回调上下文（render 直达内核；deviceRate 更新一次，原子读）
     struct RenderCtx {
@@ -217,6 +223,7 @@ private:
     };
 
     std::unique_ptr<beatbench::audio::AudioBackend> m_backend;
+    bool m_backendReady = false;
     beatbench::audio::SamplePlayer m_player;
     beatbench::audio::SampleCache m_cache;  ///< 采样解码缓存（M4.3a：LRU+预算+合并）
     RenderCtx m_renderCtx;
