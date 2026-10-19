@@ -1783,12 +1783,10 @@ public:
         if (!mirror && rotate == 0) {
             throw CommandError("bad_args", "至少指定 mirror 或 rotate 之一");
         }
-        auto comp = std::make_unique<edit::CompositeCommand>();
-        for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::TransformNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, mirror, rotate));
-        }
-        const bool ok = session.exec(std::move(comp));
+        // 批量快照变换（2026-10 复核 R27-2）：值定位全部在模型未动时完成，
+        // 同拍同 sample 互换不再把写入目标当后续源拆坏 LN；单命令一个 undo 步。
+        const bool ok = session.exec(
+            std::make_unique<edit::TransformNotesCommand>(refs, mirror, rotate));
         // 返回变换后的选择引用（QML 直接采用，不再独立计算映射——单一事实源在 core；
         // 键号上限按谱面模式，与命令 apply 同一 transform_lane）。
         const std::string mode =

@@ -1429,6 +1429,63 @@ std::string TransformNoteCommand::describe() const {
     return s;
 }
 
+// ---------- TransformNotesCommand ----------
+
+TransformNotesCommand::TransformNotesCommand(std::vector<NoteRef> refs, bool mirror,
+                                             int rotate)
+    : m_refs(std::move(refs)), m_mirror(mirror), m_rotate(rotate) {}
+
+void TransformNotesCommand::apply(Chart& chart) {
+    m_applied.clear();
+    // 键号上限按谱面模式（apply 时刻的 chart.mode_id）
+    const int max_key = chart_mode_key_count(chart.mode_id.value_or("sp7k"));
+    // 第一遍：全部定位 + 计算新 lane（模型未动 → 值定位必中各自源，
+    // 同拍同 sample 互换不再把写入目标当后续源，R27-2）
+    struct Planned {
+        std::size_t index;
+        const NoteRef* ref;
+        Lane new_lane;
+    };
+    std::vector<Planned> planned;
+    planned.reserve(m_refs.size());
+    for (const auto& r : m_refs) {
+        const auto idx = find_note(chart.notes, r.measure, r.pos, r.lane, r.sample);
+        if (!idx) continue;  // 与逐项命令同语义：找不到 → 跳过
+        const Lane nl = transform_lane(r.lane, m_mirror, m_rotate, max_key);
+        if (nl == r.lane) continue;  // 无变化
+        planned.push_back(Planned{*idx, &r, nl});
+    }
+    // 第二遍：统一落新 lane
+    for (const auto& p : planned) {
+        chart.notes[p.index].value.lane = p.new_lane;
+        m_applied.push_back(Applied{*p.ref, p.index, p.new_lane});
+    }
+}
+
+void TransformNotesCommand::invert(Chart& chart) {
+    if (m_applied.empty()) return;
+    // 倒序恢复：按下标 + 值校验（当前应为 new_lane）；容器被重排时回退值定位
+    for (auto it = m_applied.rbegin(); it != m_applied.rend(); ++it) {
+        const auto& a = *it;
+        if (a.index < chart.notes.size() &&
+            chart.notes[a.index].value.lane == a.new_lane) {
+            chart.notes[a.index].value.lane = a.ref.lane;
+            continue;
+        }
+        const auto idx =
+            find_note(chart.notes, a.ref.measure, a.ref.pos, a.new_lane, a.ref.sample);
+        if (idx) chart.notes[*idx].value.lane = a.ref.lane;
+    }
+    m_applied.clear();
+}
+
+std::string TransformNotesCommand::describe() const {
+    std::string s = "变换 " + std::to_string(m_refs.size()) + " 个 note";
+    if (m_mirror) s += " 镜像";
+    if (m_rotate != 0) s += " 旋转" + std::to_string(m_rotate);
+    return s;
+}
+
 // ---------- MetaEditCommand ----------
 
 namespace {

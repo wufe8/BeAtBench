@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
@@ -270,4 +271,159 @@ TEST(TransformQuantize, ProtocolEmptySelection) {
     const Json resp = global_registry().dispatch(req);
     EXPECT_FALSE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("error").at("code").as_str(), "empty_selection");
+}
+
+// —— R27-2（上游复核）：批量快照变换，同拍同 sample 互换不拆 LN ——
+
+namespace {
+
+// 复核场景：pms9k，key1 LN 头@pos0 s1、key1 LN 尾@1/4 s1、key9 普通音@pos0 s1
+//（三事件同 sample；按 Chart 顺序全选 mirror 时，逐项值定位会把刚移到 key9
+// 的头又被普通音命令按同值定位移回 key1，头尾配对拆坏且命令返回 ok）。
+Chart make_pms_ln_swap_chart() {
+    Chart c;
+    c.meta["TITLE"] = "pms ln swap";
+    c.meta["BPM"] = "120";
+    c.mode_id = "pms9k";
+    Event<Note> head{0, Rational(0, 1), {}};
+    head.value.lane = {0, LaneKind::Key, 1};
+    head.value.sample.id = 1;
+    head.value.ln_channel = true;
+    Event<Note> tail{0, Rational(1, 4), {}};
+    tail.value.lane = {0, LaneKind::Key, 1};
+    tail.value.sample.id = 1;
+    tail.value.ln_channel = true;
+    Event<Note> normal{0, Rational(0, 1), {}};
+    normal.value.lane = {0, LaneKind::Key, 9};
+    normal.value.sample.id = 1;
+    c.notes = {head, tail, normal};
+    return c;
+}
+
+NoteRef ref_for(const Event<Note>& e) {
+    return NoteRef{e.measure, e.pos, e.value.lane, e.value.sample.id, e.value.sub_line};
+}
+
+Json transform_request(std::vector<NoteRef> refs, bool mirror, int rotate = 0) {
+    Json args = Json::object();
+    Json sel = Json::array();
+    for (const auto& r : refs) {
+        Json item = Json::object();
+        item.set("measure", static_cast<std::int64_t>(r.measure));
+        Json pos = Json::object();
+        pos.set("num", static_cast<std::int64_t>(r.pos.num));
+        pos.set("den", static_cast<std::int64_t>(r.pos.den));
+        item.set("pos", std::move(pos));
+        Json lane = Json::object();
+        lane.set("player", static_cast<std::int64_t>(r.lane.player));
+        lane.set("index", static_cast<std::int64_t>(r.lane.index));
+        lane.set("kind", "key");
+        item.set("lane", std::move(lane));
+        item.set("sample", static_cast<std::int64_t>(r.sample));
+        sel.push_back(std::move(item));
+    }
+    args.set("selection", std::move(sel));
+    if (mirror) args.set("mirror", true);
+    if (rotate != 0) args.set("rotate", static_cast<std::int64_t>(rotate));
+    Json req = Json::object();
+    req.set("command", "note.transform");
+    req.set("args", std::move(args));
+    return req;
+}
+
+}  // namespace
+
+TEST(TransformQuantize, BatchMirrorSwapKeepsLnPaired) {
+    auto& s = beatbench::edit::global_editor_session();
+    s.load(make_pms_ln_swap_chart());
+    std::vector<NoteRef> refs;
+    for (const auto& e : s.chart().notes) refs.push_back(ref_for(e));  // Chart 顺序
+    const Json resp = global_registry().dispatch(transform_request(refs, true));
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    const auto& notes = s.chart().notes;
+    ASSERT_EQ(notes.size(), 3u);
+    // LN 头尾整体到 key9，普通音到 key1
+    EXPECT_EQ(notes[0].value.lane, (Lane{0, LaneKind::Key, 9}));
+    EXPECT_EQ(notes[1].value.lane, (Lane{0, LaneKind::Key, 9}));
+    EXPECT_EQ(notes[2].value.lane, (Lane{0, LaneKind::Key, 1}));
+    // 配对保持：头尾互指且同 lane
+    ASSERT_TRUE(notes[0].value.ln_pair.has_value());
+    EXPECT_EQ(*notes[0].value.ln_pair, 1u);
+    ASSERT_TRUE(notes[1].value.ln_pair.has_value());
+    EXPECT_EQ(*notes[1].value.ln_pair, 0u);
+    // undo/redo 精确往返
+    ASSERT_TRUE(s.undo());
+    EXPECT_EQ(s.chart().notes[0].value.lane, (Lane{0, LaneKind::Key, 1}));
+    EXPECT_EQ(s.chart().notes[1].value.lane, (Lane{0, LaneKind::Key, 1}));
+    EXPECT_EQ(s.chart().notes[2].value.lane, (Lane{0, LaneKind::Key, 9}));
+    ASSERT_TRUE(s.redo());
+    EXPECT_EQ(s.chart().notes[0].value.lane, (Lane{0, LaneKind::Key, 9}));
+    EXPECT_EQ(s.chart().notes[1].value.lane, (Lane{0, LaneKind::Key, 9}));
+    EXPECT_EQ(s.chart().notes[2].value.lane, (Lane{0, LaneKind::Key, 1}));
+    EXPECT_TRUE(s.chart().notes[0].value.ln_pair.has_value());
+    EXPECT_EQ(s.chart().notes[0].value.lane, s.chart().notes[1].value.lane);
+}
+
+TEST(TransformQuantize, BatchMirrorSwapOrderIndependent) {
+    // 不同选择顺序（含普通音在前的危险序）结果一致
+    const std::vector<std::vector<std::size_t>> orders = {{0, 1, 2}, {2, 0, 1}, {1, 2, 0}};
+    for (const auto& order : orders) {
+        auto& s = beatbench::edit::global_editor_session();
+        s.load(make_pms_ln_swap_chart());
+        std::vector<NoteRef> refs;
+        for (const auto& i : order) refs.push_back(ref_for(s.chart().notes[i]));
+        const Json resp = global_registry().dispatch(transform_request(refs, true));
+        ASSERT_TRUE(resp.at("ok").as_bool());
+        const auto& notes = s.chart().notes;
+        EXPECT_EQ(notes[0].value.lane, (Lane{0, LaneKind::Key, 9})) << "order[0]";
+        EXPECT_EQ(notes[1].value.lane, (Lane{0, LaneKind::Key, 9})) << "order[1]";
+        EXPECT_EQ(notes[2].value.lane, (Lane{0, LaneKind::Key, 1})) << "order[2]";
+        EXPECT_EQ(notes[0].value.lane, notes[1].value.lane);
+    }
+}
+
+TEST(TransformQuantize, BatchRotateNoTargetCollision) {
+    // rotate 同类碰撞：A@key1 s1 → key2，B@key2 s1（同 sample）→ key3。
+    // 旧实现 A 先应用后，B 按值定位 key2 命中刚移来的 A，把 A 再推到 key3。
+    auto& s = beatbench::edit::global_editor_session();
+    Chart c;
+    c.meta["TITLE"] = "rotate swap";
+    c.meta["BPM"] = "120";
+    Event<Note> a{1, Rational(0, 1), {}};
+    a.value.lane = {0, LaneKind::Key, 1};
+    a.value.sample.id = 1;
+    Event<Note> b{1, Rational(0, 1), {}};
+    b.value.lane = {0, LaneKind::Key, 2};
+    b.value.sample.id = 1;
+    c.notes = {a, b};
+    s.load(c);
+    // 危险序：A 在前
+    const Json resp = global_registry().dispatch(transform_request(
+        {ref_for(s.chart().notes[0]), ref_for(s.chart().notes[1])}, false, 1));
+    ASSERT_TRUE(resp.at("ok").as_bool());
+    EXPECT_EQ(s.chart().notes[0].value.lane, (Lane{0, LaneKind::Key, 2}));
+    EXPECT_EQ(s.chart().notes[1].value.lane, (Lane{0, LaneKind::Key, 3}));
+}
+
+TEST(TransformQuantize, BatchMirrorRoundtripFileStable) {
+    // 变换后保存重开：模型语义稳定，LN 两端同 lane（key9 = 标准 65 通道）仍成对
+    auto& s = beatbench::edit::global_editor_session();
+    s.load(make_pms_ln_swap_chart());
+    std::vector<NoteRef> refs;
+    for (const auto& e : s.chart().notes) refs.push_back(ref_for(e));
+    ASSERT_TRUE(global_registry().dispatch(transform_request(refs, true)).at("ok").as_bool());
+    const auto sigs = norm_notes(s.chart().notes);
+    beatbench::bms::BmsReadOptions opts;
+    opts.mode = "pms9k";
+    const auto r2 = beatbench::bms::read_bms(beatbench::bms::write_bms(s.chart()), opts);
+    EXPECT_EQ(norm_notes(r2.chart.notes), sigs);
+    int key9_count = 0, key9_paired = 0;
+    for (const auto& e : r2.chart.notes) {
+        if (e.value.lane == (Lane{0, LaneKind::Key, 9})) {
+            ++key9_count;
+            if (e.value.ln_pair) ++key9_paired;
+        }
+    }
+    EXPECT_EQ(key9_count, 2);
+    EXPECT_EQ(key9_paired, 2);
 }

@@ -279,6 +279,30 @@ private:
     std::optional<Lane> m_new_lane;
 };
 
+/// 批量变换（note.transform 协议路径，2026-10 复核 R27-2）：先按值定位全部
+/// 选中 note（此时模型未动，定位必中各自源）并快照旧 lane，再统一落新 lane——
+/// 写入目标不再成为后续定位源（同拍同 sample 的 LN 头/普通音互换不再拆坏配对）。
+/// 单命令一个 undo 步；invert 按下标+值校验恢复，失配回退值定位。
+class TransformNotesCommand : public EditCommand {
+public:
+    TransformNotesCommand(std::vector<NoteRef> refs, bool mirror, int rotate);
+    std::string name() const override { return "note.transform"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+private:
+    struct Applied {
+        NoteRef ref;        ///< 原引用（ref.lane = 旧 lane）
+        std::size_t index;  ///< apply 时的 note 下标
+        Lane new_lane;
+    };
+    std::vector<NoteRef> m_refs;
+    bool m_mirror;
+    int m_rotate;
+    std::vector<Applied> m_applied;
+};
+
 /// 键轨 lane 变换（镜像/循环移位公式）：mirror = key i ↔ key (max_key+1-i)；
 /// rotate = key 轨循环移位（1→2→…→max_key→1，负数反向）。非 Key lane 原样返回。
 /// max_key 由调用方按谱面模式传入（chart_mode_key_count），本函数不感知模式。
