@@ -44,6 +44,7 @@
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
 #include "bridge/ProjectController.hpp"
+#include "bridge/ResourceBindingController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWorkspace.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -292,6 +293,12 @@ int main(int argc, char** argv) {
     // M7 项目页（doc/07 §9.1 阶段①）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
+    beatbench::app::ResourceBindingController resourceBindingController(&documentService);
+    QObject::connect(&resourceBindingController, &beatbench::app::ResourceBindingController::bindingsApplied,
+                     &documentService, [&] {
+        documentService.refresh();
+        projectController.refreshOpenStates();
+    });
     beatbench::app::ChartHistoryController chartHistoryController(&documentService);
     beatbench::app::ChartFileActions chartFileActions;
 
@@ -314,6 +321,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("clipboard"), &clipboardBridge);
     engine.rootContext()->setContextProperty(QStringLiteral("editUtils"), &editUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
+    engine.rootContext()->setContextProperty(QStringLiteral("resourceBindingController"), &resourceBindingController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
     engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"), &chartHistoryController);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）

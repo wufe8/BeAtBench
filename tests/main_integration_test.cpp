@@ -13,6 +13,7 @@
 #include "bridge/LintListModel.hpp"
 #include "bridge/PlayheadOverlayItem.hpp"
 #include "bridge/ProjectController.hpp"
+#include "bridge/ResourceBindingController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWaveformItem.hpp"
 #include "bridge/SliceWorkspace.hpp"
@@ -246,7 +247,11 @@ public:
         for (const auto& n : s->chart().notes) notes.append(QVariantMap{
             {"measure", n.measure}, {"num", n.pos.num}, {"den", n.pos.den},
             {"lane", n.value.lane.index}, {"sample", n.value.sample.id}});
-        return {{"meta", meta}, {"notes", notes}, {"dirty", s->is_dirty()},
+        QVariantMap definitions;
+        for (const auto& [key, def] : s->chart().samples)
+            definitions.insert(QString::number(int(key.first)) + ":" + QString::number(key.second),
+                               QString::fromStdString(def.file));
+        return {{"definitions", definitions}, {"meta", meta}, {"notes", notes}, {"dirty", s->is_dirty()},
             {"undo", int(s->undo_depth())}, {"redo", int(s->redo_depth())},
             {"revision", QString::number(s->revision())}, {"path", QString::fromStdString(s->path())}};
     }
@@ -341,6 +346,11 @@ public slots:
         ctx->setContextProperty("clipboard", &clipboard);
         ctx->setContextProperty("editUtils", &utils);
         ctx->setContextProperty("project", &project);
+        ctx->setContextProperty("resourceBindingController", &bindings);
+        connect(&bindings, &ResourceBindingController::bindingsApplied, engine, [this] {
+            documents.refresh();
+            project.refreshOpenStates();
+        });
         ctx->setContextProperty("documents", &documents);
         ctx->setContextProperty("chartHistoryController", history.get());
         workspace.setChartSession(documents.currentSession());
@@ -407,6 +417,7 @@ private:
         return functions;
     }
     DocumentService documents;
+    ResourceBindingController bindings{&documents};
     CommandDispatcher dispatcher;
     UiActionRegistry uiActions;
     ThemeManager theme;

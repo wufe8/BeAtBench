@@ -1241,6 +1241,15 @@ ApplicationWindow {
         function onSlicesChanged() { updateActionStates() }
         function onAudioChanged() { updateActionStates() }
     }
+    Connections {
+        target: typeof resourceBindingController !== "undefined" ? resourceBindingController : null
+        function onBindingsApplied() {
+            documents.refresh()
+            session.refreshSamples()
+            editPage.reloadBga()
+            project.refreshOpenStates()
+        }
+    }
     Timer { id: sliceExportRetry; interval: 300; repeat: true; onTriggered: doDebugSliceExport() }
     function doDebugSliceExport() {
         if (!sliceWorkspace.hasAudio || !sliceWorkspace.hasSlices) { sliceExportRetry.start(); return }
@@ -1447,7 +1456,10 @@ ApplicationWindow {
     function completeSaveAttempt(result) {
         if (result === undefined || window.pendingDocAction === "") return
         if (result) {
-            if (window.pendingDocAction === "close" || window.pendingDocAction === "saveAll") saveThenContinue()
+            if (window.pendingDocAction === "saveSelected") {
+                ++window.pendingSelectedSaveIndex
+                saveThenContinue()
+            } else if (window.pendingDocAction === "close" || window.pendingDocAction === "saveAll") saveThenContinue()
             else finishPendingDocumentAction()
         } else {
             setStatus(qsTr("保存失败，未关闭/替换当前谱面"))
@@ -1485,7 +1497,8 @@ ApplicationWindow {
         const saveAs = window.pendingPmsSaveAs
         clearPmsSuffixConfirmation() // 本次授权仅消费一次，不能留下全局“已允许”状态。
         if (id === "" || id !== documents.activeId() || id !== chartSession.sessionId ||
-                !chartSession.hasChart || (!saveAs && path !== window.chartPath)) {
+                !chartSession.hasChart || (!saveAs && path !== window.chartPath) ||
+                (window.pendingDocAction === "saveSelected" && !selectedSaveTargetUnchanged())) {
             chartHistoryController.finishSave(id, false)
             setStatus(qsTr("文档或目标已变化，保存已取消；请重新确认"))
             if (window.pendingDocAction !== "") cancelPendingDocumentAction()
@@ -1547,6 +1560,8 @@ ApplicationWindow {
     property string pendingDocAction: ""   // "" | "close" | "new" | "open" | "switch" | "assign" | "swap" (target ID in pendingOpenPath)
     property string pendingOpenPath: ""
     property string pendingOriginalDocument: ""
+    property var pendingSelectedSaves: []
+    property int pendingSelectedSaveIndex: 0
     /// 空模式走选择对话框；「新建为模式」直建指定模式。
     property string pendingNewMode: ""
     property bool allowClose: false
@@ -1604,11 +1619,13 @@ ApplicationWindow {
             window.pendingNewMode = ""
             if (mode !== "") performNewChart(mode)
             else newChartDialog.open()
-        } else if (action === "saveAll") {
+        } else if (action === "saveAll" || action === "saveSelected") {
+            window.pendingSelectedSaves = []
+            window.pendingSelectedSaveIndex = 0
             restoreDocument(original)
             project.refreshOpenStates()
             documents.refresh()
-            setStatus(qsTr("全部已打开文档已保存"))
+            setStatus(action === "saveSelected" ? qsTr("勾选范围内的已打开文档已保存") : qsTr("全部已打开文档已保存"))
         } else if (action === "swap") {
             const previousId = documents.activeId()
             editPage.prepareReferenceSwap()
@@ -1634,10 +1651,62 @@ ApplicationWindow {
         window.pendingOpenPath = ""
         window.pendingOriginalDocument = ""
         window.pendingNewMode = ""
+        window.pendingSelectedSaves = []
+        window.pendingSelectedSaveIndex = 0
         window.allowClose = false
         restoreDocument(original)
     }
+    function selectedSaveTargetUnchanged() {
+        const target = window.pendingSelectedSaves[window.pendingSelectedSaveIndex]
+        if (!target || window.metaDraftDirty) return false
+        const current = project.saveSliceTargetSnapshot([target.path])
+        return current.length === 1 && current[0].id === target.id &&
+                current[0].path === target.path && current[0].revision === target.revision
+    }
+    function saveSelectedDocuments(paths) {
+        if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "" ||
+                window.pendingDocAction !== "" || unsavedConfirmDialog.visible) return
+        // Never silently commit the primary panel or save an unselected dirty primary.
+        if (window.metaDraftDirty) {
+            setStatus(qsTr("请先提交面板草稿，再保存勾选谱面"))
+            return
+        }
+        window.pendingSelectedSaves = project.saveSliceTargetSnapshot(paths)
+        window.pendingSelectedSaveIndex = 0
+        window.pendingOriginalDocument = documents.activeId()
+        window.pendingDocAction = "saveSelected"
+        saveThenContinue()
+    }
     function saveThenContinue() {
+        if (window.pendingDocAction === "saveSelected") {
+            // Snapshot includes only explicitly requested loaded dirty IDs. Do not use
+            // saveDirtyNamed here: unrelated dirty documents must remain untouched.
+            while (window.pendingSelectedSaveIndex < window.pendingSelectedSaves.length) {
+                if (!selectedSaveTargetUnchanged()) {
+                    setStatus(qsTr("勾选保存目标已修改、重载或另存为，请重新保存"))
+                    cancelPendingDocumentAction()
+                    return
+                }
+                const target = window.pendingSelectedSaves[window.pendingSelectedSaveIndex]
+                const activated = documents.activate(target.id)
+                if (!activated.ok) {
+                    setStatus(activated.error)
+                    cancelPendingDocumentAction()
+                    return
+                }
+                adoptChart(activated.path)
+                const saved = saveChart()
+                if (saved === undefined) return // PMS confirmation resumes via completeSaveAttempt.
+                if (!saved) {
+                    setStatus(qsTr("保存勾选谱面失败，其余目标未保存"))
+                    cancelPendingDocumentAction()
+                    return
+                }
+                ++window.pendingSelectedSaveIndex
+            }
+            finishPendingDocumentAction()
+            return
+        }
         // 先提交当前面板草稿；退出时还要保存所有非活动脏文档。
         if (documentIsDirty()) {
             if (window.chartPath === "") { openSaveAsDialog(); return }
