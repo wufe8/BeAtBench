@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# pre-commit 门禁（安装：git config core.hooksPath .githooks）
+#
+#   - 文档护栏：挂账生命周期 / 指针有效性 / 弯引号（scripts/check-docs.sh）
+#   - 赶时间可临时跳过：SKIP_DOCS=1 git commit ...
+set -euo pipefail
+
+if [ "${SKIP_DOCS:-0}" = "1" ]; then
+  echo "[pre-commit] SKIP_DOCS=1，跳过文档护栏"
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+exec scripts/check-docs.sh

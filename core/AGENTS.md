@@ -12,5 +12,5 @@
   M0 遗留的复数 `commands/` 目录已删除，不存在。
 - 命名空间 `beatbench::<模块>`；文件 snake_case、类型 PascalCase；注释中文；
   每文件带 SPDX 头 `// SPDX-License-Identifier: GPL-3.0-only`。
-- `core/json/` 是最小 JSON 实现（零依赖，命令协议用），不引第三方 JSON 库。
+- `core/include/beatbench/core/json/` 是最小 JSON 实现（零依赖，命令协议用），不引第三方 JSON 库。
 - `#RANDOM/#IF` 块为 raw 兜底（播放/时序走 `expand_variants`）；结构化 AST 是 M9 规划（doc/04 §6）。
