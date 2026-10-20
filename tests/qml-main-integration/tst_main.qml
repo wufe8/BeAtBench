@@ -169,6 +169,162 @@ TestCase {
         compare(mainFixture.disk(a), disk)
     }
 
+    function bindingSetup(data) {
+        start(true)
+        if (data) { main.width = data.width; main.height = data.height }
+        const path = mainFixture.snapshot(a).path
+        project.scan(path.slice(0, path.lastIndexOf("/")))
+        tryCompare(project, "state", "ready")
+        main.currentPage = 3
+        project.setAllSliceTargets(true)
+        compare(project.sliceTargetCount, 2)
+        const page = mainFixture.objectNamed(main, "projectPage")
+        verify(page !== null)
+        return page
+    }
+    function test_resourceBindings_multiselect_preview_apply_andUndo_data() {
+        return [{tag: "default", width: 1280, height: 800}, {tag: "narrow", width: 640, height: 480}]
+    }
+    function test_resourceBindings_multiselect_preview_apply_andUndo(data) {
+        const page = bindingSetup(data)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        const referenceId = split.referenceDocumentId
+        clickButton(page, "更新资源绑定…")
+        const dialog = mainFixture.dialog(main, "更新勾选谱面的资源绑定")
+        verify(dialog !== null)
+        dialog.rawText = "#WAV01 audio/new.wav\n#BMP02 bga/new.png"
+        clickButton(dialog, "预览绑定更新")
+        compare(dialog.preview.ok, true)
+        compare(dialog.preview.targetCount, 2)
+        compare(dialog.preview.changedCount, 4)
+        compare(dialog.preview.collisionCount, 0)
+        const applyButton = mainFixture.objectNamed(dialog, "resourceBindingApplyButton")
+        const bottom = applyButton.mapToItem(main.contentItem, 0, applyButton.height)
+        verify(bottom.y <= main.height && bottom.x >= 0)
+        unchanged(sa, sb)
+        clickButton(dialog, "应用绑定更新")
+        tryCompare(dialog, "visible", false)
+        compare(documents.activeId(), a)
+        compare(split.referenceDocumentId, referenceId)
+        const aa = mainFixture.snapshot(a), bb = mainFixture.snapshot(b)
+        compare(aa.undo, sa.undo + 1)
+        compare(bb.undo, sb.undo + 1)
+        compare(aa.notes, sa.notes)
+        compare(bb.notes, sb.notes)
+        compare(mainFixture.disk(a), diskA)
+        compare(mainFixture.disk(b), diskB)
+        compare(mainFixture.bridgeState(documents.session(b)).samples, 2)
+        verify(project.openStates[sb.path].dirty)
+        for (const id of [a, b]) {
+            const undo = JSON.parse(beatbench.dispatch(JSON.stringify({command: "session.undo", args: {session_id: id}})))
+            verify(undo.ok)
+        }
+        documents.refresh()
+        compare(mainFixture.snapshot(a).definitions, sa.definitions)
+        compare(mainFixture.snapshot(b).definitions, sb.definitions)
+    }
+    function test_resourceBindings_definedId_requiresConsent_cancel_andSelectionInvalidates() {
+        const page = bindingSetup()
+        verify(JSON.parse(beatbench.dispatch(JSON.stringify({command: "sample.setFile", args: {
+            session_id: b, id: "01", file: "old.wav"}}))).ok)
+        documents.refresh()
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        clickButton(page, "更新资源绑定…")
+        let dialog = mainFixture.dialog(main, "更新勾选谱面的资源绑定")
+        dialog.rawText = "#WAV01 new.wav"
+        clickButton(dialog, "预览绑定更新")
+        compare(dialog.preview.collisionCount, 1)
+        const apply = mainFixture.objectNamed(dialog, "resourceBindingApplyButton")
+        const consent = mainFixture.objectNamed(dialog, "resourceBindingOverwriteConsent")
+        verify(apply !== null && !apply.enabled)
+        verify(consent.visible && !consent.checked)
+        wait(50)
+        verify(mainFixture.screenshot())
+        clickButton(dialog, "取消")
+        unchanged(sa, sb)
+        clickButton(page, "更新资源绑定…")
+        dialog = mainFixture.dialog(main, "更新勾选谱面的资源绑定")
+        clickButton(dialog, "预览绑定更新")
+        mouseClick(consent, consent.width / 2, consent.height / 2)
+        verify(apply.enabled)
+        project.setSliceTargetChecked("main-integration-a.bms", false)
+        tryVerify(function() { return !dialog.preview.ok })
+        verify(!apply.enabled)
+        clickButton(dialog, "预览绑定更新")
+        compare(dialog.preview.targetCount, 1)
+        compare(consent.checked, false)
+        mouseClick(consent, consent.width / 2, consent.height / 2)
+        clickButton(dialog, "应用绑定更新")
+        compare(mainFixture.snapshot(a), sa)
+        compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+        compare(documents.activeId(), a)
+    }
+    function test_selectedSave_onlyFrozenSelection_notOtherDirtyDocuments() {
+        const page = bindingSetup()
+        project.setSliceTargetChecked("main-integration-a.bms", false)
+        const sa = mainFixture.snapshot(a), diskA = mainFixture.disk(a)
+        clickButton(page, "保存勾选谱面")
+        tryCompare(main, "pendingDocAction", "")
+        compare(mainFixture.snapshot(a), sa)
+        compare(mainFixture.disk(a), diskA)
+        compare(mainFixture.snapshot(b).dirty, false)
+        compare(documents.activeId(), a)
+    }
+    function test_selectedSave_nonactivePms_cancelAcceptStale_data() {
+        return [{tag: "cancel", action: "cancel"}, {tag: "accept", action: "accept"},
+                {tag: "stale", action: "stale"}]
+    }
+    function test_selectedSave_nonactivePms_cancelAcceptStale(data) {
+        start(true)
+        const id = openPmsFixture(pmsProfileData()[0])
+        savePmsToDangerousPath(id, main.chartPath + ".selected.bms")
+        verify(JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+            session_id: id, edits: [{key: "TITLE", value: "Selected PMS"}]}}))).ok)
+        documents.refresh()
+        const targetPath = mainFixture.snapshot(id).path, disk = mainFixture.disk(id)
+        verify(documents.activate(a).ok)
+        main.adoptChart(mainFixture.snapshot(a).path)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        main.saveSelectedDocuments([targetPath])
+        const dialog = pmsDialog()
+        // Changing project selection cannot expand this pending batch to A or B.
+        project.setSliceTargetChecked(mainFixture.snapshot(a).path, true)
+        if (data.action === "stale") {
+            verify(JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+                session_id: id, edits: [{key: "ARTIST", value: "Changed after preview"}]}}))).ok)
+        }
+        clickButton(dialog, data.action === "cancel" ? "取消保存" : "仍按此后缀保存")
+        tryCompare(main, "pendingDocAction", "")
+        compare(documents.activeId(), a)
+        unchanged(sa, sb)
+        compare(mainFixture.disk(a), diskA)
+        compare(mainFixture.disk(b), diskB)
+        if (data.action === "accept") {
+            compare(mainFixture.snapshot(id).dirty, false)
+            verify(mainFixture.disk(id).indexOf("#TITLE Selected PMS") >= 0)
+        } else {
+            compare(mainFixture.disk(id), disk)
+            verify(mainFixture.snapshot(id).dirty)
+        }
+    }
+    function test_resourceBindings_emptySelection_andPanelDraft_doNotFallBackToA() {
+        const page = bindingSetup()
+        project.clearSliceTargets()
+        verify(!mainFixture.button(page, "更新资源绑定…").enabled)
+        project.setAllSliceTargets(true)
+        main.currentPage = 0
+        draft()
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        main.currentPage = 3
+        clickButton(page, "更新资源绑定…")
+        compare(mainFixture.dialog(main, "更新勾选谱面的资源绑定"), null)
+        verify(page.saveText.indexOf("草稿") >= 0)
+        verify(main.metaDraftDirty)
+        unchanged(sa, sb)
+    }
+
     function test_projectHistoryTab_savesWithoutDialog_andKeepsSelectionIdentity() {
         start(true)
         main.currentPage = 3

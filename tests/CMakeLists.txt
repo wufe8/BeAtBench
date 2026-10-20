@@ -160,6 +160,20 @@ if (Qt6Core_FOUND)
     add_test(NAME chart_snapshot_store_tests COMMAND chart_snapshot_store_test)
     set_tests_properties(chart_snapshot_store_tests PROPERTIES TIMEOUT 30)
 
+    add_executable(resource_binding_controller_test resource_binding_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ResourceBindingController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ResourceBindingController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(resource_binding_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(resource_binding_controller_test PRIVATE beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(resource_binding_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(resource_binding_controller_test)
+    add_test(NAME resource_binding_controller_tests COMMAND resource_binding_controller_test)
+    set_tests_properties(resource_binding_controller_tests PROPERTIES TIMEOUT 30)
+
     # Settings rollback uses an injected backend and synthetic PCM; Qt Core only, no devices.
     add_executable(audio_engine_test audio_engine_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp
@@ -339,7 +353,7 @@ if (Qt6Core_FOUND)
         # Full production Main/SessionController integration; audio is a no-device spy.
         add_executable(main_integration_test main_integration_test.cpp
             ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
-        foreach(bridge ChartSession DocumentService ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
+        foreach(bridge ChartSession DocumentService ResourceBindingController ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
                 ChartViewItem PlayheadOverlayItem WaveformOverviewItem SliceWaveformItem
                 SliceWorkspace AudioEngine ThemeManager UiActionRegistry KeyMonitor ClipboardBridge EditUtils ProjectController)
             target_sources(main_integration_test PRIVATE

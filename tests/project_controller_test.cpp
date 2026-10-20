@@ -14,7 +14,10 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 #include "bridge/ProjectController.hpp"
+#include "bridge/DocumentService.hpp"
+#include "beatbench/core/edit/EditCommand.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
 namespace {
@@ -478,6 +481,101 @@ TEST_F(ProjectControllerTest, ModelsFiltersAndResourceDetailsPreserveLegacyResul
     EXPECT_EQ(project.chartModel()->rowCount(), 0);
     project.setChartFilter(false, "");
     EXPECT_EQ(project.chartModel()->rowCount(), 1);
+}
+
+// Save tests own only their three IDs; no scanning, audio, or user files.
+class ProjectSelectedSaveTest : public ProjectControllerTest {
+protected:
+    void SetUp() override {
+        ProjectControllerTest::SetUp();
+        auto& reg = beatbench::edit::session_registry();
+        original = reg.active_id();
+        for (const auto& id : ids) {
+            ASSERT_TRUE(reg.create(id));
+            auto* doc = reg.by_id(id);
+            beatbench::Chart chart;
+            chart.mode_id = "sp7k";
+            const QString path = temp->filePath(QString::fromStdString(id) + ".bms");
+            QFile file(path);
+            ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+            ASSERT_GT(file.write("#TITLE original\n#BPM 120\n"), 0);
+            doc->load(std::move(chart), path.toUtf8().toStdString());
+            doc->set_backup_enabled(false);
+            ASSERT_TRUE(doc->exec(std::make_unique<beatbench::edit::SetSampleFileCommand>(
+                beatbench::SampleKind::Wav, 1, "changed.wav")));
+        }
+    }
+    void TearDown() override {
+        auto& reg = beatbench::edit::session_registry();
+        for (const auto& id : ids) reg.close(id);
+        reg.activate(original);
+        ProjectControllerTest::TearDown();
+    }
+    beatbench::edit::EditorSession* doc(int i) {
+        return beatbench::edit::session_registry().by_id(ids[i]);
+    }
+    QString path(int i) { return QString::fromStdString(doc(i)->path()); }
+    QByteArray bytes(int i) {
+        QFile file(path(i));
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        return file.readAll();
+    }
+    const std::vector<std::string> ids{"selected-save-a", "selected-save-b", "selected-save-unselected"};
+    std::string original;
+};
+
+TEST_F(ProjectSelectedSaveTest, SnapshotFreezesOnlyExplicitDirtyIdsAndDetectsRevisions) {
+    beatbench::app::ProjectController project;
+    const auto snapshot = project.saveSliceTargetSnapshot({path(0), path(0), path(1), temp->filePath("unopened.bms")});
+    ASSERT_EQ(snapshot.size(), 2);
+    EXPECT_EQ(snapshot[0].toMap().value("id").toString(), QString::fromStdString(ids[0]));
+    EXPECT_EQ(snapshot[1].toMap().value("id").toString(), QString::fromStdString(ids[1]));
+    ASSERT_TRUE(doc(0)->exec(std::make_unique<beatbench::edit::SetSampleFileCommand>(
+        beatbench::SampleKind::Wav, 1, "later.wav")));
+    EXPECT_NE(project.saveSliceTargetSnapshot({path(0)})[0].toMap().value("revision"),
+              snapshot[0].toMap().value("revision"));
+    ASSERT_TRUE(doc(0)->undo());
+    EXPECT_NE(project.saveSliceTargetSnapshot({path(0)})[0].toMap().value("revision"),
+              snapshot[0].toMap().value("revision"));
+    doc(1)->mark_clean();
+    EXPECT_TRUE(project.saveSliceTargetSnapshot({path(1)}).isEmpty());
+    EXPECT_TRUE(project.saveSliceTargetSnapshot({}).isEmpty());
+}
+
+TEST_F(ProjectSelectedSaveTest, LegacyDirectSaveRejectsUnsafePmsBeforeWritingAnySelectedFile) {
+    beatbench::app::ProjectController project;
+    auto chart = doc(1)->chart();
+    chart.mode_id = "pms9k";
+    doc(1)->load(std::move(chart), path(1).toUtf8().toStdString());
+    ASSERT_TRUE(doc(1)->exec(std::make_unique<beatbench::edit::SetSampleFileCommand>(
+        beatbench::SampleKind::Wav, 1, "pms.wav")));
+    project.setSliceTargetChecked(path(0), true);
+    project.setSliceTargetChecked(path(1), true);
+    const auto a = bytes(0), b = bytes(1), c = bytes(2);
+    EXPECT_TRUE(project.saveSliceTargets(path(2)).contains("PMS"));
+    EXPECT_EQ(bytes(0), a);
+    EXPECT_EQ(bytes(1), b);
+    EXPECT_EQ(bytes(2), c);
+    EXPECT_TRUE(doc(0)->is_dirty());
+    EXPECT_TRUE(doc(1)->is_dirty());
+    EXPECT_TRUE(doc(2)->is_dirty());
+}
+
+TEST_F(ProjectSelectedSaveTest, LegacySafeSaveDoesNotExpandToUnselectedActiveDirtyDocument) {
+    beatbench::app::ProjectController project;
+    auto& reg = beatbench::edit::session_registry();
+    ASSERT_TRUE(reg.activate(ids[2]));
+    project.setSliceTargetChecked(path(0), true);
+    project.setSliceTargetChecked(path(1), true);
+    const auto a = bytes(0), b = bytes(1), c = bytes(2);
+    project.saveSliceTargets(path(2));
+    EXPECT_FALSE(doc(0)->is_dirty());
+    EXPECT_FALSE(doc(1)->is_dirty());
+    EXPECT_TRUE(doc(2)->is_dirty());
+    EXPECT_NE(bytes(0), a);
+    EXPECT_NE(bytes(1), b);
+    EXPECT_EQ(bytes(2), c);
+    EXPECT_EQ(reg.active_id(), ids[2]);
 }
 
 }  // namespace

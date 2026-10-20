@@ -110,6 +110,9 @@ public:
     /// **生效目标**：勾选非空 = 勾选集合；否则 = 当前编辑页打开的谱面（用户拍板 2026-10-11）；
     /// 两者都空 = 空（切音页据此提示"无目标"）。
     Q_INVOKABLE QStringList effectiveSliceTargets(const QString& editorPath) const;
+    /// 冻结明确路径中已加载且有改动的保存目标（ID/路径/内容版本，版本用字符串避免JS精度损失）。
+    Q_INVOKABLE QVariantList saveSliceTargetSnapshot(const QStringList& paths) const;
+    /// 兼容直接调用；危险PMS后缀拒绝整批，GUI必须经过Main的逐目标确认队列。
     /// 统一保存：对生效目标里**已加载且有改动**的会话执行 session.save（overwrite）；
     /// 返回人类可读摘要（"已保存 N 个谱面" / "无改动" / 含失败项）。
     Q_INVOKABLE QString saveSliceTargets(const QString& editorPath);

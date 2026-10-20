@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "ProjectController.hpp"
 #include "DocumentService.hpp"
+#include "EditUtils.hpp"
 
 #include <QDebug>
 #include <QAbstractListModel>
@@ -545,10 +546,35 @@ QStringList ProjectController::effectiveSliceTargets(const QString& editorPath) 
     return out;
 }
 
+QVariantList ProjectController::saveSliceTargetSnapshot(const QStringList& paths) const {
+    QVariantList out;
+    QStringList seen;
+    auto& reg = beatbench::edit::session_registry();
+    for (const auto& path : paths) {
+        const QString id = DocumentService::findSessionId(path);
+        if (id.isEmpty() || seen.contains(id)) continue;
+        seen.push_back(id);
+        const auto* doc = reg.by_id(id.toUtf8().toStdString());
+        if (!doc || !doc->has_chart() || !doc->is_dirty()) continue;
+        out.push_back(QVariantMap{{QStringLiteral("id"), id},
+            {QStringLiteral("path"), DocumentService::normalizedPath(qs(doc->path()))},
+            {QStringLiteral("revision"), QString::number(doc->revision())}});
+    }
+    return out;
+}
+
 QString ProjectController::saveSliceTargets(const QString& editorPath) {
     using beatbench::json::Json;
     auto& reg = beatbench::edit::session_registry();
     const QStringList targets = effectiveSliceTargets(editorPath);
+    // No UI is available here: never silently authorize a PMS suffix mismatch.
+    // Preflight the complete range before writing even its safe documents.
+    for (const auto& value : saveSliceTargetSnapshot(targets)) {
+        const auto target = value.toMap();
+        const auto* doc = reg.by_id(target.value(QStringLiteral("id")).toString().toUtf8().toStdString());
+        if (EditUtils::pmsSuffixNeedsConfirmation(qs(doc->chart().mode_id.value_or("")), qs(doc->path())))
+            return tr("保存已取消：PMS后缀需要确认，请使用界面保存勾选谱面：%1").arg(qs(doc->path()));
+    }
     int saved = 0;
     QStringList problems;
     for (const QString& abs : targets) {

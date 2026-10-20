@@ -117,6 +117,21 @@ Item {
         }
     }
 
+    ResourceBindingDialog {
+        id: bindingDialog
+        parent: Overlay.overlay
+        controller: resourceBindingController
+        projectRoot: project.root
+        targetPaths: {
+            const selected = project.sliceTargets // Track the existing multi-selection.
+            return selected.length > 0 ? project.effectiveSliceTargets("") : []
+        }
+        onApplied: (message) => {
+            root.saveText = message
+            window.setStatus(message)
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -337,8 +352,11 @@ Item {
                             font.pixelSize: Theme.fsSmall
                             elide: Text.ElideRight
                         }
-                        RowLayout {
-                            spacing: 6
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: width < 520 ? 2 : 3
+                            columnSpacing: 6
+                            rowSpacing: 4
                             BbToolButton {
                                 text: qsTr("在 A 中编辑")
                                 enabled: root.selectedChart !== ""
@@ -348,6 +366,18 @@ Item {
                                 text: qsTr("在 B 中对照")
                                 enabled: root.selectedChart !== ""
                                 onClicked: root.referenceOpenRequested(project.absolutePath(root.selectedChart))
+                            }
+                            BbToolButton {
+                                objectName: "projectUpdateBindingsButton"
+                                text: qsTr("更新资源绑定…")
+                                enabled: project.sliceTargetCount > 0 && project.state === "ready"
+                                onClicked: {
+                                    if (window.metaDraftDirty) {
+                                        root.saveText = qsTr("请先提交或取消面板草稿，再更新资源绑定")
+                                        return
+                                    }
+                                    bindingDialog.open()
+                                }
                             }
                             BbToolButton {
                                 text: qsTr("保存全部已打开")
@@ -361,11 +391,13 @@ Item {
                                         root.saveText = qsTr("请先提交面板草稿，或使用保存全部已打开")
                                         return
                                     }
-                                    root.saveText = project.saveSliceTargets(window.chartPath)
-                                    chartSession.refresh()
+                                    window.saveSelectedDocuments(project.effectiveSliceTargets(window.chartPath))
                                 }
                             }
                             Label {
+                                Layout.columnSpan: parent.columns
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
                                 visible: root.saveText !== ""
                                 text: root.saveText
                                 color: Theme.textMuted
@@ -373,8 +405,9 @@ Item {
                             }
                             Label {
                                 Layout.fillWidth: true
+                                Layout.columnSpan: parent.columns
                                 text: project.sliceTargetCount > 0
-                                      ? qsTr("已勾选 %1 个谱面作为切音目标（切音页导出/铺放按勾选生效）").arg(project.sliceTargetCount)
+                                      ? qsTr("已勾选 %1 谱：资源绑定更新 / 切音导出与铺放目标").arg(project.sliceTargetCount)
                                       : qsTr("未勾选任何谱面 → 切音目标 = 当前编辑页打开的谱面")
                                 color: Theme.textFaint
                                 font.pixelSize: Theme.fsSmall
@@ -454,6 +487,15 @@ Item {
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        text: qsTr("资源表为磁盘扫描结果；未保存的绑定请在编辑页检查，保存后刷新文件夹更新此表。")
+                        wrapMode: Text.Wrap
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.fsSmall
+                    }
                     // 资源表列头（与行同间距/同列宽）
                     RowLayout {
                         Layout.fillWidth: true
