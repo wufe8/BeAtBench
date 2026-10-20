@@ -35,6 +35,7 @@
 
 #include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
+#include "bridge/ChartHistoryController.hpp"
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
 #include "bridge/EditUtils.hpp"
@@ -290,6 +291,7 @@ int main(int argc, char** argv) {
     // M7 项目页（doc/07 §9.1 阶段①）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
+    beatbench::app::ChartHistoryController chartHistoryController(&documentService);
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
@@ -306,6 +308,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("editUtils"), &editUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
+    engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"), &chartHistoryController);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
     audioEngine.setChartSession(initialSession);
     QObject::connect(&documentService, &beatbench::app::DocumentService::currentSessionChanged,
@@ -358,7 +361,13 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"file.openFolder", QCoreApplication::tr("打开歌曲文件夹…"), "Ctrl+Shift+O", "file", nullptr, qml("uiActionOpenFolder")});
         uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, qml("saveChart")});
         uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, qml("uiActionSaveAs")});
-        uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：打开/保存/另存 ↔ 退出
+        uiActions.add(UiActionDef{.id = "file.history",
+            .label = QCoreApplication::tr("谱面历史…"), .category = "file",
+            .handler = ActionHandler([&chartHistoryController, &documentService](const QVariantMap&) {
+                chartHistoryController.showHistory(documentService.activeId());
+                return true;
+            })});
+        uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：打开/保存/历史 ↔ 退出
         uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file", nullptr, qml("uiActionExit")});
         // 编辑动作
         uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit", nullptr, qml("undoEdit")});

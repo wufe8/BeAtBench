@@ -207,7 +207,7 @@ ColumnLayout {
     }
     property var _rawOrig: []
 
-    /// 保存扩展代码（Main 在保存前调用：先 meta.rawEdit 再 session.save）
+    /// 保存扩展代码：true=已应用、false=无改动、null=失败（调用方必须停止保存）。
     function applyRawEdits() {
         if (!root.meta) return false
         const lines = root.rawEdits()
@@ -217,7 +217,7 @@ ColumnLayout {
         const r = JSON.parse(resp)
         if (r.ok) { root._rawOrig = lines.slice(); root.expandRaw = false; return true }
         root.metaMessage(r.error.code + ": " + r.error.message)
-        return false
+        return null
     }
 
     spacing: 2

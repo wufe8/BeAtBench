@@ -21,6 +21,10 @@ add_executable(beatbench
     bridge/PlayheadOverlayItem.cpp
     bridge/SliceWorkspace.cpp
     bridge/SliceWaveformItem.cpp
+    bridge/ChartSnapshotStore.cpp
+    bridge/ChartSnapshotStore.hpp
+    bridge/ChartHistoryController.cpp
+    bridge/ChartHistoryController.hpp
     bridge/DocumentService.cpp
     bridge/DocumentService.hpp   # Q_OBJECT：显式列入
     bridge/ProjectController.cpp
@@ -80,6 +84,7 @@ qt_add_qml_module(beatbench
         qml/components/BbComboBox.qml
         qml/components/SamplePanel.qml
         qml/components/SettingsDialog.qml
+        qml/components/ChartHistoryDialog.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml
         qml/components/ChartCompareSplit.qml

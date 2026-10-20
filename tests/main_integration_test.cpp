@@ -3,6 +3,7 @@
 // Only audio is replaced. AudioEngine.cpp is linked for SliceWorkspace's symbols,
 // but no AudioEngine is constructed (nor connected to the workspace).
 #include "bridge/ChartSession.hpp"
+#include "bridge/ChartHistoryController.hpp"
 #include "bridge/ChartViewItem.hpp"
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
@@ -32,6 +33,8 @@
 #include <QTemporaryDir>
 #include <QThreadPool>
 #include <QSemaphore>
+#include <QSettings>
+#include <QStringList>
 #include <QtQuickTest/quicktest.h>
 #include <memory>
 
@@ -253,6 +256,19 @@ public:
         if (!f.open(QIODevice::ReadOnly)) return {};
         return QString::fromUtf8(f.readAll());
     }
+    Q_INVOKABLE QStringList restoredHistoryCopies() const {
+        QStringList paths;
+        if (!temp) return paths;
+        for (const auto& name : QDir(temp->path()).entryList({"*-恢复-*.bms"}, QDir::Files))
+            paths.append(temp->filePath(name));
+        return paths;
+    }
+    Q_INVOKABLE QString restoredHistoryText() const {
+        const auto copies = restoredHistoryCopies();
+        if (copies.size() != 1) return {};
+        QFile file(copies.first());
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString{};
+    }
 public slots:
     void applicationAvailable() {
         QQuickStyle::setStyle(QStringLiteral("Fusion"));
@@ -269,6 +285,18 @@ public slots:
         auto& r = beatbench::edit::session_registry();
         if (!r.create(aId) || !r.create(bId)) qFatal("Cannot create fixture sessions");
         reset(false);
+        // 历史服务使用独立生命周期的测试目录，不随每例谱面reset销毁。
+        const QString scratch = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
+        const QString canonicalScratch = QFileInfo(scratch).canonicalFilePath();
+        historyTemp = std::make_unique<QTemporaryDir>(QDir(canonicalScratch.isEmpty() ? scratch : canonicalScratch)
+            .filePath("main-history-XXXXXX"));
+        if (!historyTemp->isValid()) qFatal("Cannot create history integration scratch directory");
+        QCoreApplication::setOrganizationName(QStringLiteral("BeAtBenchIntegrationTests"));
+        QCoreApplication::setApplicationName(QStringLiteral("MainHistory"));
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, historyTemp->filePath("settings-user"));
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, historyTemp->filePath("settings-system"));
+        history = std::make_unique<ChartHistoryController>(&documents, nullptr, historyTemp->filePath("store"));
         // Same id -> QML handler wiring as app/main.cpp; never reimplement swap or gates.
         const std::pair<const char*, const char*> actions[] = {
             {"edit.undo", "undoEdit"}, {"edit.redo", "redoEdit"},
@@ -306,6 +334,7 @@ public slots:
         ctx->setContextProperty("editUtils", &utils);
         ctx->setContextProperty("project", &project);
         ctx->setContextProperty("documents", &documents);
+        ctx->setContextProperty("chartHistoryController", history.get());
         workspace.setChartSession(documents.currentSession());
         connect(&documents, &DocumentService::currentSessionChanged, engine, [this, ctx] {
             workspace.setChartSession(documents.currentSession());
@@ -384,6 +413,8 @@ private:
     ProjectController project{projectScanFunctions()};
     QPointer<QObject> root, audio;
     std::unique_ptr<QTemporaryDir> temp;
+    std::unique_ptr<QTemporaryDir> historyTemp;
+    std::unique_ptr<ChartHistoryController> history;
 };
 QUICK_TEST_MAIN_WITH_SETUP(main_integration, MainIntegrationSetup)
 #include "main_integration_test.moc"
