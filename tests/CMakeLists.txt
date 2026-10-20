@@ -151,6 +151,15 @@ add_test(NAME reference_track_tests COMMAND reference_track_test)
 # 配置（gtest 走 FetchContent）。
 find_package(Qt6 COMPONENTS Core QUIET)
 if (Qt6Core_FOUND)
+    # 本地谱面历史：纯 Qt Core 文件存储，不依赖 Git/声卡/窗口。
+    add_executable(chart_snapshot_store_test chart_snapshot_store_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSnapshotStore.cpp)
+    target_include_directories(chart_snapshot_store_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(chart_snapshot_store_test PRIVATE Qt6::Core GTest::gtest)
+    beatbench_set_warnings(chart_snapshot_store_test)
+    add_test(NAME chart_snapshot_store_tests COMMAND chart_snapshot_store_test)
+    set_tests_properties(chart_snapshot_store_tests PROPERTIES TIMEOUT 30)
+
     # Settings rollback uses an injected backend and synthetic PCM; Qt Core only, no devices.
     add_executable(audio_engine_test audio_engine_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp
@@ -190,6 +199,23 @@ if (Qt6Core_FOUND)
     beatbench_set_warnings(document_service_test)
     add_test(NAME document_service_tests COMMAND document_service_test)
     target_sources(document_service_test PRIVATE document_instances_test.cpp)
+
+    add_executable(chart_history_controller_test chart_history_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartHistoryController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartHistoryController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSnapshotStore.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSnapshotStore.hpp)
+    target_include_directories(chart_history_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(chart_history_controller_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(chart_history_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(chart_history_controller_test)
+    add_test(NAME chart_history_controller_tests COMMAND chart_history_controller_test)
+    set_tests_properties(chart_history_controller_tests PROPERTIES TIMEOUT 30)
     target_compile_definitions(document_service_test PRIVATE BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     foreach(document_test project_controller_test document_service_test)
         target_sources(${document_test} PRIVATE
@@ -299,7 +325,7 @@ if (Qt6Core_FOUND)
         # Full production Main/SessionController integration; audio is a no-device spy.
         add_executable(main_integration_test main_integration_test.cpp
             ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
-        foreach(bridge ChartSession DocumentService CommandDispatcher SampleListModel LintListModel
+        foreach(bridge ChartSession DocumentService ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
                 ChartViewItem PlayheadOverlayItem WaveformOverviewItem SliceWaveformItem
                 SliceWorkspace AudioEngine ThemeManager UiActionRegistry KeyMonitor ClipboardBridge EditUtils ProjectController)
             target_sources(main_integration_test PRIVATE

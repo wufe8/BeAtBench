@@ -985,9 +985,10 @@ QtObject {
             const edits = editPage.collectMetaEdits()
             if (edits && edits.length > 0) {
                 const em = sessionCmd("meta.edit", { edits: edits })
-                if (em) setStatus(qsTr("元信息已保存 %1 处").arg(edits.length))
+                if (!em) return false // 草稿未应用时不写盘，更不能将旧内容记录为新快照。
+                setStatus(qsTr("元信息已保存 %1 处").arg(edits.length))
             }
-            editPage.applyRawEdits()
+            if (editPage.applyRawEdits() === null) return false
             refreshLint()
         }
         var r = sessionCmd("session.save", { overwrite: true })
@@ -1013,7 +1014,9 @@ QtObject {
             if (!em) return   // 失败：sessionCmd 已置状态栏
             n = edits.length
         }
-        if (editPage.applyRawEdits()) n++
+        const rawApplied = editPage.applyRawEdits()
+        if (rawApplied === null) return // 失败时保留面板草稿与基线。
+        if (rawApplied) n++
         editPage.commitMeta()
         refreshLint()
         setStatus(n > 0
@@ -1029,8 +1032,8 @@ QtObject {
     function saveChartAs(path) {
         if (typeof editPage !== "undefined" && editPage) {
             const edits = editPage.collectMetaEdits()
-            if (edits && edits.length > 0) sessionCmd("meta.edit", { edits: edits })
-            editPage.applyRawEdits()
+            if (edits && edits.length > 0 && !sessionCmd("meta.edit", { edits: edits })) return false
+            if (editPage.applyRawEdits() === null) return false
         }
         const r = documents.save(documents.activeId(), path)
         if (r.ok) {

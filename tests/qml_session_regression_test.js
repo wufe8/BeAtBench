@@ -35,6 +35,7 @@ function makeContext(refs = [], mode = 'pms9k') {
         }
     };
     const context = vm.createContext({
+        chartHistoryController: { finishSave: () => {} },
         documents, project: { refreshOpenStates: () => {} },
         refreshLint: () => {},
         beatbench: { dispatch: request => {
@@ -271,6 +272,7 @@ function makeMainContext() {
         audioEngine: { setChartPath: value => events.push(['audio-path', value]) },
         refreshTiming: () => {}, statusClearTimer: { restart: () => {} },
         setStatus: text => events.push(['status', text]), qsTr: text => text,
+        chartHistoryController: { finishSave: () => {} },
         restoreDocument: id => events.push(['restore', id])
     });
     vm.runInContext('String.prototype.arg = function(value) { return this.replace(/%[1-9]/, String(value)); };', context);
@@ -324,4 +326,142 @@ test('failed new document leaves current chart/draft/selection untouched', () =>
     context.performNewChart('invalid');
     assert.deepEqual(plain(context.window), before);
     assert.equal(events.some(event => event[0] === 'bind-primary'), false);
+});
+
+
+// History glue tests execute Main's actual save callbacks; the store is tested in C++.
+function makeHistoryContext() {
+    const { context, events } = makeMainContext();
+    const finished = [];
+    Object.assign(context.window, { chartPath: 'A.bms', allowClose: false,
+        pendingPmsSaveDocumentId: '', pendingPmsSavePath: '', pendingPmsSaveAs: false,
+        pmsSaveRequestToken: 0 });
+    Object.defineProperty(context.window, 'pmsSaveConfirmationPending', {
+        get: () => context.window.pendingPmsSaveDocumentId !== '' });
+    context.documents.activeId = () => 'A';
+    context.chartSession = { sessionId: 'A', hasChart: true, chartMode: () => 'sp7k' };
+    context.chartHistoryController = { busy: false, enabled: false, createOnClose: false,
+        finishSave: (id, ok) => finished.push([id, ok]),
+        snapshotAllSaved: () => { events.push(['snapshot']); return true; },
+        showHistory: id => events.push(['history', id]) };
+    context.editUtils = { pmsSuffixNeedsConfirmation: () => false };
+    context.session = { saveChart: () => true, saveChartAs: () => true };
+    context.Qt = { callLater: callback => callback() };
+    context.pmsSuffixConfirmDialog = { open: () => events.push(['suffix-dialog']) };
+    context.saveAsDialog = { open: () => events.push(['save-as']) };
+    context.anyDocumentIsDirty = () => false;
+    for (const name of ['saveChart', 'saveChartAs', 'openSaveAsDialog', 'handleSaveAsAccepted',
+        'completeSaveAttempt', 'requestPmsSuffixConfirmation', 'clearPmsSuffixConfirmation',
+        'cancelPmsSuffixSave', 'confirmPmsSuffixSave'])
+        vm.runInContext(extractFunction(name, main), context);
+    // Exact production handler, not a hand-written model of its conditions.
+    const closing = main.match(/    onClosing: function\(close\) \{[^]*?^    }/m);
+    assert.ok(closing, 'production close handler exists');
+    vm.runInContext(closing[0].replace('onClosing: function', 'function runClosing'), context);
+    return { context, events, finished };
+}
+for (const ok of [true, false]) {
+    test('history receives immediate save result ' + ok, () => {
+        const { context, finished } = makeHistoryContext();
+        context.session.saveChart = () => ok;
+        assert.equal(context.saveChart(), ok);
+        assert.deepEqual(finished, [['A', ok]]);
+    });
+}
+test('history waits for PMS confirmation and completes original document once', () => {
+    const { context, finished } = makeHistoryContext();
+    context.editUtils.pmsSuffixNeedsConfirmation = () => true;
+    assert.equal(context.saveChart(), undefined);
+    assert.deepEqual(finished, []);
+    assert.equal(context.confirmPmsSuffixSave(), true);
+    assert.deepEqual(finished, [['A', true]]);
+    context.confirmPmsSuffixSave();
+    assert.equal(finished.filter(([id, ok]) => id === 'A' && ok).length, 1);
+});
+for (const changed of ['cancel', 'id', 'path']) {
+    test('history PMS cancellation stays bound to original ID: ' + changed, () => {
+        const { context, finished } = makeHistoryContext();
+        context.editUtils.pmsSuffixNeedsConfirmation = () => true;
+        context.saveChart();
+        if (changed === 'id') {
+            context.documents.activeId = () => 'B';
+            context.chartSession.sessionId = 'B';
+        } else if (changed === 'path') context.window.chartPath = 'other.bms';
+        if (changed === 'cancel') context.cancelPmsSuffixSave();
+        else assert.equal(context.confirmPmsSuffixSave(), false);
+        assert.deepEqual(finished, [['A', false]]);
+    });
+}
+test('history save-as changed document cancels original ID without saving B', () => {
+    const { context, finished } = makeHistoryContext();
+    context.window.saveAsDocumentId = 'A';
+    context.documents.activeId = () => 'B';
+    context.chartSession.sessionId = 'B';
+    context.session.saveChartAs = () => assert.fail('stale save must not write');
+    assert.equal(context.handleSaveAsAccepted('new.bms'), false);
+    assert.deepEqual(finished, [['A', false]]);
+});
+test('history busy blocks close even when allowClose is set', () => {
+    const { context, events } = makeHistoryContext();
+    context.window.allowClose = true;
+    context.chartHistoryController.busy = true;
+    const close = { accepted: true };
+    context.runClosing(close);
+    assert.equal(close.accepted, false);
+    assert.equal(events.some(event => event[0] === 'snapshot'), false);
+});
+test('enabled exit snapshot failure blocks clean close and permits explicit retry', () => {
+    const { context, events } = makeHistoryContext();
+    Object.assign(context.chartHistoryController, { enabled: true, createOnClose: true,
+        snapshotAllSaved: () => false });
+    context.window.allowClose = true;
+    const failed = { accepted: true };
+    context.runClosing(failed);
+    assert.equal(failed.accepted, false);
+    assert.equal(context.window.allowClose, false);
+    assert.ok(events.some(event => event[0] === 'history' && event[1] === 'A'));
+    context.chartHistoryController.snapshotAllSaved = () => true;
+    const retried = { accepted: true };
+    context.runClosing(retried);
+    assert.equal(retried.accepted, true);
+});
+
+// “保存并快照”不能将未提交成功的草稿误报为已保存，也不能清除草稿基线。
+for (const method of ['saveChart', 'saveChartAs']) {
+    for (const failure of ['metadata', 'raw']) {
+        test(method + ': failed ' + failure + ' draft blocks disk write and commit', () => {
+            const { context, calls, saved } = makeContext();
+            let committed = 0, rawCalls = 0;
+            context.editPage = {
+                collectMetaEdits: () => failure === 'metadata' ? [{ key: 'TITLE', value: 'new' }] : [],
+                applyRawEdits: () => { ++rawCalls; return null; },
+                commitMeta: () => { ++committed; }
+            };
+            const original = context.sessionCmd;
+            context.sessionCmd = (name, args) => name === 'meta.edit' ? null : original(name, args);
+            assert.equal(context[method]('new.bms'), false);
+            assert.equal(committed, 0);
+            assert.equal(rawCalls, failure === 'metadata' ? 0 : 1);
+            assert.equal(calls.some(call => call.name === 'session.save'), false);
+            assert.equal(saved.length, 0);
+        });
+    }
+    test(method + ': unchanged raw draft still permits normal save', () => {
+        const { context } = makeContext();
+        let committed = 0;
+        context.editPage = { collectMetaEdits: () => [], applyRawEdits: () => false,
+            commitMeta: () => { ++committed; } };
+        assert.equal(context[method]('normal.bms'), true);
+        assert.equal(committed, 1);
+    });
+}
+
+test('apply-only metadata save preserves draft baseline after raw failure', () => {
+    const { context } = makeContext();
+    let committed = 0;
+    context.editPage = { collectMetaEdits: () => [], applyRawEdits: () => null,
+        commitMeta: () => { ++committed; } };
+    vm.runInContext(extractFunction('saveMetaEdits'), context);
+    context.saveMetaEdits();
+    assert.equal(committed, 0);
 });

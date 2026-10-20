@@ -50,6 +50,9 @@ TestCase {
     function cleanup() {
         publicationHeartbeat.stop()
         mainFixture.releaseProjectScan()
+        tryCompare(chartHistoryController, "busy", false)
+        chartHistoryController.createOnClose = false
+        chartHistoryController.enabled = false
         referenceContents.target = null
         if (main) { main.visible = false; main.destroy(); main = null; wait(0) }
         compare(audioEngine.playbackCalls, 0)
@@ -90,6 +93,102 @@ TestCase {
         compare(mainFixture.snapshot(a), sa)
         compare(mainFixture.snapshot(b), sb)
     }
+    function test_chartHistory_oneClickSavesDraft_deduplicates_andRestoresCopy_data() {
+        return [{tag: "default", width: 1280, height: 800},
+                {tag: "narrow", width: 640, height: 480}]
+    }
+    function test_chartHistory_oneClickSavesDraft_deduplicates_andRestoresCopy(data) {
+        start(true)
+        main.width = data.width
+        main.height = data.height
+        compare(chartHistoryController.enabled, false)
+        compare(chartHistoryController.createOnClose, false)
+        const title = draft()
+        chartHistoryController.showHistory(a)
+        let dialog = mainFixture.dialog(main, "本地谱面历史")
+        verify(dialog !== null)
+        compare(chartHistoryController.busy, false)
+        compare(chartHistoryController.entries.length, 0)
+        chartHistoryController.enabled = true
+        tryCompare(chartHistoryController, "busy", false)
+        // 触发真实按钮与Main保存接线，确认草稿随同一次点击落盘。
+        clickButton(dialog, "保存并创建快照")
+        tryCompare(chartHistoryController, "busy", false)
+        compare(chartHistoryController.entries.length, 1)
+        compare(main.metaDraftDirty, false)
+        compare(mainFixture.snapshot(a).dirty, false)
+        compare(mainFixture.snapshot(a).meta.TITLE, title)
+        const diskA = mainFixture.disk(a)
+        const savedA = mainFixture.snapshot(a), savedB = mainFixture.snapshot(b)
+        const id = chartHistoryController.entries[0].id
+        dialog = mainFixture.dialog(main, "本地谱面历史")
+        verify(dialog !== null)
+        clickButton(dialog, "保存并创建快照")
+        tryCompare(chartHistoryController, "busy", false)
+        compare(chartHistoryController.entries.length, 1)
+        compare(chartHistoryController.entries[0].id, id)
+        dialog = mainFixture.dialog(main, "本地谱面历史")
+        verify(dialog !== null)
+        verify(dialog.width <= main.width && dialog.height <= main.height)
+        wait(50)
+        verify(mainFixture.screenshot())
+        dialog.selectedSnapshotId = id
+        const restore = mainFixture.button(dialog, "恢复为副本")
+        const scroll = mainFixture.objectNamed(dialog, "chartHistoryScroll")
+        verify(restore !== null && scroll !== null)
+        // 恢复按钮可能位于滚动区下方；按实际布局滚到可见位置再注入鼠标。
+        const flickable = scroll.contentItem
+        verify(flickable !== null && flickable.contentItem !== null)
+        const point = restore.mapToItem(flickable.contentItem, 0, 0)
+        flickable.contentY = Math.max(0, point.y - flickable.height / 2)
+        wait(0)
+        clickButton(dialog, "恢复为副本")
+        tryCompare(chartHistoryController, "busy", false)
+        compare(mainFixture.restoredHistoryCopies().length, 1)
+        compare(mainFixture.restoredHistoryText(), diskA)
+        unchanged(savedA, savedB)
+        compare(documents.activeId(), a)
+        compare(documents.instances.length, 2)
+    }
+
+    function test_chartHistory_pmsCancellationCreatesNoSnapshot() {
+        start(true)
+        const id = openPmsFixture({bmesp: false, mode: "pms9k"})
+        savePmsToDangerousPath(id, main.chartPath + ".history.bms")
+        const title = draftTitleFor(id)
+        const before = pmsSaveState(id)
+        chartHistoryController.showHistory(id)
+        chartHistoryController.enabled = true
+        tryCompare(chartHistoryController, "busy", false)
+        const dialog = mainFixture.dialog(main, "本地谱面历史")
+        verify(dialog !== null)
+        clickButton(dialog, "保存并创建快照")
+        verify(chartHistoryController.busy)
+        clickButton(pmsDialog(), "取消保存")
+        tryCompare(chartHistoryController, "busy", false)
+        compare(chartHistoryController.entries.length, 0)
+        compare(pmsSaveState(id), before)
+        verify(main.metaDraftDirty)
+    }
+    function test_chartHistory_exitFailureKeepsWindowAndCleanState() {
+        start(true)
+        verify(main.saveChart())
+        chartHistoryController.showHistory(a)
+        chartHistoryController.enabled = true
+        tryCompare(chartHistoryController, "busy", false)
+        chartHistoryController.createOnClose = true
+        const before = mainFixture.snapshot(a)
+        mainFixture.failSave() // Replace source with directory: deterministic snapshot failure.
+        mainFixture.dialog(main, "本地谱面历史").close()
+        main.allowClose = true // Final close gate after discarding dirty B, never snapshot B.
+        main.close()
+        tryCompare(main, "visible", true)
+        tryCompare(chartHistoryController, "busy", false)
+        compare(mainFixture.snapshot(a), before)
+        verify(mainFixture.dialog(main, "本地谱面历史") !== null)
+        verify(chartHistoryController.message.indexOf("退出快照失败") >= 0)
+    }
+
     SignalSpy { id: activeChanges; target: documents; signalName: "currentSessionChanged" }
     SignalSpy { id: referenceContents; signalName: "contentChanged" }
     SignalSpy { id: slicePlacements; target: sliceWorkspace; signalName: "samplesPlaced" }

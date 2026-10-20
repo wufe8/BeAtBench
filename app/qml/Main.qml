@@ -31,6 +31,27 @@ ApplicationWindow {
     font.family: Theme.fontSans
     font.pixelSize: Theme.fsBase
 
+    ChartHistoryDialog {
+        id: chartHistoryDialog
+        controller: chartHistoryController
+    }
+    Connections {
+        target: chartHistoryController
+        function onStatusMessage(message) { window.setStatus(message) }
+        function onSaveRequested(id) {
+            // 复用已有保存/草稿提交/PMS确认，不引入另一套写盘路径。
+            chartHistoryDialog.close()
+            if (id !== documents.activeId() || window.pmsSaveConfirmationPending ||
+                    window.saveAsDocumentId !== "" || window.pendingDocAction !== "" ||
+                    unsavedConfirmDialog.visible) {
+                chartHistoryController.finishSave(id, false)
+                return
+            }
+            const result = window.saveChart()
+            if (result !== undefined) chartHistoryController.finishSave(id, result)
+        }
+    }
+
     // ---------- 会话状态（不入 undo，doc/05 §1.2） ----------
     property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试 / 3 项目
     property var chartMeta: null         // dispatch(info) 的 result.meta
@@ -1391,6 +1412,7 @@ ApplicationWindow {
         defaultSuffix: window.isPmsChart ? "pms" : "bms"
         onAccepted: window.handleSaveAsAccepted(urlToPath(selectedFile))
         onRejected: {
+            chartHistoryController.finishSave(window.saveAsDocumentId, false)
             window.saveAsDocumentId = ""
             if (window.pendingDocAction !== "") cancelPendingDocumentAction()
         }
@@ -1412,6 +1434,7 @@ ApplicationWindow {
         const id = window.saveAsDocumentId
         window.saveAsDocumentId = "" // 一次性消费，重复/过期 accepted 不会写入另一文档。
         if (id === "" || id !== documents.activeId() || id !== chartSession.sessionId) {
+            chartHistoryController.finishSave(id, false)
             setStatus(qsTr("文档已切换，另存为已取消；请重新选择保存目标"))
             if (id !== "") cancelPendingDocumentAction()
             return false
@@ -1449,7 +1472,9 @@ ApplicationWindow {
         window.pendingPmsSaveAs = false
     }
     function cancelPmsSuffixSave() {
+        const historyDocumentId = window.pendingPmsSaveDocumentId
         clearPmsSuffixConfirmation()
+        chartHistoryController.finishSave(historyDocumentId, false)
         if (window.pendingDocAction !== "") cancelPendingDocumentAction()
         setStatus(qsTr("已取消保存；请使用 .pms 后缀，当前更改和面板草稿仍保留"))
     }
@@ -1460,11 +1485,13 @@ ApplicationWindow {
         clearPmsSuffixConfirmation() // 本次授权仅消费一次，不能留下全局“已允许”状态。
         if (id === "" || id !== documents.activeId() || id !== chartSession.sessionId ||
                 !chartSession.hasChart || (!saveAs && path !== window.chartPath)) {
+            chartHistoryController.finishSave(id, false)
             setStatus(qsTr("文档或目标已变化，保存已取消；请重新确认"))
             if (window.pendingDocAction !== "") cancelPendingDocumentAction()
             return false
         }
         const result = saveAs ? session.saveChartAs(path) : session.saveChart()
+        chartHistoryController.finishSave(id, result)
         completeSaveAttempt(result)
         return result
     }
@@ -1673,8 +1700,19 @@ ApplicationWindow {
             close.accepted = false
             return
         }
+        if (chartHistoryController.busy) {
+            close.accepted = false
+            setStatus(qsTr("正在处理谱面历史，请完成后再退出"))
+            return
+        }
         if (window.allowClose || !anyDocumentIsDirty()) {
             window.allowClose = false
+            if (chartHistoryController.enabled && chartHistoryController.createOnClose &&
+                    !chartHistoryController.snapshotAllSaved()) {
+                close.accepted = false
+                // 保存已完成，不回滚、不伪造脏状态；允许重试或关闭可选退出快照。
+                chartHistoryController.showHistory(documents.activeId())
+            }
             return
         }
         close.accepted = false
@@ -2176,7 +2214,9 @@ ApplicationWindow {
             requestPmsSuffixConfirmation(window.chartPath, false)
             return undefined
         }
-        return session.saveChart()
+        const result = session.saveChart()
+        chartHistoryController.finishSave(chartSession.sessionId, result)
+        return result
     }
     function saveAllDocuments() {
         if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "" ||
@@ -2192,7 +2232,9 @@ ApplicationWindow {
             requestPmsSuffixConfirmation(path, true)
             return undefined
         }
-        return session.saveChartAs(path)
+        const result = session.saveChartAs(path)
+        chartHistoryController.finishSave(chartSession.sessionId, result)
+        return result
     }
     function saveMetaEdits() { return session.saveMetaEdits() }
     function setModeMeta(key, value) { return session.setModeMeta(key, value) }

@@ -222,7 +222,7 @@ Item {
     function collectMetaEdits() {
         return metaPanel ? metaPanel.collectEdits() : []
     }
-    /// 应用「扩展代码」原始行改动（Main 在保存前调用；返回是否应用）。
+    /// 应用扩展代码：true=已应用、false=无改动、null=失败（保存应中止）。
     function applyRawEdits() {
         return metaPanel ? metaPanel.applyRawEdits() : false
     }
