@@ -170,6 +170,35 @@ Item {
             flushSync()
         }
 
+        function test_bgm_default_expansion_and_reference_collapse_do_not_edit_documents() {
+            compare(split.primaryView.bgmExpanded, true)
+            compare(split.primaryView.viewportItem.bgmExpanded, true)
+            // B is initialized before a reference document is selected.
+            compare(split.referenceView.bgmExpanded, true)
+            compare(split.referenceView.viewportItem.bgmExpanded, true)
+            split.hideSecondaryChannels = false
+            expand()
+            verify(bindingFixture.seedCompareHistory())
+            const a = state(aId), b = state(bId)
+            const reference = split.referenceView, item = reference.viewportItem
+            const column = item.probe(0, 40).columns.find(c => c.label === "bgm1")
+            verify(column !== undefined)
+            item.scrollX = Math.max(0, column.x - item.rulerWidth - 20)
+            const visibleColumn = item.probe(0, 40).columns.find(c => c.label === "bgm1")
+            verify(visibleColumn !== undefined)
+            const x = visibleColumn.x + visibleColumn.w / 2
+            verify(x > item.rulerWidth && x < item.width)
+            mouseClick(reference, x, 9)
+            compare(reference.bgmExpanded, false)
+            compare(item.bgmExpanded, false)
+            compare(split.primaryView.bgmExpanded, true)
+            compare(split.primaryView.viewportItem.bgmExpanded, true)
+            compare(state(aId), a)
+            compare(state(bId), b)
+            compare(split.referenceDocumentId, bId)
+            compare(compareDocuments.activeId(), aId)
+        }
+
         function test_sync_default_enable_A_wins_and_disabled_is_independent() {
             compare(split.synchronizeViewports, true)
             compare(split.syncActive, false) // collapsed, despite default enabled

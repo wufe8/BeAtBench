@@ -136,12 +136,13 @@ bool ChartHistoryController::validateDocument(const QString& id, const QString& 
     return true;
 }
 
-void ChartHistoryController::showHistory(const QString& documentId) {
+void ChartHistoryController::showHistory(const QString& documentId, bool presentDialog) {
     if (m_busy) {
         setMessage(tr("历史操作正在进行，请稍候。"));
-        emit showRequested();
+        if (presentDialog) emit showRequested();
         return;
     }
+    m_presentDialog = presentDialog;
     const QVariantMap row = document(documentId);
     m_documentId = documentId;
     m_sourcePath = DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString());
@@ -154,7 +155,30 @@ void ChartHistoryController::showHistory(const QString& documentId) {
     else if (m_sourcePath.isEmpty()) setMessage(tr("未命名谱面请先另存为，再创建快照。"));
     else loadHistory();
     if (!m_exitSnapshotError.isEmpty()) setMessage(m_exitSnapshotError);
-    emit showRequested();
+    if (m_presentDialog) emit showRequested();
+}
+void ChartHistoryController::browseHistory(const QString& sourcePath) {
+    if (m_busy) return; // 不在已接受的操作中改变目标或弹窗模式。
+    const QString path = DocumentService::normalizedPath(sourcePath);
+    if (m_documents && !path.isEmpty()) {
+        for (const auto& item : m_documents->instances()) {
+            const auto row = item.toMap();
+            if (samePath(DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString()), path)) {
+                showHistory(row.value(QStringLiteral("id")).toString(), false);
+                return;
+            }
+        }
+    }
+    m_presentDialog = false;
+    m_documentId.clear();
+    m_sourcePath = path;
+    m_documentLabel = QFileInfo(path).fileName();
+    emit sourcePathChanged();
+    emit documentLabelChanged();
+    setEntries({});
+    if (path.isEmpty()) setMessage(tr("请在左侧选择谱面，或先打开一个谱面。"));
+    else if (!m_enabled) setMessage(tr("启用本地谱面历史后可查看；仅包含谱面文件，不含媒体。"));
+    else loadHistory();
 }
 void ChartHistoryController::loadHistory() {
     launch(Operation::History, m_sourcePath);
@@ -188,7 +212,7 @@ void ChartHistoryController::finishSave(const QString& documentId, bool ok) {
         // 从保存转交快照期间保持 busy，避免接受重复请求。
         launch(Operation::Create, path, note);
     }
-    emit showRequested();
+    if (m_presentDialog) emit showRequested();
 }
 void ChartHistoryController::restoreCopy(const QString& snapshotId) {
     if (!canStart()) return;

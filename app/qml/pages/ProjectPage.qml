@@ -3,7 +3,7 @@
 // 选中 → 在编辑页打开 / 设为切音目标。数据来自 `project`（ProjectController，
 // 两段式：先枚举出表，再后台补元信息/统计/引用）。
 //
-// 本页**只读**：不写盘、不持有文档；打开与切音目标都只发信号（doc/07 §2 架构边界）。
+// 本页不直接写盘/持有文档；项目索引只读，历史操作委托独立控制器。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -16,6 +16,15 @@ Item {
     signal primaryAssignRequested(string absolutePath)
     signal referenceOpenRequested(string absolutePath)
 
+    objectName: "projectPage"
+    property int detailTab: 0
+    function refreshHistoryTarget() {
+        if (detailTab !== 1 || !visible || chartHistoryController.busy) return
+        if (selectedChart !== "") chartHistoryController.browseHistory(project.absolutePath(selectedChart))
+        else chartHistoryController.showHistory(documents.activeId(), false)
+    }
+    onDetailTabChanged: refreshHistoryTarget()
+    onVisibleChanged: refreshHistoryTarget()
     property string selectedChart: ""
     property string saveText: ""
     property var selectedResource: null
@@ -44,7 +53,10 @@ Item {
         project.setChartFilter(root.onlyOpen, root.chartSearch)
         root.selectedChartInfo = project.chartDetails(root.selectedChart)
     }
-    onSelectedChartChanged: root.selectedChartInfo = project.chartDetails(root.selectedChart)
+    onSelectedChartChanged: {
+        root.selectedChartInfo = project.chartDetails(root.selectedChart)
+        root.refreshHistoryTarget()
+    }
 
     /// “未打开”是会话状态；清洁文档按是否实际保存区分“未修改 / 已保存”。
     function docBadge(m) {
@@ -232,6 +244,7 @@ Item {
 
                     ListView {
                         id: chartList
+                        enabled: root.detailTab !== 1 || !chartHistoryController.busy
                         objectName: "projectChartList"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -372,14 +385,38 @@ Item {
                 }
             }
 
-            // ================= 资源表 =================
+            // ================= 资源 / 谱面历史（共享右侧空间） =================
             Rectangle {
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: 320
                 color: Theme.bg
 
+                BbTabStrip {
+                    id: detailTabs
+                    objectName: "projectDetailTabs"
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    model: [qsTr("资源"), qsTr("谱面历史")]
+                    currentIndex: root.detailTab
+                    onIndexRequested: (index) => root.detailTab = index
+                }
+                ChartHistoryPanel {
+                    objectName: "projectHistoryPanel"
+                    anchors.fill: parent
+                    anchors.topMargin: detailTabs.height + 8
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    anchors.bottomMargin: 8
+                    visible: root.detailTab === 1
+                    controller: chartHistoryController
+                    saveAllowed: controller.documentId !== "" &&
+                                 controller.documentId === chartSession.sessionId && controller.sourcePath !== ""
+                }
                 ColumnLayout {
                     anchors.fill: parent
+                    anchors.topMargin: detailTabs.height
+                    visible: root.detailTab === 0
                     spacing: 0
 
                     RowLayout {

@@ -7,7 +7,7 @@
 //   pan 拖 = 滚动；note 点击 = hitTest → hitPlaceRequested（Main 走 note.put）；
 //   地雷/LN 工具暂提示（M3 命令无 kind 语义）。
 // - 选中高亮：Main 把 selection 回填 → view.selection（ChartViewItem 绘制）。
-// BGM 列头点击 → 展开为按 #WAV id 分列（iBMSC 式后台轨分开显示，BMS 笔记 ch01 注）；
+// BGM 默认按源子通道分列（不是按 #WAV id）；列头点击可收起/重新展开。
 // 列头显示实际 BMS 通道 id = 工具条勾选 / Ctrl 临时（Main.qml 经 checkbox.toggle() 同路径
 // 翻转 + 松开还原（C++ KeyMonitor 事件过滤器，Adobe 式）；此处只透传状态）。
 // 皮肤边界（doc/08 §3.6 / doc/05 §8）：本组件 = 默认皮肤 surface「viewport」的组件库成员，
@@ -47,7 +47,7 @@ Item {
     property int snapNum: 1              // 吸附粒度分子（放置吸附 + 槽位弱线）
     property int snapDen: 16             // 吸附粒度分母
     property bool showChannelIds: false  // 列头显示实际 BMS 通道 id（工具条勾选）
-    property bool bgmExpanded: false     // BGM 轨展开（列头点击切换；--bgm-expand 调试）
+    property bool bgmExpanded: true      // BGM 默认展开，列头点击切换收起/展开
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
     property bool lnSelectMode: false    // LN 选取模式（默认关）：点 LN 任一段自动选配对两端
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
@@ -113,8 +113,6 @@ Item {
     // BGA/BPM/STOP 双击编辑
     signal metaEditRequested(var obj)
 
-    onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
-
     ChartViewItem {
         id: view
         anchors.fill: parent
@@ -148,6 +146,7 @@ Item {
         // Ctrl 临时切换已在状态层完成（Main.qml Connections → checkbox.toggle()），
         // 此处纯透传（不 XOR）——checkbox 视觉/视图状态始终一致（2026-09 用户）
         showChannelIds: root.showChannelIds
+        bgmExpanded: root.bgmExpanded
         // M6 编辑预览：放置工具 → ghost note 类型（note/ln/mine）；其它工具 = 关
         previewNoteKind: !root.editable ? ""
                        : root.editorTool === "note" ? "normal"

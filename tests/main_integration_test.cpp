@@ -297,6 +297,14 @@ public slots:
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, historyTemp->filePath("settings-user"));
         QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, historyTemp->filePath("settings-system"));
         history = std::make_unique<ChartHistoryController>(&documents, nullptr, historyTemp->filePath("store"));
+        // External launch is deliberately not performed by the integration fixture.
+        for (const auto* id : {"file.revealInFileManager", "file.openInTextEditor"}) {
+            UiActionDef def;
+            def.id = QString::fromLatin1(id);
+            def.label = def.id;
+            def.handler = [](const QVariantMap&) { return true; };
+            uiActions.add(std::move(def));
+        }
         // Same id -> QML handler wiring as app/main.cpp; never reimplement swap or gates.
         const std::pair<const char*, const char*> actions[] = {
             {"edit.undo", "undoEdit"}, {"edit.redo", "redoEdit"},

@@ -23,6 +23,7 @@ class ChartHistoryController : public QObject {
     Q_PROPERTY(QString documentLabel READ documentLabel NOTIFY documentLabelChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     Q_PROPERTY(QString sourcePath READ sourcePath NOTIFY sourcePathChanged)
+    Q_PROPERTY(QString documentId READ documentId NOTIFY sourcePathChanged)
     Q_PROPERTY(QString storagePath READ storagePath CONSTANT)
 public:
     explicit ChartHistoryController(DocumentService* documents, QObject* parent = nullptr,
@@ -37,9 +38,12 @@ public:
     QString documentLabel() const { return m_documentLabel; }
     QString message() const { return m_message; }
     QString sourcePath() const { return m_sourcePath; }
+    QString documentId() const { return m_documentId; }
     QString storagePath() const { return m_storagePath; }
 
-    Q_INVOKABLE void showHistory(const QString& documentId);
+    Q_INVOKABLE void showHistory(const QString& documentId, bool presentDialog = true);
+    /// 项目页仅查看冻结路径，不打开/切换文档；已打开路径保留原文档身份。
+    Q_INVOKABLE void browseHistory(const QString& sourcePath);
     Q_INVOKABLE void createSnapshot(const QString& note = {});
     /// 父集成必须在所有保存完成或取消分支调用 finishSave。
     Q_INVOKABLE void requestSavedSnapshot(const QString& note = {});
@@ -77,6 +81,7 @@ private:
     bool m_enabled = false;
     bool m_createOnClose = false;
     bool m_busy = false;
+    bool m_presentDialog = true;
     QVariantList m_entries;
     QString m_documentId, m_sourcePath, m_documentLabel, m_message;
     QString m_pendingId, m_pendingPath, m_pendingNote;

@@ -151,6 +151,60 @@ TestCase {
         compare(documents.instances.length, 2)
     }
 
+    function test_externalFileActions_followNamedPathWithoutSaving() {
+        start(true)
+        const path = main.chartPath
+        for (const id of ["file.revealInFileManager", "file.openInTextEditor"]) {
+            verify(uiActions.exists(id))
+            verify(uiActions.enabled(id))
+        }
+        const before = mainFixture.snapshot(a), disk = mainFixture.disk(a)
+        main.chartPath = "" // Path-only change must disable the menu even if meta is unchanged.
+        verify(!uiActions.enabled("file.revealInFileManager"))
+        verify(!uiActions.enabled("file.openInTextEditor"))
+        main.chartPath = path
+        verify(uiActions.enabled("file.revealInFileManager"))
+        verify(uiActions.enabled("file.openInTextEditor"))
+        compare(mainFixture.snapshot(a), before)
+        compare(mainFixture.disk(a), disk)
+    }
+
+    function test_projectHistoryTab_savesWithoutDialog_andKeepsSelectionIdentity() {
+        start(true)
+        main.currentPage = 3
+        const page = mainFixture.objectNamed(main, "projectPage")
+        verify(page !== null)
+        clickButton(page, "谱面历史")
+        compare(page.detailTab, 1)
+        const panel = mainFixture.objectNamed(page, "projectHistoryPanel")
+        verify(panel !== null && panel.visible)
+        compare(chartHistoryController.documentId, a)
+        verify(panel.saveAllowed)
+        chartHistoryController.enabled = true
+        tryCompare(chartHistoryController, "busy", false)
+        clickButton(panel, "保存并创建快照")
+        tryCompare(chartHistoryController, "busy", false)
+        compare(chartHistoryController.entries.length, 1)
+        compare(mainFixture.dialog(main, "本地谱面历史"), null)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        page.selectedChart = mainFixture.snapshot(b).path
+        tryCompare(chartHistoryController, "busy", false)
+        compare(chartHistoryController.documentId, b)
+        compare(panel.saveAllowed, false)
+        verify(!mainFixture.button(panel, "保存并创建快照").enabled)
+        compare(documents.activeId(), a)
+        unchanged(sa, sb)
+        page.selectedChart = ""
+        tryCompare(chartHistoryController, "busy", false)
+        compare(chartHistoryController.documentId, a)
+        compare(chartHistoryController.entries.length, 1)
+        wait(50)
+        verify(mainFixture.screenshot())
+        clickButton(page, "资源")
+        compare(page.detailTab, 0)
+        compare(panel.visible, false)
+    }
+
     function test_chartHistory_pmsCancellationCreatesNoSnapshot() {
         start(true)
         const id = openPmsFixture({bmesp: false, mode: "pms9k"})

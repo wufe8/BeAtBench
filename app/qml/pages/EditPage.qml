@@ -32,8 +32,8 @@ Item {
     property string modeLabel: "SP7K"
     /// 轨道列头显示实际 BMS 通道 id（Main 工具条勾选；Alt 临时在 ChartView 内处理）
     property bool showChannelIds: false
-    /// BGM 轨展开（列头点击；--bgm-expand 调试参数）
-    property bool bgmExpanded: false
+    /// BGM 默认按子通道展开；点击列头仍可收起（--bgm-expand 可显式展开）。
+    property bool bgmExpanded: true
     /// note 采样标签：0 隐藏 / 1 id / 2 文件名
     property int noteSampleMode: 0
     /// LN 选取模式（默认关）：点 LN 任一段自动选配对两端（整体移动/删除）

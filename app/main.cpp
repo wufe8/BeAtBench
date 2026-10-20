@@ -36,6 +36,7 @@
 #include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/ChartHistoryController.hpp"
+#include "bridge/ChartFileActions.hpp"
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
 #include "bridge/EditUtils.hpp"
@@ -292,8 +293,14 @@ int main(int argc, char** argv) {
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
     beatbench::app::ChartHistoryController chartHistoryController(&documentService);
+    beatbench::app::ChartFileActions chartFileActions;
 
     QQmlApplicationEngine engine;
+    QObject::connect(&chartFileActions, &beatbench::app::ChartFileActions::statusMessage,
+        &engine, [&engine](const QString& message) {
+            if (auto* root = engine.rootObjects().value(0))
+                QMetaObject::invokeMethod(root, "setStatus", Qt::DirectConnection, Q_ARG(QVariant, QVariant(message)));
+        });
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
     engine.rootContext()->setContextProperty(QStringLiteral("beatbench"), &dispatcher);
     engine.rootContext()->setContextProperty(QStringLiteral("uiActions"), &uiActions);
@@ -367,7 +374,17 @@ int main(int argc, char** argv) {
                 chartHistoryController.showHistory(documentService.activeId());
                 return true;
             })});
-        uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：打开/保存/历史 ↔ 退出
+        uiActions.add(UiActionDef{.id = "file.revealInFileManager",
+            .label = QCoreApplication::tr("在文件管理器中打开"), .category = "file",
+            .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
+                return chartFileActions.revealActiveChart();
+            })});
+        uiActions.add(UiActionDef{.id = "file.openInTextEditor",
+            .label = QCoreApplication::tr("用文本编辑器打开"), .category = "file",
+            .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
+                return chartFileActions.openActiveChartInTextEditor();
+            })});
+        uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：文件操作 ↔ 退出
         uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file", nullptr, qml("uiActionExit")});
         // 编辑动作
         uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit", nullptr, qml("undoEdit")});
