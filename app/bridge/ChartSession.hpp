@@ -84,10 +84,12 @@ public:
     /// 无法表示 / 无文档 → 空串）。kind：key/scratch/pedal/bgm。
     Q_INVOKABLE QString laneChannel(int player, const QString& kind, int index) const;
 
-    /// 当前谱面 #LNTYPE（chart.meta["LNTYPE"]）：0=关闭 / 1=RDM(默认) / 2=#LNOBJ。
-    /// 无文档 → 1。前端 LN 放置工具分支（LNTYPE 1 vs 2 交互不同）。
+    /// Legacy metadata API: #LNTYPE value (absent/unknown/no chart -> 1).
+    /// This does not choose the LN placement mechanism; use useLnObjPlacement().
     Q_INVOKABLE int lnType() const;
-    /// 当前谱面 #LNOBJ 的数值 id（未定义 → -1）。LNTYPE 2 的 LN 尾采样值。
+    /// LNOBJ placement is enabled only with valid #LNOBJ and no #LNTYPE declaration.
+    Q_INVOKABLE bool useLnObjPlacement() const;
+    /// Valid nonzero two-digit #LNOBJ id, or -1 (absent/invalid/no chart).
     Q_INVOKABLE int lnobjSample() const;
 
     /// id 文本 → 数值（按活动文档 id_base 解码；**不做存在性校验**）。

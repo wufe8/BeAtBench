@@ -935,13 +935,13 @@ int ChartViewItem::bgmHeaderIndexAt(qreal x) const {
 
 QString ChartViewItem::noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
                                   const beatbench::Lane& lane, std::uint32_t sample,
-                                  std::uint32_t sub_line) {
+                                  std::uint32_t sub_line, int lnChannel, const QString& noteKind) {
     // ⚠️ sub_line 必须入键：BGM(ch01) 多个 note 可同 (measure,pos,kind,index,sample) 但不同
     // 子通道行——未含 sub_line 时选中一个会**全部高亮**（同键碰撞 → 误多选；2026-09 用户）。
-    return QString::asprintf("%u|%lld|%lld|%d|%d|%d|%u|%u", measure,
+    return QString::asprintf("%u|%lld|%lld|%d|%d|%d|%u|%u|%d|", measure,
                              static_cast<long long>(pos.num), static_cast<long long>(pos.den),
                              static_cast<int>(lane.player), static_cast<int>(lane.kind),
-                             static_cast<int>(lane.index), sample, sub_line);
+                             static_cast<int>(lane.index), sample, sub_line, lnChannel) + noteKind;
 }
 
 QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
@@ -1131,6 +1131,9 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         res.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
         // BGM 行序号（同值多行 Bgm note 消歧；前端选中/删除/移动必带）
         res.insert(QStringLiteral("sub_line"), static_cast<int>(ev.value.sub_line));
+        res.insert(QStringLiteral("ln_channel"), ev.value.ln_channel);
+        res.insert(QStringLiteral("note_kind"), ev.value.kind == beatbench::NoteKind::Landmine
+                       ? QStringLiteral("mine") : QStringLiteral("normal"));
         // LN 选取模式（默认关）：命中 LN 任一段 → 返回配对段（lnPartner），
         // 前端据此自动多选两端（用户问题5）。配对段 = ln_pair 下标指向的 note。
         if (m_lnSelectMode && ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size()) {
@@ -1155,6 +1158,9 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
             pr.insert(QStringLiteral("lane"), plane);
             pr.insert(QStringLiteral("sample"), static_cast<int>(p.value.sample.id));
             pr.insert(QStringLiteral("sub_line"), static_cast<int>(p.value.sub_line));
+            pr.insert(QStringLiteral("ln_channel"), p.value.ln_channel);
+            pr.insert(QStringLiteral("note_kind"), p.value.kind == beatbench::NoteKind::Landmine
+                          ? QStringLiteral("mine") : QStringLiteral("normal"));
             res.insert(QStringLiteral("lnPartner"), pr);
         }
         return res;
@@ -1296,6 +1302,9 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
         ref.insert(QStringLiteral("lane"), lane);
         ref.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
         ref.insert(QStringLiteral("sub_line"), static_cast<int>(ev.value.sub_line));
+        ref.insert(QStringLiteral("ln_channel"), ev.value.ln_channel);
+        ref.insert(QStringLiteral("note_kind"), ev.value.kind == beatbench::NoteKind::Landmine
+                       ? QStringLiteral("mine") : QStringLiteral("normal"));
         hits.push_back(std::move(ref));
     }
     // 稳定升序（(measure,pos) → lane → sample），满足「顺序无关」的前提下给可预期结果
@@ -1598,7 +1607,7 @@ void ChartViewItem::updateHover(const QPointF& pos) {
                     // 2026-09：看**数据真值**而非配对状态——未配对的 LN 通道 note
                     // 也应显示 +LN(xx)（用户：实际确实是 LN 通道，只是缺伙伴）。
                     // ln_channel = 源通道就是 5x/6x（parser 只对 51-69 置位）；
-                    // LNTYPE 2（#LNOBJ）配对 → ln_channel=false → 显示普通通道号。
+                    // LNOBJ pairing -> ln_channel=false -> ordinary channel label.
                     QString lnText;
                     bool paired = ev.value.ln_pair && *ev.value.ln_pair < chart.notes.size() &&
                         chart.notes[*ev.value.ln_pair].value.ln_pair &&
@@ -1915,7 +1924,10 @@ void ChartViewItem::drawPreview(QPainter* p) const {
             // 纯横向（deltaF=0，只改通道/目标列）：时间保持**原始**（不 snap，否则离网 note 被挪位）；
             // 有位移才 snap 目标（吸附 snapNum/snapDen，与松开后 moveSelection 的吸附一致）。
             const qreal mf = qFuzzyIsNull(m_moveDeltaF) ? tBase : snapMf(tBase + m_moveDeltaF);
-            drawNoteGhost(p, mf, lane, QStringLiteral("normal"),
+            const QString ghostKind = m.value(QStringLiteral("ln_channel")).toBool()
+                                          ? QStringLiteral("ln")
+                                          : m.value(QStringLiteral("note_kind"), QStringLiteral("normal")).toString();
+            drawNoteGhost(p, mf, lane, ghostKind,
                           static_cast<std::uint32_t>(sample), ghostBgmLine);
         }
         return;
@@ -2575,16 +2587,27 @@ void ChartViewItem::paint(QPainter* p) {
                                       pos, lane,
                                       static_cast<std::uint32_t>(
                                           m.value(QStringLiteral("sample")).toLongLong()),
-                               static_cast<std::uint32_t>(
-                                   m.value(QStringLiteral("sub_line")).toLongLong()))
+                                      static_cast<std::uint32_t>(
+                                          m.value(QStringLiteral("sub_line")).toLongLong()),
+                                      m.contains(QStringLiteral("ln_channel"))
+                                          ? (m.value(QStringLiteral("ln_channel")).toBool() ? 1 : 0) : -1,
+                                      m.value(QStringLiteral("note_kind")).toString())
                                .toStdString());
         }
     }
     const auto isSelected = [&](const beatbench::Event<beatbench::Note>& ev) {
-        return !selKeys.empty() &&
-               selKeys.count(noteRefKey(ev.measure, ev.pos, ev.value.lane,
-                                        ev.value.sample.id, ev.value.sub_line)
-                                 .toStdString()) > 0;
+        if (selKeys.empty()) return false;
+        const QString kind = ev.value.kind == beatbench::NoteKind::Landmine
+                                 ? QStringLiteral("mine") : QStringLiteral("normal");
+        // Missing optional fields keep legacy wildcard semantics.
+        for (const int channel : {ev.value.ln_channel ? 1 : 0, -1}) {
+            for (const QString& noteKind : {kind, QString()}) {
+                if (selKeys.count(noteRefKey(ev.measure, ev.pos, ev.value.lane,
+                                            ev.value.sample.id, ev.value.sub_line, channel, noteKind)
+                                      .toStdString()) > 0) return true;
+            }
+        }
+        return false;
     };
     // 描边标签（note id/文件名/控制轨）：文字居中于格子、允许越出 note（不裁剪——窄 note/矮 note
     // 也可读）。性能：raster 引擎下 QPainterPath(文本) 每帧每标签构建+描边+填充极慢（用户反馈

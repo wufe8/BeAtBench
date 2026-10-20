@@ -207,7 +207,7 @@ ApplicationWindow {
     property bool lnSelectMode: false
     // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
     property bool showGrid: true
-    /// LNTYPE 2（#LNOBJ）LN 放置的「待定头」（NoteRef 形状：measure/pos/lane/sample）。
+    /// LNOBJ 放置的待定头（仅 LNOBJ 有效且未声明 LNTYPE 时使用）。
     /// 会话状态不入 undo；同轨点尾 / 异轨重放头 / Esc 取消（2026-09 用户）。
     property var pendingLnHead: null
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）。
@@ -292,7 +292,7 @@ ApplicationWindow {
                enabled: !window.textInputFocused && (currentPage === 0 || currentPage === 1)
                onActivated: uiActions.invoke("view.zoomOut") }
 
-    // Esc：取消未完成的 LN 头（LNTYPE 2 放置；文本输入焦点时让行）
+    // Esc：取消未完成的 LNOBJ 头（文本输入焦点时让行）
     // 2026-09 快捷键收尾：进注册表（edit.cancel，scope=edit）→ 设置页可改绑。
     Shortcut {
         sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.cancel") : ""
@@ -1085,17 +1085,13 @@ ApplicationWindow {
     }
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
-    /// LN 放置提示文本（LNTYPE 2 = 头尾状态机；其余 = 连点两次自动配对）。
-    /// 附当前 LNTYPE/LNOBJ 解析值——用户可据此确认会话里 #LNTYPE 是否真的为 2
-    ///（元信息改了须点「保存」才写入会话；否则仍走 LNTYPE 1）。
+    /// Placement format is separate from derived LN connections.
     function lnHint() {
-        const t = (typeof chartSession !== "undefined" && chartSession) ? chartSession.lnType() : 1
+        const useObj = (typeof chartSession !== "undefined" && chartSession) && chartSession.useLnObjPlacement()
         const lj = (typeof chartSession !== "undefined" && chartSession) ? chartSession.lnobjSample() : -1
-        const mode = t === 2 ? "LNTYPE2" : (t === 0 ? "LNTYPE0" : "LNTYPE1")
-        const ljText = t === 2 ? (lj >= 0 ? " · LNOBJ #WAV" + chartSession.idTextOf(lj) : " · LNOBJ 未定义") : ""
-        return (t === 2 ? qsTr("同轨道左键放置Ln尾，不同轨道左键重新放置Ln头，按esc键取消")
-                        : qsTr("同一轨道连点两次：先头后尾（自动配对）"))
-               + qsTr("〔%1%2〕").arg(mode).arg(ljText)
+        return useObj
+            ? qsTr("先放普通头，再在同轨放 LNOBJ 尾；异轨重放头，Esc 取消〔LNOBJ #%1〕").arg(chartSession.idTextOf(lj))
+            : qsTr("LN 通道：同轨按时间先后连接头尾（不限制采样 ID）")
     }
     /// 进入 LN 工具：停掉自动清空，直接显示放置说明（持久直到切工具）。
     function activateLnHint() {
@@ -2428,6 +2424,7 @@ ApplicationWindow {
             Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
             BbTextField {
                 id: noteIdInput
+                objectName: "noteSampleIdInput"
                 Layout.fillWidth: true
                 font.family: Theme.fontMono
                 placeholderText: qsTr("如 1A")
@@ -2452,6 +2449,8 @@ ApplicationWindow {
                 to: to
             }
             if (r.sub_line !== undefined) args.sub_line = r.sub_line
+            if (r.ln_channel !== undefined) args.ln_channel = r.ln_channel
+            if (r.note_kind !== undefined) args.note_kind = r.note_kind
             const res = sessionCmd("note.setSample", args)
             if (res) setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
         }

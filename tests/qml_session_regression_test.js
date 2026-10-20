@@ -64,7 +64,7 @@ function makeContext(refs = [], mode = 'pms9k') {
         } }
     });
     vm.runInContext('String.prototype.arg = function(value) { return this.replace(/%[1-9]/, String(value)); };', context);
-    for (const name of ['sessionCmd', 'moveSelection', 'addPosDelta', 'laneEquals', 'pmsSuffixWarning', 'saveChart', 'saveChartAs']) {
+    for (const name of ['sessionCmd', 'moveSelection', 'addPosDelta', 'laneEquals', 'pmsSuffixWarning', 'saveChart', 'saveChartAs', 'placeNote', 'placeLnObj', 'cancelPendingLn', 'deleteNoteAt', 'quantizeSelection', 'gcd']) {
         vm.runInContext(extractFunction(name), context);
     }
     return { context, calls, statuses, saved, states };
@@ -72,6 +72,44 @@ function makeContext(refs = [], mode = 'pms9k') {
 function ref(num, den, measure = 0, kind = 'bgm', index = 0) {
     return { measure, pos: { num, den }, lane: { player: 0, kind, index }, sample: 1, sub_line: 0 };
 }
+test('explicit note identity survives drag and delete dispatch', () => {
+    const ordinary = { ...ref(1, 4, 0, 'key', 1), ln_channel: false, note_kind: 'normal' };
+    const ln = { ...ordinary, ln_channel: true };
+    const mine = { ...ordinary, note_kind: 'mine' };
+    const { context, calls } = makeContext([ordinary, ln, mine]);
+    context.moveSelection(0.25, null, ordinary.lane, -1);
+    assert.deepEqual(calls[0].args.moves.map(m => [m.from.ln_channel, m.from.note_kind]),
+        [[false, 'normal'], [true, 'normal'], [false, 'mine']]);
+    assert.deepEqual(plain(context.window.selectionRefs).map(r => [r.ln_channel, r.note_kind]),
+        [[false, 'normal'], [true, 'normal'], [false, 'mine']]);
+    context.deleteNoteAt(ln);
+    assert.equal(calls[1].args.ln_channel, true);
+    assert.equal(calls[1].args.note_kind, 'normal');
+});
+
+for (const useLnobj of [false, true]) {
+    test('LN placement uses explicit bridge policy ' + useLnobj, () => {
+        const { context, calls } = makeContext();
+        Object.assign(context.window, { editorTool: 'ln', currentSampleId: '01', pendingLnHead: null });
+        Object.assign(context.chartSession, { useLnObjPlacement: () => useLnobj,
+            lnType: () => 2, lnobjSample: () => 1295, sampleValueOf: () => 1 });
+        const hit = { measure: 0, num: 1, den: 4, lanePlayer: 0, laneKind: 'key', laneIndex: 1 };
+        context.placeNote({ ...hit, laneKind: 'bgm' });
+        assert.equal(calls.length, 0, 'BGM rejects either LN mechanism');
+        context.placeNote(hit);
+        assert.equal(calls[0].args.kind, useLnobj ? 'normal' : 'ln');
+        assert.equal(Boolean(context.window.pendingLnHead), useLnobj);
+        if (useLnobj) {
+            assert.equal(context.window.pendingLnHead.ln_channel, false);
+            assert.equal(context.window.pendingLnHead.note_kind, 'normal');
+            context.placeNote({ ...hit, num: 3 });
+            assert.equal(calls[1].args.sample, 1295);
+            assert.equal(calls[1].args.kind, 'normal');
+            assert.equal(context.window.pendingLnHead, null);
+        }
+    });
+}
+
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
 function mf(value) { return value.measure + value.pos.num / value.pos.den; }
 

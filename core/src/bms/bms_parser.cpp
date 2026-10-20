@@ -3,6 +3,7 @@
 // 输入约定：read_bms 接收已解码的 UTF-8 文本；read_bms_file 负责编码检测与解码。
 // 通道号 → Lane/语义的映射收敛在 ChannelMap（换格式 = 换映射规则）。
 #include "beatbench/core/bms/BmsCodec.hpp"
+#include "beatbench/core/LnPairing.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -159,15 +160,6 @@ std::int64_t resolve_stop_count(const Chart& chart, std::string_view slot, int n
     return 0;
 }
 
-// LN 配对辅助记录（解析时收集，行循环后统一配对）
-struct NoteInfo {
-    std::uint32_t idx = 0;
-    Lane lane;
-    bool ln_channel = false;  // 51-69 RDM LN 通道（LNTYPE 1：同通道内按时间序交替头尾）
-    bool lnobj_tail = false;  // LNTYPE 2：普通通道内值 == #LNOBJ 的对象 = LN 尾
-    int number = 0;
-};
-
 }  // namespace
 
 BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
@@ -217,25 +209,6 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             result.diagnostics.push_back({Severity::Warning,
                                           "不支持的 #BASE 值（按 36 进制处理）: " + std::string(v),
                                           number});
-        }
-    }
-
-    // ---- 预扫描 #LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
-    bool lntype2 = false;
-    std::uint32_t lnobj_id = 1295;  // 默认 ZZ
-    for (const auto& [line, number] : lines) {
-        (void)number;
-        if (line.empty() || line[0] != '#') continue;
-        const auto token = field_token(line);
-        const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
-                                      token.size();
-        const auto up = upper_ascii(token);
-        if (up == "LNTYPE") {
-            const auto v = field_value(line, token_end);
-            lntype2 = v == "2";
-        } else if (up == "LNOBJ") {
-            const auto v = field_value(line, token_end);
-            if (!v.empty()) lnobj_id = decode_id(chart, v);
         }
     }
 
@@ -357,17 +330,12 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     }
 
     auto& raw = chart.raw_lines;
-    std::vector<NoteInfo> note_infos;
+    std::vector<int> note_lines;  // Diagnostics only; pairing derives from Chart.
     // 子行序号（2026-09 泛化：任意 Note 通道同小节多行 = 子行，按 (measure,channel) 记录「第几条
     // 行」赋 sub_line（空行也占位，字数递增）。磁盘无"子通道"——子行就是同一通道的重复行，sub_line
     // 是读侧行序。allow_sub_lines=false 的通道出现多行由 lint 软警告（chart_check）。
     std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> sub_line_counts;
     bool in_block_comment = false;
-
-    // ---- 预扫描 1：#LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
-    {
-        // （已在上方完成，此处占位保持结构清晰）
-    }
 
     // ---- 预扫描 2：定义行（#WAVxx/#BMPxx/#BPMxx/#STOPxx）。
     // 先于数据行解析，保证数据行内的 #BPMxx/#STOPxx 引用与定义顺序无关
@@ -557,10 +525,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 note.sub_line = sub_line;
                                 note.ln_channel = rule->ln_channel;  // 51-69（LNTYPE 1 通道）
                                 chart.notes.push_back({measure, pos, note});
-                                note_infos.push_back(
-                                    {static_cast<std::uint32_t>(chart.notes.size() - 1),
-                                     rule->lane, rule->ln_channel,
-                                     lntype2 && !rule->ln_channel && id == lnobj_id, number});
+                                note_lines.push_back(number);
                                 break;
                             }
                             case ChannelSemantics::BpmInline:
@@ -650,63 +615,18 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             {Severity::Warning, std::string("无法识别的行：") + std::string(line), number});
     }
 
-    // ---- LN 配对 ----
-    // 定义（hitkey「#xxx51-69」「#LNTYPE 1 :: RDM-notation」+ BMS 笔记「长音」）：
-    //   LNTYPE 1（RDM 记法，BMS 惯例默认）：51-59 = 1P LN 通道、61-69 = 2P LN 通道；
-    //     通道内物件按出现次序严格交替 = 头、尾、头、尾…（同 lane 配对）。
-    //   LNTYPE 2（#LNOBJ）：不用 51-69；头尾同在普通通道（11-29），
-    //     值 == #LNOBJ 的物件为尾，头 = 同 lane 最近未配对的先前物件。
-    //     （BMS 笔记例 2：#02412:3C0000000000ZZ → channel 12 内 3C 头 + ZZ 尾。）
-    {
-        std::map<Lane, std::optional<std::uint32_t>> pending_head;  // LNTYPE 1：交替状态
-        std::map<Lane, std::vector<std::uint32_t>> head_stack;      // LNTYPE 2：候选头栈
-        for (const auto& info : note_infos) {
-            // 51-69 LN 通道件：**无论 LNTYPE 1/2 都按 LNTYPE 1 交替头尾**（用户确认两机制
-            // 不冲突可同时运行——谱面可同时含 51-69 LN 件与普通通道 #LNOBJ 件）。
-            if (info.ln_channel) {
-                auto& pending = pending_head[info.lane];
-                if (pending) {
-                    const auto h = *pending;
-                    pending.reset();
-                    chart.notes[h].value.ln_pair = info.idx;
-                    chart.notes[info.idx].value.ln_pair = h;
-                } else {
-                    pending = info.idx;
-                }
-                continue;
-            }
-            // LNTYPE 2（#LNOBJ）：普通通道（11-29）内值 == #LNOBJ 的物件 = 尾，
-            // 头 = 同 lane 最近未配对的先前物件。
-            if (lntype2) {
-                if (info.lnobj_tail) {
-                    auto& stk = head_stack[info.lane];
-                    if (stk.empty()) {
-                        result.diagnostics.push_back(
-                            {Severity::Warning,
-                             "未配对 LN 尾（缺少头）: 行 " + std::to_string(info.number), 0});
-                        continue;
-                    }
-                    const auto h = stk.back();
-                    stk.pop_back();
-                    chart.notes[h].value.ln_pair = info.idx;
-                    chart.notes[info.idx].value.ln_pair = h;
-                } else {
-                    head_stack[info.lane].push_back(info.idx);
-                }
-                continue;
-            }
-            // LNTYPE 1：普通通道件不做 LN 配对（只有 51-69 参与，已在上方处理）
-        }
-        // 未闭合 LN 头（LNTYPE 1 残留 / LNTYPE 2 无关；仅 LNTYPE 1 路径有 pending）
-        for (const auto& [lane, pending] : pending_head) {
-            (void)lane;
-            if (!pending) continue;
-            result.diagnostics.push_back(
-                {Severity::Warning,
-                 "未闭合 LN 头（缺少尾）: 行 " +
-                     std::to_string(note_infos[*pending].number),
-                 0});
-        }
+    // Rebuild from stored note identity, not source-line encounter order.
+    rebuild_note_ln_pairs(chart);
+    const auto lnobj = lnobj_sample_id(chart);
+    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
+        const auto& n = chart.notes[i].value;
+        if (n.ln_pair) continue;
+        const bool orphan_tail = lnobj && !n.ln_channel && n.kind == NoteKind::Normal &&
+                                 n.lane.kind != LaneKind::Bgm && n.sample.id == *lnobj;
+        if (!n.ln_channel && !orphan_tail) continue;
+        result.diagnostics.push_back({Severity::Warning,
+            (orphan_tail ? "未配对 LN 尾（缺少头）: 行 " : "未闭合 LN 头（缺少尾）: 行 ") +
+                std::to_string(note_lines[i]), note_lines[i]});
     }
 
     return result;

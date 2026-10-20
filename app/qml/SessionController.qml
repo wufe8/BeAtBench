@@ -63,6 +63,8 @@ QtObject {
             measure: ref.measure, pos: ref.pos, lane: ref.lane, sample: ref.sample
         }
         if (ref.sub_line !== undefined) args.sub_line = ref.sub_line
+        if (ref.ln_channel !== undefined) args.ln_channel = ref.ln_channel
+        if (ref.note_kind !== undefined) args.note_kind = ref.note_kind
         var r = sessionCmd("note.delete", args)
         if (r) setStatus(qsTr("已删除（可撤销）"))
     }
@@ -99,9 +101,9 @@ QtObject {
             placeBgaAt(hit)
             return
         }
-        // LNTYPE 2（#LNOBJ）：LN 工具 = 头尾状态机（同轨点尾 / 异轨重放头 / Esc 取消）。
-        if (window.editorTool === "ln" && chartSession.lnType() === 2) {
-            placeLnType2(hit)
+        // Valid LNOBJ without LNTYPE: LN tool = 头尾状态机（同轨点尾 / 异轨重放头 / Esc 取消）。
+        if (window.editorTool === "ln" && chartSession.useLnObjPlacement()) {
+            placeLnObj(hit)
             return
         }
         // kind 语义（M3 note.put 已支持）：note→normal / ln→LN 自动配对 / mine→地雷。
@@ -164,10 +166,11 @@ QtObject {
             setStatus(st.arg(window.currentSampleId).arg(hit.measure).arg(hit.num).arg(hit.den))
         }
     }
-    /// LNTYPE 2（#LNOBJ）LN 放置：头尾状态机（2026-09 用户）。
+    /// LNOBJ placement (no LNTYPE declaration):头尾状态机（2026-09 用户）。
     /// 无待定头 → 放头（当前采样普通 note）；已在当前轨 → 放尾（#LNOBJ 采样 note，rebuild 自动
     /// 配对）；异轨 → 重放头（note.move 把头 note 移到新轨/新位置，一个 undo 步）；Esc → 删除头。
-    function placeLnType2(hit) {
+    function placeLnObj(hit) {
+        if (!chartSession.useLnObjPlacement()) return
         if (hit.laneKind === "bgm") {
             setStatus(qsTr("BGM 轨不能放置 LN（格式无 LN 通道表示）；请用「3 放置」放普通背景音"))
             return
@@ -188,7 +191,8 @@ QtObject {
             const r = sessionCmd("note.put", { measure: hit.measure, pos: pos, lane: lane,
                                                sample: v, kind: "normal" })
             if (r) {
-                window.pendingLnHead = { measure: hit.measure, pos: pos, lane: lane, sample: v }
+                window.pendingLnHead = { measure: hit.measure, pos: pos, lane: lane, sample: v,
+                                         ln_channel: false, note_kind: "normal" }
                 setStatus(qsTr("LN 头 #WAV%1 · 小节 %2 · %3/%4（同轨点尾 / 异轨重放头 / Esc 取消）")
                           .arg(window.currentSampleId).arg(hit.measure).arg(hit.num).arg(hit.den))
             }
@@ -199,33 +203,17 @@ QtObject {
                          h.lane.index === lane.index
         // —— 待定头在当前轨 → 放尾（#LNOBJ 采样 note）——
         if (sameLane) {
-            let lnojb = chartSession.lnobjSample()
-            let fallback = false
-            if (lnojb < 0) {
-                // LNOBJ 未定义（用户预期 2026-09）：回退用**当前采样**作尾（空音化由用户
-                // 自行选择 ZZ 等空槽位），状态栏提示——不再阻断放置。
-                const cv = (window.currentSampleId !== "")
-                           ? chartSession.sampleValueOf(window.currentSampleId) : -1
-                if (cv < 0) {
-                    setStatus(qsTr("未定义 #LNOBJ 且未选当前采样，无法放 LN 尾"))
-                    return
-                }
-                lnojb = cv
-                fallback = true
-            }
+            const lnobj = chartSession.lnobjSample()
+            if (lnobj <= 0) return
             const headF = h.measure + h.pos.num / h.pos.den
             const tailF = hit.measure + hit.num / hit.den
             if (tailF <= headF) { setStatus(qsTr("LN 尾须在头之后（当前点早于头）")); return }
             const r = sessionCmd("note.put", { measure: hit.measure, pos: pos, lane: lane,
-                                               sample: lnojb, kind: "normal" })
+                                               sample: lnobj, kind: "normal" })
             if (r) {
                 window.pendingLnHead = null
-                if (fallback)
-                    setStatus(qsTr("LN 完成（#LNOBJ 未定义，尾用当前采样 #WAV%1；建议元信息设 #LNOBJ=ZZ 作空音尾）")
-                              .arg(window.currentSampleId))
-                else
-                    setStatus(qsTr("LN 完成（#LNOBJ 尾 · 小节 %1 · %2/%3）")
-                              .arg(hit.measure).arg(hit.num).arg(hit.den))
+                setStatus(qsTr("LN 完成（#LNOBJ 尾 · 小节 %1 · %2/%3）")
+                          .arg(hit.measure).arg(hit.num).arg(hit.den))
             }
             return
         }
@@ -233,17 +221,21 @@ QtObject {
         const to = { measure: hit.measure, pos: pos, lane: lane }
         const r = sessionCmd("note.move", { moves: [{ from: h, to: to }] })
         if (r) {
-            window.pendingLnHead = { measure: hit.measure, pos: pos, lane: lane, sample: h.sample }
+            window.pendingLnHead = { measure: hit.measure, pos: pos, lane: lane, sample: h.sample,
+                                     ln_channel: false, note_kind: "normal" }
             setStatus(qsTr("LN 头移到新轨 · 小节 %1 · %2/%3（同轨点尾）")
                       .arg(hit.measure).arg(hit.num).arg(hit.den))
         }
     }
+    // Compatibility wrapper for existing skins; new callers use placeLnObj.
+    function placeLnType2(hit) { return placeLnObj(hit) }
+
     /// Esc / 切走工具：取消未完成的 LN 头（删除已放的头 note）。
     function cancelPendingLn() {
         if (!window.pendingLnHead) { setStatus(qsTr("没有待完成的 LN 头")); return }
         const h = window.pendingLnHead
         const r = sessionCmd("note.delete", { measure: h.measure, pos: h.pos, lane: h.lane,
-                                              sample: h.sample })
+                                              sample: h.sample, ln_channel: false, note_kind: "normal" })
         window.pendingLnHead = null
         if (r) setStatus(qsTr("已取消 LN 放置（删除头）"))
     }
@@ -569,6 +561,8 @@ QtObject {
             const nr = { measure: to.measure, pos: to.pos,
                          lane: changedLane ? to.lane : ref.lane,
                          sample: ref.sample }
+            if (ref.ln_channel !== undefined) nr.ln_channel = ref.ln_channel
+            if (ref.note_kind !== undefined) nr.note_kind = ref.note_kind
             if (changedLane) {
                 // 换轨后按是否 BGM 定 sub_line（与后端 MoveNoteCommand 一致，防选中判定残留旧行号）
                 nr.sub_line = (to.lane && to.lane.kind === "bgm")
@@ -594,7 +588,7 @@ QtObject {
         return lane && lane.kind === kind && lane.index === index && lane.player === player
     }
     /// 单点 ↔ LN 转换（工具栏「单点/LN」按钮；selection 批量一个 undo 步）。
-    /// LNTYPE 翻转选中 note 的 LN 通道（LNTYPE 1：ln_channel ←→ 普通；配对由 rebuild 自动）。
+    /// Toggle selected note LN representation; pairing remains derived by core.
     function toggleLnSelection() {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（点击/框选）再转换单点/LN"))
@@ -635,7 +629,7 @@ QtObject {
                 const g = gcd(nnum, nden)
                 return { measure: ref.measure, pos: { num: nnum / g, den: nden / g },
                          lane: ref.lane, sample: ref.sample,
-                         sub_line: ref.sub_line }
+                         sub_line: ref.sub_line, ln_channel: ref.ln_channel, note_kind: ref.note_kind }
             })
             setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(sn).arg(sd))
         }
@@ -661,7 +655,9 @@ QtObject {
                 return { measure: nl.measure, pos: nl.pos,
                          lane: { player: nl.lane.player, kind: nl.lane.kind,
                                  index: nl.lane.index },
-                         sample: ref.sample, sub_line: ref.sub_line }
+                         sample: ref.sample, sub_line: ref.sub_line,
+                         ln_channel: nl.ln_channel !== undefined ? nl.ln_channel : ref.ln_channel,
+                         note_kind: nl.note_kind !== undefined ? nl.note_kind : ref.note_kind }
             })
             setStatus(mirror ? qsTr("已镜像 %1 个 note").arg(r.notes)
                              : qsTr("已旋转 %1 个 note").arg(r.notes))

@@ -12,7 +12,8 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.cpp
+add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp ln_codec_test.cpp timing_test.cpp
+    ln_identity_test.cpp
     json_test.cpp command_test.cpp codec_registry_test.cpp chart_mode_test.cpp
     pms_variant_test.cpp pms_integrity_test.cpp
     edit_commands_test.cpp session_registry_test.cpp timing_commands_test.cpp

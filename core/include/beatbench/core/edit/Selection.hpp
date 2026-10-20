@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "beatbench/core/Lane.hpp"
+#include "beatbench/core/Payloads.hpp"
 #include "beatbench/core/Rational.hpp"
 
 namespace beatbench::edit {
@@ -23,16 +24,24 @@ struct NoteRef {
     std::uint32_t sample = 0;
     std::uint32_t sub_line = 0;  ///< BGM 行序号（消歧；非 Bgm = 0）
 
+    // Missing identity fields preserve legacy references; explicit values disambiguate
+    // ordinary notes, LN-channel notes and mines at the same position/sample.
+    std::optional<bool> ln_channel;
+    std::optional<NoteKind> note_kind;
+
     friend bool operator<(const NoteRef& a, const NoteRef& b) {
         if (a.measure != b.measure) return a.measure < b.measure;
         if (a.pos != b.pos) return a.pos < b.pos;
         if (a.lane != b.lane) return a.lane < b.lane;
         if (a.sample != b.sample) return a.sample < b.sample;
-        return a.sub_line < b.sub_line;
+        if (a.sub_line != b.sub_line) return a.sub_line < b.sub_line;
+        if (a.ln_channel != b.ln_channel) return a.ln_channel < b.ln_channel;
+        return a.note_kind < b.note_kind;
     }
     friend bool operator==(const NoteRef& a, const NoteRef& b) {
         return a.measure == b.measure && a.pos == b.pos && a.lane == b.lane &&
-               a.sample == b.sample && a.sub_line == b.sub_line;
+               a.sample == b.sample && a.sub_line == b.sub_line &&
+               a.ln_channel == b.ln_channel && a.note_kind == b.note_kind;
     }
 };
 

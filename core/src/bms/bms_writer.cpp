@@ -100,14 +100,6 @@ struct RowCell {
     std::uint32_t sub_line = 0;  // BGM 行序号（仅 ch01 有意义；非 BGM = 0）
 };
 
-// 事件 i 与 j 是否互为 LN 配对（互指下标）
-inline bool ln_paired(const Chart& chart, std::size_t i, std::size_t j) {
-    if (i >= chart.notes.size() || j >= chart.notes.size()) return false;
-    const auto& a = chart.notes[i].value;
-    const auto& b = chart.notes[j].value;
-    return a.ln_pair && *a.ln_pair == j && b.ln_pair && *b.ln_pair == i;
-}
-
 // id 文本：按 chart.id_base 输出（36 = 大写；62 = 大小写敏感 base62）
 inline std::string fmt_id(const Chart& chart, std::uint32_t id) {
     return chart.id_base == IdBase::Base62 ? u32_to_c62(id, 2) : u32_to_c36(id, 2);
@@ -357,57 +349,14 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         cells.push_back({pos, std::move(text), sub_line});
     };
 
-    // 3a. 头部元信息：LNTYPE 2 尾槽值需要 LNOBJ 文本
-    const auto lntype2 = [&] {
-        if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end()) {
-            return it->second == "2";
-        }
-        return false;
-    }();
-    std::string lnobj_text;
-    if (const auto it = chart.meta.find("LNOBJ"); it != chart.meta.end()) {
-        lnobj_text = it->second;
-    }
-    if (lntype2 && lnobj_text.empty()) {
-        lnobj_text = "ZZ";  // 默认；若头部无 #LNOBJ 行则需补（见下方头部输出修正）
-    }
-
-    // 3b. note：LN 通道由配对关系决定（互为配对时按时间序分头尾）
-    //   LNTYPE 1（默认）：头尾同在 RDM LN 通道（1P→5x / 2P→6x，槽位文本 = WAV id）；
-    //   LNTYPE 2（#LNOBJ）：头尾同在普通通道（1x/2x），尾槽位文本 = #LNOBJ id。
-    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
-        const auto& ev = chart.notes[i];
+    // Note channel and sample are stored identity, never inferred from derived links.
+    for (const auto& ev : chart.notes) {
         const auto& n = ev.value;
-        bool is_head = false;
-        bool is_tail = false;
-        if (n.ln_pair && *n.ln_pair < chart.notes.size() &&
-            ln_paired(chart, i, *n.ln_pair)) {
-            if (ev < chart.notes[*n.ln_pair]) {
-                is_head = true;
-            } else {
-                is_tail = true;
-            }
-        }
         const auto mode = chart.mode_id.value_or("sp7k");
-        // BGM（ch01）：无 LN 表示（通道映射 ln_channel=false 且 bms_channel_for(Bgm,ln)==""）。
-        // 即使模型异常残留 ln_channel/配对，也按普通背景 note 写回（绝不丢数据）。
-        const bool want_ln =
-            !lntype2 && (is_head || is_tail) && n.lane.kind != LaneKind::Bgm;
-        auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
-        // 部分遗留 PMS 2P 仅有 LN 通道而无普通通道。孤儿也保留源 LN 标记，
-        // 不能降级成会读成1P的普通通道，更不能因缺少配对而静默丢弃。
-        if (channel.empty() && n.ln_channel)
-            channel = bms_channel_for_mode(mode, n.lane, true, n.kind);
-        if (channel.empty()) continue;  // 无法表示的 Lane（罕见）→ 丢弃并依赖诊断
-        std::string slot_text;
-        const auto output_rule = bms_channel_rule_for(mode, channel);
-        const bool rdm_channel = output_rule && output_rule->ln_channel;
-        if (is_tail && lntype2 && !rdm_channel && n.lane.kind != LaneKind::Bgm) {
-            slot_text = lnobj_text;
-        } else {
-            slot_text = fmt_id(chart, n.sample.id);
-        }
-        add_cell(ev.measure, channel, ev.pos, std::move(slot_text), n.sub_line);
+        const bool want_ln = n.ln_channel && n.lane.kind != LaneKind::Bgm;
+        const auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
+        if (channel.empty()) continue;  // Unrepresentable lane; diagnostics report it.
+        add_cell(ev.measure, channel, ev.pos, fmt_id(chart, n.sample.id), n.sub_line);
     }
 
     // 3c. BPM：按源通道语义输出（2026-09 用户修复：ch08 不得改写成 ch03）——

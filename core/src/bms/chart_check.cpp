@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 事件统计 + 最小 lint（info/check 命令与 CLI 展示共用，避免两处逻辑漂移）。
 #include "beatbench/core/bms/ChartCheck.hpp"
+#include "beatbench/core/LnPairing.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -36,34 +39,12 @@ EventStats collect_event_stats(const Chart& chart) {
     stats.measure = chart.measure_events.size();
     stats.bga = chart.bga_events.size();
     stats.raw_lines = chart.raw_lines.size();
-    // LNTYPE 2：LN 头尾在普通通道（无独立 5x/6x 通道），通道统计按普通通道计
-    bool lntype2 = false;
-    if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end() && it->second == "2") {
-        lntype2 = true;
-    }
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
-        const auto& ev = chart.notes[i];
-        const auto& n = ev.value;
-        // LN 对：互为配对的取头（配对下标大于自身则为尾，跳过计数）
-        if (n.ln_pair && *n.ln_pair > i) {
-            ++stats.ln_pairs;
-        }
-        // 通道：互为配对 → 按时间序分头尾；否则普通通道
-        bool is_head = false;
-        bool is_tail = false;
-        if (n.ln_pair && *n.ln_pair < chart.notes.size()) {
-            const auto j = *n.ln_pair;
-            const auto& p = chart.notes[j].value;
-            if (p.ln_pair && *p.ln_pair == i) {  // 互指 = 配对
-                if (ev < chart.notes[j]) {
-                    is_head = true;
-                } else {
-                    is_tail = true;
-                }
-            }
-        }
+        const auto& n = chart.notes[i].value;
+        if (n.ln_pair && *n.ln_pair > i && *n.ln_pair < chart.notes.size() &&
+            chart.notes[*n.ln_pair].value.ln_pair == i) ++stats.ln_pairs;
         const auto ch = bms_channel_for_mode(chart.mode_id.value_or("sp7k"), n.lane,
-                                             !lntype2 && (is_head || is_tail), n.kind);
+                                             n.ln_channel, n.kind);
         if (!ch.empty()) ++stats.channels[ch];
     }
     return stats;
@@ -151,19 +132,19 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
     // NBM 2026-09：LNOBJ 空音尾豁免（#LNOBJ 通常不绑文件）；其余照常警告。
     {
         const auto usage = collect_sample_usage(chart);
-        std::uint32_t lnobj_id = 0;
-        if (const auto lt = chart.meta.find("LNTYPE"); lt != chart.meta.end() && lt->second == "2") {
-            if (const auto lj = chart.meta.find("LNOBJ"); lj != chart.meta.end() && !lj->second.empty()) {
-                lnobj_id = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(lj->second, 2)
-                                                           : bms::c36_to_u32(lj->second, 2);
-            } else {
-                lnobj_id = chart.id_base == IdBase::Base62 ? 3843u : 1295u;  // 默认 ZZ
-            }
-        }
+        const auto lnobj_id = lnobj_sample_id(chart);
         for (const auto& [key, u] : usage) {
             (void)u;
             if (key.first != SampleKind::Wav) continue;
-            if (key.second == lnobj_id) continue;  // LNOBJ 空音尾豁免
+            if (lnobj_id && key.second == *lnobj_id) {
+                const bool has_audio_use = std::any_of(chart.notes.begin(), chart.notes.end(),
+                    [&](const auto& ev) {
+                        const auto& n = ev.value;
+                        return n.sample.id == key.second && (n.ln_channel ||
+                            n.kind != NoteKind::Normal || n.lane.kind == LaneKind::Bgm);
+                    });
+                if (!has_audio_use) continue;  // Only ordinary LNOBJ markers are silent.
+            }
             const auto it = chart.samples.find(key);
             if (it != chart.samples.end() && !it->second.file.empty()) continue;  // 1) 已检查
             LintIssue issue;
@@ -228,7 +209,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         const auto& ev = chart.notes[i];
         const auto p = ev.value.ln_pair;
         if (!p) continue;
-        bool bad = *p >= chart.notes.size();  // 越界
+        bool bad = *p == i || *p >= chart.notes.size();  // 越界
         if (!bad) {
             const auto& q = chart.notes[*p].value.ln_pair;
             bad = !q || *q != i;  // 不互指（含自我指向）
@@ -249,13 +230,26 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
                         " 轨道 " + lane_text(ev.value.lane);
         issues.push_back(std::move(issue));
     }
+    if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end()) {
+        auto value = std::string_view(it->second);
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+            value.remove_prefix(1);
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+            value.remove_suffix(1);
+        if (value == "2") issues.push_back({"unsupported_lntype",
+            "LNTYPE 2 (MGQ) is unsupported; metadata and note data are preserved", Severity::Warning});
+    }
+    const auto lnobj = lnobj_sample_id(chart);
     // 5b) LN 通道 note 未组成完整 LN（2026-09 用户：跨通道移出 LN 端后残留深色单点，
     //      lint 提示「存在未组成完整 LN 的 LN 通道 note」）。
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         const auto& ev = chart.notes[i];
-        if (!ev.value.ln_channel || ev.value.ln_pair) continue;
+        const auto& n = ev.value;
+        const bool orphan_lnobj = lnobj && !n.ln_channel && n.kind == NoteKind::Normal &&
+                                  n.lane.kind != LaneKind::Bgm && n.sample.id == *lnobj;
+        if ((!n.ln_channel && !orphan_lnobj) || n.ln_pair) continue;
         LintIssue issue;
-        issue.code = "unpaired_ln_note";
+        issue.code = orphan_lnobj ? "unpaired_lnobj_tail" : "unpaired_ln_note";
         issue.severity = Severity::Warning;
         issue.measure = ev.measure;
         issue.pos_num = ev.pos.num;
@@ -264,7 +258,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
         issue.lane_index = ev.value.lane.index;
         issue.sample = ev.value.sample.id;
-        issue.message = "LN 通道 note 未组成完整 LN: " + std::to_string(ev.measure) +
+        issue.message = std::string(orphan_lnobj ? "LNOBJ 尾缺少头: " : "LN 通道 note 未组成完整 LN: ") + std::to_string(ev.measure) +
                         " 小节 " + std::to_string(ev.pos.num) + "/" +
                         std::to_string(ev.pos.den) + " 轨道 " + lane_text(ev.value.lane);
         issues.push_back(std::move(issue));

@@ -411,7 +411,9 @@ Item {
                     s.lane.index === hit.lane.index &&
                     s.lane.player === hit.lane.player &&
                     s.pos.num === hit.pos.num && s.pos.den === hit.pos.den &&
-                    (s.sub_line === undefined || s.sub_line === hit.sub_line))
+                    (s.sub_line === undefined || s.sub_line === hit.sub_line) &&
+                    (s.ln_channel === undefined || s.ln_channel === hit.ln_channel) &&
+                    (s.note_kind === undefined || s.note_kind === hit.note_kind))
                 return true
         }
         return false
