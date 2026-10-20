@@ -1,117 +1,77 @@
 # AGENTS.md — 协作者 / AI 新会话入口
 
-> **新会话第一步读本文件**，再按需读 `doc/README.md`（文档地图）。
-> 本文件只回答两件事：**去哪找文件**、**新文件该放哪**。项目介绍见 `README.md`。
+> 本文件只回答三件事：**去哪找文件**、**新文件放哪**、**文档怎么维护**。
+> 项目介绍见 `README.md`；当前状态、构建、代码约定见 `doc/04-开发手册.md`。
 
-## 1. 先读（按顺序，不要整包通读）
+## 1. 新会话三步
 
-1. **本文件**（落点约定）
-2. `doc/04-开发手册.md` —— 现状/仓库布局/构建/代码约定/里程碑
-3. 按任务查 `doc/README.md` §2「任务 → 文档」表
-4. 当前进度、最近改动、待手测、已知边界：`local/doc/13-新会话入口.md`
-5. 开发历史/踩坑/防回退：`local/doc/04-开发手册-完整版.md`
+1. **本文件**（落点与维护约定）；
+2. `doc/04-开发手册.md` —— 现状 / 构建 / 代码约定；
+3. 按任务查 `doc/README.md` 的「任务 → 文档」表。
 
 ## 2. 仓库布局
 
-**主仓库**（`git` 跟踪，可提交）：
-
-| 路径 | 内容 |
-|---|---|
-| `core/` | 格式无关模型 + BMS codec + timing + 命令框架（**零 Qt**） |
-| `audio/` | PortAudio 后端 + miniaudio 解码 + 混音内核（**零 Qt**） |
-| `cli/` | `beatbench-cli` 批处理入口（info/check/convert/version + `--json`） |
-| `app/` | Qt Quick/QML GUI：`bridge/`（C++）+ `qml/`（界面） |
-| `tests/` | GoogleTest 单测 |
-| `doc/` | **交接/规格/设计**文档（提交）——权威文档都在这 |
-| `scripts/` | 发布打包等脚本 |
-| `third_party/` | vendored 头文件（miniaudio.h） |
-| `skins/`、`testdata/`、`tools/` | 皮肤 / 测试数据 / 工具 |
-
-**`local/`（主仓库已 gitignore，永不提交、永不依赖）**：
-
-- 它本身是**独立的嵌套 git 仓库**（本机备份，无远程）。对它的改动在 `local/` 内**单独 commit**
-  （`git -C local ...`），**不要**混进主仓库提交。
-- `local/doc/` 过程/历史/踩坑/审查；`local/screenshot/` 截图；`local/tmp/` 临时产物；
-  `local/release-notes/` 发布说明草稿；`local/tests/` 测试谱面；`local/chart/`、`local/bms/` 样本。
-- 详细结构与规则见 `local/README.md`。
-
-## 3. 文件落点规则（防乱放）——最重要
-
-| 你要产出 | 放这里 | 提交？ |
+| 路径 | 内容 | 模块约定 |
 |---|---|---|
-| 权威规格 / 设计 / 交接文档（别人能独立看懂） | `doc/` | ✅ 主仓库 |
-| 文档配图 | `doc/assets/` | ✅ 主仓库 |
-| 会话记录 / 进度 / 踩坑 / 审查 / 待拍板草稿 | `local/doc/` | 仅 local 仓库 |
-| 文档配图（local 内） | `local/doc/assets/` | ❌ 二进制忽略 |
-| **临时截图 / GUI 验收图** | `local/screenshot/` | ❌ 二进制忽略 |
-| **渲染输出 / 调试音频 / 日志 / 临时产物** | `local/tmp/`（或 `local/tmp/audio/`） | ❌ 忽略 |
-| 发布说明草稿 | `local/release-notes/` | 仅 local 仓库 |
-| 测试谱面 / 测试输入音频 | `local/tests/`（输入音频固定在 `local/` 根，被相对路径引用） | 仅 local 仓库 |
-| 工具生成物（架构图等） | `local/archify/`、`local/ui-demos/` | 视内容 |
+| `core/` | 格式无关模型 + BMS codec + timing + 命令框架（零 Qt） | [core/AGENTS.md](core/AGENTS.md) |
+| `audio/` | PortAudio 后端 + miniaudio 解码 + 混音内核（零 Qt） | [audio/AGENTS.md](audio/AGENTS.md) |
+| `cli/` | `beatbench-cli` 批处理入口（info/check/convert/version + `--json`） | [cli/AGENTS.md](cli/AGENTS.md) |
+| `app/` | Qt Quick/QML GUI：`bridge/`（C++）+ `qml/`（界面） | [app/AGENTS.md](app/AGENTS.md) |
+| `tests/` | GoogleTest 单测 | — |
+| `doc/` | 权威规格 / 设计 / 交接文档（提交）；文档地图在其 `README.md` | — |
+| `doc/pending/` | 挂账台账（待裁决 / 未复现 / 未验证观察项，解决即删） | 见 §4 维护规则 |
+| `scripts/` | 门禁 / 打包 / 备份脚本 | — |
+| `local/` | 本机临时产物（gitignore，永不提交，仓库代码与文档不得依赖） | `local/tmp/` 调试产物 |
 
-> **反例（不要做）**：把临时 wav / 截图 / 日志写到项目根、`build*/`、`out/` 或系统随机临时目录；
-> 把过程笔记写进主仓库 `doc/`；把 `local/` 内容提交进主仓库。
+改动落在哪个模块，就同时受该模块 AGENTS.md 约束（代理进入子目录自动加载；人工改动先读它）。
 
-## 4. 硬性纪律
+## 3. 文件落点规则
 
-- **主仓库不得依赖 `local/` 的任何路径**，也不得提交它（`.gitignore` 已忽略整个 `local/`）。
-- **临时文件一律写 `local/tmp/`**；运行期日志（如 `beatbench-qml-errors.log`）已 gitignore，勿提交。
-- **截图一律 `local/screenshot/`**，命名 `<阶段>-<页面>.png`。
-- **新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表**，否则运行时「类型不可用」。
+写之前先归类——一个事实只有一个权威位置：
+
+| 要写的内容 | 权威位置 |
+|---|---|
+| 必守规则（不变量、禁令、口径、契约形状、命令入口） | AGENTS.md 层级（根或模块） |
+| 权威规格 / 设计文档（非项目参与者可独立理解） | `doc/`（提交） |
+| 待裁决 / 未复现 / 未验证观察项 | `doc/pending/`（提交，解决即删） |
+| 实现细节（交互门控、参数语义、状态流转、边界取舍） | 代码实现处头注释（与实现同灶演进） |
+| 用户文档（功能、下载、快速上手） | 根 `README.md` |
+| 临时截图 / 渲染输出 / 调试日志 | `local/tmp/`、`local/screenshot/`（gitignore） |
+
+通用硬规则：
+
 - 源文件一律 UTF-8；不要移除 MSVC 的 `/utf-8`。
-- 命令目录只有单数 `core/include/beatbench/core/command/`（命名空间 `beatbench::cmd`）；
-  M0 遗留的复数 `core/.../commands/` 已删除，不要照旧笔记去找。
 - 提交信息用 conventional commits（`feat` / `fix` / `docs` / `refactor` / `test` / `chore`）。
+- 门禁钩子（安装：`git config core.hooksPath .githooks`）：pre-push 跑快速回归，
+  pre-commit 跑 `scripts/check-docs.sh` 文档护栏。
 
-## 5. 构建 / 测试速查
+## 4. 文档维护规则
 
-```bash
-# core + CLI + 测试
+**内容四层标准**（写入任何文档前先归类）：
 
-Linux / macOS（GCC / Clang，单配置）：
+- **必守规则**：住 AGENTS.md 层级，不下沉；
+- **决策理由**：融入当前陈述随规则同段（「X 为有意设计，不是 Y」形态），只保留
+  「坏了会怎样、怎么识别」的判据；长实证与复现叙事不入档（细节归 git）；
+- **操作手册**（环境、构建、发布、排障）：归 `doc/` 主题文件，AGENTS.md 只留指针；
+- **实现细节**：权威载体是代码实现处头注释——注释与实现同灶、随代码演进；
+  文档只留规则句与指针，不双写。
 
-```bash
-cmake -S . -B build -DBEATBENCH_BUILD_TESTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-# 快速回归（跳过真实谱面，<1s）：BB_SKIP_REAL=1 ./build/tests/beatbench_tests
-```
+**挂账生命周期**（`doc/pending/`）：文件名 `YYMMDD-主题.md`（登记当日真实日期），
+正文必带背景与出口条件；完成即删、失效即删；一次性提醒不留档。
 
-Windows（MSVC，多配置；`ctest` 不带 `-C` 全部 Not Run）：
+**整理式维护，不建台账**：新约定并入既有主题小节、同步改写过时表述；被取代的内容直接删；
+不写时间线段落与句内决策日期（决策已定即现行事实，不需要出生证明）；人工验证时效声明豁免
+（哪些平台路径验证过、哪些没验证过，日期保留）。
 
-```powershell
-cmake -S . -B build -DBEATBENCH_BUILD_TESTS=ON
-cmake --build build --config Debug --parallel
-ctest --test-dir build -C Debug --output-on-failure
-# 快速回归：$env:BB_SKIP_REAL=1; build\tests\Debug\beatbench_tests.exe
-```
+**表述纪律**：不落描述性计数（「N 个测试 / N 处 / N 个 job」类，随代码漂移且无人提醒），
+改语义 + 权威源指针；契约常量（阈值 / 上限等由代码承载的值）照写，但与代码同名同源。
+同一事实只在权威处编辑、其余位置引用；动权威源必须同步全部下游引用。
 
-# GUI（Qt 6.4+；Windows MinGW 加 -DCMAKE_CXX_COMPILER/-DCMAKE_MAKE_PROGRAM 参数）
-cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DBEATBENCH_BUILD_TESTS=OFF
-cmake --build build-gui --parallel
+**护栏**：`scripts/check-docs.sh`（pre-commit 拦截）——挂账文件名与出口条件、
+markdown 内仓库路径指针有效性、中文弯引号。
 
-# Qt 桥层单测：带 Qt 的配置自动启用（edit_utils / ui_action_registry /
-# slice_workspace / theme_manager / command_dispatcher）
-```
+## 5. 构建 / 门禁 / 发布
 
-- **CI**（`.github/workflows/ci.yml`）：push（master）/ PR（目标 master）/ 手动触发；
-  五 job = linux-core、windows-msvc-core（无 Qt）、linux-full、macos-full（非阻塞，
-  summary job 翻出其实际结论）、windows-mingw-full（回归）。
-  改跨平台相关代码先在本地用 GCC/Clang 过一遍。
-- **打包流水线**（`.github/workflows/package.yml`，独立于回归门禁）：tag `v*` 或手动
-  dispatch 时产出 Linux deb/rpm/arch（各发行版容器内安装冒烟 + Qt 6.4 探针），tag 触发时
-  自动把包附到 `release.yml` 建好的同一个 Release；Windows 发布包由 `release.yml` 产出并挂
-  GitHub Release。手动 dispatch 到分支可**只验 Linux 矩阵**（挂载作业自动跳过）。详见 `doc/11`。
-
-- ⚠️ **「无 Qt」≠「可离线」**：`audio/CMakeLists.txt` 无条件 FetchContent 拉 PortAudio；
-  离线干净构建需 `-DFETCHCONTENT_SOURCE_DIR_PORTAUDIO=<已有源码>`（googletest 同理）。
-- 测试基线（源码 `TEST()` 计数，0.3.2 后）：core **317**（快速 315 过 / 2 SKIP）+ 音频 **61**（含 onset_detector 6）+ Qt 桥层 **63**（slice_workspace 23）。
-  真实谱面集缺失时部分用例 SKIP，**不要把某一天的 PASS 数写死**。
-
-## 6. 找不到文件时
-
-1. 查 `doc/README.md` §2 的「任务 → 文档」表；
-2. 查 `local/README.md` 的目录结构与归位规则；
-3. 用 `glob` / `grep` 搜索，**不要猜路径**；
-4. 仍未找到 → 读 `local/doc/13-新会话入口.md`（当前状态与最近落点）。
+- 构建与测试：`doc/04` §4（构建命令权威）；分支与门禁：`doc/10`；打包与发布：`doc/11`。
+- 快速门禁：`scripts/check.sh --quick`；pre-push 自动执行，赶时间 `SKIP_CHECK=1 git push`。
+- 找不到文件 → `doc/README.md` 文档地图；地图也解答不了 → 按 §3 落点规则归类。
