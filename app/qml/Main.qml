@@ -1243,9 +1243,25 @@ ApplicationWindow {
     }
     Connections {
         target: typeof resourceBindingController !== "undefined" ? resourceBindingController : null
-        function onBindingsApplied() {
+        function onBindingsApplied(changedTargets) {
+            if (changedTargets.indexOf(window.chartPath) >= 0) {
+                window.selectionRefs = []
+                window.metaSelection = []
+                window.pendingLnHead = null
+            }
             documents.refresh()
             session.refreshSamples()
+            session.refreshTiming()
+            session.refreshLint()
+            if (!window.metaDraftDirty) {
+                const metadata = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.list", args: {}})))
+                if (metadata.ok) {
+                    window.chartMeta = metadata.result.meta
+                    const bpm = parseFloat(window.chartMeta.BPM)
+                    if (isFinite(bpm) && bpm > 0) window.currentBpmValue = bpm
+                }
+                editPage.reloadMeta()
+            }
             editPage.reloadBga()
             project.refreshOpenStates()
         }

@@ -6,9 +6,11 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <algorithm>
+#include <set>
 #include "bridge/ResourceBindingController.hpp"
 #include "bridge/DocumentService.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 
 namespace {
 using namespace beatbench;
@@ -203,6 +205,142 @@ TEST_F(ResourceBindingTest, InvalidTargetsAndConditionalTargetsAreRejected) {
     EXPECT_FALSE(ok(controller.prepareBindings("#WAV02 a.wav",root,{"missing.bms"})));
     ASSERT_TRUE(ok(documents.openReference(a))); session(a)->chart_mut().raw_lines.push_back("#RANDOM 2");
     EXPECT_FALSE(ok(prepare()));
+}
+TEST_F(ResourceBindingTest, CustomMetaDefinitionsKeepUntouchedSourceModelDiskAndUndo) {
+    ASSERT_TRUE(write(a,"#TITLE Old\n#ARTIST Keep\n#BPM 120\n#WAV01 old.wav\n#BPM01 150\n#STOP01 48\n#00108:01\n#00109:01\n#00251:0102\n#00311:01\n#004ZZ:keep\n// original comment\n"));
+    ASSERT_TRUE(ok(documents.openReference(a))); auto* s = session(a); ASSERT_NE(s,nullptr);
+    const auto before = s->chart(); const auto disk = bytes(a); const auto activeId = session_registry().active_id();
+    s->set_backup_enabled(false);
+    ASSERT_TRUE(s->exec(std::make_unique<SetSampleFileCommand>(SampleKind::Wav,9,"draft.wav")));
+    const auto depth = s->undo_depth(); int persisted = 0;
+    s->set_autosave_enabled(true); s->set_backup_enabled(true);
+    s->set_persist_hook([&](const Chart&,const std::string&,std::string*) { ++persisted; return true; });
+    auto p = controller.prepareCustomContent("#TITLE New\n#WAV01 media/new.wav\n#BMP02 images/new.png\n#BPM01 180.25\n#STOP01 96\n#STAGEFILE images/stage.png",root,{a});
+    ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString();
+    EXPECT_EQ(p.value("changedCount").toInt(),6); EXPECT_EQ(p.value("collisionCount").toInt(),4);
+    ASSERT_TRUE(ok(controller.commitBindings(planId(p),true)));
+    EXPECT_EQ(persisted,0); EXPECT_EQ(bytes(a),disk); EXPECT_EQ(session_registry().active_id(),activeId);
+    EXPECT_EQ(s->undo_depth(),depth+1); EXPECT_EQ(s->chart().meta.at("TITLE"),"New"); EXPECT_EQ(s->chart().meta.at("ARTIST"),"Keep");
+    EXPECT_EQ(s->chart().notes,before.notes); EXPECT_EQ(s->chart().raw_lines,before.raw_lines); EXPECT_EQ(s->chart().mode_id,before.mode_id);
+    EXPECT_EQ(s->chart().bpm_events.front().value.value,180.25); EXPECT_TRUE(s->chart().bpm_events.front().value.ch08);
+    EXPECT_EQ(s->chart().bpm_events.front().value.ref_id,1u); EXPECT_EQ(s->chart().stop_events.front().value.count,96);
+    s->set_autosave_enabled(false); s->set_backup_enabled(false);
+    ASSERT_TRUE(s->undo()); EXPECT_EQ(s->chart().notes,before.notes); EXPECT_EQ(s->chart().meta.at("TITLE"),"Old");
+    EXPECT_EQ(file(s,SampleKind::Wav,9),"draft.wav"); ASSERT_TRUE(s->redo()); EXPECT_EQ(s->chart().meta.at("TITLE"),"New");
+}
+TEST_F(ResourceBindingTest, CustomDataReplacesEntireBgmGroupNotAppendAndPreservesOtherSources) {
+    ASSERT_TRUE(write(a,"#BPM 120\n#WAV01 a.wav\n#WAV02 b.wav\n#00101:01\n#00101:0001\n#00111:01\n#00151:0101\n#00201:01\n#003ZZ:untouched\n"));
+    ASSERT_TRUE(ok(documents.openReference(a))); auto* s = session(a); const auto before=s->chart();
+    auto p=controller.prepareCustomContent("#00101:02\n#00101:0002",root,{a}); ASSERT_TRUE(ok(p));
+    const auto row=p.value("rows").toList().front().toMap(); EXPECT_EQ(row.value("key").toString(),"001/01");
+    EXPECT_TRUE(row.value("summary").toString().contains("整组替换")); EXPECT_EQ(p.value("collisionCount").toInt(),1);
+    EXPECT_FALSE(ok(controller.commitBindings(planId(p)))); EXPECT_EQ(s->chart().notes,before.notes);
+    p=controller.prepareCustomContent("#00101:02\n#00101:0002",root,{a}); ASSERT_TRUE(ok(p)); ASSERT_TRUE(ok(controller.commitBindings(planId(p),true)));
+    unsigned bgmCount=0; std::set<unsigned> sublines;
+    for (const auto& e:s->chart().notes) {
+        if (e.measure==1 && e.value.lane.kind==LaneKind::Bgm) { ++bgmCount; EXPECT_EQ(e.value.sample.id,2u); sublines.insert(e.value.sub_line); }
+        else {
+            const auto original=std::find_if(before.notes.begin(),before.notes.end(),[&](const auto& n) { return n.measure==e.measure && n.pos==e.pos && n.value.lane==e.value.lane && n.value.ln_channel==e.value.ln_channel; });
+            ASSERT_NE(original,before.notes.end()); EXPECT_EQ(e.value.sample,original->value.sample); EXPECT_EQ(e.value.sub_line,original->value.sub_line);
+        }
+    }
+    EXPECT_EQ(bgmCount,2u); EXPECT_EQ(sublines,(std::set<unsigned>{0,1})); EXPECT_EQ(s->chart().raw_lines,before.raw_lines);
+    s->set_backup_enabled(false); ASSERT_TRUE(s->undo()); EXPECT_EQ(s->chart().notes,before.notes); ASSERT_TRUE(s->redo());
+    p=controller.prepareCustomContent("#00101:02\n#00101:0002",root,{a}); ASSERT_TRUE(ok(p)); EXPECT_EQ(p.value("changedCount").toInt(),0);
+}
+TEST_F(ResourceBindingTest, CustomSameValueReferenceIdentityAndBgmSublineChangesAreNotNoop) {
+    ASSERT_TRUE(write(a,"#BPM 120\n#BPM01 180\n#BPM02 180\n#STOP01 48\n#STOP02 48\n#00108:01\n#00109:01\n#00201:00\n#00201:01\n"));
+    auto p=controller.prepareCustomContent("#00108:02\n#00109:02\n#00201:01",root,{a}); ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString();
+    EXPECT_EQ(p.value("changedCount").toInt(),3); ASSERT_TRUE(ok(controller.commitBindings(planId(p),true)));
+    auto* s=session(a); ASSERT_EQ(s->chart().bpm_events.size(),1u); EXPECT_EQ(s->chart().bpm_events[0].value.ref_id,2u);
+    ASSERT_EQ(s->chart().stop_events.size(),1u); EXPECT_EQ(s->chart().stop_events[0].value.ref_id,2u);
+    ASSERT_EQ(s->chart().notes.size(),1u); EXPECT_EQ(s->chart().notes[0].value.sub_line,0u);
+}
+TEST_F(ResourceBindingTest, CustomTimingBgaAndMeasureGroupsRetainOtherChannels) {
+    ASSERT_TRUE(write(a,"#BPM 120\n#BPM01 150\n#STOP01 48\n#BMP01 old.png\n#00103:8C\n#00108:01\n#00109:01\n#00104:01\n#00107:01\n#00102:1.5\n"));
+    auto p=controller.prepareCustomContent("#BPM02 180\n#STOP02 96\n#BMP02 image.png\n#00108:02\n#00109:02\n#00104:02\n#00102:0.5",root,{a});
+    ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString(); ASSERT_TRUE(ok(controller.commitBindings(planId(p),true)));
+    const auto& c=session(a)->chart(); ASSERT_EQ(c.bpm_events.size(),2u);
+    EXPECT_EQ(std::count_if(c.bpm_events.begin(),c.bpm_events.end(),[](const auto& e){return !e.value.ch08 && e.value.value==140;}),1);
+    EXPECT_EQ(c.stop_events.front().value.count,96); EXPECT_EQ(c.measure_events.front().value.beats,2);
+    ASSERT_EQ(c.bga_events.size(),2u); for(const auto& e:c.bga_events) EXPECT_EQ(e.value.image.id,e.value.layer==0?2u:1u);
+}
+TEST_F(ResourceBindingTest, CustomUnknownHeadersAndRawRoundTripWithoutLosingUnrelatedRaw) {
+    ASSERT_TRUE(write(a,"#BPM 120\n#MYSTERY old\n#EXT-RAW old\n#WAV001 legacy.wav\n#003ZZ:old\n// Keep comment\nopaque original\n"));
+    auto p=controller.prepareCustomContent("#MYSTERY new\n#EXT-RAW new\n#WAV001 updated.wav\n#003ZZ:new\nopaque new\n// new comment",root,{a});
+    ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString();
+    EXPECT_TRUE(p.value("warnings").toStringList().join(' ').contains("未知"));
+    ASSERT_TRUE(ok(controller.commitBindings(planId(p),true))); const auto& c=session(a)->chart();
+    EXPECT_EQ(c.meta.at("MYSTERY"),"new");
+    EXPECT_EQ(std::count(c.raw_lines.begin(),c.raw_lines.end(),"#EXT-RAW old"),0);
+    EXPECT_EQ(std::count(c.raw_lines.begin(),c.raw_lines.end(),"#EXT-RAW new"),1);
+    EXPECT_EQ(std::count(c.raw_lines.begin(),c.raw_lines.end(),"opaque original"),1);
+    EXPECT_EQ(std::count(c.raw_lines.begin(),c.raw_lines.end(),"// Keep comment"),1);
+    const auto saved=bms::write_bms(c); const auto reloaded=bms::read_bms(saved).chart;
+    EXPECT_EQ(reloaded.meta.at("MYSTERY"),"new");
+    for(const auto& line:c.raw_lines) EXPECT_NE(std::find(reloaded.raw_lines.begin(),reloaded.raw_lines.end(),line),reloaded.raw_lines.end()) << line;
+}
+TEST_F(ResourceBindingTest, CustomMixedBasesInterpretInputPerTargetAndRootRelativePaths) {
+    const auto p=controller.prepareCustomContent("#TITLE Both\n#WAV0a media/missing.wav\n#BMP0a images/missing.png\n#BANNER images/banner.png\n#00211:0a",root,{a,b});
+    ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString(); ASSERT_TRUE(ok(controller.commitBindings(planId(p))));
+    EXPECT_EQ(file(session(a),SampleKind::Wav,10),"media/missing.wav"); EXPECT_EQ(file(session(b),SampleKind::Wav,36),"../media/missing.wav");
+    EXPECT_EQ(session(a)->chart().meta.at("BANNER"),"images/banner.png"); EXPECT_EQ(session(b)->chart().meta.at("BANNER"),"../images/banner.png");
+    for(const auto& pair:std::vector<std::pair<EditorSession*,unsigned>>{{session(a),10},{session(b),36}}) {
+        const auto note=std::find_if(pair.first->chart().notes.begin(),pair.first->chart().notes.end(),[](const auto& e){return e.measure==2;});
+        ASSERT_NE(note,pair.first->chart().notes.end()); EXPECT_EQ(note->value.sample.id,pair.second);
+    }
+    EXPECT_EQ(session(a)->chart().id_base,IdBase::Base36); EXPECT_EQ(session(b)->chart().id_base,IdBase::Base62);
+}
+TEST_F(ResourceBindingTest, CustomPmsProfilesAndLnSourceIdentityArePreserved) {
+    const auto standard=QDir(root).filePath("standard.pms"), bmesp=QDir(root).filePath("bmesp.pms");
+    ASSERT_TRUE(write(standard,"#BPM 120\n#00122:01\n#00262:0101\n#00311:01\n"));
+    ASSERT_TRUE(write(bmesp,"#BPM 120\n#00118:01\n#00258:0101\n#00311:01\n"));
+    auto p=controller.prepareCustomContent("#TITLE PMS\n#WAV02 updated.wav",root,{standard,bmesp}); ASSERT_TRUE(ok(p));
+    const auto stdBefore=session(standard)->chart(), bmeBefore=session(bmesp)->chart(); ASSERT_TRUE(ok(controller.commitBindings(planId(p))));
+    EXPECT_EQ(session(standard)->chart().mode_id,std::optional<std::string>{"pms9k"});
+    EXPECT_EQ(session(bmesp)->chart().mode_id,std::optional<std::string>{"pms9k-bmesp"});
+    EXPECT_EQ(session(standard)->chart().notes,stdBefore.notes); EXPECT_EQ(session(bmesp)->chart().notes,bmeBefore.notes);
+    p=controller.prepareCustomContent("#00118:02",root,{bmesp}); ASSERT_TRUE(ok(p)); ASSERT_TRUE(ok(controller.commitBindings(planId(p),true)));
+    EXPECT_EQ(session(bmesp)->chart().mode_id,bmeBefore.mode_id);
+    const auto saved=bms::write_bms(session(bmesp)->chart()); EXPECT_NE(saved.find("#00118:02"),std::string::npos); EXPECT_NE(saved.find("#00258:"),std::string::npos);
+    EXPECT_FALSE(ok(controller.prepareCustomContent("#00118:02",root,{standard})));
+}
+TEST_F(ResourceBindingTest, CustomRejectsStructuralChangesControlsAndMalformedData) {
+    const QStringList bad{"#BASE 62","#BASE 36","#PLAYER 3","#LNOBJ ZZ","#LNTYPE 2","#LNMODE 1","#ENCODING UTF-8",
+        "#RANDOM 2","#IF 1","#ENDIF","#ENDRANDOM","#SWITCH 1","#ENDSWITCH","#DEFAULT","/* comment */",
+        "#00111:012","#00111:0!","#00103:ZZ","#00108:ZZ","#00109:ZZ","#00102:NaN","#BPM01 NaN","#STOP01 1.5","#WAV01 ../escape.wav","#WAV01","#BPM01","#STOP01"};
+    for(const auto& raw:bad) { SCOPED_TRACE(raw.toStdString()); EXPECT_FALSE(ok(controller.prepareCustomContent(raw,root,{a}))); }
+    ASSERT_TRUE(ok(documents.openReference(a))); session(a)->chart_mut().raw_lines.push_back("#SWITCH 1");
+    EXPECT_FALSE(ok(controller.prepareCustomContent("#TITLE Safe",root,{a}))); EXPECT_EQ(session(a)->undo_depth(),0u);
+}
+TEST_F(ResourceBindingTest, CustomStaleCancelReplacementAndNoopAreSafe) {
+    auto p=controller.prepareCustomContent("#TITLE Custom",root,{a,b}); ASSERT_TRUE(ok(p)); controller.discardPlan();
+    EXPECT_FALSE(ok(controller.commitBindings(planId(p),true))); EXPECT_EQ(session(a)->undo_depth(),0u);
+    p=controller.prepareCustomContent("#TITLE Custom",root,{a,b}); ASSERT_TRUE(ok(p));
+    auto* sb=session(b); sb->set_backup_enabled(false); ASSERT_TRUE(sb->exec(std::make_unique<SetSampleFileCommand>(SampleKind::Wav,8,"draft.wav"))); ASSERT_TRUE(sb->undo());
+    EXPECT_FALSE(ok(controller.commitBindings(planId(p),true))); EXPECT_EQ(session(a)->undo_depth(),0u);
+    p=controller.prepareCustomContent("#BPM 120",root,{a,b}); ASSERT_TRUE(ok(p)); EXPECT_EQ(p.value("changedCount").toInt(),0);
+    ASSERT_TRUE(ok(controller.commitBindings(planId(p)))); EXPECT_EQ(session(a)->undo_depth(),0u);
+    p=controller.prepareCustomContent("#TITLE Custom",root,{a}); ASSERT_TRUE(ok(p));
+    const auto newer=controller.prepareBindings("#WAV02 other.wav",root,{a}); ASSERT_TRUE(ok(newer));
+    EXPECT_FALSE(ok(controller.commitBindings(planId(p),true)));
+}
+TEST_F(ResourceBindingTest, CustomBudgetsRejectBeforeOpeningTargets) {
+    EXPECT_FALSE(ok(controller.prepareCustomContent(QString(1024*1024+1,'x'),root,{a})));
+    QString many; for(int i=0;i<20001;++i) many+="// x\n";
+    EXPECT_FALSE(ok(controller.prepareCustomContent(many,root,{a})));
+    QStringList targets; for(int i=0;i<20001;++i) targets.push_back(a);
+    EXPECT_FALSE(ok(controller.prepareCustomContent("#TITLE x",root,targets))); EXPECT_TRUE(DocumentService::findSessionId(a).isEmpty());
+}
+TEST_F(ResourceBindingTest, SimpleWavHelperAcceptsRootRelativeAndAbsoluteButRejectsInjection) {
+    auto p=controller.prepareWavBinding("02",QDir(root).filePath("media/new.wav"),root,{a,b}); ASSERT_TRUE(ok(p));
+    ASSERT_TRUE(ok(controller.commitBindings(planId(p)))); EXPECT_EQ(file(session(b),SampleKind::Wav,2),"../media/new.wav");
+    EXPECT_FALSE(ok(controller.prepareWavBinding("03\n#WAV04","x.wav",root,{a})));
+    EXPECT_FALSE(ok(controller.prepareWavBinding("03","x.wav\n#WAV04 other.wav",root,{a})));
+    EXPECT_FALSE(ok(controller.prepareWavBinding("03",QDir(root).absoluteFilePath("../outside.wav"),root,{a})));
+    EXPECT_FALSE(ok(controller.prepareWavBinding("00","x.wav",root,{a})));
+    p=controller.prepareWavBinding("02","other.wav",root,{a}); ASSERT_TRUE(ok(p)); EXPECT_EQ(p.value("collisionCount").toInt(),1);
+    EXPECT_FALSE(ok(controller.commitBindings(planId(p)))); EXPECT_EQ(file(session(a),SampleKind::Wav,2),"media/new.wav");
 }
 } // namespace
 int main(int argc, char** argv) {
