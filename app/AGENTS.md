@@ -12,11 +12,11 @@
 
 - **字符串格式化只用链式单参 `.arg()`**：multi-arg 抛 `String.arg(): Invalid arguments`
   并中止当前 JS 函数。
-- **互斥单选组用「外部激活态」**：状态放单值属性 + `active: 状态 === id` 绑定；
+- **互斥单选组用“外部激活态”**：状态放单值属性 + `active: 状态 === id` 绑定；
   控件 `checkable` 自翻会断开绑定、多选残留。
 - **AUTOMOC 对 target sources 的自动 include 扫描不可靠**：带 Q_OBJECT 的头文件必须显式列入
   `add_executable(...)`。
-- **新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表**，否则运行时「类型不可用」。
+- **新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表**，否则运行时“类型不可用”。
 - **平台 palette 陷阱**：关键表面显式绑 Theme token（如 `ApplicationWindow.color: Theme.bg`），
   不靠 palette 继承——Windows 平台主题会在窗口创建时覆盖启动时设置的 QPalette（doc/08 §3.3）。
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SessionController.qml 纯函数回抽（2026-09；doc/08 §2 双语言纪律、
-// local/doc/13-大文件拆分规划 §2.5「纯函数先搬」第一刀）：
+// SessionController.qml 纯函数回抽（doc/08 §2 双语言纪律，「纯函数先搬」回抽路线）：
 //   gcd / refEquals / addPosDelta —— 编辑几何纯计算（可单测，无 QML 依赖）；
 //   looksLikeBmsText / textUsesBase62Ids —— 剪贴板文本判定（Base62 粘贴警告前置）。
 // 只依赖 Qt6::Core（无 GUI / 无 core 模型）；QML 经上下文属性 editUtils 调用。

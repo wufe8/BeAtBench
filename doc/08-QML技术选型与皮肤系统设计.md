@@ -1,36 +1,31 @@
 # BeAtBench — QML 技术选型与皮肤系统设计（08）
 
-> 状态：**决策稿 v1（2026-08 定）**。GUI 层采用 Qt Quick / QML；core 维持零 Qt 依赖。
-> 本稿吸收并取代 `06-换肤与扩展设计.md`（2026-08 前端会话草稿，Widgets 语汇，内容已并入本稿后删除）。
-> 关联：`doc/04`（手册，决策速查已更新）；`doc/05`（前端界面设计构思，UI 细节待前端会话按 QML 更新）；
-> `doc/06-插件体系与时间单位设计.md`（命令协议/分层接口，**不受影响**）；`local/doc/07`（M2 计划，构建命令已更新）。
+> 状态：**决策稿 v1**。GUI 层采用 Qt Quick / QML；core 维持零 Qt 依赖。
+> 关联：`doc/04`（手册）；`doc/05`（前端界面设计构思）；
+> `doc/06-插件体系与时间单位设计.md`（命令协议/分层接口，不受影响）。
 > 配套设计参考：`doc/beatbench-ui-styles.html`（六套外观卡，本质是六份主题数据）。
 
-## 0. 决策（2026-08 拍板）
+## 0. 决策
 
 1. **app 层（GUI）用 Qt Quick / QML 构建**（C++ 写引擎桥接 + QML 写界面表现）；core（模型/命令/时序）不变，仍零 Qt 依赖、命令即接口；
 2. 皮肤/外观/布局 = **分层覆写皮肤系统**：L1 token+贴图 / L2 布局描述 / L3 QML 模块；
 3. **我们开发的默认界面 = 内置默认皮肤**（同时也是皮肤 API 的参考实现，dogfooding）；
-4. 驱动因素：**moddability（第三方皮肤/模组）是产品目标**——QML 是「beatoraja 级皮肤」在 Qt 生态里的天然载体。
+4. 驱动因素：**moddability（第三方皮肤/模组）是产品目标**——QML 是“beatoraja 级皮肤”在 Qt 生态里的天然载体。
 
 ## 1. 决策依据（摘要）
 
 - **实证**：beatoraja 的 Lua 皮肤 ≈ 一个 UI 框架暴露成脚本 API（类型化对象槽 + 布局即代码 + 绑定引擎状态），
   侵入程度 = 前端编辑器级；osu! 皮肤 = 固定同名贴图替换，门槛≈0、上限低。
 - **结论**：皮肤是一条**能力光谱**，单层二选一都错——**分层覆写**（L1/L2/L3）让作者按能力选深度，
-  未提供的层回落内置默认；QML 是「beatoraja 级皮肤」在 Qt 生态里的天然载体。
+  未提供的层回落内置默认；QML 是“beatoraja 级皮肤”在 Qt 生态里的天然载体。
 - **QML vs Widgets**：编辑器硬骨头（表格/富文本）Widgets 省力，但本项目硬骨头是自绘时间轴（两栈都要自写）；
   GPU 渲染收益被高估（时间轴用 `QQuickPaintedItem` 即可）；最大收益是**设计迭代**（声明式设计 → QML 近乎无损）。
   代价：双语言纪律（逻辑放 C++，QML 只管表现）。
-- 完整评估（beatoraja 拆解 / Widgets-QML 逐项对比）→ `local/doc/08-QML与Widgets评估.md`（gitignore）。
-
-> 原 §2（QML vs Widgets 逐项评估）与原 §5（对既有文档的影响）已移入
-> `local/doc/08-QML与Widgets评估.md`；以下保留现行设计。
 
 ## 2. 双语言纪律（桥接原则）
 
 - **逻辑放 C++（`app/bridge`），QML 只管表现与 `invoke`**；JS 不写散业务
-  （`SessionController.qml` 是迁移期例外，按 `local/doc/13-大文件拆分规划.md` 逐步回抽 C++）。
+  （`SessionController.qml` 是迁移期例外，逐步回抽 C++，现状见 `doc/04` §6）。
 - 新增业务不要往 `Main.qml` / `SessionController.qml` 堆 JS；handler 用字符串方法名只是迁移期兼容，
   新动作优先在 C++ 注册真实处理器。
 - 渲染路线：时间轴用 `QQuickPaintedItem`（QPainter 起步），瓶颈后迁 QSG。
@@ -56,28 +51,28 @@ skins/MySkin/
 | L2 | 写 layout.json（声明式） | 低（看文档照抄） | 面板排列/工具条组成/可见性 |
 | L3 | 写 QML 模块（beatoraja 式） | 高（要会 QML） | 完全自定义布局/控件/交互 |
 
-> **两步命名约定（2026-09 定稿，免讨论混乱）**：「层」只用 L1/L2/L3 指**能力**（改什么）；
-> 「时机」用 **启动时 / 运行时** 指**何时生效**。二者正交，不说"L1.5"这类模糊层级——
-> 例如"L1 运行时换肤"= 皮肤只改 token，但通过菜单**运行时**切换（不是启动时 `--skin`）。
-> 本轮实现的即「L1 运行时换肤」，能力仍是 L1（仅 token），时机为运行时。
+> **两步命名约定（免层级混乱）**：“层”只用 L1/L2/L3 指**能力**（改什么）；
+> “时机”用 **启动时 / 运行时** 指**何时生效**。二者正交，不说“L1.5”这类模糊层级——
+> 例如“L1 运行时换肤”= 皮肤只改 token，但通过菜单**运行时**切换（不是启动时 `--skin`）。
+> 本轮实现的即“L1 运行时换肤”，能力仍是 L1（仅 token），时机为运行时。
 
 ### 3.3 覆写与兜底（核心机制）
 
 - **皮肤继承默认皮肤，只覆写它声明的层**；未提供的层回落内置默认；
 - 覆写优先级：内置默认 < `theme.json` < `assets/` < `layout.json` < `ui/`；
 - 每层 schema 校验 + **版本号字段**（皮肤文件带 `"version"`，token 增删有升级路径）；
-- **功能永远在引擎 + 默认皮肤兜底**：L1/L2 皮肤作者不需要实现任何功能；只有 L3 皮肤（主动要全权）才自担功能——这正面化解「beatoraja 的功能选项由皮肤自己实现」的负担。
-- **运行时换肤（2026-09 已实现，见 §6 四批）**：L1 层 token 属性从 `CONSTANT` 改 NOTIFY，换肤时
+- **功能永远在引擎 + 默认皮肤兜底**：L1/L2 皮肤作者不需要实现任何功能；只有 L3 皮肤（主动要全权）才自担功能——这正面化解“beatoraja 的功能选项由皮肤自己实现”的负担。
+- **运行时换肤（已实现）**：L1 层 token 属性从 `CONSTANT` 改 NOTIFY，换肤时
   `applyTheme(path)` → 重发 `tokensChanged` → QML 绑定重算；应用级 `QPalette` 同步重建
   （main.cpp connect）；视口重绘（`ChartViewItem.refreshTheme()`）。启动时 `--skin` 仍走旧
-  单次路径（等价于"启动时应用一次 L1 皮肤"）。
-- ⚠️ **平台 palette 陷阱（2026-09 实测修复）**：Windows 平台主题会在**窗口创建时覆盖**启动时
+  单次路径（等价于“启动时应用一次 L1 皮肤”）。
+- ⚠️ **平台 palette 陷阱（实测踩坑）**：Windows 平台主题会在**窗口创建时覆盖**启动时
   `app.setPalette` 的 QPalette（Fusion 默认控件/菜单首帧取平台浅色 palette → 默认皮肤深色背景
   首帧不生效，进过设置换肤才恢复）。解法：**关键表面显式绑 Theme token 而非 palette 继承**
   ——`ApplicationWindow.color = Theme.bg`、`MenuBar.background = Theme.surface2`、
   菜单字体 `MenuBar.palette.text = Theme.text`（⚠️ Fusion MenuBarItem 标题取 **palette.text**
   角色，不是 windowText）；`loadFromModule` 后重刷一次 `app.setPalette`（Fusion 默认控件兜底）。
-  新增皮肤须检查自身颜色是否也遇到同类「启动 vs 运行时」分叉。
+  新增皮肤须检查自身颜色是否也遇到同类“启动 vs 运行时”分叉。
 
 ### 3.4 内置皮肤双角色
 
@@ -90,7 +85,7 @@ skins/MySkin/
 3. **命令协议**（doc/06 §3，不变——皮肤是界面，core 永远是引擎）；
 4. 引擎暴露给 QML 的注册类型（见 §4）。
 
-### 3.6 默认皮肤 surface 清单（L2 layout.json 的命名插槽，2026-08 布局探索补）
+### 3.6 默认皮肤 surface 清单（L2 layout.json 的命名插槽）
 
 L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前壳 Main.qml）已蕴含：
 
@@ -106,7 +101,7 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 | `pageSwitcher` | 底部页面条 | 位置可配置（doc/05 待拍板 2） |
 | `statusBar` | 状态栏 | 固定全局 |
 
-**2026-08 布局探索新增候选插槽**（结论 → `local/doc/05-布局探索与皮肤可行性.md`）——理想皮肤若要免整壳支持，需纳入 schema：
+**布局探索候选插槽**（未进 schema）——理想皮肤若要免整壳支持，需纳入 schema：
 
 - `documentTabs`：顶部多文档标签条（① IDE 式）；
 - `activityRail`：左图标栏（① IDE 式 / ④ Material 式）；
@@ -123,20 +118,17 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
   - 另有 `UiActionRegistry` / `AudioEngine` / `SliceWorkspace` / `ChartViewItem` / 若干 ListModel；
 - **第一条真链路（M2）**：打开谱面（文件对话框 → `dispatch(info)`）→ QML 元信息表单绑定——验证全栈。
 
-## 6. 未做 / 待拍板
+## 5. 未做 / 待拍板
 
-- [ ] **L2 `layout.json`**（面板集/顺序/dock/工具条组成；surface 清单见 §3.6）——设计已定稿、未实现，
-      细节在本机 `local/doc/11`（gitignore）；
-- [ ] **L3 QML 壳覆写**：整壳替换 vs 按区域 `Replace:` 声明（本机 `local/doc/11` §9 已拍「同名 components/ 覆写」，未进仓库）；
+- [ ] **L2 `layout.json`**（面板集/顺序/dock/工具条组成；surface 清单见 §3.6）——设计已定稿、未实现；
+- [ ] **L3 QML 壳覆写**：整壳替换 vs 按区域 `Replace:` 声明（已拍板：按区域同名 `components/` 覆写，未实现）；
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME；文本框已让行 Ctrl+Z 等）。
 
 > 已落地项（L1 运行时换肤、`theme.json` 颜色/非颜色 token、UI 动作注册表、工具条枚举、快捷键三层）
-> 见 `doc/04` §5–§6 与 `doc/09` §11；逐批实现快照 → `local/doc/09-操作注册设计-实现快照.md`（gitignore）。
+> 见 `doc/04` §6 与 `doc/09` §11。
 
-## 7. 文件清单
+## 6. 文件清单
 
 - 本稿（08）；
 - `doc/beatbench-ui-styles.html`（设计参考 + token 数据来源，随 doc/ 提交）；
-- `skins/`（内置 Aurora / Linear / OsuLight / Win10；L1 token + 可选 keymap.json）；
-- `local/ui-demos/`（5 套布局气质 demo，纯静态、gitignore——2026-08 布局探索产物，
-  结论见 `local/doc/05-布局探索与皮肤可行性.md`，仅本地参照）。
+- `skins/`（内置 Aurora / Linear / OsuLight / Win10；L1 token + 可选 keymap.json）。

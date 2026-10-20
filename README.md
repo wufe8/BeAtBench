@@ -17,7 +17,7 @@
 
 <!-- ⚠️ 版本号由 release-please 自动改写（见 release-please-config.json 的 extra-files）。
      行内标记注释必须紧跟在版本号之后、发行物后缀之前——release-please 的版本正则会贪婪
-     匹配「版本 + 紧随的 -xxx」并整体替换，注释若写在行尾，发行物后缀会被连同注释一起
+     匹配“版本 + 紧随的 -xxx”并整体替换，注释若写在行尾，发行物后缀会被连同注释一起
      吃掉（Windows zip 与 rpm 的包名曾因此被改坏）。改这几行前先看 scripts/check-version.sh 第 3 段。 -->
 1. 下载 `beatbench-v0.4.1<!-- x-release-please-version -->-win64.zip`（校验同目录的 `.zip.sha256`），解压到任意目录；
 2. 双击 `beatbench.exe` 启动图形界面，或运行 `beatbench-cli.exe` 使用命令行；
@@ -40,14 +40,14 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 桌面图标与 start 菜单项随包提供。若界面中文显示为方块，安装一套 CJK 字体
 （如 `fonts-noto-cjk` / `noto-fonts-cjk`）。
 
-**打开文件**：菜单「文件 → 打开」（Ctrl+O）；也可以把谱面 / 音频 / MIDI 文件
+**打开文件**：菜单“文件 → 打开”（Ctrl+O）；也可以把谱面 / 音频 / MIDI 文件
 **拖进窗口**、**拖到 `beatbench.exe` 图标**，或双击已关联的文件——谱面进编辑页，
-音频与 MIDI 自动进入「切音 / 对音」工作台。
+音频与 MIDI 自动进入“切音 / 对音”工作台。
 
 
 ## 状态
 
-**M1–M6 已完成**（2026-09）：「谱面编辑 → 试听 → 发布」全链路可用。
+**M1–M6 已完成**：“谱面编辑 → 试听 → 发布”全链路可用。
 
 - **核心 / 工具**：格式无关模型 + BMS codec / timing；CLI `info` / `check` / `convert` / `version`（支持 `--json`）
 - **编辑器**：编辑、时间轴、元信息、采样、BGA、lint、剪贴板、多文档、动作注册表、皮肤（L1）；note 编辑增强
@@ -59,7 +59,7 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 **版本与完整变更历史**：[`CHANGELOG.md`](CHANGELOG.md) · [Releases](https://github.com/wufe8/BeAtBench/releases)
 （0.3.x 起提供 Linux deb/rpm/arch 与 Windows zip；CHANGELOG 自 0.4.0 起由 release-please 依据 Conventional Commits 自动生成）
 
-**测试基线**：core 317 + 音频 61 + Qt 桥层 63（源码 `TEST()` 计数）；真实谱面集缺失时部分用例 SKIP，不要把某一天的 PASS 数写死。详见 `doc/04` §6。
+**测试**：以源码 `TEST()` 与 CI 回归为准；真实谱面集缺失时部分用例自动 SKIP。详见 `doc/04` §6。
 
 ### 已知问题
 
@@ -77,25 +77,25 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 | 平台 | 状态 |
 |---|---|
 | Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/11`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
-| Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出未人工验证 |
+| Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出已实机验证（ALSA 路径，见 `doc/11` §6） |
 | macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2，非阻塞门禁）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
-守卫）。三平台的「能编译、测得过、GUI 能起画」由 CI 持续钉住
+守卫）。三平台的“能编译、测得过、GUI 能起画”由 CI 持续钉住
 （`.github/workflows/ci.yml`，详见 `doc/04` §4）；Linux deb/rpm/arch 由 `package.yml`
 产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/11`），macOS 发布产物与实时音频输出的人工验证未排期。
 
-当前边界（两句）：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
+当前边界：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
 `.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
-macOS 打包范畴；② GUI 的悬停 / 拖拽等交互行为在 Linux/macOS **未人工验证**
-（CI 只做无头冒烟）。
+macOS 打包范畴；② GUI 交互中悬停高亮可自动化验证（X11 指针注入，见 `doc/11` §2），
+拖拽仍只有无头冒烟；音频实时输出已验证的仅 Linux ALSA 一处（见 `doc/pending/`）。
 
 ## 文档导航
 
 | 文档 | 内容 |
 |---|---|
-| [`doc/README.md`](doc/README.md) | **文档地图**：按任务查该读哪份文档、doc/local 分布约定 |
-| [`doc/04-开发手册.md`](doc/04-开发手册.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、当前状态；开发历史见 `local/doc/04-开发手册-完整版.md` |
+| [`doc/README.md`](doc/README.md) | **文档地图**：按任务查该读哪份文档、文件落点约定 |
+| [`doc/04-开发手册.md`](doc/04-开发手册.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、当前状态 |
 | [`doc/02-核心模型与调用架构.md`](doc/02-核心模型与调用架构.md) | **模型/架构权威**：格式无关模型、命令即接口、切音工作台设计、note 移动机制 |
 | [`doc/06-插件体系与时间单位设计.md`](doc/06-插件体系与时间单位设计.md) | **命令 JSON 协议正式规格**、插件分层、时间单位边界 |
 | [`doc/07-M7项目化工作流设计.md`](doc/07-M7项目化工作流设计.md) | **M7 设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
