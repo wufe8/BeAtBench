@@ -119,6 +119,38 @@ Item {
             dialog.close()
             tryCompare(dialog, "visible", false)
         }
+        function test_full_windows_api_names_data() {
+            return [{ tag: "default", width: 680 }, { tag: "narrow", width: 520 }]
+        }
+        function test_full_windows_api_names(data) {
+            dialog.width = data.width
+            const names = ["MME", "Windows DirectSound", "ASIO",
+                           "Windows WASAPI", "Windows WDM-KS"]
+            audioEngine.devices = names.map(function(api, i) {
+                return { index: i, name: "Output", api: api, apiType: i,
+                         isAsio: api === "ASIO", sampleRate: 48000 }
+            })
+            const combo = control("audioApiFilter")
+            reveal(combo)
+            mouseClick(combo)
+            tryCompare(combo.popup, "opened", true)
+            const list = combo.popup.contentItem
+            for (var i = 0; i < combo.count; ++i) {
+                list.positionViewAtIndex(i, ListView.Contain)
+                tryVerify(function() { return list.itemAtIndex(i) !== null })
+                const label = list.itemAtIndex(i).contentItem
+                verify(label.implicitWidth <= label.width + 1, combo.model[i])
+            }
+            mouseClick(list.itemAtIndex(2))
+            tryCompare(combo.popup, "visible", false)
+            compare(combo.displayText, "Windows DirectSound")
+            waitForRendering(combo)
+            verify(!combo.contentItem.truncated, "Selected API must fit too")
+            const device = control("audioDeviceCombo")
+            verify(device.width > 80, "Device selector retains usable space")
+            verify(device.x + device.width <= control("audioSettingsColumn").width + 1)
+            compare(audioEngine.lastApply.length, 0, "Filtering never changes audio device")
+        }
         function test_default_and_filtered_current_selection() {
             const devices = control("audioDeviceCombo")
             compare(devices.count, 3)
@@ -288,6 +320,8 @@ Item {
                                      isAsio: false, sampleRate: 48000 }]
             audioEngine.deviceIndex = 3
             audioEngine.activeDeviceText = longName
+            // Model/font-dependent API width is applied on the next layout polish.
+            waitForRendering(control("audioScrollView"))
             const scroll = control("audioScrollView")
             const column = control("audioSettingsColumn")
             tryCompare(column, "width", scroll.availableWidth)
