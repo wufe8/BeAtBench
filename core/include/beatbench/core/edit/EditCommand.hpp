@@ -64,6 +64,16 @@ public:
 
     /// 人类可读描述（undo 菜单/诊断显示）。
     virtual std::string describe() const { return name(); }
+
+    /// Optional source identity filters; omitted values retain legacy matching.
+    void set_source_identity(std::optional<bool> ln_channel, std::optional<NoteKind> kind) {
+        m_source_ln_channel = ln_channel;
+        m_source_kind = kind;
+    }
+
+protected:
+    std::optional<bool> m_source_ln_channel;
+    std::optional<NoteKind> m_source_kind;
 };
 
 /// 复合命令：一组子命令按序 apply/invert（逆序反转），整体 = 一个 undo 步。
@@ -181,8 +191,9 @@ private:
     ConvertTarget m_target;
     std::uint32_t m_to_measure;   ///< 目标位置（转换后事件落点；可同一 position）
     Rational m_to_pos;
-    /// apply 删除的 note 快照（invert 恢复）
+    /// apply 删除的 note 快照与原容器位置（invert 精确恢复，不能重排同位别名）。
     std::optional<Event<Note>> m_removed;
+    std::size_t m_removed_index = 0;
     /// apply 断开配对的伙伴快照（invert 恢复互指）
     std::optional<Event<Note>> m_partner;
     /// BGA 层号（target==Bga）或 BPM/STOP 的 ref_id；invert 恢复用

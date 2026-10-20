@@ -22,7 +22,7 @@ public:
     Q_INVOKABLE int gcd(int a, int b) const;
 
     /// note 引用等价：measure / sample / lane(kind,index,player) / pos(num,den)；
-    /// sub_line 任一侧缺失（或 null）视为通配（与旧 JS 版 `undefined` 语义一致）。
+    /// sub_line / ln_channel / note_kind 两侧提供时必须匹配；缺失兼容旧引用。
     Q_INVOKABLE bool refEquals(const QVariantMap& a, const QVariantMap& b) const;
 
     /// 源位置 + 位移增量 → 绝对目标位置（带小节进位；分数约分；floor 语义同 JS Math.floor）。

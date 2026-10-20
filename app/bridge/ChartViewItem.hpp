@@ -406,11 +406,12 @@ private:
                        const QString& noteKind, std::uint32_t sample, int subLine) const;
     /// paint 前按当前 theme 刷新标尺/note 标签字体族（皮肤可换；避免硬编码 Consolas）。
     void applyThemeFonts(const ThemeManager* th);
-    /// NoteRef 语义键（measure|num|den|player|kind|index|sample|sub_line）：选中判定用。
+    /// NoteRef identity includes optional ln_channel/note_kind (-1/empty = legacy wildcard).
     /// ⚠️ sub_line 入键：BGM 同位置不同子通道行须彼此区分，否则选中会误高亮整组。
     static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
                               const beatbench::Lane& lane, std::uint32_t sample = 0,
-                              std::uint32_t sub_line = 0);
+                              std::uint32_t sub_line = 0, int lnChannel = -1,
+                              const QString& noteKind = {});
 
     /// BGA/BPM/STOP 对象选中判定（按 kind/measure/pos/layer/sample 键；layer/sample -1 = n/a）。
     bool metaSelected(std::uint32_t measure, const beatbench::Rational& pos,

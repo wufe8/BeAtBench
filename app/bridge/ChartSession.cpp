@@ -11,6 +11,7 @@
 #include <QThreadPool>
 
 #include "beatbench/core/ChartMode.hpp"
+#include "beatbench/core/LnPairing.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
@@ -589,14 +590,17 @@ int ChartSession::lnType() const {
     return 1;
 }
 
+bool ChartSession::useLnObjPlacement() const {
+    const auto* currentChart = chart();
+    return currentChart && currentChart->meta.find("LNTYPE") == currentChart->meta.end() &&
+           lnobjSample() > 0;
+}
+
 int ChartSession::lnobjSample() const {
     const auto* currentChart = chart();
     if (!currentChart) return -1;
-    const auto it = currentChart->meta.find("LNOBJ");
-    if (it == currentChart->meta.end() || it->second.empty()) return -1;
-    return static_cast<int>(currentChart->id_base == beatbench::IdBase::Base62
-                                ? beatbench::bms::c62_to_u32(it->second, 2)
-                                : beatbench::bms::c36_to_u32(it->second, 2));
+    const auto id = beatbench::lnobj_sample_id(*currentChart);
+    return id ? static_cast<int>(*id) : -1;
 }
 
 int ChartSession::decodeId(const QString& idText) const {

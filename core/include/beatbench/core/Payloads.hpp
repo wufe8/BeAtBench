@@ -23,10 +23,9 @@ struct Note {
     SampleRef sample;
     NoteKind kind = NoteKind::Normal;
     std::optional<std::uint32_t> ln_pair;  ///< 配对 note 的下标（LN 头<->尾）
-    /// 是否来自 BMS LN 通道（51-69 / 61-69，LNTYPE 1）。parser 填初始值；
-    /// 编辑后由 rebuild_ln_pairs 统一推导（编辑命令**不维护** ln_pair——用户原则：
-    /// ln_pair 是「自下而上：文件数据 → 解析 → 效果呈现」的派生，不是编辑真相源）。
-    /// 前端用它：① LN note 深色 ② 未配对时 lint 提示。
+    /// 源通道身份：true = BMS LN 通道（51-69），false = 普通/地雷通道。
+    /// 不由配对推导；移动和保存保持它，只有显式转换才修改。
+    /// ln_pair 是独立的派生显示/选取连接，不决定写出的通道或采样。
     bool ln_channel = false;
     /// 子行序号（2026-09 泛化，原 bgm_line）：该 note 在其所在通道同小节内的行序（读侧 FIFO，
     /// 任意 Note 通道（含 ch01）同小节多行 = 子行；空行也占位）。允许多子行的通道由
@@ -37,7 +36,7 @@ struct Note {
 
     friend bool operator==(const Note& a, const Note& b) {
         return a.lane == b.lane && a.sample == b.sample && a.kind == b.kind &&
-               a.ln_pair == b.ln_pair;  // 排除 sub_line / ln_channel（辅助、派生）
+               a.ln_channel == b.ln_channel && a.ln_pair == b.ln_pair;  // sub_line 不参与
     }
 };
 

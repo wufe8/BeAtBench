@@ -566,6 +566,40 @@ std::uint32_t u32_arg(const Json& args, const char* key) {
     return static_cast<std::uint32_t>(v->as_i64());
 }
 
+std::optional<bool> source_ln_channel(const Json& item) {
+    const Json* v = item.find("ln_channel");
+    if (!v) return std::nullopt;
+    if (!v->is_bool()) bad_args("ln_channel 应为布尔值");
+    return v->as_bool();
+}
+
+std::optional<NoteKind> source_note_kind(const Json& item) {
+    const Json* v = item.find("note_kind");
+    if (!v) return std::nullopt;
+    if (!v->is_string()) bad_args("note_kind 应为字符串 normal/mine");
+    if (v->as_str() == "normal") return NoteKind::Normal;
+    if (v->as_str() == "mine") return NoteKind::Landmine;
+    bad_args("note_kind 应为 normal/mine");
+}
+
+template<class T>
+std::unique_ptr<T> with_source_identity(std::unique_ptr<T> command, const Json& item) {
+    command->set_source_identity(source_ln_channel(item), source_note_kind(item));
+    return command;
+}
+
+template<class T>
+std::unique_ptr<T> with_source_identity(std::unique_ptr<T> command, const edit::NoteRef& ref) {
+    command->set_source_identity(ref.ln_channel, ref.note_kind);
+    return command;
+}
+
+void write_source_identity(Json& item, const edit::NoteRef& ref) {
+    if (ref.ln_channel) item.set("ln_channel", *ref.ln_channel);
+    if (ref.note_kind)
+        item.set("note_kind", *ref.note_kind == NoteKind::Landmine ? "mine" : "normal");
+}
+
 // 解析 selection 数组（NoteRef 列表：{measure, pos, lane:{player,kind,index}, sample}）→
 // NoteRef 向量。空数组 / 非数组 → bad_args。lane 支持子对象优先 + 顶层平铺兼容。
 // bonus：可选 sub_line（BGM 行序号，Bgm note 同值消歧；缺省 0）。
@@ -589,6 +623,8 @@ std::vector<edit::NoteRef> selection_from_json(const Json& args) {
             if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
             ref.sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
+        ref.ln_channel = source_ln_channel(item);
+        ref.note_kind = source_note_kind(item);
         refs.push_back(std::move(ref));
     }
     return refs;
@@ -999,17 +1035,27 @@ public:
                 const auto& ev = chart.notes[i];
                 if (ev.measure == ref.measure && ev.pos == ref.pos &&
                     ev.value.lane == ref.lane && ev.value.sample.id == ref.sample &&
-                    ev.value.sub_line == ref.sub_line && !claimed.contains(i)) {
+                    ev.value.sub_line == ref.sub_line &&
+                    (!ref.ln_channel || ev.value.ln_channel == *ref.ln_channel) &&
+                    (!ref.note_kind || ev.value.kind == *ref.note_kind) && !claimed.contains(i)) {
                     // 别名收敛后两个合法物件可能拥有完全相同的引用值；逐一认领，
                     // 否则完整LN选择也会反复命中第一端、被误判为半选。
+                    if (found) {
+                        if (found->value.ln_channel != ev.value.ln_channel ||
+                            found->value.kind != ev.value.kind)
+                            throw CommandError("bad_args", "选择引用不明确；请提供 ln_channel/note_kind");
+                        continue; // Identical aliases are still claimed FIFO.
+                    }
                     found = &ev;
                     found_i = i;
-                    claimed.insert(i);
-                    break;
+                    // Legacy references are accepted only when unambiguous.
+                    // Do not silently copy an ordinary note instead of an LN/mine.
+                    continue;
                 }
             }
             if (!found)
                 throw CommandError("not_found", "选择集中的 note 在谱面中不存在（可能已被删除）");
+            claimed.insert(found_i);
             const bool want_ln =
                 found->value.ln_channel && found->value.lane.kind != LaneKind::Bgm;
             const auto ch = bms::bms_channel_for_mode(mode, found->value.lane, want_ln,
@@ -1214,6 +1260,8 @@ public:
                 ref.lane = rule->lane;
                 ref.sample = decode_id_text(chart, slot);
                 ref.sub_line = sub_line;
+                ref.ln_channel = rule->ln_channel && rule->lane.kind != LaneKind::Bgm;
+                ref.note_kind = rule->note_kind;
                 parsed.push_back(ref);
                 parsed_ln.push_back(rule->ln_channel && rule->lane.kind != LaneKind::Bgm);
                 parsed_kind.push_back(rule->note_kind);
@@ -1302,6 +1350,7 @@ public:
             item.set("lane", std::move(lane));
             item.set("sample", static_cast<std::int64_t>(r.sample));
             item.set("sub_line", static_cast<std::int64_t>(r.sub_line));
+            write_source_identity(item, r);
             placed.push_back(std::move(item));
         }
         Json out = Json::object();
@@ -1679,9 +1728,9 @@ public:
             if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
             to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
-        return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m,
-                                                       to_pos, false, to_lane, from_sub_line,
-                                                       to_sub_line);
+        return with_source_identity(std::make_unique<edit::MoveNoteCommand>(
+            from_m, from_pos, lane, sample, to_m, to_pos, false, to_lane, from_sub_line,
+            to_sub_line), *from);
     }
 
     Json run(const Json& args) const override {
@@ -1707,7 +1756,15 @@ public:
             cmds.push_back(make_command(args));
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
-        for (auto& c : cmds) comp->add(std::move(c));
+        std::unordered_set<std::size_t> claimed;
+        for (auto& c : cmds) {
+            try {
+                c->preflight(session.chart(), claimed);
+            } catch (const std::invalid_argument& e) {
+                throw CommandError("bad_args", e.what());
+            }
+            comp->add(std::move(c));
+        }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
@@ -1744,7 +1801,8 @@ public:
                 if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
                 sub_line = static_cast<std::uint32_t>(bl->as_i64());
             }
-            return std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line);
+            return with_source_identity(std::make_unique<edit::DeleteNoteCommand>(
+                measure, pos, lane, sample, sub_line), item);
         };
         // selection 数组 = 批量删除（一个 CompositeCommand / 一次备份）；单对象路径保持兼容。
         if (args.find("selection")) {
@@ -1802,8 +1860,8 @@ public:
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::QuantizeNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, snap_num, snap_den));
+            comp->add(with_source_identity(std::make_unique<edit::QuantizeNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample, snap_num, snap_den), r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -1838,6 +1896,7 @@ public:
         for (const auto& r : refs) {
             auto command = std::make_unique<edit::TransformNoteCommand>(
                 r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line);
+            command->set_source_identity(r.ln_channel, r.note_kind);
             // Preflight against the unchanged chart. Invalid targets must return
             // a protocol error, not success with a replacement selection.
             try {
@@ -1869,6 +1928,7 @@ public:
             o.set("lane", std::move(l));
             o.set("sample", static_cast<std::int64_t>(r.sample));
             o.set("sub_line", static_cast<std::int64_t>(r.sub_line));
+            write_source_identity(o, r);
             sel.push_back(std::move(o));
         }
         Json out = Json::object();
@@ -1904,8 +1964,8 @@ public:
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::ToggleLnCommand>(
-                r.measure, r.pos, r.lane, r.sample, r.sub_line));
+            comp->add(with_source_identity(std::make_unique<edit::ToggleLnCommand>(
+                r.measure, r.pos, r.lane, r.sample, r.sub_line), r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -1978,8 +2038,8 @@ public:
             } else {
                 tm = r.measure; tp = r.pos;
             }
-            comp->add(std::make_unique<edit::ConvertNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, r.sub_line, target, tm, tp));
+            comp->add(with_source_identity(std::make_unique<edit::ConvertNoteCommand>(
+                r.measure, r.pos, r.lane, r.sample, r.sub_line, target, tm, tp), r));
         }
         if (comp->size() == 0) throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
         const bool ok = session.exec(std::move(comp));
@@ -2096,14 +2156,14 @@ public:
             }
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
-                comp->add(std::make_unique<edit::ConvertNoteCommand>(
+                comp->add(with_source_identity(std::make_unique<edit::ConvertNoteCommand>(
                     r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
-                    static_cast<std::uint32_t>(to_m), to_pos));
+                    static_cast<std::uint32_t>(to_m), to_pos), r));
             } else {
-                comp->add(std::make_unique<edit::MoveNoteCommand>(
+                comp->add(with_source_identity(std::make_unique<edit::MoveNoteCommand>(
                     r.measure, r.pos, r.lane, r.sample,
                     static_cast<std::uint32_t>(to_m), to_pos, false, to_lane,
-                    r.sub_line, to_sub_line));
+                    r.sub_line, to_sub_line), r));
             }
         }
         if (comp->size() == 0) {
@@ -2476,8 +2536,8 @@ public:
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t to_id = decode(to);
-        const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(
-            measure, pos, lane, sample, sub_line, to_id));
+        const bool ok = session.exec(with_source_identity(std::make_unique<edit::SetNoteSampleCommand>(
+            measure, pos, lane, sample, sub_line, to_id), args));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));

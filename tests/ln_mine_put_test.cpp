@@ -84,18 +84,17 @@ TEST(LnMinePut, PutLnUndoRestoresUnpaired) {
     EXPECT_TRUE(s.chart().notes.empty());
 }
 
-TEST(LnMinePut, PutLnDifferentSampleNoPair) {
+TEST(LnMinePut, PutLnDifferentSamplesPairByChronology) {
     EditorSession s;
     s.load(make_chart());
-    // 头 sample1，尾 sample2 → 不配对（不同采样 id 不是一对）
+    // LN-channel endpoints pair by time even with different sample IDs.
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
         1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
         1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 2, true)));
     ASSERT_EQ(s.chart().notes.size(), 2u);
-    for (const auto& e : s.chart().notes) {
-        EXPECT_FALSE(e.value.ln_pair.has_value());
-    }
+    EXPECT_EQ(s.chart().notes[0].value.ln_pair, 1u);
+    EXPECT_EQ(s.chart().notes[1].value.ln_pair, 0u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 }
 

@@ -333,6 +333,8 @@ Json transform_request(const Chart& chart, const std::vector<int>& order, bool m
         item.set("lane", std::move(lane));
         item.set("sample", static_cast<std::int64_t>(e.value.sample.id));
         item.set("sub_line", static_cast<std::int64_t>(e.value.sub_line));
+        item.set("ln_channel", e.value.ln_channel);
+        item.set("note_kind", e.value.kind == NoteKind::Landmine ? "mine" : "normal");
         sel.push_back(std::move(item));
     }
     Json args = Json::object();
@@ -346,8 +348,10 @@ Json transform_request(const Chart& chart, const std::vector<int>& order, bool m
 }
 
 std::unique_ptr<TransformNoteCommand> mirror_note(const Event<Note>& e) {
-    return std::make_unique<TransformNoteCommand>(e.measure, e.pos, e.value.lane,
-                                                 e.value.sample.id, true, 0, e.value.sub_line);
+    auto command = std::make_unique<TransformNoteCommand>(e.measure, e.pos, e.value.lane,
+                                                         e.value.sample.id, true, 0, e.value.sub_line);
+    command->set_source_identity(e.value.ln_channel, e.value.kind);
+    return command;
 }
 
 class FailingTransformBatchCommand : public EditCommand {
@@ -474,7 +478,7 @@ TEST(TransformQuantize, MixedNestedCompositeRebindsAfterInsertion) {
     expect_pairs(session.chart(), 1);
 }
 
-TEST(TransformQuantize, TransformUndoRebindsAfterLaterMoveUndoReordersNotes) {
+TEST(TransformQuantize, TransformUndoAfterLaterMoveUndoPreservesSourceOrder) {
     Chart chart = collision_chart(false);
     std::stable_sort(chart.notes.begin(), chart.notes.end(), [](const auto& a, const auto& b) {
         if (a.pos != b.pos) return a.pos < b.pos;
@@ -490,8 +494,8 @@ TEST(TransformQuantize, TransformUndoRebindsAfterLaterMoveUndoReordersNotes) {
         0, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(0, 1))));
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(full_notes(session.chart()), transformed);
-    // Move 撤销在同拍段首重插，此时原 Transform 的索引已过期。
-    EXPECT_FALSE(session.chart().notes[2].value.ln_channel);
+    // Move undo now restores original same-position source ordering exactly.
+    EXPECT_TRUE(session.chart().notes[2].value.ln_channel);
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(full_notes(session.chart()), full_notes(chart));
     expect_pairs(session.chart(), 1);

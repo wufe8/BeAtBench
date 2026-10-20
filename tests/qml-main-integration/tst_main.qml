@@ -675,6 +675,167 @@ TestCase {
                     + split.referenceView.viewportItem.viewportAnchor.fraction - before.measure - before.fraction) < 0.00001)
         compare(audioEngine.playbackCalls, 0)
     }
+    function test_lnPlacementPolicy_data() {
+        return [
+            {tag: "LNOBJ-without-LNTYPE", type: "", obj: "ZZ", lnobj: true},
+            {tag: "LNTYPE1-with-LNOBJ", type: "1", obj: "ZZ", lnobj: false},
+            {tag: "LNTYPE2-with-LNOBJ", type: "2", obj: "ZZ", lnobj: false},
+            {tag: "no-LNOBJ", type: "", obj: "", lnobj: false},
+            {tag: "LNTYPE2-no-LNOBJ", type: "2", obj: "", lnobj: false},
+            {tag: "zero-LNOBJ", type: "", obj: "00", lnobj: false},
+            {tag: "malformed-LNOBJ", type: "", obj: "!Z", lnobj: false},
+            {tag: "short-LNOBJ", type: "", obj: "Z", lnobj: false}
+        ]
+    }
+    function test_lnPlacementPolicy(data) {
+        start(false)
+        const edited = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+            session_id: a, edits: [{key: "LNTYPE", value: data.type}, {key: "LNOBJ", value: data.obj}]
+        }})))
+        verify(edited.ok)
+        documents.refresh()
+        compare(chartSession.useLnObjPlacement(), data.lnobj)
+        main.currentSampleId = "01"
+        main.editorTool = "ln"
+        // Both policies must reject BGM without editing any existing note.
+        const before = mainFixture.snapshot(a)
+        main.placeNote({measure: 0, num: 1, den: 4, lanePlayer: 0, laneKind: "bgm", laneIndex: 0})
+        compare(mainFixture.snapshot(a), before)
+        compare(main.pendingLnHead, null)
+        main.placeNote({measure: 0, num: 1, den: 4, lanePlayer: 0, laneKind: "key", laneIndex: 3})
+        compare(!!main.pendingLnHead, data.lnobj)
+        const viewport = mainFixture.primaryView(main).viewportItem
+        viewport.scrollToStart()
+        const refs = viewport.notesInRect(0, 18, viewport.width, viewport.height)
+        const placed = refs.find(n => n.measure === 0 && n.lane.kind === "key" && n.lane.index === 3)
+        verify(placed !== undefined, "Placed note must be exposed as a view ref")
+        compare(placed.ln_channel, !data.lnobj)
+        compare(placed.note_kind, "normal")
+        compare(placed.sample, 1)
+        // Complete both representations with a different current sample. LNOBJ must
+        // use its marker; LN-channel placement must preserve the independently chosen ID.
+        main.currentSampleId = "02"
+        main.placeNote({measure: 0, num: 3, den: 4, lanePlayer: 0, laneKind: "key", laneIndex: 3})
+        compare(main.pendingLnHead, null)
+        const completed = viewport.notesInRect(0, 18, viewport.width, viewport.height)
+                                  .filter(n => n.measure === 0 && n.lane.kind === "key" && n.lane.index === 3)
+        compare(completed.length, 2)
+        const tail = completed.find(n => n.pos.num === 3 && n.pos.den === 4)
+        verify(tail !== undefined)
+        compare(tail.sample, data.lnobj ? chartSession.lnobjSample() : 2)
+        compare(tail.ln_channel, !data.lnobj)
+        compare(tail.note_kind, "normal")
+        main.lnSelectMode = true
+        tryCompare(viewport, "lnSelectMode", true)
+        const column = viewport.probe(0, 40).columns[viewport.columnIndexForRef(placed)]
+        verify(column !== undefined)
+        const x = column.x + column.w / 2
+        let headHit = null, tailHit = null
+        for (let y = 19; y < viewport.height; ++y) {
+            const hit = viewport.noteAt(x, y)
+            if (!hit.valid || hit.measure !== 0) continue
+            if (hit.pos.num === 1 && hit.pos.den === 4) headHit = hit
+            if (hit.pos.num === 3 && hit.pos.den === 4) tailHit = hit
+            if (headHit && tailHit) break
+        }
+        verify(headHit !== null && tailHit !== null, "Both completed LN endpoints are hittable")
+        verify(headHit.lnPartner !== undefined && tailHit.lnPartner !== undefined)
+        compare(headHit.sample, 1)
+        compare(headHit.ln_channel, !data.lnobj)
+        compare(headHit.lnPartner.sample, tail.sample)
+        compare(headHit.lnPartner.pos, tail.pos)
+        compare(headHit.lnPartner.ln_channel, !data.lnobj)
+        compare(headHit.lnPartner.note_kind, "normal")
+        compare(tailHit.lnPartner.sample, 1)
+        compare(tailHit.lnPartner.pos, placed.pos)
+        compare(tailHit.lnPartner.ln_channel, !data.lnobj)
+        compare(tailHit.lnPartner.note_kind, "normal")
+        // Deletion is endpoint-local even with LN partner selection enabled.
+        main.deleteNoteAt(placed)
+        const remaining = viewport.notesInRect(0, 18, viewport.width, viewport.height)
+                                  .filter(n => n.measure === 0 && n.lane.kind === "key" && n.lane.index === 3)
+        compare(remaining.length, 1)
+        compare(remaining[0].sample, tail.sample)
+        compare(remaining[0].pos, tail.pos)
+        compare(remaining[0].ln_channel, tail.ln_channel)
+        main.deleteNoteAt(tail)
+        compare(mainFixture.snapshot(a).notes, before.notes)
+    }
+    function test_coincidentNoteRefs_preserveIdentityOnMoveAndDelete() {
+        start(false)
+        const lane = {player: 0, kind: "key", index: 3}
+        for (const kind of ["normal", "ln", "mine"]) {
+            verify(main.sessionCmd("note.put", {measure: 0, pos: {num: 1, den: 4},
+                                               lane: lane, sample: 1, kind: kind}) !== null)
+        }
+        const viewport = mainFixture.primaryView(main).viewportItem
+        viewport.scrollToStart()
+        function refs() {
+            return viewport.notesInRect(0, 18, viewport.width, viewport.height)
+                           .filter(n => n.lane.kind === "key" && (n.lane.index === 3 || n.lane.index === 4))
+        }
+        const all = refs()
+        compare(all.length, 3)
+        const ordinary = all.find(n => !n.ln_channel && n.note_kind === "normal")
+        const ln = all.find(n => n.ln_channel && n.note_kind === "normal")
+        const mine = all.find(n => !n.ln_channel && n.note_kind === "mine")
+        verify(ordinary !== undefined && ln !== undefined && mine !== undefined)
+        main.selectionRefs = [ln]
+        main.moveSelection(0.25, null, lane, -1)
+        compare(main.selectionRefs.length, 1)
+        compare(main.selectionRefs[0].ln_channel, true)
+        compare(main.selectionRefs[0].note_kind, "normal")
+        const moved = refs()
+        compare(moved.find(n => n.ln_channel).pos, {num: 1, den: 2})
+        compare(moved.find(n => n.note_kind === "mine").pos, mine.pos)
+        compare(moved.find(n => !n.ln_channel && n.note_kind === "normal").pos, ordinary.pos)
+        const beforeCrossKey = mainFixture.snapshot(a).notes
+        // Use the actual laneAtX target schema, not a Lane/ref-shaped stand-in.
+        main.moveSelection(0, {valid: true, laneKind: "key", laneIndex: 4, lanePlayer: 0}, lane, -1)
+        compare(main.selectionRefs.length, 1)
+        compare(main.selectionRefs[0].lane, {player: 0, kind: "key", index: 4})
+        compare(main.selectionRefs[0].ln_channel, true)
+        compare(main.selectionRefs[0].note_kind, "normal")
+        const crossed = refs()
+        compare(crossed.length, 3)
+        const crossedLn = crossed.find(n => n.ln_channel)
+        compare(crossedLn.lane, {player: 0, kind: "key", index: 4})
+        compare(crossedLn.pos, {num: 1, den: 2})
+        compare(crossedLn.sample, ln.sample)
+        compare(crossedLn.note_kind, "normal")
+        compare(crossed.find(n => n.note_kind === "mine").lane, mine.lane)
+        compare(crossed.find(n => n.note_kind === "mine").pos, mine.pos)
+        compare(crossed.find(n => !n.ln_channel && n.note_kind === "normal").lane, ordinary.lane)
+        compare(crossed.find(n => !n.ln_channel && n.note_kind === "normal").pos, ordinary.pos)
+        const afterCrossKey = mainFixture.snapshot(a).notes
+        main.undoEdit()
+        compare(mainFixture.snapshot(a).notes, beforeCrossKey)
+        const undoneLn = refs().find(n => n.ln_channel)
+        compare(undoneLn.lane, lane)
+        compare(undoneLn.pos, {num: 1, den: 2})
+        compare(undoneLn.note_kind, "normal")
+        main.redoEdit()
+        compare(mainFixture.snapshot(a).notes, afterCrossKey)
+        const redoneLn = refs().find(n => n.ln_channel)
+        compare(redoneLn.lane, crossedLn.lane)
+        compare(redoneLn.pos, crossedLn.pos)
+        compare(redoneLn.note_kind, "normal")
+        // The sample dialog must address the mine, not its coincident ordinary alias.
+        main.editNoteSample(mine)
+        const sampleDialog = mainFixture.objectNamed(main, "noteSampleDialog")
+        tryCompare(sampleDialog, "opened", true)
+        mainFixture.objectNamed(main, "noteSampleIdInput").text = "02"
+        sampleDialog.accept()
+        tryCompare(sampleDialog, "visible", false)
+        const sampled = refs()
+        compare(sampled.find(n => n.note_kind === "mine").sample, 2)
+        compare(sampled.find(n => !n.ln_channel && n.note_kind === "normal").sample, 1)
+        main.deleteNoteAt(ordinary)
+        const remaining = refs()
+        compare(remaining.length, 2)
+        verify(remaining.some(n => n.ln_channel))
+        verify(remaining.some(n => n.note_kind === "mine"))
+    }
     function test_loadDoesNotEditModeFieldsOrCreateDraft() {
         start(false, true)
         compare(mainFixture.snapshot(a).meta.LNTYPE, "2")

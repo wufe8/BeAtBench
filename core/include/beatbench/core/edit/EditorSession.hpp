@@ -165,12 +165,9 @@ private:
 /// 跨通道（2026-09，M2 自由 2D 拖动）：`to_lane` 可选——传了 = 移动同时改到目标轨道
 /// （时间 + 通道一起动）；缺省 nullopt = 纯时间移动（向后兼容，行为与旧版完全一致）。
 ///
-/// LN 处理（2026-08 对齐 BMS 编辑器惯例，用户确认）：
-/// - move_ln_pair = false（默认）：LN 当作单个 note 处理——只移动该 note，
-///   配对解除（伙伴 ln_pair 清空）。配对断了由解析器自然延续/ lint 告警，
-///   编辑器不主动修复（BMS 编辑器常见行为）。
-/// - move_ln_pair = true：识别到 LN 则整体头尾一起移动（保持相对位置），配对保留；
-///   跨通道时伙伴 lane 同步改为 to_lane（LN 头尾恒同轨道）。
+/// LN 只移动显式选中的物件，保持源 ln_channel / kind / sample，不修改伙伴。
+/// 连接由原始数据独立推导；不能成型仅 lint。批量先绑定全部源，避免目标串作后续源。
+/// move_ln_pair 仅保留旧调用签名，不自动扩张选择；成对移动须显式选择两端。
 class MoveNoteCommand : public EditCommand {
 public:
     MoveNoteCommand(std::uint32_t from_measure, Rational from_pos, Lane lane,
@@ -179,6 +176,9 @@ public:
                     std::optional<Lane> to_lane = std::nullopt,
                     std::uint32_t from_sub_line = 0,
                     std::optional<std::uint32_t> to_sub_line = std::nullopt);
+    void preflight(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+        bind_source(chart, claimed);
+    }
     std::string name() const override { return "note.move"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -199,14 +199,16 @@ private:
     std::uint32_t m_from_sub_line = 0;
     /// 目标 BGM 行序号（nullopt = 不指定：按目标小节 ch01 行数自动分配；非 BGM 目标忽略）
     std::optional<std::uint32_t> m_to_sub_line;
-    /// apply 快照（invert 恢复；找不到 note 时为空）
+    friend class CompositeCommand;
+    void bind_source(const Chart&, std::unordered_set<std::size_t>& claimed);
+    void bind_target(const Chart&, std::unordered_set<std::size_t>& claimed);
+    void apply_bound(Chart&);
+    void invert_bound(Chart&);
+    static void reposition(Chart&, const std::vector<MoveNoteCommand*>&, bool undo);
+    std::optional<std::size_t> m_original_index;
+    std::optional<std::size_t> m_index;
     std::optional<Event<Note>> m_moved;
-    std::optional<Event<Note>> m_partner;
-    /// 单 note 模式 apply 后移动端重连的新伙伴（m_paired_at = 移动端新下标，m_paired_with = 伙伴）；
-    /// invert 时用于清理该临时配对（否则新伙伴会悬挂指向已移回主 note 的旧下标）。
-    std::optional<std::size_t> m_paired_at;
-    std::optional<std::size_t> m_paired_with;
-    Rational m_last_delta{0, 1};
+    std::optional<Event<Note>> m_target;
 };
 
 /// 删除 note（doc/05 §9「选择集删除」→ note.delete）。

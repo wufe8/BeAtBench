@@ -689,8 +689,8 @@ TEST(BmsRead, LnPairType1TwoP) {
     EXPECT_EQ(res.chart.notes[0].value.lane, (Lane{1, LaneKind::Key, 1}));
 }
 
-TEST(BmsRead, LnPairType2) {
-    // LNTYPE 2（#LNOBJ）：头尾同在普通通道；值==#LNOBJ 的物件为尾；
+TEST(BmsRead, LnPairLnobj) {
+    // LNOBJ: ordinary-channel markers pair independently of LNTYPE.
     // 非 LNOBJ 值 → 普通 note（kSample 例 2：#02412:3C…ZZ 即通道 12 内头尾）
     const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n#00311:02\n");
     ASSERT_EQ(res.chart.notes.size(), 3u);
@@ -700,12 +700,12 @@ TEST(BmsRead, LnPairType2) {
 }
 
 TEST(BmsRead, LnDualType1And2) {
-    // LNTYPE 2 下两机制并存：51-59 LN 通道件（#00151/#00251）仍按 LNTYPE 1 交替配对；
-    // 普通通道内 头(11)+#LNOBJ 尾(ZZ) 按 LNTYPE 2 配对。二者互不干扰。
+    // Under LNTYPE 2, preserve both independent LN-channel and LNOBJ pairing.
+    // Ordinary-channel LNOBJ pairing does not implement MGQ.
     const auto res = read_bms(
         "#LNTYPE 2\n#LNOBJ ZZ\n"
         "#00151:01\n#00251:02\n"   // 51 通道 LN 头尾（LNTYPE 1 交替）
-        "#00311:03\n#00411:ZZ\n"); // 普通通道 头 + LNOBJ 尾（LNTYPE 2）
+        "#00311:03\n#00411:ZZ\n"); // Ordinary head + LNOBJ tail
     const auto pair_of = [&](const Event<Note>& n) {
         if (n.value.ln_pair && *n.value.ln_pair < res.chart.notes.size())
             return static_cast<int>(*n.value.ln_pair);
@@ -733,7 +733,7 @@ TEST(BmsRead, LnUnclosedWarns) {
 }
 
 TEST(BmsRead, LnOrphanTailWarns) {
-    // LNTYPE 2 尾没有可配对的头
+    // LNOBJ tail without a preceding ordinary head
     const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00111:ZZ\n");
     bool warned = false;
     for (const auto& d : res.diagnostics) {
@@ -827,10 +827,12 @@ TEST(BmsRoundTrip, UserCommentsStillPreserved) {
     EXPECT_EQ(write_bms(r2.chart), out);  // 幂等
 }
 
-TEST(BmsRoundTrip, SamePosConflictSplitsRows) {
-    // 未配对 LN 头（#00151:01）退化普通通道后与 #00111:01 同 pos 撞位 → 写回分裂两行
+TEST(BmsRoundTrip, OrdinaryAndOrphanLnKeepDistinctChannels) {
+    // Same-position ordinary and orphan LN notes retain their stored channel identities.
     const auto r1 = read_bms("#00111:01\n#00151:01\n");
     const auto out = write_bms(r1.chart);
+    EXPECT_NE(out.find("#00111:01"), std::string::npos);
+    EXPECT_NE(out.find("#00151:01"), std::string::npos);
     const auto r2 = read_bms(out);
     EXPECT_EQ(r2.chart.notes.size(), 2u);
     EXPECT_EQ(normalize_notes(r2.chart.notes), normalize_notes(r1.chart.notes));  // 全部保留
@@ -874,8 +876,8 @@ TEST(BmsRoundTrip, BgmMultiLineKeepsRows) {
     EXPECT_EQ(r2.chart.notes.size(), r1.chart.notes.size());
 }
 
-TEST(BmsRoundTrip, LnType2RoundTrip) {
-    // LNTYPE 2：头尾同在普通通道；尾槽位写回 #LNOBJ 文本
+TEST(BmsRoundTrip, LnobjRoundTripPreservesLntypeMeta) {
+    // Preserve the actual ordinary-channel samples and the unrelated LNTYPE metadata.
     const auto src = "#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n";
     const auto r1 = read_bms(src);
     ASSERT_EQ(r1.chart.notes.size(), 2u);
