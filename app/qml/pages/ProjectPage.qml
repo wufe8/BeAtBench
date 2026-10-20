@@ -18,6 +18,7 @@ Item {
 
     objectName: "projectPage"
     property int detailTab: 0
+    readonly property alias resourceSplitView: resourceSplit
     function refreshHistoryTarget() {
         if (detailTab !== 1 || !visible || chartHistoryController.busy) return
         if (selectedChart !== "") chartHistoryController.browseHistory(project.absolutePath(selectedChart))
@@ -352,39 +353,39 @@ Item {
                             font.pixelSize: Theme.fsSmall
                             elide: Text.ElideRight
                         }
-                        GridLayout {
+                        RowLayout {
+                            id: chartActions
+                            objectName: "projectChartActions"
                             Layout.fillWidth: true
-                            columns: width < 520 ? 2 : 3
-                            columnSpacing: 6
-                            rowSpacing: 4
+                            spacing: 6
                             BbToolButton {
-                                text: qsTr("在 A 中编辑")
+                                text: qsTr("编辑 A")
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("在 A 中编辑")
+                                ToolTip.delay: 500
                                 enabled: root.selectedChart !== ""
                                 onClicked: root.primaryAssignRequested(project.absolutePath(root.selectedChart))
                             }
                             BbToolButton {
-                                text: qsTr("在 B 中对照")
+                                text: qsTr("对照 B")
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("在 B 中对照")
+                                ToolTip.delay: 500
                                 enabled: root.selectedChart !== ""
                                 onClicked: root.referenceOpenRequested(project.absolutePath(root.selectedChart))
                             }
                             BbToolButton {
-                                objectName: "projectUpdateBindingsButton"
-                                text: qsTr("更新资源绑定…")
-                                enabled: project.sliceTargetCount > 0 && project.state === "ready"
-                                onClicked: {
-                                    if (window.metaDraftDirty) {
-                                        root.saveText = qsTr("请先提交或取消面板草稿，再更新资源绑定")
-                                        return
-                                    }
-                                    bindingDialog.open()
-                                }
-                            }
-                            BbToolButton {
-                                text: qsTr("保存全部已打开")
+                                text: qsTr("保存全部")
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("保存全部已打开的谱面")
+                                ToolTip.delay: 500
                                 onClicked: window.saveAllDocuments()
                             }
                             BbToolButton {
-                                text: qsTr("保存勾选谱面")
+                                text: qsTr("保存勾选")
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("保存勾选谱面；未勾选时保存当前编辑谱面")
+                                ToolTip.delay: 500
                                 enabled: project.sliceTargetCount > 0 || window.chartPath !== ""
                                 onClicked: {
                                     if (window.metaDraftDirty) {
@@ -394,25 +395,53 @@ Item {
                                     window.saveSelectedDocuments(project.effectiveSliceTargets(window.chartPath))
                                 }
                             }
-                            Label {
-                                Layout.columnSpan: parent.columns
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                visible: root.saveText !== ""
-                                text: root.saveText
-                                color: Theme.textMuted
-                                font.pixelSize: Theme.fsSmall
+                            Item { Layout.fillWidth: true }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            BbToolButton {
+                                objectName: "projectUpdateBindingsButton"
+                                text: qsTr("自定义…")
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("为勾选谱面批量自定义内容 / 更新资源绑定")
+                                ToolTip.delay: 500
+                                enabled: project.sliceTargetCount > 0 && project.state === "ready"
+                                onClicked: {
+                                    if (window.metaDraftDirty) {
+                                        root.saveText = qsTr("请先提交或取消面板草稿，再更新资源绑定")
+                                        return
+                                    }
+                                    inlineWav.invalidate()
+                                    bindingDialog.open()
+                                }
                             }
-                            Label {
+                            InlineWavBinding {
+                                id: inlineWav
                                 Layout.fillWidth: true
-                                Layout.columnSpan: parent.columns
-                                text: project.sliceTargetCount > 0
-                                      ? qsTr("已勾选 %1 谱：资源绑定更新 / 切音导出与铺放目标").arg(project.sliceTargetCount)
-                                      : qsTr("未勾选任何谱面 → 切音目标 = 当前编辑页打开的谱面")
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.fsSmall
-                                elide: Text.ElideRight
+                                controller: resourceBindingController
+                                projectRoot: project.root
+                                targetPaths: bindingDialog.targetPaths
+                                editingAllowed: !window.metaDraftDirty && project.state === "ready"
+                                onStatusChanged: (message) => { root.saveText = message; window.setStatus(message) }
                             }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: root.saveText !== ""
+                            text: root.saveText
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.fsSmall
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: project.sliceTargetCount > 0
+                                  ? qsTr("已勾选 %1 谱：资源绑定更新 / 切音导出与铺放目标").arg(project.sliceTargetCount)
+                                  : qsTr("未勾选任何谱面 → 切音目标 = 当前编辑页打开的谱面")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.fsSmall
+                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -474,8 +503,17 @@ Item {
                             text: qsTr("仅无引用")
                             onToggled: { root.onlyUnreferenced = checked; root.refreshResources() }
                         }
+                        Item { Layout.fillWidth: true }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        Layout.bottomMargin: 4
+                        spacing: 8
                         BbTextField {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             placeholderText: qsTr("按路径筛选…")
                             onTextChanged: { root.searchText = text; root.refreshResources() }
                         }
@@ -496,123 +534,167 @@ Item {
                         color: Theme.textFaint
                         font.pixelSize: Theme.fsSmall
                     }
-                    // 资源表列头（与行同间距/同列宽）
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 10
-                        Layout.rightMargin: 10
-                        Layout.topMargin: 4
-                        Layout.bottomMargin: 2
-                        spacing: 8
-                        Label { Layout.fillWidth: true; text: qsTr("文件"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-                        Label { Layout.preferredWidth: 44; text: qsTr("类型"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-                        Label { Layout.preferredWidth: 88; text: qsTr("状态"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-                        Label { Layout.preferredWidth: 44; text: qsTr("引用"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-                    }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-
-                    ListView {
-                        id: resList
-                        objectName: "projectResourceList"
+                    SplitView {
+                        id: resourceSplit
+                        objectName: "projectResourceSplit"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        Layout.minimumHeight: 0
+                        orientation: Qt.Vertical
                         clip: true
-                        model: project.resourceModel
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar {}
+                        // Shrink minima together in short windows, never beyond the viewport.
+                        readonly property real paneMinimumHeight: Math.min(96, Math.max(0, (height - 8) / 2))
+                        handle: Rectangle {
+                            objectName: "projectResourceSplitHandle"
+                            implicitHeight: 8
+                            color: SplitHandle.pressed ? Theme.primarySoft
+                                   : (SplitHandle.hovered ? Theme.surface3 : Theme.surface2)
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: Math.min(48, parent.width)
+                                height: 2
+                                radius: 1
+                                color: Theme.borderStrong
+                            }
+                            HoverHandler { cursorShape: Qt.SplitVCursor }
+                        }
+                        ColumnLayout {
+                            SplitView.minimumHeight: resourceSplit.paneMinimumHeight
+                            SplitView.fillHeight: true
+                            spacing: 0
+                            clip: true
+                            // 资源表列头（与行同间距/同列宽）
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 10
+                                Layout.rightMargin: 10
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 2
+                                spacing: 8
+                                Label { Layout.fillWidth: true; text: qsTr("文件"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                                Label { Layout.preferredWidth: 44; text: qsTr("类型"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                                Label { Layout.preferredWidth: 88; text: qsTr("状态"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                                Label { Layout.preferredWidth: 44; text: qsTr("引用"); color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                            }
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
-                        delegate: Rectangle {
-                            id: resRow
-                            required property var modelData
-                            width: resList.width
-                            height: 24
-                            color: (root.selectedResource !== null && root.selectedResource.path === modelData.path)
-                                   ? Theme.primarySoft
-                                   : (resHover.hovered ? Theme.surface2 : "transparent")
+                            ListView {
+                                id: resList
+                                objectName: "projectResourceList"
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.minimumHeight: 0
+                                clip: true
+                                model: project.resourceModel
+                                boundsBehavior: Flickable.StopAtBounds
+                                ScrollBar.vertical: ScrollBar {}
 
-                            HoverHandler { id: resHover }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: root.selectedResource = project.selectResource(resRow.modelData.path)
+                                delegate: Rectangle {
+                                    id: resRow
+                                    required property var modelData
+                                    width: resList.width
+                                    height: 24
+                                    color: (root.selectedResource !== null && root.selectedResource.path === modelData.path)
+                                           ? Theme.primarySoft
+                                           : (resHover.hovered ? Theme.surface2 : "transparent")
+
+                                    HoverHandler { id: resHover }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: root.selectedResource = project.selectResource(resRow.modelData.path)
+                                    }
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        spacing: 8
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: resRow.modelData.path
+                                            elide: Text.ElideMiddle
+                                            color: resRow.modelData.onDisk ? Theme.text : Theme.warning
+                                            font.pixelSize: Theme.fsSmall
+                                        }
+                                        Label { Layout.preferredWidth: 44; text: resRow.modelData.kind; color: Theme.textFaint; font.pixelSize: Theme.fsSmall }
+                                        Label {
+                                            Layout.preferredWidth: 88
+                                            text: resRow.modelData.state
+                                            color: resRow.modelData.state === "缺失" ? Theme.warning
+                                                   : (resRow.modelData.state === "无引用" ? Theme.textFaint : Theme.textMuted)
+                                            font.pixelSize: Theme.fsSmall
+                                        }
+                                        Label { Layout.preferredWidth: 44; text: resRow.modelData.useText; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
+                                    }
+                                }
                             }
 
-                            RowLayout {
+                        }
+                        Item {
+                            SplitView.minimumHeight: resourceSplit.paneMinimumHeight
+                            SplitView.preferredHeight: Math.max(resourceSplit.paneMinimumHeight, resourceSplit.height * 0.35)
+                            clip: true
+                            // 选中资源：引用出处（文件 ← 谱面 / 定义 ID / 头部字段）
+                            ColumnLayout {
+                                id: resDetail
                                 anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 10
-                                spacing: 8
+                                anchors.margins: 10
+                                spacing: 2
+
                                 Label {
                                     Layout.fillWidth: true
-                                    text: resRow.modelData.path
-                                    elide: Text.ElideMiddle
-                                    color: resRow.modelData.onDisk ? Theme.text : Theme.warning
+                                    visible: root.selectedResource === null
+                                    text: qsTr("资源引用出处")
+                                    color: Theme.textFaint
                                     font.pixelSize: Theme.fsSmall
                                 }
-                                Label { Layout.preferredWidth: 44; text: resRow.modelData.kind; color: Theme.textFaint; font.pixelSize: Theme.fsSmall }
                                 Label {
-                                    Layout.preferredWidth: 88
-                                    text: resRow.modelData.state
-                                    color: resRow.modelData.state === "缺失" ? Theme.warning
-                                           : (resRow.modelData.state === "无引用" ? Theme.textFaint : Theme.textMuted)
+                                    Layout.fillWidth: true
+                                    visible: root.selectedResource !== null
+                                    text: root.selectedResource === null ? "" :
+                                          (root.selectedResource.declared !== ""
+                                           ? qsTr("声明：%1 → 实际：%2").arg(root.selectedResource.declared)
+                                               .arg(root.selectedResource.path)
+                                           : root.selectedResource.path)
+                                    color: Theme.text
                                     font.pixelSize: Theme.fsSmall
+                                    elide: Text.ElideMiddle
                                 }
-                                Label { Layout.preferredWidth: 44; text: resRow.modelData.useText; color: Theme.textMuted; font.pixelSize: Theme.fsSmall }
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-
-                    // 选中资源：引用出处（文件 ← 谱面 / 定义 ID / 头部字段）
-                    ColumnLayout {
-                        id: resDetail
-                        Layout.fillWidth: true
-                        Layout.maximumHeight: 150
-                        Layout.leftMargin: 10
-                        Layout.rightMargin: 10
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        spacing: 2
-
-                        Label {
-                            Layout.fillWidth: true
-                            visible: root.selectedResource === null
-                            text: qsTr("选中资源查看引用出处（文件 ← 谱面 / 定义 ID / 头部字段）")
-                            color: Theme.textFaint
-                            font.pixelSize: Theme.fsSmall
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            visible: root.selectedResource !== null
-                            text: root.selectedResource === null ? "" :
-                                  (root.selectedResource.declared !== ""
-                                   ? qsTr("声明：%1 → 实际：%2").arg(root.selectedResource.declared)
-                                       .arg(root.selectedResource.path)
-                                   : root.selectedResource.path)
-                            color: Theme.text
-                            font.pixelSize: Theme.fsSmall
-                            elide: Text.ElideMiddle
-                        }
-                        ListView {
-                            id: resourceUsesList
-                            objectName: "projectResourceUsesList"
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(contentHeight, 100)
-                            clip: true
-                            visible: root.selectedResource !== null
-                            model: project.resourceUsesModel
-                            boundsBehavior: Flickable.StopAtBounds
-                            ScrollBar.vertical: ScrollBar {}
-                            delegate: Label {
-                                required property var modelData
-                                width: resourceUsesList.width
-                                text: "· " + modelData.chart + "  [" + modelData.source + "] "
-                                      + (modelData.id !== "" ? ("#" + modelData.kind + modelData.id)
-                                                             : ("#" + modelData.field))
-                                      + "  refs=" + modelData.refs
-                                color: Theme.textMuted
-                                font.pixelSize: Theme.fsSmall
-                                elide: Text.ElideRight
+                                ListView {
+                                    id: resourceUsesList
+                                    objectName: "projectResourceUsesList"
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.minimumHeight: 0
+                                    clip: true
+                                    model: root.selectedResource === null ? null : project.resourceUsesModel
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ScrollBar {}
+                                    Label {
+                                        anchors.fill: parent
+                                        anchors.margins: 6
+                                        visible: resourceUsesList.count === 0
+                                        text: root.selectedResource === null
+                                              ? qsTr("选中资源查看引用出处（谱面 / 定义 ID / 头部字段）")
+                                              : qsTr("该资源暂无引用")
+                                        wrapMode: Text.Wrap
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: Theme.textFaint
+                                        font.pixelSize: Theme.fsSmall
+                                    }
+                                    delegate: Label {
+                                        required property var modelData
+                                        width: resourceUsesList.width
+                                        text: "· " + modelData.chart + "  [" + modelData.source + "] "
+                                              + (modelData.id !== "" ? ("#" + modelData.kind + modelData.id)
+                                                                     : ("#" + modelData.field))
+                                              + "  refs=" + modelData.refs
+                                        color: Theme.textMuted
+                                        font.pixelSize: Theme.fsSmall
+                                        elide: Text.ElideRight
+                                    }
+                                }
                             }
                         }
                     }

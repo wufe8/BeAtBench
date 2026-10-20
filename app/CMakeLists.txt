@@ -94,6 +94,7 @@ qt_add_qml_module(beatbench
         qml/components/ChartHistoryDialog.qml
         qml/components/ChartHistoryPanel.qml
         qml/components/ResourceBindingDialog.qml
+        qml/components/InlineWavBinding.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml
         qml/components/ChartCompareSplit.qml
