@@ -13,7 +13,7 @@
 
 | 路径 | 内容 | 模块约定 |
 |---|---|---|
-| `core/` | 格式无关模型 + BMS codec + timing + 命令框架（零 Qt） | [core/AGENTS.md](core/AGENTS.md) |
+| `core/` | 格式无关模型 + BMS codec + timing + 命令框架（零 Qt；子目录：`bms/` codec、`timing/` 时序、`json/` 最小 JSON、`command/` 命令框架、`edit/` 编辑命令，均在 `core/include/beatbench/core/` 下） | [core/AGENTS.md](core/AGENTS.md) |
 | `audio/` | PortAudio 后端 + miniaudio 解码 + 混音内核（零 Qt） | [audio/AGENTS.md](audio/AGENTS.md) |
 | `cli/` | `beatbench-cli` 批处理入口（info/check/convert/version + `--json`） | [cli/AGENTS.md](cli/AGENTS.md) |
 | `app/` | Qt Quick/QML GUI：`bridge/`（C++）+ `qml/`（界面） | [app/AGENTS.md](app/AGENTS.md) |
