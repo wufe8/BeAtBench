@@ -311,8 +311,18 @@ Dialog {
                             BbComboBox {
                                 id: apiFilterCombo
                                 objectName: "audioApiFilter"
-                                Layout.preferredWidth: 130
-                                Layout.minimumWidth: 0
+                                // Fit full API names (notably Windows DirectSound), including
+                                // popup item padding and the closed control's arrow. Keep
+                                // room for the device selector when the dialog is narrow.
+                                Layout.preferredWidth: Math.min(apiTextWidth + 40, audioColumn.width * 0.65)
+                                Layout.minimumWidth: Layout.preferredWidth
+                                readonly property real apiTextWidth: {
+                                    var widest = 90
+                                    for (var i = 0; i < model.length; ++i)
+                                        widest = Math.max(widest, apiFontMetrics.advanceWidth(model[i]))
+                                    return Math.ceil(widest)
+                                }
+                                FontMetrics { id: apiFontMetrics; font: apiFilterCombo.font }
                                 model: {
                                     var arr = [qsTr("全部")]
                                     var seen = {}
