@@ -287,6 +287,20 @@ if (Qt6Core_FOUND)
     # 验证 theme.json 颜色 + 非颜色 token 覆写（L2 皮肤布局改动幅度的根基）。
     find_package(Qt6 COMPONENTS Gui QUIET)
     if (Qt6Gui_FOUND)
+        # External file actions use injected launchers: never start desktop applications in tests.
+        add_executable(chart_file_actions_test chart_file_actions_test.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartFileActions.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartFileActions.hpp)
+        target_include_directories(chart_file_actions_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(chart_file_actions_test PRIVATE beatbench_core Qt6::Gui GTest::gtest)
+        if(WIN32)
+            target_link_libraries(chart_file_actions_test PRIVATE shell32 ole32)
+        endif()
+        set_target_properties(chart_file_actions_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(chart_file_actions_test)
+        add_test(NAME chart_file_actions_tests COMMAND chart_file_actions_test)
+        set_tests_properties(chart_file_actions_tests PROPERTIES TIMEOUT 20)
+
         add_executable(theme_manager_test theme_manager_test.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.hpp)

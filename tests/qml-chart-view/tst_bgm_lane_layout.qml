@@ -2,6 +2,7 @@
 import QtQuick
 import QtTest
 import BeatBench 1.0
+import "../../app/qml/components" as Components
 
 Item {
     id: scene
@@ -15,6 +16,15 @@ Item {
             height: scene.height
             session: bridgeA
             theme: Theme
+            topHigh: false
+        }
+    }
+
+    Component {
+        id: qmlView
+        Components.ChartView {
+            width: scene.width; height: scene.height
+            documentSession: bridgeA
             topHigh: false
         }
     }
@@ -111,9 +121,46 @@ Item {
             compare(view.notesInRect(x - 2, noteY - 2, x + 2, noteY + 2).length, 1)
             return expected.map(c => c.x + c.w / 2)
         }
+        function test_default_expanded_and_header_click_is_visual_only() {
+            // Cover the bare C++ default independently of the production QML wrapper.
+            compare(view.bgmExpanded, true)
+            compare(bgmColumns().length, 9)
+            const wrapper = createTemporaryObject(qmlView, scene)
+            verify(wrapper !== null)
+            view = wrapper.viewportItem
+            compare(wrapper.bgmExpanded, true)
+            compare(view.bgmExpanded, true)
+            compare(bgmColumns().length, 9)
+            const beforeA = bindingFixture.documentState(bridgeA.sessionId)
+            const beforeB = bindingFixture.documentState(bridgeB.sessionId)
+            for (const expanded of [false, true]) {
+                const column = bgmColumns()[0]
+                mouseClick(wrapper, column.x + column.w / 2, 9)
+                compare(wrapper.bgmExpanded, expanded)
+                compare(view.bgmExpanded, expanded)
+                compare(bgmColumns().length, expanded ? 9 : 1)
+            }
+            compare(bindingFixture.documentState(bridgeA.sessionId), beforeA)
+            compare(bindingFixture.documentState(bridgeB.sessionId), beforeB)
+        }
+        function test_explicit_collapsed_initial_value_reaches_cpp_item() {
+            // A construction-time false must override the C++ true even without a change signal.
+            const wrapper = createTemporaryObject(qmlView, scene, {bgmExpanded: false})
+            verify(wrapper !== null)
+            view = wrapper.viewportItem
+            compare(wrapper.bgmExpanded, false)
+            compare(view.bgmExpanded, false)
+            compare(bgmColumns().length, 1)
+            wrapper.bgmExpanded = true
+            compare(view.bgmExpanded, true)
+            compare(bgmColumns().length, 9)
+        }
         function test_live_geometry_before_first_paint() {
             view = createTemporaryObject(laneView, scene, {visible: false})
             verify(view !== null) // Invisible from construction: guaranteed zero paints.
+            compare(view.bgmExpanded, true)
+            checkLiveColumns()
+            view.bgmExpanded = false
             checkLiveColumns()
             view.bgmExpanded = true
             checkLiveColumns()
@@ -146,6 +193,9 @@ Item {
         function test_empty_bgm_is_editable(data) {
             bindingFixture.resetBgmLayout(data.empty)
             view.scrollToStart()
+            // Keep collapsed-lane placement coverage explicit; expansion is now the default.
+            compare(view.bgmExpanded, true)
+            view.bgmExpanded = false
             compare(view.bgmExpanded, false)
             let columns = bgmColumns()
             compare(columns.length, 1, "No BGM events must still expose the collapsed BGM lane")

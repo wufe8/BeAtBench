@@ -277,6 +277,8 @@ Item {
         }
 
         function test_BGM_hidden_collapsed_and_expanded_full_lane_mapping() {
+            compare(view.bgmExpanded, true) // New default; explicitly exercise collapsed mapping below.
+            view.bgmExpanded = false
             compare(probe(106).status, "hidden")
             view.referenceOverlayHideSecondaryChannels = false
             image()

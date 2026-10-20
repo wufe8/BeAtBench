@@ -252,6 +252,44 @@ TEST_F(ChartHistoryControllerTest, ExitPartialFailureRetriesWithoutDuplicatesAnd
     EXPECT_TRUE(controller->snapshotAllSaved());
 }
 
+TEST_F(ChartHistoryControllerTest, ProjectBrowseClosedPathRestoresWithoutOpeningOrSaving) {
+    enableAndSelect();
+    controller->createSnapshot();
+    ASSERT_TRUE(waitIdle(*controller));
+    session_registry().close(aId.toUtf8().toStdString());
+    ASSERT_TRUE(session_registry().activate(bId.toUtf8().toStdString()));
+    int dialogs = 0, saves = 0;
+    QObject::connect(controller.get(), &ChartHistoryController::showRequested, [&] { ++dialogs; });
+    QObject::connect(controller.get(), &ChartHistoryController::saveRequested, [&](const QString&) { ++saves; });
+    controller->browseHistory(aPath);
+    ASSERT_TRUE(waitIdle(*controller));
+    EXPECT_TRUE(controller->documentId().isEmpty());
+    ASSERT_EQ(controller->entries().size(), 1);
+    controller->requestSavedSnapshot();
+    EXPECT_EQ(saves, 0);
+    controller->restoreCopy(controller->entries().first().toMap().value("id").toString());
+    ASSERT_TRUE(waitIdle(*controller));
+    EXPECT_EQ(dialogs, 0);
+    EXPECT_EQ(documents->instances().size(), 1);
+    EXPECT_EQ(session_registry().active_id(), bId.toUtf8().toStdString());
+    EXPECT_EQ(bytes(aPath), QByteArray("#TITLE A\n#BPM 120\n"));
+}
+
+TEST_F(ChartHistoryControllerTest, ProjectSaveDoesNotPopDialogOrRetargetBusyOperation) {
+    controller->setEnabled(true);
+    controller->showHistory(aId, false);
+    ASSERT_TRUE(waitIdle(*controller));
+    int dialogs = 0;
+    QObject::connect(controller.get(), &ChartHistoryController::showRequested, [&] { ++dialogs; });
+    controller->requestSavedSnapshot();
+    controller->browseHistory(bPath);
+    EXPECT_EQ(controller->documentId(), aId);
+    controller->finishSave(aId, true);
+    ASSERT_TRUE(waitIdle(*controller));
+    EXPECT_EQ(controller->entries().size(), 1);
+    EXPECT_EQ(dialogs, 0);
+}
+
 TEST_F(ChartHistoryControllerTest, DestructionJoinsActiveWorkerAndDropsQueuedDelivery) {
     enableAndSelect();
     controller->createSnapshot();

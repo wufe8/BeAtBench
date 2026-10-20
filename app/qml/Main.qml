@@ -34,6 +34,7 @@ ApplicationWindow {
     ChartHistoryDialog {
         id: chartHistoryDialog
         controller: chartHistoryController
+        onClosed: projectPage.refreshHistoryTarget()
     }
     Connections {
         target: chartHistoryController
@@ -2279,6 +2280,7 @@ ApplicationWindow {
         sliceWorkspace.exportTargets = project.effectiveSliceTargets(window.chartPath)
     }
     onChartPathChanged: {
+        updateActionStates()
         syncSliceExportTargets()
         audioEngine.setChartPath(window.chartPath)
     }
@@ -2321,6 +2323,8 @@ ApplicationWindow {
     function updateActionStates() {
         setActionEnabled("file.save", chartMeta !== null)
         setActionEnabled("file.saveAs", chartMeta !== null)
+        setActionEnabled("file.revealInFileManager", chartMeta !== null && chartPath !== "")
+        setActionEnabled("file.openInTextEditor", chartMeta !== null && chartPath !== "")
         setActionEnabled("edit.undo",
                          (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canUndoSlice))

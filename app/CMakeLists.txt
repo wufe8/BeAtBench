@@ -25,6 +25,8 @@ add_executable(beatbench
     bridge/ChartSnapshotStore.hpp
     bridge/ChartHistoryController.cpp
     bridge/ChartHistoryController.hpp
+    bridge/ChartFileActions.cpp
+    bridge/ChartFileActions.hpp
     bridge/DocumentService.cpp
     bridge/DocumentService.hpp   # Q_OBJECT：显式列入
     bridge/ProjectController.cpp
@@ -42,6 +44,9 @@ add_executable(beatbench
     bridge/SliceWaveformItem.hpp
 )
 target_link_libraries(beatbench PRIVATE beatbench_core beatbench_audio Qt6::Quick Qt6::QuickControls2)
+if(WIN32)
+    target_link_libraries(beatbench PRIVATE shell32 ole32)
+endif()
 beatbench_set_warnings(beatbench)
 
 # ⚠️ Qt 6.12.0 的 qmlcachegen 在本模块上**确定性 SIGSEGV**（已知上游问题，2026-10 实测）：
@@ -85,6 +90,7 @@ qt_add_qml_module(beatbench
         qml/components/SamplePanel.qml
         qml/components/SettingsDialog.qml
         qml/components/ChartHistoryDialog.qml
+        qml/components/ChartHistoryPanel.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml
         qml/components/ChartCompareSplit.qml
