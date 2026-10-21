@@ -1,5 +1,8 @@
 local/
 
+# 本地工作树（git worktree 挂载点）
+/.worktrees/
+
 # 构建产物
 # /build-*/ 通配所有 build-* 目录：此前逐个列名，2026-10 新建 build-reltest/ 时漏掉，
 # 误把 36 MB 构建产物提交进 dev（已 amend 掉）。新增构建目录不必再改本文件。
