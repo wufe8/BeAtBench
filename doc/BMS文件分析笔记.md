@@ -5,7 +5,7 @@ by Wufe8
 [http://bm98.yaneu.com/bm98/bmsformat.html](http://bm98.yaneu.com/bm98/bmsformat.html)  
 举例 `Doppelganger[Eb]`
 
-注意不是所有播放器均支持该笔记内的所有功能
+注意不是所有播放器均支持该笔记内的所有功能；本文是格式笔记，不是 BeAtBench 已支持能力清单。当前编辑/保存限制见根 [README 的已知问题](<../README.md#已知问题>)，尤其不要把长音示例当作所有 LN 端点都能可靠保存的保证。
 指令大小写不敏感
 可使用`//` `/**/`注释语句 使用方法类似C语言注释
 
@@ -134,7 +134,7 @@ x=2: 长音同样位于短音通道中 定义一个长音截止符 以此作为�
 > - model 层：`Chart.id_base`（默认 Base36）；数值 id 按 base62 编码（0..3843 容纳 2 位），
 >   文本 ↔ 数值编解码见 `BmsUtil c62_to_u32/u32_to_c62` 与 `id_text`。
 > - 测试：合成用例覆盖（`BmsUtil.C62*` / `BmsRead.Base62*` / `BmsRoundTrip.Base62Stable`）；
->   真实谱面样本暂无（用户确认无现成 BOFTT 谱面），解析真实谱面后补。
+>   尚无真实 BOFTT 谱面验证，不能用合成用例外推真实谱面兼容性。
 
 2. `#BMPxx yyy` 同上 只不过为定义图片(bgi/bga/miss)引用 也可以是视频 通常为.bmp/.png/.wmv/.mp4格式 注意对于视频 需要有对应的视频解码器才能播放
 3. `#BPMxx yyy` | `#EXBPMxx` 同上 只不过为指代bpm值 可以为小数 可以是负数(但实际上负数bpm并不是硬性规范 实现效果可能不一致)  

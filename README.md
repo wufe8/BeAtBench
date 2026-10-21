@@ -124,7 +124,7 @@ ctest --test-dir build --output-on-failure
 BB_SKIP_REAL=1 ./build/tests/beatbench_tests
 ```
 
-Windows（MSVC）：命令相同，多配置生成器下 `ctest` 必须带 `-C Debug`，否则全部 Not Run。
+Windows（MSVC）：配置命令相同；多配置生成器下构建用 `cmake --build build --config Debug --parallel`，测试用 `ctest --test-dir build -C Debug --output-on-failure`。
 
 ### GUI（Linux / macOS，Qt 6.4+）
 
@@ -135,10 +135,13 @@ cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DBEATBENCH_BUILD_TESTS=OFF
 cmake --build build-gui --parallel
 
-# 无头冒烟（CI 同款；offscreen + 软件渲染）
+# 无头冒烟（offscreen + 软件渲染）；macOS 可执行文件位于 .app 内
+mkdir -p local/tmp
+GUI_EXE=./build-gui/app/beatbench
+[ "$(uname -s)" != Darwin ] || GUI_EXE=./build-gui/app/beatbench.app/Contents/MacOS/beatbench
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 QML2_IMPORT_PATH="$PWD/build-gui/app" \
-  ./build-gui/app/beatbench --screenshot smoke.png --apply-skin Aurora
+  "$GUI_EXE" --screenshot local/tmp/smoke.png --apply-skin Aurora
 ```
 
 Windows 用 MinGW + Qt：配置时以 `-DCMAKE_CXX_COMPILER` / `-DCMAKE_MAKE_PROGRAM` 指向 MinGW 的

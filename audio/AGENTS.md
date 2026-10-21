@@ -9,4 +9,4 @@
   `-DFETCHCONTENT_SOURCE_DIR_PORTAUDIO=<已有源码>`（googletest 同理）；复用下载源码时如实标注。
 - **实时回调线程零分配**：混音回调内不做内存分配与重锁操作；离线渲染（ChartRenderer）语义与 SamplePlayer 对齐。
 - 解码不重采样：源率保留，混音回调按设备率插值。
-- OnsetDetector 零依赖（STFT complex-domain 谱通量）；CLI 不暴露需要 PortAudio 的能力。
+- OnsetDetector 是不依赖设备后端的纯检测算法（STFT complex-domain 谱通量）；离线算法与实时设备输出分开，不通过音频后端读写设备。

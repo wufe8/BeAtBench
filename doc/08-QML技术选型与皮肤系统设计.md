@@ -25,7 +25,7 @@
 ## 2. 双语言纪律（桥接原则）
 
 - **逻辑放 C++（`app/bridge`），QML 只管表现与 `invoke`**；JS 不写散业务
-  （`SessionController.qml` 是迁移期例外，逐步回抽 C++，现状见 `doc/04` §6）。
+  （`SessionController.qml` 是迁移期例外，逐步回抽 C++，现状见 `doc/09` §11）。
 - 新增业务不要往 `Main.qml` / `SessionController.qml` 堆 JS；handler 用字符串方法名只是迁移期兼容，
   新动作优先在 C++ 注册真实处理器。
 - 渲染路线：时间轴用 `QQuickPaintedItem`（QPainter 起步），瓶颈后迁 QSG。
@@ -54,7 +54,7 @@ skins/MySkin/
 > **两步命名约定（免层级混乱）**：“层”只用 L1/L2/L3 指**能力**（改什么）；
 > “时机”用 **启动时 / 运行时** 指**何时生效**。二者正交，不说“L1.5”这类模糊层级——
 > 例如“L1 运行时换肤”= 皮肤只改 token，但通过菜单**运行时**切换（不是启动时 `--skin`）。
-> 本轮实现的即“L1 运行时换肤”，能力仍是 L1（仅 token），时机为运行时。
+> 现已实现的是“L1 运行时换肤”，能力仍是 L1（仅 token），时机为运行时。
 
 ### 3.3 覆写与兜底（核心机制）
 
@@ -83,7 +83,8 @@ skins/MySkin/
 1. `theme.json` schema（token 表以 `beatbench-ui-styles.html` 为准：bg/surface/surface2/border/text/muted/accent/accent2/on-accent/accent-soft/n1..n4/scratch/mine/ln/wave/radius/radius-sm/note-radius/fs）；
 2. `layout.json` schema；
 3. **命令协议**（doc/06 §3，不变——皮肤是界面，core 永远是引擎）；
-4. 引擎暴露给 QML 的注册类型（见 §4）。
+4. 引擎暴露给 QML 的注册类型（见 §4）；
+5. `UiActionRegistry` 的动作 id、`invoke` 与状态查询（见 `doc/09`）；L3 加载仍未实现（§5）。
 
 ### 3.6 默认皮肤 surface 清单（L2 layout.json 的命名插槽）
 
@@ -98,7 +99,7 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 | `leftDock` | 左面板容器 | 元信息/采样/lint/BGA 标签页 |
 | `viewport` | 中央视口 | 竖向时间轴（QQuickPaintedItem） |
 | `rightDock` | 右属性面板 | 选中对象 / 事件时间线 |
-| `pageSwitcher` | 底部页面条 | 位置可配置（doc/05 待拍板 2） |
+| `pageSwitcher` | 底部页面条 | 位置可配置属于 L2 规划（未实现，见 §5） |
 | `statusBar` | 状态栏 | 固定全局 |
 
 **布局探索候选插槽**（未进 schema）——理想皮肤若要免整壳支持，需纳入 schema：

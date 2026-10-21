@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # 备份：给「只有一块盘」的工作流加一层异地副本。
 #   ① 主仓库有未提交改动就先落一个 commit（即使不 push 也不丢）
-#   ② 打一个 git bundle 到备份目录（默认 OneDrive，无网也能跑）
+#   ② 仅给主仓库打 git bundle 到备份目录（默认 OneDrive，无网也能跑）
+#   本机 local/ 若是独立仓库，仅在其内部本地提交；本脚本不备份或推送它。
 #   ③ 清理超过 --keep 份的旧 bundle
 #   ④ --push 时额外 push 有远程的仓库；没远程的打印配置指引
 #
