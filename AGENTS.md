@@ -101,3 +101,18 @@ markdown 内仓库路径指针有效性、中文弯引号。
 按任务取用：BMS codec → `development.md` 五、+ BMS 笔记；切音 → `core-model.md` 三、；
 协议/JSON → `command-protocol.md` 三、；界面/皮肤 → `ui-design.md` + `skin-system.md`；
 快捷键 → `action-registry.md`；构建/测试 → `development.md` 四、；发版 → `dev-workflow.md` + `packaging.md`。
+
+
+## 7. 工作树
+
+多任务并行时优先为每个任务新建工作树开发，主工作区只留当前任务：
+
+- 挂载点固定 `.worktrees/<任务名>/`（已 gitignore，status 与 rg/fd 搜索不受干扰）。
+- 新建：`git worktree add -b <分支名> .worktrees/<任务名>`；构建目录随工作树本地化，
+  在工作树内照 §5 流程全新配置，首次联网拉取 PortAudio / GoogleTest。
+- 工作树**不含 `local/`**（嵌套仓库、已被 gitignore）：依赖真实谱面/音频的用例会 SKIP，
+  这是预期，不是回归失败。
+- 门禁钩子经共享 config 全仓生效，工作树内 pre-commit / pre-push 直接可用。
+- 任务完成即移除：先确认已合并、`git status` 干净且无未跟踪文件，再
+  `git worktree remove .worktrees/<任务名>`——**不要默认加 `--force`**（会连未提交改动一起删）；
+  分支用 `git branch -d`（拒绝删除未合并分支）。
