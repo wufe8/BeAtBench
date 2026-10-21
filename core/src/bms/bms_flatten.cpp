@@ -5,6 +5,7 @@
 #include "beatbench/core/bms/BmsCodec.hpp"
 
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -135,7 +136,7 @@ std::string expand_variants(std::string_view text, std::uint32_t random_value,
     out.reserve(text.size());
 
     // 选择块状态
-    enum class BlockKind { Random, If, Switch };
+    enum class BlockKind : std::uint8_t { Random, If, Switch };
     struct Block {
         BlockKind kind = BlockKind::Random;
         double arg = 0;                        // RANDOM: 段数；SWITCH: 选择值

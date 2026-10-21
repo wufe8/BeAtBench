@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -11,7 +12,7 @@ namespace beatbench::codec {
 
 /// 格式无关诊断（协议/CLI 展示共用；提升自 bms::Diagnostic 的通用版）。
 /// 各 codec 内部的专有诊断类型由 adapter 转换到本类型。
-enum class Severity { Error, Warning, Info };
+enum class Severity : std::uint8_t { Error, Warning, Info };
 
 struct Diagnostic {
     Severity severity = Severity::Info;

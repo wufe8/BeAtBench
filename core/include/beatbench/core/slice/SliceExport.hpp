@@ -34,7 +34,7 @@ struct SliceExportItem {
 };
 
 /// 落盘文件名冲突策略（B2）：文件序号与 #WAV id 独立；无冲突时三种等价于按 layout 原名写。
-enum class ExportConflictPolicy {
+enum class ExportConflictPolicy : std::uint8_t {
     Overwrite,  ///< 按 layout 原名写（已存在则覆盖）
     Continue,   ///< 只给启用切片从 max(已有序号)+1 连续编号，旧文件保留
     Error,      ///< 有冲突则拒绝（调用方弹窗 / 调试路径失败零落盘）

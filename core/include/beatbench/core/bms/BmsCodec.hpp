@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,10 +10,10 @@
 namespace beatbench::bms {
 
 /// BMS 文本编码。传统 Shift-JIS；现代工具渐用 UTF-8（#ENCODING 注释）。读取建议 Auto。
-enum class BmsEncoding { Auto, ShiftJis, Utf8 };
+enum class BmsEncoding : std::uint8_t { Auto, ShiftJis, Utf8 };
 
 /// 编码检测结果（read_bms_file 填写；read_bms 输入约定已是 UTF-8）。
-enum class DetectedEncoding { Utf8, ShiftJis };
+enum class DetectedEncoding : std::uint8_t { Utf8, ShiftJis };
 
 struct BmsReadOptions {
     BmsEncoding encoding = BmsEncoding::Auto;
@@ -32,7 +33,7 @@ struct BmsWriteOptions {
     bool normalize = true;  ///< 槽位最小化 + 通道按行聚合
 };
 
-enum class Severity { Error, Warning, Info };
+enum class Severity : std::uint8_t { Error, Warning, Info };
 
 struct Diagnostic {
     Severity severity = Severity::Info;

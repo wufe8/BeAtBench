@@ -19,6 +19,7 @@
 // 回调线程只碰 SamplePlayer（voice + 时钟），不触碰本类状态。
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -28,7 +29,7 @@ namespace beatbench::audio {
 
 class PcmPlayback {
 public:
-    enum class State { Idle, Playing, Paused, Stopped };
+    enum class State : std::uint8_t { Idle, Playing, Paused, Stopped };
 
     /// player = 混音内核（命令 ring 入口）；deviceRate = 设备采样率（时钟换算；
     /// 与 AudioEngine 的 m_renderCtx.deviceRate 同源——每帧 render 用实际值）。

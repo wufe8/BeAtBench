@@ -10,7 +10,7 @@
 
 namespace beatbench::json {
 
-enum class Type { Null, Bool, Int, Double, String, Array, Object };
+enum class Type : std::uint8_t { Null, Bool, Int, Double, String, Array, Object };
 
 /// JSON 解析/序列化错误，携带输入中的字节偏移（0 = 无）。
 class JsonError : public std::runtime_error {
