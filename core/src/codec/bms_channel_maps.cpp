@@ -221,7 +221,7 @@ std::optional<BmsChannelRule> bms_channel_rule_for(std::string_view mode,
     return std::nullopt;
 }
 
-std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool ln,
+std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool ln, // NOLINT(readability-function-cognitive-complexity)——模式到通道的映射查表链，映射表即数据
                                  NoteKind kind) {
     // 模型可由协议/插件直接构造，不能依赖读侧保证玩家与数组下标合法。
     if (lane.player > 1) return {};

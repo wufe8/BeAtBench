@@ -86,7 +86,7 @@ struct PendingNote {
 
 }  // namespace
 
-MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
+MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——MIDI 事件流逐字节状态机
     Reader r(bytes);
 
     // ---- MThd 头块 ----
@@ -128,7 +128,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
     int maxTick = 0;          // 全曲最大事件 tick（含 EOT）
     bool smpteTempo = false;  // SMPTE 基下出现 tempo 事件 → 警告
 
-    auto handle_channel = [&](Reader& tr, int& tick, int status, bool hasFirst,
+    auto handle_channel = [&](Reader& tr, int& tick, int status, bool hasFirst, // NOLINT(readability-function-cognitive-complexity)——note-off 配对扫描（与 note-on 对称）
                               std::uint8_t first, int track,
                               std::vector<PendingNote>& pending, int& unmatchedOff,
                               std::vector<MidiNote>& emit) {
@@ -163,7 +163,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
                             n.velocity = pn.velocity;
                             n.startTick = pn.tick;
                             n.endTick = tick;
-                            emit.push_back(std::move(n));
+                            emit.push_back(n);
                             matched = true;
                             break;
                         }
@@ -187,7 +187,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
                         n.velocity = pn.velocity;
                         n.startTick = pn.tick;
                         n.endTick = tick;
-                        emit.push_back(std::move(n));
+                        emit.push_back(n);
                         matched = true;
                         break;
                     }
@@ -347,7 +347,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
     for (auto& n : rawNotes) {
         n.startSec = tick_to_sec(n.startTick);
         n.endSec = tick_to_sec(n.endTick);
-        out.notes.push_back(std::move(n));
+        out.notes.push_back(n);
     }
     std::sort(out.notes.begin(), out.notes.end(), [](const MidiNote& a, const MidiNote& b) {
         if (a.startTick != b.startTick) return a.startTick < b.startTick;

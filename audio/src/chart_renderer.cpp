@@ -145,12 +145,12 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate,
 
         // 5ms 包络（起止；与 SamplePlayer 一致）
         double env = 1.0;
-        if (playPos < envFrames / rate)
-            env = playPos / (envFrames / rate);
+        const double envSec = static_cast<double>(envFrames) / rate;
+        if (playPos < envSec)
+            env = playPos / envSec;
         else {
-            const double remain = (srcFrames / srcRate) - playPos;
-            const double envEnd = envFrames / rate;
-            if (remain < envEnd) env = remain / envEnd;
+            const double remain = static_cast<double>(srcFrames) / srcRate - playPos;
+            if (remain < envSec) env = remain / envSec;
         }
         env = std::clamp(env, 0.0, 1.0);
         out[o * 2] += l * static_cast<float>(env);

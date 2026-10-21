@@ -47,7 +47,8 @@ bool ReferenceTrack::finish_load(const DecodeResult& r, const std::string& displ
     m_pcm = std::move(pcm);
     m_sampleRate = rate;
     m_channels = 2;
-    m_durationSec = static_cast<double>(m_pcm->size() / 2) / rate;
+    const std::size_t frameCount = m_pcm->size() / 2;  // 交错立体声：两样本一帧
+    m_durationSec = static_cast<double>(frameCount) / rate;
     m_waveform.build(m_pcm, static_cast<std::size_t>(m_channels), rate);
     m_path = displayPath;
     m_error.clear();
@@ -91,9 +92,10 @@ void ReferenceTrack::apply_slice_fade(std::vector<float>& pcm, double sampleRate
     if (pcm.empty() || sampleRate <= 0.0 || fadeSec <= 0.0) return;
     const std::size_t frames = pcm.size() / 2;
     if (frames < 2) return;
+    const std::size_t halfFrames = frames / 2;
     const std::size_t fadeFrames = static_cast<std::size_t>(
         std::clamp(std::ceil(sampleRate * fadeSec), 1.0,
-                   static_cast<double>(frames / 2)));
+                   static_cast<double>(halfFrames)));
     for (std::size_t i = 0; i < frames; ++i) {
         float g = 1.0f;
         if (i < fadeFrames) {

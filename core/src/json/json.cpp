@@ -154,7 +154,7 @@ struct Parser {
         }
     }
 
-    std::string parse_string() {
+    std::string parse_string() { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——JSON 字符串转义状态机
         expect('"');
         std::string out;
         while (true) {
@@ -214,7 +214,7 @@ struct Parser {
         return v;
     }
 
-    Json parse_number() {
+    Json parse_number() { // NOLINT(readability-function-cognitive-complexity)——JSON 数字字面量状态机
         const std::size_t start = i;
         if (peek() == '-') ++i;
         // 整数部分：不允许前导零（"0" 或 "0.xx" 之外）

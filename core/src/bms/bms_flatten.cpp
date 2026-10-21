@@ -105,7 +105,7 @@ bool eval_if(std::string_view expr, std::uint32_t random_var,
 
 }  // namespace
 
-std::string expand_variants(std::string_view text, std::uint32_t random_value,
+std::string expand_variants(std::string_view text, std::uint32_t random_value, // NOLINT(readability-function-cognitive-complexity,readability-function-size)——#RANDOM/#IF 块展开状态机
                             std::vector<Diagnostic>* diags) {
     // ---- 拆行 ----
     struct Line {

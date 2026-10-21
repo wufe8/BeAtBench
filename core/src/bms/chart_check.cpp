@@ -28,7 +28,7 @@ std::string lane_text(const Lane& lane) {
 
 }  // namespace
 
-EventStats collect_event_stats(const Chart& chart) {
+EventStats collect_event_stats(const Chart& chart) { // NOLINT(readability-function-size)——固有分支密度（解析/协议形状），有意保留
     EventStats stats;
     stats.notes = chart.notes.size();
     stats.bpm = chart.bpm_events.size();
@@ -105,7 +105,7 @@ inline std::string_view audio_ext_fallback(std::string_view ext) {
     return {};
 }
 
-std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::path& base_dir) {
+std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::path& base_dir) { // NOLINT(readability-function-cognitive-complexity)——谱面 lint 规则链
     std::vector<LintIssue> issues;
     // 1) WAV 引用文件检查（相对谱面目录；扩展名回退见 audio_ext_fallback）
     for (const auto& [key, def] : chart.samples) {

@@ -34,7 +34,7 @@ constexpr std::string_view kControlTags[] = {
     "SETRANDOM", "ENCODING",
 };
 
-inline bool is_control_tag(std::string_view tag) {
+inline bool is_control_tag(std::string_view tag) { // NOLINT(readability-function-size)——控制指令识别链
     for (const auto t : kControlTags) {
         if (tag.size() == t.size()) {
             bool eq = true;
@@ -170,7 +170,7 @@ struct NoteInfo {
 
 }  // namespace
 
-BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
+BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——BMS 逐行解析状态机（格式核心，勿轻拆）
     BmsReadResult result;
     Chart& chart = result.chart;
 
@@ -253,7 +253,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                           token.size();
             if (upper_ascii(token) != "PLAYER") continue;
             const auto v = field_value(line, token_end);
-            if (!v.empty()) player = std::atoi(std::string(v).c_str());
+            if (!v.empty()) player = static_cast<int>(std::strtol(std::string(v).c_str(), nullptr, 10));
             break;  // 首个 #PLAYER 即生效
         }
         if (player == 3) {
@@ -712,7 +712,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     return result;
 }
 
-BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts) {
+BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——文件装载：编码与模式探测分支
     BmsReadResult result;
 
     // 路径处理（2026-09 修复日文/非 ASCII 路径打不开）：
@@ -773,7 +773,7 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
                         val.push_back(line_view[i]);
                         ++i;
                     }
-                    if (!val.empty()) player = std::atoi(val.c_str());
+                    if (!val.empty()) player = static_cast<int>(std::strtol(val.c_str(), nullptr, 10));
                     break;
                 }
             }

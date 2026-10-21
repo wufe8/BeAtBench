@@ -20,7 +20,7 @@ const std::vector<std::string>& fallback_exts() {
 
 std::string resolve_audio_path(const std::string& dir, const std::string& base) {
     // 原样（base 可能已含目录）
-    const std::string asIs = dir.empty() ? base : dir + "/" + base;
+    std::string asIs = dir.empty() ? base : dir + "/" + base;
     if (std::filesystem::exists(asIs)) return asIs;
 
     // 从 base 拆 basename（去掉目录）+ 原扩展名
@@ -31,7 +31,10 @@ std::string resolve_audio_path(const std::string& dir, const std::string& base) 
     const std::string stem = (dot != std::string::npos) ? name.substr(0, dot) : name;
 
     for (const auto& ext : fallback_exts()) {
-        const std::string cand = dir.empty() ? stem + ext : dir + "/" + stem + ext;
+        std::string cand(dir);
+        if (!cand.empty()) cand += '/';
+        cand += stem;
+        cand += ext;
         if (std::filesystem::exists(cand)) return cand;
     }
     return std::string();

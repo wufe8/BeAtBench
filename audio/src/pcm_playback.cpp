@@ -32,7 +32,8 @@ void PcmPlayback::load(std::shared_ptr<const std::vector<float>> pcm, double sam
     }
     m_pcm = std::move(pcm);
     m_sampleRate = sampleRate;
-    m_durationSec = static_cast<double>(m_pcm->size() / 2) / sampleRate;
+    const std::size_t frameCount = m_pcm->size() / 2;  // 交错立体声：两样本一帧
+    m_durationSec = static_cast<double>(frameCount) / sampleRate;
     // M5：新 PCM 装载。播放中（renderFinished 增量完成）→ 只更新引用（旧 voice 继续播
     // 旧版缓冲——共享缓冲替换由 ChartSession 处理，本类保活旧 shared_ptr 到 voice 结束）；
     // 暂停/停止/Idle → 位置复位（载入 = 从头的新素材）。

@@ -22,7 +22,7 @@
 // ⚠️ 教训：**不要预定义** `STB_VORBIS_INCLUDE_STB_VORBIS_H`——stb_vorbis.c 的
 // 声明段以 `#ifndef STB_VORBIS_INCLUDE_STB_VORBIS_H` 守卫，预定义会跳过声明、
 // 只剩实现 → MSVC 报 `alloc`/取码本成员未定义（2026-09 实测两轮）。
-#include "stb_vorbis.c"    // vorbis 解码实现（公有领域）——自身带声明+实现+STB_VORBIS_INCLUDE_STB_VORBIS_H
+#include "stb_vorbis.c"    // NOLINT(bugprone-suspicious-include)——stb 单文件库按设计直接含实现
 // ⚠️ stb_vorbis.c 实现段定义了单字母宏 L/C/R（声道查询），且不 #undef——
 // 污染后续 include（miniaudio.h 内 Windows 头位域 `DWORD L : 1` 被展开 → 语法错误）。
 // 必须立即清理（stb 已知问题，官方 stb_vorbis.h 版本有此 #undef）。
@@ -47,7 +47,7 @@ namespace {
 
 /// miniaudio 多声道 → stereo 向下混（keysound 场景标准做法；miniaudio 无内置 downmix）。
 /// 输入 interleaved 平面 f32；n = 总样本数；ch = 声道数。
-void downmix_to_stereo(const float* src, std::size_t frames, std::uint32_t ch,
+void downmix_to_stereo(const float* src, std::size_t frames, std::uint32_t ch, // NOLINT(readability-function-size)——声道下混逐样本循环
                        std::vector<float>& out) {
     out.resize(frames * 2);
     if (ch == 1) {
@@ -167,7 +167,8 @@ DecodeResult decode_audio_file_w(const std::wstring& path) {
     try {
         const auto u8 = std::filesystem::path(path).u8string();  // C++20: std::u8string
         recordPath.assign(reinterpret_cast<const char*>(u8.data()), u8.size());
-    } catch (...) {}
+    } catch (...) { // NOLINT(bugprone-empty-catch)——诊断字段容错，解码主流程不依赖此路径
+    }
     return decode_with([&](ma_decoder* d, const ma_decoder_config* c) {
         return ma_decoder_init_file_w(path.c_str(), c, d);  // Windows 宽字符（UTF-16）
     }, recordPath);
