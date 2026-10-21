@@ -29,6 +29,18 @@ scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测
 - 装了 pre-push hook 后，`git push` 会自动跑 `--quick`；推 `v*` tag 时额外跑版本一致性检查。
   安装一次即可：`git config core.hooksPath .githooks`；赶时间 `SKIP_CHECK=1 git push`。
 - 预设（`CMakePresets.json`）：`cmake --preset core|gui|check`；本机路径在 `CMakeUserPresets.json`（gitignore）里。
+- clang-tidy 门禁：配置在 `.clang-tidy`（bugprone/performance/认知复杂度 + 嵌套阈值
+  `NestingThreshold=4`；signed-bitwise 与 easily-swappable-parameters 为有意设计已禁用），
+  范围 core/audio/cli。CI lint job（clang-tidy 23 钉版）全量 `--warnings-as-errors` 拦截；
+  本地复跑需 clang-tidy 23（大版本差异会引入新告警）+ `compile_commands.json`：
+  `cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=OFF
+  -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。存量已清零；新增超标
+  一律修复，或 `NOLINT(检查项)——理由` 显式标注（现有标注全部携带理由）。
+- 模块边界由 CMake target 可见性结构化强制（core 只暴露 `include/`，模块间 PRIVATE 链接），
+  越界即编译错误，无需额外工具；规则见各模块 AGENTS.md。
+- qmllint：`qt_add_qml_module` 自带 `all_qmllint` 目标（构建目录内
+  `cmake --build build --target all_qmllint`），现挂账未进门禁（Theme 为 context property、
+  工具不可见），出口条件见 `doc/pending/`。
 - CI（`.github/workflows/ci.yml`）是同一套检查的远端副本：**本地快档 + CI 全量**，两者不重复造轮子。
 
 ## 三、发布（版本与产物）

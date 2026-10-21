@@ -3,8 +3,9 @@
 #
 # 设计决策（为什么长这样）：
 # - Qt 统一 6.11.2：回归、打包与发布包用同一版本，避免「测的是 X、发的是 Y」。
-# - 五个 job：linux-core / windows-msvc-core 无 Qt（core/cli/audio/tests + ctest），
-#   linux-full / macos-full / windows-mingw-full 带 Qt（桥层单测 + GUI 构建 + offscreen 冒烟）。
+# - 五个回归 job：linux-core / windows-msvc-core 无 Qt（core/cli/audio/tests + ctest），
+#   linux-full / macos-full / windows-mingw-full 带 Qt（桥层单测 + GUI 构建 + offscreen 冒烟）；
+#   另设独立 lint job（clang-tidy 全量 + 文档护栏，无 Qt，summary 同样阻塞）。
 # - Windows 用 MinGW 全量钉住发布链路（Qt 官方 Windows 默认 kit 即 MinGW，与
 #   scripts/package-release.sh 同源），另设 MSVC 无 Qt job 守护 MSVC 兼容性。
 # - macOS continue-on-error：macOS 侧从未人工验证过，首跑风险隔离；其余 job 阻塞。
@@ -260,6 +261,29 @@ jobs:
             beatbench-qml-errors.log
           if-no-files-found: ignore
 
+  # ---------- 静态检查：clang-tidy 全量（存量已清零，WAE 拦截）+ 文档护栏（无 Qt，独立可重跑） ----------
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install clang-tidy 23（与存量清零同版；大版本差异会引入新告警）
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 23
+          sudo apt-get install -y -q clang-tidy-23
+          echo "/usr/lib/llvm-23/bin" >> "$GITHUB_PATH"
+      - name: Configure（无 Qt 路径）
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=OFF -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: clang-tidy 全量（--warnings-as-errors）
+        run: |
+          git ls-files 'core/src/*.cpp' 'audio/src/*.cpp' 'cli/*.cpp' \
+            | xargs -P 4 -I{} clang-tidy -p build-lint --warnings-as-errors='*' '{}'
+      - name: 文档护栏（挂账生命周期 / 路径指针 / 中文弯引号）
+        run: bash scripts/check-docs.sh
+
   # ---------- 汇总：把被 continue-on-error 洗掉的 macOS 真实结论翻出来 ----------
   # needs.<job>.result 在 continue-on-error 下恒为 success，故经 API 取实际 conclusion：
   # 阻塞四 job 任一失败 → 本 job 红；macOS 失败 → warning 标注（run 绿灯不含 macOS）。
@@ -267,7 +291,7 @@ jobs:
     name: ci-summary
     permissions:
       actions: read
-    needs: [linux-core, linux-full, macos-full, windows-msvc-core, windows-mingw-full]
+    needs: [linux-core, linux-full, macos-full, windows-msvc-core, windows-mingw-full, lint]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -281,7 +305,7 @@ jobs:
           # are authoritative; the jobs REST API can lag or omit inherited jobs
           # during a failed-job rerun, and must not turn success into a false red.
           fail=""
-          for j in linux-core linux-full windows-msvc-core windows-mingw-full; do
+          for j in linux-core linux-full windows-msvc-core windows-mingw-full lint; do
             c=$(jq -r --arg j "$j" '.[$j].result' <<< "$NEEDS_JSON")
             echo "$j = $c"
             if [ "$c" != "success" ]; then echo "::error::阻塞 job 失败：$j = $c"; fail=1; fi

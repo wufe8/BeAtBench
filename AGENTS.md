@@ -81,6 +81,8 @@ markdown 内仓库路径指针有效性、中文弯引号。
 
 - 构建与测试：`doc/development.md` 四、（构建命令权威）；分支与门禁：`doc/dev-workflow.md`；打包与发布：`doc/packaging.md`。
 - 快速门禁：`scripts/check.sh --quick`；pre-push 自动执行，赶时间 `SKIP_CHECK=1 git push`。
+- 静态检查：clang-tidy 全量 `--warnings-as-errors`（范围 core/audio/cli；CI 独立 lint job
+  执行，存量已清零；新增超标一律修复或 `NOLINT(检查项)——理由` 显式标注），详见 `doc/dev-workflow.md` 二、。
 - 找不到文件 → §6 文档地图；地图也解答不了 → 按 §3 落点规则归类。
 
 ## 6. 文档地图
