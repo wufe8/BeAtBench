@@ -302,7 +302,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 in_block_comment = rest.find("*/") == std::string_view::npos;
                 continue;
             }
-            if (rest.starts_with("//") || rest.starts_with("*")) continue;
+            if (rest.starts_with("//") || rest.starts_with('*')) continue;
             if (line[0] != '#') continue;
             const auto token = field_token(line);
             // 数据行：#mmmcc:（3 位小节 + 2 位 36 进制通道 + ':'；与主循环判定一致）
@@ -423,7 +423,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             if (opts.preserve_comments) raw.emplace_back(line);
             continue;
         }
-        if (rest.starts_with("//") || rest.starts_with("*")) {
+        if (rest.starts_with("//") || rest.starts_with('*')) {
             // BMSE 风格：// 行注释、* 星号注释
             // 结构分割线（bms_sections.hpp）是 writer 生成的装饰、不算用户注释：
             // 豁免不入 raw_lines，否则 写→读→写 每次在尾部累积一份（幂等性破坏）。

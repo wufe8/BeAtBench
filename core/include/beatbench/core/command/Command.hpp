@@ -15,8 +15,8 @@ namespace beatbench::cmd {
 /// what() = 人类可读消息（当前为中文）。
 class CommandError : public std::runtime_error {
 public:
-    CommandError(std::string code, std::string message)
-        : std::runtime_error(std::move(message)), code_(std::move(code)) {}
+    CommandError(std::string code, const std::string& message)
+        : std::runtime_error(message), code_(std::move(code)) {}
     const std::string& code() const noexcept { return code_; }
 
 private:

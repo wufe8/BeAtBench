@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 
 namespace beatbench::audio {
@@ -237,7 +238,7 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             // 主音量（实时参数；回调线程读原子）乘到每个 voice
             const float g = v.volume * env *
                             m_masterVolume.load(std::memory_order_relaxed);
-            out[o * 2] += l * g;
+            out[static_cast<ptrdiff_t>(o * 2)] += l * g;
             out[o * 2 + 1] += rgt * g;
             v.frac += v.step;
             const std::uint64_t advance = static_cast<std::uint64_t>(v.frac);

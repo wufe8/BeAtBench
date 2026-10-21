@@ -439,7 +439,7 @@ void MoveNoteCommand::apply(Chart& chart) {
     }
 
     // 从容器取走主 note（只这一个；伙伴不动）
-    Event<Note> main_ev = std::move(chart.notes[*idx]);
+    Event<Note> main_ev = chart.notes[*idx];
     const std::size_t removed_at = *idx;
     chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(removed_at));
     // 其余配对端下标修正（删除点之后的 -1；主 note 自身 ln_pair 稍后按值重设）
@@ -506,7 +506,7 @@ void MoveNoteCommand::apply(Chart& chart) {
     main_ev.value.ln_pair.reset();  // 稍后按伙伴值重设
     const std::size_t main_at = lower_bound_pos(chart.notes, m_to_measure, m_to_pos);
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(main_at),
-                       std::move(main_ev));
+                       main_ev);
 
     // 主 note 插入后：其余配对端下标修正（插入点后 +1）
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
@@ -559,7 +559,7 @@ void MoveNoteCommand::invert(Chart& chart) {
                                       p.value.sub_line);
     }
 
-    Event<Note> main_ev = std::move(chart.notes[*idx]);
+    Event<Note> main_ev = chart.notes[*idx];
     const std::size_t removed_at = *idx;
     chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(removed_at));
     // 其余配对端下标修正（删除点之后的 -1；主 note 自身 ln_pair 稍后按值重设）
@@ -580,7 +580,7 @@ void MoveNoteCommand::invert(Chart& chart) {
     main_ev.value.ln_pair.reset();
     const std::size_t main_at = lower_bound_pos(chart.notes, m_from_measure, m_from_pos);
     chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(main_at),
-                       std::move(main_ev));
+                       main_ev);
 
     // 插入后其余配对端下标修正
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
@@ -1545,7 +1545,7 @@ std::string upper_ascii(std::string_view s) {
 
 }  // namespace
 
-MetaEditCommand::MetaEditCommand(std::string key, std::string value)
+MetaEditCommand::MetaEditCommand(const std::string& key, std::string value)
     : m_key(upper_ascii(key)), m_value(std::move(value)) {}
 
 void MetaEditCommand::apply(Chart& chart) {

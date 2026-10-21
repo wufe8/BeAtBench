@@ -306,7 +306,7 @@ Lane transform_lane(const Lane& lane, bool mirror, int rotate, int max_key);
 /// 批量 = CompositeCommand 包多个（一个 undo 步）。键名统一大写（meta 键规范）。
 class MetaEditCommand : public EditCommand {
 public:
-    MetaEditCommand(std::string key, std::string value);
+    MetaEditCommand(const std::string& key, std::string value);
     std::string name() const override { return "meta.edit"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;

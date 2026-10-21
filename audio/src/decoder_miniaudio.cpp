@@ -8,6 +8,7 @@
 #include "beatbench/audio/AudioDecoder.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -105,7 +106,7 @@ DecodeResult decode_with(OpenFn openFile, const std::string& pathForRecord) {
 
     // 读出全部 PCM（纯读内存；f32 输出）。逐块读入临时 vector，最后合并。
     std::vector<float> pcm;
-    std::vector<float> block(0x10000 * ch);
+    std::vector<float> block(static_cast<std::size_t>(0x10000) * static_cast<std::size_t>(ch));
     auto sample = std::make_unique<DecodedSample>();  // 创建者持有计数 1
     sample->sampleRate = static_cast<double>(decoder.outputSampleRate);
     if (!pathForRecord.empty()) sample->path = pathForRecord;

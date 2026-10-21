@@ -40,7 +40,7 @@ struct NoteRef {
 /// 会话状态，不入 undo 栈；由 EditorSession 持有。
 class Selection {
 public:
-    void add(NoteRef ref) { m_refs.insert(std::move(ref)); }
+    void add(NoteRef ref) { m_refs.insert(ref); }
     void remove(const NoteRef& ref) { m_refs.erase(ref); }
     void clear() { m_refs.clear(); }
     bool contains(const NoteRef& ref) const { return m_refs.count(ref) != 0; }

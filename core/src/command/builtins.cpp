@@ -1339,7 +1339,7 @@ public:
             }
         }
         auto& session = session_from_args(args);
-        session.load(std::move(result.chart), path);
+        session.load(result.chart, path);
         // 注入持久化钩子（崩溃备份/自动保存用；按本文件 codec 写出）
         session.set_persist_hook(make_persist_hook(codec));
         Json out = Json::object();

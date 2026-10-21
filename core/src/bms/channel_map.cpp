@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <string>
 #include <string_view>
 
@@ -40,7 +41,7 @@ constexpr LaneKind kLaneKinds[9] = {
 };
 
 constexpr std::size_t kSpecialCount = 14;  // "01".."0E"
-constexpr std::size_t kGroupCount = 6 * 9;  // 11/21/51/61/D/E 六组
+constexpr std::size_t kGroupCount = static_cast<const std::size_t>(6 * 9);  // 11/21/51/61/D/E 六组
 constexpr std::size_t kTotal = kSpecialCount + kGroupCount;
 
 struct Table {

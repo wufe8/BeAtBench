@@ -15,8 +15,8 @@ enum class Type { Null, Bool, Int, Double, String, Array, Object };
 /// JSON 解析/序列化错误，携带输入中的字节偏移（0 = 无）。
 class JsonError : public std::runtime_error {
 public:
-    JsonError(std::string message, std::size_t offset = 0)
-        : std::runtime_error(std::move(message)), offset_(offset) {}
+    JsonError(const std::string& message, std::size_t offset = 0)
+        : std::runtime_error(message), offset_(offset) {}
     std::size_t offset() const noexcept { return offset_; }
 
 private:

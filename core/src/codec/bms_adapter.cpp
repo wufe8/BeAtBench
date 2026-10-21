@@ -44,7 +44,7 @@ public:
         const auto r = beatbench::bms::read_bms_file(
             std::string(reinterpret_cast<const char*>(u8.data()), u8.size()), bo);
         ReadResult out;
-        out.chart = std::move(r.chart);
+        out.chart = r.chart;
         out.diagnostics.reserve(r.diagnostics.size());
         for (const auto& d : r.diagnostics) {
             Diagnostic od;

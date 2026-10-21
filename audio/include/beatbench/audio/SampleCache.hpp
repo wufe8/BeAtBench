@@ -52,7 +52,7 @@ public:
     using DecodeFn = std::function<DecodeResult(const std::string&)>;
     using DecodeFnW = std::function<DecodeResult(const std::wstring&)>;
 
-    static constexpr std::size_t kDefaultBudgetBytes = 128u * 1024u * 1024u;
+    static constexpr std::size_t kDefaultBudgetBytes = static_cast<const std::size_t>(128u * 1024u * 1024u);
 
     explicit SampleCache(std::size_t budgetBytes = kDefaultBudgetBytes);
     ~SampleCache();
