@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // note.move 跨通道（to.lane）测试：时间 + 通道一起移动、invert 精确还原、
 // 向后兼容（不传 to.lane = 纯时间）、LN 两种模式、批量 CompositeCommand 跨通道一步 undo。
-// 依据 local/doc/handoff-note-move-batch.md（M2→M3 交接，2026-09）。
 #include <gtest/gtest.h>
 
 #include <algorithm>

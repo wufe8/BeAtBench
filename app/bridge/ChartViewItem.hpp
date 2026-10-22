@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 竖向时间轴自绘视口（M2 第 5 步，doc/07 §3 步 5）：QQuickPaintedItem + QPainter。
+// 竖向时间轴自绘视口（M2 第 5 步，doc/project-workflow.md §3 步 5）：QQuickPaintedItem + QPainter。
 // 绘制（v1）：小节标尺（小节号 + BPM 变化标记 + STOP 段）、槽位网格、轨道列
 // （皿/1-7/BGM/2P，按谱面实际出现的 Lane 数据驱动）、note / LN 头尾 / 地雷
 // 按 (measure,pos) 落位；方向默认「顶部=高小节」（preview.html，note 自上而下落）。
-// 秒标尺与 BGM 波形铺底后置 Phase B（doc/07 §4）。
+// 秒标尺与 BGM 波形铺底后置 Phase B（doc/project-workflow.md §4）。
 // 数据源 = ChartSession（core Chart + TimingEngine 真数据）；只读展示，无编辑（M3）。
-// 滚动/缩放由 QML 侧 ChartView.qml 驱动（Flickable 无 onWheel，doc/04 §5）。
-// 类型经 QML_ELEMENT 注册为 BeatBench 模块组件（皮肤 L3 按组件覆写的落点，doc/05 §8）。
+// 滚动/缩放由 QML 侧 ChartView.qml 驱动（Flickable 无 onWheel，doc/development.md §5）。
+// 类型经 QML_ELEMENT 注册为 BeatBench 模块组件（皮肤 L3 按组件覆写的落点，doc/ui-design.md §8）。
 #pragma once
 
 #include <QColor>
@@ -53,7 +53,7 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(int noteSampleMode READ noteSampleMode WRITE setNoteSampleMode NOTIFY noteSampleModeChanged)
     /// LN 选取模式（默认关）：开启后点选 LN 任一段，noteAt 返回配对的两段（lnPartner）。
     Q_PROPERTY(bool lnSelectMode READ lnSelectMode WRITE setLnSelectMode NOTIFY lnSelectModeChanged)
-    /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式，doc 参考 local/doc 截图）
+    /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式）
     Q_PROPERTY(bool showExtras READ showExtras WRITE setShowExtras NOTIFY showExtrasChanged)
     /// 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
@@ -185,7 +185,7 @@ public:
     qreal contentWidth() const;
     QString hoverText() const { return m_hoverText; }
 
-    /// 运行时换肤（doc/08 §3.3）：Theme token 变化后强制重绘（repaint）视口。
+    /// 运行时换肤（doc/skin-system.md §3.3）：Theme token 变化后强制重绘（repaint）视口。
     /// QML 侧 catch Theme.tokensChanged 时调用；等价于调用底层 QQuickPaintedItem::update()。
     Q_INVOKABLE void refreshTheme() { update(); }
 
