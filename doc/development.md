@@ -103,6 +103,22 @@ cmake --build build-gui --target beatbench
   core 专属（零依赖、命令框架）→ `core/AGENTS.md`；音频（回调零分配、离线构建）→ `audio/AGENTS.md`；
   CLI（协议指针、离线约束）→ `cli/AGENTS.md`。
 
+### 代码格式化（clang-format）
+
+- 配置在根目录 `.clang-format`：基于 Google 风格定制（4 空格缩进、列宽 100、左对齐指针），
+  其余沿用 Google 默认（attached 大括号、单行短 if/loop、include 分块排序）。选型时对全仓
+  六种内置 preset 做过实测比对，纯 preset 无一能直接用，详见该文件头注释。
+- `third_party/` 与生成文件 `core/src/bms/sjis_table.hpp` 在 `.clang-format-ignore` 中排除，
+  生成表由 `tools/gen_sjis_table.ps1` 重新生成，不参与格式化。
+- 检查入口 `scripts/check-format.sh`（check.sh 第 0 步与 CI format job 同一入口）；版本钉
+  23.1.3（本机版本不符只警告不拦截，以 CI 为准）。修复命令：
+  `git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format -i`。
+- 全量重排提交已登记 `.git-blame-ignore-revs`：GitHub blame 自动生效；本地需一次性
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs`（换机器 clone 后重跑）。
+- ⚠️ **不要用“锚定排版”的正则从测试抓 C++ 源码**：抓表达式先把目标文本压平空白
+  （`replace(/\s+/g, ' ')`）再匹配语义标记，否则格式化一拆行测试就碎（qml_session_regression
+  踩过）。
+
 ## 六、当前状态与下一步
 
 > 基线：**M1–M6 全部收尾**（0.4.x）：BMS codec + 时序 + CLI → 页面式 GUI 外壳 → 编辑命令

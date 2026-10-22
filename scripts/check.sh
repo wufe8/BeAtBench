@@ -84,6 +84,10 @@ echo "==> 模式:    $([ "$CORE_ONLY" -eq 1 ] && echo 'core（无 Qt）' || echo
 
 START="$(date +%s)"
 
+# ---- 0. 格式检查（与 CI format job 同一入口；<2s，失败快速返回）----
+step "格式检查"
+"$ROOT/scripts/check-format.sh"
+
 # ---- 1. 配置 ----
 if [ "$REUSE" -eq 0 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
   step "配置"
