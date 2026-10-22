@@ -3,13 +3,12 @@
 #
 # 设计决策（为什么长这样）：
 # - Qt 统一 6.11.2：回归、打包与发布包用同一版本，避免「测的是 X、发的是 Y」。
-# - 六个 job：format（纯格式门禁，无构建）；五个回归 job：linux-core / windows-msvc-core 无 Qt
-#   （core/cli/audio/tests + ctest），linux-full / macos-full / windows-mingw-full 带 Qt
-#   （桥层单测 + GUI 构建 + offscreen 冒烟）；另设独立 lint job（clang-tidy 全量 + 文档护栏，
-#   无 Qt，summary 同样阻塞）。
+# - 七个 job：format（纯格式门禁，无构建）、lint（clang-tidy 全量 + 文档护栏，无 Qt），
+#   加五个回归 job：linux-core / windows-msvc-core 无 Qt（core/cli/audio/tests + ctest），
+#   linux-full / macos-full / windows-mingw-full 带 Qt（桥层单测 + GUI 构建 + offscreen 冒烟）。
+#   全部阻塞，任一 job 失败 run 即红（无汇总层）。
 # - Windows 用 MinGW 全量钉住发布链路（Qt 官方 Windows 默认 kit 即 MinGW，与
 #   scripts/package-release.sh 同源），另设 MSVC 无 Qt job 守护 MSVC 兼容性。
-# - macOS continue-on-error：macOS 侧从未人工验证过，首跑风险隔离；其余 job 阻塞。
 # - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
 #   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
 # - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2）；Qt 装机走 action 缓存，
@@ -127,8 +126,6 @@ jobs:
 
   macos-full:
     name: macos-full
-    # macOS 侧从未人工验证过，风险隔离；其实际结论由 summary job 经 API 翻出
-    continue-on-error: true
     runs-on: macos-15
     # 历史教训：make -j 无限并发曾把全量构建拖到 18–35 分钟（147 个编译单元同起跑，
     # 3 vCPU/7GB 被调度与换页压垮）；--parallel 3 后冷构建实测 116s。timeout 90 为
@@ -295,46 +292,3 @@ jobs:
         run: pipx install clang-format==23.1.3
       - name: Check formatting
         run: scripts/check-format.sh
-
-  # ---------- 汇总：把被 continue-on-error 洗掉的 macOS 真实结论翻出来 ----------
-  # needs.<job>.result 在 continue-on-error 下恒为 success，故经 API 取实际 conclusion：
-  # 阻塞四 job 任一失败 → 本 job 红；macOS 失败 → warning 标注（run 绿灯不含 macOS）。
-  summary:
-    name: ci-summary
-    permissions:
-      actions: read
-    needs: [format, linux-core, linux-full, macos-full, windows-msvc-core, windows-mingw-full, lint]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: 汇总各 job 实际结论
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          # These six jobs do not use continue-on-error. Their dependency results
-          # are authoritative; the jobs REST API can lag or omit inherited jobs
-          # during a failed-job rerun, and must not turn success into a false red.
-          fail=""
-          for j in format linux-core linux-full windows-msvc-core windows-mingw-full lint; do
-            c=$(jq -r --arg j "$j" '.[$j].result' <<< "$NEEDS_JSON")
-            echo "$j = $c"
-            if [ "$c" != "success" ]; then echo "::error::阻塞 job 失败：$j = $c"; fail=1; fi
-          done
-          # macOS uses continue-on-error, so needs cannot reveal its real result.
-          # Bound retries for REST propagation; unknown is never reported as pass.
-          m="unknown"
-          for attempt in 1 2 3 4 5 6; do
-            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100&refresh=$(date +%s)-$attempt" \
-                --jq '.jobs | map(select(.name == "macos-full")) | first | .conclusion // "unknown"' > macos-result.txt; then
-              m=$(cat macos-result.txt)
-            fi
-            [ "$m" != "unknown" ] && break
-            [ "$attempt" = 6 ] || sleep 5
-          done
-          echo "macos-full actual conclusion = $m"
-          if [ "$m" != "success" ]; then
-            echo "::warning::macos-full 实际结论：$m（非阻塞门禁——本 run 绿灯不含 macOS）"
-          fi
-          [ -z "$fail" ]

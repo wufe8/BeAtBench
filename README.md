@@ -78,7 +78,7 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 |---|---|
 | Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/packaging.md`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
 | Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出已实机验证（ALSA 路径，见 `doc/packaging.md` 六、） |
-| macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2，非阻塞门禁）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
+| macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
 守卫）。三平台的“能编译、测得过、GUI 能起画”由 CI 持续钉住

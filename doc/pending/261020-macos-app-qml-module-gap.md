@@ -8,7 +8,7 @@ macOS CI 产物（`.app`）内不含 `BeatBench/` QML 模块目录，双击启�
 
 ## 现状
 
-- macOS 无预编译包；仅 CI 验证全量构建 + 单测 + GUI 无头冒烟（非阻塞门禁）。
+- macOS 无预编译包；仅 CI 验证全量构建 + 单测 + GUI 无头冒烟。
 - `.app` 打包、签名公证整体未做（doc/packaging.md 六、 边界）。
 
 ## 出口条件
