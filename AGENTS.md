@@ -1,12 +1,12 @@
 # AGENTS.md — 协作者 / AI 新会话入口
 
 > 本文件只回答三件事：**去哪找文件**、**新文件放哪**、**文档怎么维护**。
-> 项目介绍见 `README.md`；当前状态、构建、代码约定见 `doc/04-开发手册.md`。
+> 项目介绍见 `README.md`；当前状态、构建、代码约定见 `doc/development.md`。
 
 ## 1. 新会话三步
 
 1. **本文件**（落点与维护约定）；
-2. `doc/04-开发手册.md` —— 现状 / 构建 / 代码约定；
+2. `doc/development.md` —— 现状 / 构建 / 代码约定；
 3. 按任务查 `doc/README.md` 的“任务 → 文档”表。
 
 ## 2. 仓库布局
@@ -77,6 +77,6 @@ markdown 内仓库路径指针有效性、中文弯引号。
 
 ## 5. 构建 / 门禁 / 发布
 
-- 构建与测试：`doc/04` §4（构建命令权威）；分支与门禁：`doc/10`；打包与发布：`doc/11`。
+- 构建与测试：`doc/development.md` §4（构建命令权威）；分支与门禁：`doc/dev-workflow.md`；打包与发布：`doc/packaging.md`。
 - 快速门禁：`scripts/check.sh --quick`；pre-push 自动执行，赶时间 `SKIP_CHECK=1 git push`。
 - 找不到文件 → `doc/README.md` 文档地图；地图也解答不了 → 按 §3 落点规则归类。

@@ -40,7 +40,7 @@ struct WriteOptions {
     bool overwrite = false;
 };
 
-/// 格式编解码器接口（doc/06 规划、M3 落地）：
+/// 格式编解码器接口（doc/command-protocol.md 规划、M3 落地）：
 /// 「换格式 = 换映射表」的核心兑现点。每个格式注册一个 Codec，
 /// 声明扩展名、支持的模式集合、读写入口；GUI/CLI/命令共用同一注册表。
 class Codec {

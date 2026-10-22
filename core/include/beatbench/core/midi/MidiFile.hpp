@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MIDI 文件解析器（M6.1）：Standard MIDI File（.mid）→ note/tempo/拍号模型。
 //
-// 定位（doc/02 §3）：M6 切音工作台的「MIDI 驱动」数据源——MIDI note 天然给出
+// 定位（doc/core-model.md §3）：M6 切音工作台的「MIDI 驱动」数据源——MIDI note 天然给出
 // 切片边界（note on/off）与铺放拍位。零 Qt、零依赖、可单测；CLI/GUI/测试三方复用。
 //
 // 解析范围（刻意保守）：

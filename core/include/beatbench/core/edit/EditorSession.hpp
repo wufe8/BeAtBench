@@ -115,7 +115,7 @@ private:
 
 // —— 具体编辑命令（edit_commands.cpp 实现） ——
 
-/// 放置 note（doc/05 §9「视口点放」→ note.put）。
+/// 放置 note（doc/ui-design.md §9「视口点放」→ note.put）。
 /// 语义：在 (measure, pos) 的 lane 上放 sample 引用的 note。
 /// 逆操作：精确删除该 (measure, pos, lane) 处、匹配 sample 的 note。
 ///
@@ -151,7 +151,7 @@ private:
     std::optional<std::size_t> m_paired_head;
 };
 
-/// 移动 note（doc/05 §9「视口拖动」→ note.move，merge_with 合并拖动）。
+/// 移动 note（doc/ui-design.md §9「视口拖动」→ note.move，merge_with 合并拖动）。
 /// 语义：把 (from_measure, from_pos, lane) 处、匹配 sample 的 note 移到目标位置。
 /// 逆操作：移回原位。连续移动同一 note → merge 为一个 undo 步。
 ///
@@ -202,7 +202,7 @@ private:
     Rational m_last_delta{0, 1};
 };
 
-/// 删除 note（doc/05 §9「选择集删除」→ note.delete）。
+/// 删除 note（doc/ui-design.md §9「选择集删除」→ note.delete）。
 /// 语义：删除 (measure, pos, lane) 处匹配 sample 的 note。
 /// 逆操作：精确恢复该 note（含原容器位置近似——重插同 (measure,pos,lane,sample)）。
 class DeleteNoteCommand : public EditCommand {
@@ -300,7 +300,7 @@ private:
 /// max_key 由调用方按谱面模式传入（chart_mode_key_count），本函数不感知模式。
 Lane transform_lane(const Lane& lane, bool mirror, int rotate, int max_key);
 
-/// 编辑头部字段（doc/05 §107「元信息表单」→ meta.edit）。
+/// 编辑头部字段（doc/ui-design.md §107「元信息表单」→ meta.edit）。
 /// 语义：设置 Chart.meta[key] = value。**value 为空串 = 删除该字段**（元信息表单清空输入）。
 /// 逆操作：恢复原值（原不存在 → 移除；原存在 → 恢复旧值）。
 /// 批量 = CompositeCommand 包多个（一个 undo 步）。键名统一大写（meta 键规范）。
@@ -344,7 +344,7 @@ private:
     bool m_changed = false;
 };
 
-/// 放置/改值 BGA 事件（doc/05 §9「BGA 面板/视口」→ bga.put）。
+/// 放置/改值 BGA 事件（doc/ui-design.md §9「BGA 面板/视口」→ bga.put）。
 /// 语义：在 (measure, pos) 的 layer（0=base 1=poor 2=layer 3=layer2）放 sample 引用的
 /// #BMPxx 事件。同 (measure,pos,layer) 已存在 → 改值（同位替换）；否则插入。
 /// 逆操作：恢复旧值 / 删除插入（精确快照）。
@@ -366,7 +366,7 @@ private:
     std::optional<std::size_t> m_applied_index;  ///< 插入下标（invert 用）
 };
 
-/// 删除 BGA 事件（doc/05 §9「BGA 列表删除」→ bga.delete）。
+/// 删除 BGA 事件（doc/ui-design.md §9「BGA 列表删除」→ bga.delete）。
 /// 语义：删除 (measure, pos, layer) 的 BGA 事件；不存在 → 无操作。
 /// 逆操作：精确恢复（快照 + 原位）。
 class BgaDeleteCommand : public EditCommand {

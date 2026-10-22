@@ -1,6 +1,6 @@
 # 打包与发布说明（Linux deb/rpm/arch 与 Windows zip）
 
-> 关联：`doc/04` §4（构建 / CI）、`.github/workflows/package.yml`、
+> 关联：`doc/development.md` §4（构建 / CI）、`.github/workflows/package.yml`、
 > `scripts/package-linux.sh`、`scripts/verify-linux-package.sh`、`scripts/package-release.sh`。
 
 ## 1. 流水线总览

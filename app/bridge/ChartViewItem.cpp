@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // ChartViewItem 实现：QPainter 自绘竖向时间轴（标尺/网格/轨道列/note·LN·地雷）。
 // 性能：只绘制可见小节范围（culling）；首屏 245 小节 ≈ 6 万 note 级谱面实测不足再迁 QSG
-// （doc/08 §2 路线：QPainter 起步，瓶颈后迁）。
+// （doc/skin-system.md §2 路线：QPainter 起步，瓶颈后迁）。
 #include "bridge/ChartViewItem.hpp"
 
 #include <QElapsedTimer>
@@ -1490,7 +1490,7 @@ double ChartViewItem::bpmAt(const beatbench::Chart& chart, int measure) const {
     double bpm = 130.0;  // 缺省 BPM（对齐 TimingEngine）
     if (const auto it = chart.meta.find("BPM"); it != chart.meta.end())
         bpm = std::atof(it->second.c_str());
-    // 事件按 (measure,pos) 升序（doc/04 §6 约定）；取 measure 之前最后事件 + 本小节 pos0
+    // 事件按 (measure,pos) 升序（doc/development.md §6 约定）；取 measure 之前最后事件 + 本小节 pos0
     for (const auto& ev : chart.bpm_events) {
         if (static_cast<int>(ev.measure) > measure) break;
         if (static_cast<int>(ev.measure) < measure ||
@@ -1502,7 +1502,7 @@ double ChartViewItem::bpmAt(const beatbench::Chart& chart, int measure) const {
 }
 
 double ChartViewItem::beatsOf(const beatbench::Chart& chart, int measure) const {
-    double beats = 4.0;  // 缺省 4/4（四分拍；ch02 口径见 doc/04 §6）
+    double beats = 4.0;  // 缺省 4/4（四分拍；ch02 口径见 doc/development.md §6）
     for (const auto& ev : chart.measure_events) {
         if (static_cast<int>(ev.measure) == measure) beats = ev.value.beats;
     }

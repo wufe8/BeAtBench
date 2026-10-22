@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 切音工作台数据桥（M6.1）：参考音频（外部 stem.wav）+ MIDI（notes.mid）的装载与持有。
 //
-// 定位（doc/02 §3 M6.1）：与编辑页平级的切音工作台的数据侧——「导入工作台」：
+// 定位（doc/core-model.md §3 M6.1）：与编辑页平级的切音工作台的数据侧——「导入工作台」：
 // 外部音频解码（→ 波形金字塔 + 时长/采样率）+ MIDI 解析（→ note 表）+ offset 微调
 // （全局；逻辑在此桥换算出「+offset」后的秒）。播放/seek 委托 AudioEngine
 // （参考音频专用 PcmPlayback，与谱面播放独立）。MIDI 解析走 core `midi` 模块
 // （headless 可测；本桥只做文件读取与 QML 适配）。
 //
-// 双语言纪律（doc/08 §2）：解码/解析/数据持有在 C++，QML 只消费信号/属性。
+// 双语言纪律（doc/skin-system.md §2）：解码/解析/数据持有在 C++，QML 只消费信号/属性。
 // 线程：解码在 QThreadPool（不卡 UI），完成回 UI 线程装载。
 #pragma once
 

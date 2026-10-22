@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 中央视口：竖向时间轴（M2 第 5 步，doc/07 §3 步 5）。
+// 中央视口：竖向时间轴（M2 第 5 步，doc/project-workflow.md §3 步 5）。
 // ChartViewItem 自绘（QPainter，真数据 = chartSession 上下文属性）；滚动/缩放/水平滚动
-// 由本组件驱动（⚠️ Flickable 无 onWheel → WheelHandler，doc/04 §5）。秒标尺/波形铺底后置 Phase B。
+// 由本组件驱动（⚠️ Flickable 无 onWheel → WheelHandler，doc/development.md §5）。秒标尺/波形铺底后置 Phase B。
 // 编辑接线（M3 命令，handoff-m2-m3）：
 // - 工具分发：select 普通拖 = 滚动（保持原交互）、Shift+拖 = 框选（selectionFinished）；
 //   pan 拖 = 滚动；note 点击 = hitTest → hitPlaceRequested（Main 走 note.put）；
@@ -10,7 +10,7 @@
 // BGM 列头点击 → 展开为按 #WAV id 分列（iBMSC 式后台轨分开显示，BMS 笔记 ch01 注）；
 // 列头显示实际 BMS 通道 id = 工具条勾选 / Ctrl 临时（Main.qml 经 checkbox.toggle() 同路径
 // 翻转 + 松开还原（C++ KeyMonitor 事件过滤器，Adobe 式）；此处只透传状态）。
-// 皮肤边界（doc/08 §3.6 / doc/05 §8）：本组件 = 默认皮肤 surface「viewport」的组件库成员，
+// 皮肤边界（doc/skin-system.md §3.6 / doc/ui-design.md §8）：本组件 = 默认皮肤 surface「viewport」的组件库成员，
 // L3 可按组件覆写。
 import QtQuick
 import BeatBench
@@ -231,7 +231,7 @@ Item {
         return view.probe(x, y)
     }
 
-    /// 运行时换肤（doc/08 §3.3）：Theme.tokensChanged 后强制重绘视口（转发 ChartViewItem.refreshTheme）。
+    /// 运行时换肤（doc/skin-system.md §3.3）：Theme.tokensChanged 后强制重绘视口（转发 ChartViewItem.refreshTheme）。
     function refreshTheme() {
         view.refreshTheme()
     }

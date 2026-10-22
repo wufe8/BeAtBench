@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// BeatBench 主窗口（M2 页面式工作区外壳，doc/05 v0.2）。
+// BeatBench 主窗口（M2 页面式工作区外壳，doc/ui-design.md v0.2）。
 // 结构：固定 chrome（菜单栏 + 页面工具条 + 页面条 + 状态栏）包裹页面内容区；
 // 页面内容 = EditPage / SlicePage / TestPage（切换只换视图，不换命令引擎）。
-// 颜色/字体一律走 Theme token（doc/08，禁硬编码）；皮肤系统 = 内置默认皮肤骨架（doc/08 §3.4）。
+// 颜色/字体一律走 Theme token（doc/skin-system.md，禁硬编码）；皮肤系统 = 内置默认皮肤骨架（doc/skin-system.md §3.4）。
 // 第一条真链路：文件 → 打开谱面 → dispatch(info) → 元信息面板（EditPage 左 Dock）。
 import QtQuick
 import QtQuick.Controls
@@ -30,7 +30,7 @@ ApplicationWindow {
     font.family: Theme.fontSans
     font.pixelSize: Theme.fsBase
 
-    // ---------- 会话状态（不入 undo，doc/05 §1.2） ----------
+    // ---------- 会话状态（不入 undo，doc/ui-design.md §1.2） ----------
     property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试
     property var chartMeta: null         // dispatch(info) 的 result.meta
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
@@ -164,7 +164,7 @@ ApplicationWindow {
     onDebugNoteSampleModeChanged: if (debugNoteSampleMode > 0) window.noteSampleMode = debugNoteSampleMode
     onDebugShowExtrasChanged: if (debugShowExtras) window.showExtras = true
     // 当前编辑工具（互斥单选，会话状态；M3 接输入/放置，note 类型（普通/LN/地雷）届时
-    // 作为正交维度另设「放置类型」组，不并入本组——doc/05 §5 交互）
+    // 作为正交维度另设「放置类型」组，不并入本组——doc/ui-design.md §5 交互）
     // 2026-09 用户：默认工具 = 「1 拖拽」(pan)；拖拽工具下点 note 只选中/试听（不移动）。
     property string editorTool: "pan"
     // 工具切换：进入 LN 放置 → 显示状态栏说明（持久）；离开 → 取消未完成 LN 头 + 恢复就绪
@@ -221,7 +221,7 @@ ApplicationWindow {
             window.contentItem.forceActiveFocus()
     }
 
-    // ---------- 全局快捷键（从 uiActions 注册表查表生成，doc/09） ----------
+    // ---------- 全局快捷键（从 uiActions 注册表查表生成，doc/action-registry.md） ----------
     // 2026-09：handler 已迁入 C++ 注册表（invoke = 唯一入口）；QML Shortcut 只负责
     // 序列 + enabled 条件（含文本焦点让行等注册表不建模的细节）。
 
@@ -317,7 +317,7 @@ ApplicationWindow {
         onActivated: uiActions.invoke("edit.render")
     }
 
-    // ---------- 菜单栏（固定全局；doc/09：从 uiActions 注册表查表） ----------
+    // ---------- 菜单栏（固定全局；doc/action-registry.md：从 uiActions 注册表查表） ----------
     menuBar: MenuBar {
         // 菜单栏底 = 主题 token（启动即深色；Fusion 默认/平台 palette 兜底不可靠）。
         // ⚠️ 字体色：Fusion MenuBarItem 标题取 **palette.text**（非 windowText——上轮设错角色
@@ -328,7 +328,7 @@ ApplicationWindow {
         palette.buttonText: Theme.text
         Menu {
             title: qsTr("文件")
-            // 枚举渲染（doc/09 §7 验收 2）：文件菜单动作按注册表 idsByCategory("file") 生成，
+            // 枚举渲染（doc/action-registry.md §7 验收 2）：文件菜单动作按注册表 idsByCategory("file") 生成，
             // 分隔线由注册表 isSeparator(id) 判定（addSeparator 建模）。
             // ⚠️ 单 Repeater + delegate 统一 MenuItem（分隔线 = MenuItem 视觉模拟横线）：
             // Repeater delegate 只能是单一组件类型（MenuSeparator/MenuItem 混排需 Loader；
@@ -410,9 +410,9 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("视图")
-            // 皮肤（doc/08 §3.3 运行时换肤）：L1 token 覆写 + 运行时切换。
+            // 皮肤（doc/skin-system.md §3.3 运行时换肤）：L1 token 覆写 + 运行时切换。
             // 列出「默认」+ 内置皮肤，当前生效项打勾；点击即运行时切换（Theme.applySkinByName）。
-            // ⚠️ 运行时切肤同时应用该皮肤目录的 keymap.json（doc/10 §4 待改进）——默认皮肤清除覆写。
+            // ⚠️ 运行时切肤同时应用该皮肤目录的 keymap.json（doc/dev-workflow.md §4 待改进）——默认皮肤清除覆写。
             Menu {
                 title: qsTr("皮肤")
                 MenuItem {
@@ -468,7 +468,7 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        // 页面工具条（随页面变化；工具条 = 皮肤 L2 可声明区，doc/08 §3.1）
+        // 页面工具条（随页面变化；工具条 = 皮肤 L2 可声明区，doc/skin-system.md §3.1）
         // M6.1：编辑专属（snap/变换/A-B/谱面播放）；切音/测试页各用自有工具条 → 仅编辑页显示
         ToolBar {
             visible: currentPage === 0
@@ -513,14 +513,14 @@ ApplicationWindow {
                 }
                 BbToolButton {
                     text: uiActions.label("view.toggleGrid")
-                    // 外部态驱动高亮（外部激活而非 checkable 自翻，避免断绑定，doc/04 §5）
+                    // 外部态驱动高亮（外部激活而非 checkable 自翻，避免断绑定，doc/development.md §5）
                     active: window.showGrid
                     enabled: window.uiStateTick >= 0 && uiActions.enabled("view.toggleGrid")
                     onClicked: uiActions.invoke("view.toggleGrid")
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("开/关槽位弱线（网格显示开关；吸附不依赖此开关）")
                 }
-                // 变换动作（doc/09 §11 工具条注册化）：按注册表 transform 组枚举渲染，
+                // 变换动作（doc/action-registry.md §11 工具条注册化）：按注册表 transform 组枚举渲染，
                 // 皮肤/注册表新增变换动作即自动出现在页面工具条（无需改 QML）。
                 Repeater {
                     model: uiActions.idsByToolbar("transform")
@@ -612,7 +612,7 @@ ApplicationWindow {
                 Label { text: qsTr("工具"); color: Theme.textFaint
                         font.pixelSize: Theme.fsTiny; padding: 4 }
                 // 互斥单选：active = 外部状态（editorTool），无 checkable 断绑残留问题。
-                // 工具选择条按注册表 tool 组枚举渲染（doc/09 §11）：prefix=快捷键前缀，
+                // 工具选择条按注册表 tool 组枚举渲染（doc/action-registry.md §11）：prefix=快捷键前缀，
                 // value=当前工具值（互斥 active 判定）；新增工具只需注册进组。
                 Repeater {
                     model: uiActions.idsByToolbar("tool")
@@ -724,7 +724,7 @@ ApplicationWindow {
             }
         }
 
-        // 页面内容区（切页 = 切视图，doc/05 §2）
+        // 页面内容区（切页 = 切视图，doc/ui-design.md §2）
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -758,7 +758,7 @@ ApplicationWindow {
                 perfLog: window.debugPerfLog
                 onMetaDraftDirtyChanged: window.metaDraftDirty = metaDraftDirty
                 onSamplePicked: (id, file) => {
-                    // 会话状态：当前采样（M3 放置落点；不入 undo，doc/05 §1.2）
+                    // 会话状态：当前采样（M3 放置落点；不入 undo，doc/ui-design.md §1.2）
                     window.currentSampleId = id
                     setStatus(qsTr("当前采样：#WAV%1 %2").arg(id).arg(file))
                     // M4.1 试听：单击采样行 → 播放该采样文件（缺失/解码失败 → statusText）
@@ -1897,14 +1897,14 @@ ApplicationWindow {
         return session.redoEdit()
     }
 
-    // ---------- UI 动作注册表（doc/09）：invoke = 唯一入口；以下包装函数是 handler 落点 ----------
+    // ---------- UI 动作注册表（doc/action-registry.md）：invoke = 唯一入口；以下包装函数是 handler 落点 ----------
     // 迁移期机制：行为原点不变（原 chrome 的第 2 遍调用并入 handler）；invoke 失败 =
     // 方法不存在（C++ qWarning）或动作禁用（静默）。
     function uiActionOpen() { requestDocumentAction("open") }
     function uiActionSaveAs() { openSaveAsDialog() }
     function uiActionExit() { window.close() }
-    /// 运行时换肤（doc/08 §3.3）：应用皮肤 token（applySkinByName）+ 该皮肤目录 keymap.json。
-    /// "默认" 清除 keymap 覆写（恢复内置默认快捷键）；皮肤目录携带 keymap.json 时同步应用（doc/10 §4）。
+    /// 运行时换肤（doc/skin-system.md §3.3）：应用皮肤 token（applySkinByName）+ 该皮肤目录 keymap.json。
+    /// "默认" 清除 keymap 覆写（恢复内置默认快捷键）；皮肤目录携带 keymap.json 时同步应用（doc/dev-workflow.md §4）。
     function applySkinByName(name) {
         Theme.applySkinByName(name)
         if (name === "默认") {
@@ -1968,7 +1968,7 @@ ApplicationWindow {
         setActionEnabled("slice.importMidi", currentPage === 1)
         setActionEnabled("view.toggleGrid", chartMeta !== null)
     }
-    /// 勾选态同步（doc/09 §12 打通）：QML 会话状态 → 注册表 `setChecked`（checkable 动作）。
+    /// 勾选态同步（doc/action-registry.md §12 打通）：QML 会话状态 → 注册表 `setChecked`（checkable 动作）。
     /// 这样 `uiActions.checked(id)` 成为查询/皮肤读取的单一数据源；菜单/工具条/复选框的
     /// `checked:` 都改绑它（见上）。QML 状态是真相源（handler 翻转它），invoke 后经
     /// on*Changed → 本函数回填注册表 → stateChanged → UI 刷新。皮肤如需 programmatic 置位，
@@ -2010,7 +2010,7 @@ ApplicationWindow {
         target: uiActions
         function onStateChanged() { window.uiStateTick++ }
     }
-    // 运行时换肤（doc/08 §3.3）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定自动重算；
+    // 运行时换肤（doc/skin-system.md §3.3）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定自动重算；
     // QPalette 由 main.cpp 的 tokensChanged → rebuildPalette 重建；这里只需强制视口重绘
     // （ChartViewItem 的 note 颜色在 paint 时读 Theme token，重绘后才反映新皮肤）。
     Connections {

@@ -23,7 +23,7 @@ compile_commands.json
 .vscode/
 .idea/
 
-# 编辑器运行时缓存（波形金字塔等，见 doc/02 §8）
+# 编辑器运行时缓存（波形金字塔等，见 doc/core-model.md §8）
 **/.beatbench-cache/
 
 # QML 运行期错误日志（调试钩子，main.cpp 写）

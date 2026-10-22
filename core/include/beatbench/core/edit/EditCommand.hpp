@@ -85,7 +85,7 @@ private:
     std::vector<std::unique_ptr<EditCommand>> m_commands;
 };
 
-/// 放置/更改时间轴事件（BPM/STOP/节拍 → timing.put，doc/05 §9「工具栏值放置」）。
+/// 放置/更改时间轴事件（BPM/STOP/节拍 → timing.put，doc/ui-design.md §9「工具栏值放置」）。
 /// 语义：在 (measure, pos) 处设置 kind 事件的值。**同位替换**——已存在同
 /// (measure, pos) 的同类事件则改值，否则插入（与 timing 引擎「同 pos 后者覆盖」一致）。
 /// 逆操作：还原到操作前状态（替换 → 恢复旧值；插入 → 移除）。

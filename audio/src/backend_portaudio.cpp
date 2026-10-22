@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// PortAudio 后端实现（doc/02 §5.1）：默认输出设备（WASAPI，共享模式）。
+// PortAudio 后端实现（doc/core-model.md §5.1）：默认输出设备（WASAPI，共享模式）。
 // ASIO 后置：v19.7 编译时检测 ASIO SDK；找不到 → 自动禁用（WASAPI 兜底，不阻塞）。
 // 回调线程 = PortAudio 创建；回调内只写缓冲（SamplePlayer::render 无锁无分配）。
 // M4.2：start(settings) 支持设备序号/采样率/缓冲帧数（设置页）；0/负 = 设备默认。

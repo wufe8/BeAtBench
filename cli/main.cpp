@@ -2,7 +2,7 @@
 // beatbench-cli：无 Qt 依赖的批处理入口（对齐稿 02 §6.1，P1 模式）。
 // 两种形态：
 // - 人类可读子命令：info / check / convert / version；
-// - --json <请求> 或 --json（读 stdin）：命令协议入口（doc/06 §3），
+// - --json <请求> 或 --json（读 stdin）：命令协议入口（doc/command-protocol.md §3），
 //   输出 JSON 信封到 stdout；exit 0 = 信封已产出（语义看 ok 字段），
 //   2 = 无法产出信封（请求 JSON 本身非法 / 无输入），1 = 内部异常。
 // GUI 与外部插件走同一协议（进程内 dispatch 或进程外 --json）。
@@ -45,7 +45,7 @@ void print_usage() {
     std::printf(
         "BeAtBench CLI %.*s\n"
         "用法: beatbench-cli <子命令> [参数]\n"
-        "      beatbench-cli --json '<请求>'   命令协议（JSON 信封，见 doc/06）\n"
+        "      beatbench-cli --json '<请求>'   命令协议（JSON 信封，见 doc/command-protocol.md）\n"
         "      beatbench-cli --json < req.json 同上，从 stdin 读取\n"
         "\n"
         "子命令:\n"
@@ -320,7 +320,7 @@ int cmd_render_impl(const std::string& in_path, const std::string& out_path,
 
 // --json 模式：解析请求 → 进程内 dispatch → 输出信封。
 // 单请求（内联参数或 stdin 单块）：解析 → dispatch → 输出。
-// stdin 多行模式（doc/06 待办「批处理模式」2026-08 落地）：每行一个请求，
+// stdin 多行模式（doc/command-protocol.md 待办「批处理模式」2026-08 落地）：每行一个请求，
 // 同一进程连续 dispatch——session 状态（编辑会话）跨请求保持，CLI 可脚本编辑
 // （session.load → note.put → session.undo → convert 序列）。
 // 退出码：0 = 全部请求已产出信封；2 = 请求 JSON 非法/无输入；1 = 内部异常。

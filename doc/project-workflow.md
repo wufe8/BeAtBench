@@ -1,7 +1,7 @@
 # M7 设计：项目化工作流（Project Workspace）
 
-> 状态：**未实现的设计草案**。以下项目模型、`project.*` 命令、界面与验收目标均为规划，不是当前可用能力；排期权威见 `doc/04` §7。
-> 关联：`doc/02`（模型/命令架构）、`doc/06` §3（JSON 协议）、`doc/08`（GUI 分层）。
+> 状态：**未实现的设计草案**。以下项目模型、`project.*` 命令、界面与验收目标均为规划，不是当前可用能力；排期权威见 `doc/development.md` §7。
+> 关联：`doc/core-model.md`（模型/命令架构）、`doc/command-protocol.md` §3（JSON 协议）、`doc/skin-system.md`（GUI 分层）。
 
 ## 1. 背景与目标
 
@@ -106,7 +106,7 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 
 - **项目面板**（左 dock 或独立页）：谱面表 + 资源表 + 操作按钮。
 - **对比视图**：统计卡片 + 叠加时间轴 + A/B 切换。
-- **顶部多文档标签条**（`doc/08` surface 已规划）。
+- **顶部多文档标签条**（`doc/skin-system.md` surface 已规划）。
 - 新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表。
 
 ## 6. 关键决策（需拍板）
@@ -122,7 +122,7 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 
 - core：`project.scan/verify/compare/batch/pack` 单测，不依赖 `local/`。
 - GUI 冒烟：打开文件夹 → 列谱面 → 开多个 → 对比 → 批量 → 打包，出截图。
-- 完成后同步 `doc/04` §6 状态与 §7 里程碑表。
+- 完成后同步 `doc/development.md` §6 状态与 §7 里程碑表。
 
 ## 8. 开放问题
 

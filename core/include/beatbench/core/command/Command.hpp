@@ -24,7 +24,7 @@ private:
 };
 
 /// 命令接口。所有引擎能力（内建与将来的插件）以平等身份注册进 Registry；
-/// GUI 进程内调用与外部进程 JSON 调用走同一套命令对象（doc/06 分层接口）。
+/// GUI 进程内调用与外部进程 JSON 调用走同一套命令对象（doc/command-protocol.md 分层接口）。
 /// run 为 const：命令应无状态（可并发、可缓存结果）；有状态场景用命令内部
 /// 的自有存储（按请求参数寻址），不要在注册表里留可变状态。
 class Command {
@@ -38,14 +38,14 @@ public:
 
 /// 命令注册表（name → Command）。name 全局唯一；重复注册抛 CommandError。
 /// 内建命令见 register_builtin_commands；未来插件在加载时向
-/// global_registry() 注册自己的命令（doc/06 §2）。
+/// global_registry() 注册自己的命令（doc/command-protocol.md §2）。
 class Registry {
 public:
     void add(std::unique_ptr<Command> command);
     const Command* find(std::string_view name) const;
     std::vector<std::string> names() const;  ///< 按字典序
 
-    /// 完整信封分发（协议规范见 doc/06 §3）：
+    /// 完整信封分发（协议规范见 doc/command-protocol.md §3）：
     /// 请求  {"id"?:任意, "command":"name", "args"?:对象}
     /// 成功  {"id"?, "ok":true,  "result":…}
     /// 失败  {"id"?, "ok":false, "error":{"code":"…","message":"…"}}

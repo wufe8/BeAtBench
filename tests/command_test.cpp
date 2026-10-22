@@ -103,7 +103,7 @@ TEST(Command, DispatchOkAndIdEcho) {
     EXPECT_TRUE(resp.is_object());
     EXPECT_TRUE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("id").as_i64(), 7);
-    // version 契约：name / version / api / license 四字段齐全（doc/06 §3.5）。
+    // version 契约：name / version / api / license 四字段齐全（doc/command-protocol.md §3.5）。
     const auto& result = resp.at("result");
     EXPECT_EQ(result.at("name").as_str(), "beatbench");
     // 版本从单一来源 kVersion 派生：避免测试硬编码版本号（推进版本时漏改）
@@ -118,7 +118,7 @@ TEST(Command, DispatchEnvelopeIdAndDefaultArgs) {
     Registry reg;
     register_builtin_commands(reg);
 
-    // id 为字符串 → 原样回显（doc/06 §3.2）。
+    // id 为字符串 → 原样回显（doc/command-protocol.md §3.2）。
     const Json resp = reg.dispatch(request("version", Json::object(), Json("req-1")));
     ASSERT_TRUE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("id").as_str(), "req-1");
@@ -130,7 +130,7 @@ TEST(Command, DispatchEnvelopeIdAndDefaultArgs) {
     ASSERT_TRUE(resp2.at("ok").as_bool());
     EXPECT_EQ(resp2.find("id"), nullptr);
 
-    // args 缺省 = 空对象（doc/06 §3.2）：info 无参 → 参数语义错误 bad_args，
+    // args 缺省 = 空对象（doc/command-protocol.md §3.2）：info 无参 → 参数语义错误 bad_args，
     // 而不是信封错误 bad_request。
     Json only_cmd = Json::object();
     only_cmd.set("command", "info");
@@ -207,7 +207,7 @@ TEST(Command, CapabilitiesListsCommandsAndFormats) {
     const auto& formats = result.at("formats").as_array();
     ASSERT_EQ(formats.size(), 1);
     EXPECT_EQ(formats[0].as_str(), "bms");
-    // modes 按格式给出（doc/06 §3.5）；bms 至少有一种模式。
+    // modes 按格式给出（doc/command-protocol.md §3.5）；bms 至少有一种模式。
     const auto& modes = result.at("modes").at("bms").as_array();
     EXPECT_FALSE(modes.empty());
 }

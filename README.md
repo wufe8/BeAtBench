@@ -59,7 +59,7 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 **版本与完整变更历史**：[`CHANGELOG.md`](CHANGELOG.md) · [Releases](https://github.com/wufe8/BeAtBench/releases)
 （0.3.x 起提供 Linux deb/rpm/arch 与 Windows zip；CHANGELOG 自 0.4.0 起由 release-please 依据 Conventional Commits 自动生成）
 
-**测试**：以源码 `TEST()` 与 CI 回归为准；真实谱面集缺失时部分用例自动 SKIP。详见 `doc/04` §6。
+**测试**：以源码 `TEST()` 与 CI 回归为准；真实谱面集缺失时部分用例自动 SKIP。详见 `doc/development.md` §6。
 
 ### 已知问题
 
@@ -68,7 +68,7 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 
 ### 计划中
 
-- **M7 项目化工作流**：文件夹即项目——一首歌多个谱面一次导入；项目面板、多谱面会话、谱面对比、批量操作、打包校验、`#WAV` 占用视图。设计见 [`doc/07`](doc/07-M7项目化工作流设计.md)。
+- **M7 项目化工作流**：文件夹即项目——一首歌多个谱面一次导入；项目面板、多谱面会话、谱面对比、批量操作、打包校验、`#WAV` 占用视图。设计见 [`doc/project-workflow.md`](doc/project-workflow.md)。
 - **M8 边界与协议**：SliceWorkspace 边界拆分、CSV 时标导出、MIDI tempo 接入、codec 能力声明、跨平台 CI。
 - **M9 / M10+**：bmson、项目/工作区持久化、`#RANDOM/#IF` 结构化 AST；i18n、试玩判定、性能基准、外部预览适配器、L2 布局皮肤。
 
@@ -76,18 +76,18 @@ sudo pacman -U ./beatbench-v0.4.1<!-- x-release-please-version -->-1-x86_64.pkg.
 
 | 平台 | 状态 |
 |---|---|
-| Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/11`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
-| Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出已实机验证（ALSA 路径，见 `doc/11` §6） |
+| Windows 10/11 64 位 |  当前发布平台：提供预编译 zip（CI 产出，见 `doc/packaging.md`）；MSVC（无 Qt）与 MinGW（全量）两条工具链均由 CI 验证 |
+| Linux x86_64 |  提供 deb / rpm / arch 包（CI 产出，人工放行后随 Release 发布）；系统 Qt 6.4+（Debian 12+ / Ubuntu 24.04+ / Fedora 43+ / Arch）；实时音频输出已实机验证（ALSA 路径，见 `doc/packaging.md` §6） |
 | macOS arm64 |  CI 验证全量构建 + 全部单测 + GUI 无头冒烟（Clang，Qt 6.11.2，非阻塞门禁）；无预编译包，`.app` 打包、签名公证与实时音频输出未做 |
 
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
 守卫）。三平台的“能编译、测得过、GUI 能起画”由 CI 持续钉住
-（`.github/workflows/ci.yml`，详见 `doc/04` §4）；Linux deb/rpm/arch 由 `package.yml`
-产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/11`），macOS 发布产物与实时音频输出的人工验证未排期。
+（`.github/workflows/ci.yml`，详见 `doc/development.md` §4）；Linux deb/rpm/arch 由 `package.yml`
+产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/packaging.md`），macOS 发布产物与实时音频输出的人工验证未排期。
 
 当前边界：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
 `.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
-macOS 打包范畴；② GUI 交互中悬停高亮可自动化验证（X11 指针注入，见 `doc/11` §2），
+macOS 打包范畴；② GUI 交互中悬停高亮可自动化验证（X11 指针注入，见 `doc/packaging.md` §2），
 拖拽仍只有无头冒烟；音频实时输出已验证的仅 Linux ALSA 一处（见 `doc/pending/`）。
 
 ## 文档导航
@@ -95,23 +95,23 @@ macOS 打包范畴；② GUI 交互中悬停高亮可自动化验证（X11 指�
 | 文档 | 内容 |
 |---|---|
 | [`doc/README.md`](doc/README.md) | **文档地图**：按任务查该读哪份文档、文件落点约定 |
-| [`doc/04-开发手册.md`](doc/04-开发手册.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、当前状态 |
-| [`doc/02-核心模型与调用架构.md`](doc/02-核心模型与调用架构.md) | **模型/架构权威**：格式无关模型、命令即接口、切音工作台设计、note 移动机制 |
-| [`doc/06-插件体系与时间单位设计.md`](doc/06-插件体系与时间单位设计.md) | **命令 JSON 协议正式规格**、插件分层、时间单位边界 |
-| [`doc/07-M7项目化工作流设计.md`](doc/07-M7项目化工作流设计.md) | **M7 设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
-| [`doc/08-QML技术选型与皮肤系统设计.md`](doc/08-QML技术选型与皮肤系统设计.md) | GUI 栈决策（Qt Quick/QML）+ 分层皮肤系统（L1/L2/L3） |
-| [`doc/09-操作注册设计.md`](doc/09-操作注册设计.md) | UI 动作注册表（换肤/快捷键前置） |
-| [`doc/10-开发工作流.md`](doc/10-开发工作流.md) | **开发工作流**：分支模型、日常门禁、tag→发布放行、备份 |
-| [`doc/11-打包与发布.md`](doc/11-打包与发布.md) | **打包/发布**：CI 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布放行流程 |
-| [`doc/05-前端界面设计构思.md`](doc/05-前端界面设计构思.md) | 页面式信息架构、区域设计、设计 token、术语 |
-| [`doc/BMS文件分析笔记.md`](doc/BMS文件分析笔记.md) | BMS 格式逆向笔记 |
+| [`doc/development.md`](doc/development.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、当前状态 |
+| [`doc/core-model.md`](doc/core-model.md) | **模型/架构权威**：格式无关模型、命令即接口、切音工作台设计、note 移动机制 |
+| [`doc/command-protocol.md`](doc/command-protocol.md) | **命令 JSON 协议正式规格**、插件分层、时间单位边界 |
+| [`doc/project-workflow.md`](doc/project-workflow.md) | **M7 设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
+| [`doc/skin-system.md`](doc/skin-system.md) | GUI 栈决策（Qt Quick/QML）+ 分层皮肤系统（L1/L2/L3） |
+| [`doc/action-registry.md`](doc/action-registry.md) | UI 动作注册表（换肤/快捷键前置） |
+| [`doc/dev-workflow.md`](doc/dev-workflow.md) | **开发工作流**：分支模型、日常门禁、tag→发布放行、备份 |
+| [`doc/packaging.md`](doc/packaging.md) | **打包/发布**：CI 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布放行流程 |
+| [`doc/ui-design.md`](doc/ui-design.md) | 页面式信息架构、区域设计、设计 token、术语 |
+| [`doc/bms-format-notes.md`](doc/bms-format-notes.md) | BMS 格式逆向笔记 |
 
 
 ## 快速构建
 
 > 工具链：C++20 编译器（MSVC 2022+ / GCC 10+ / Clang 12+）+ CMake；GUI 需 Qt **6.4+**。
 > 完整构建矩阵（Windows MinGW 步骤、离线构建、测试分档、CI 说明）见
-> [`doc/04` §4](doc/04-开发手册.md)；门禁脚本见 `doc/10`。
+> [`doc/development.md` §4](doc/development.md)；门禁脚本见 `doc/dev-workflow.md`。
 
 ### CLI + 测试（Linux / macOS）
 
@@ -146,4 +146,4 @@ QML2_IMPORT_PATH="$PWD/build-gui/app" \
 
 Windows 用 MinGW + Qt：配置时以 `-DCMAKE_CXX_COMPILER` / `-DCMAKE_MAKE_PROGRAM` 指向 MinGW 的
 g++/ninja，构建后 `windeployqt --qmldir app/qml build-gui/app/beatbench.exe` 部署 DLL——
-完整步骤见 `doc/04` §4。
+完整步骤见 `doc/development.md` §4。

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// core↔QML 桥接：活动编辑会话的只读视图（时间轴视图数据源，M2 第 5 步，doc/07 §3 步 5）。
+// core↔QML 桥接：活动编辑会话的只读视图（时间轴视图数据源，M2 第 5 步，doc/project-workflow.md §3 步 5）。
 // M3 编辑体系落地后（handoff-m2-m3）：文档由 core EditorSession（session_registry 活动会话）
-// 持有——加载走协议 session.load（与 CLI/info/check 同源，doc/06 §3.6），编辑命令（note.put
+// 持有——加载走协议 session.load（与 CLI/info/check 同源，doc/command-protocol.md §3.6），编辑命令（note.put
 // 等）由 QML dispatch 后调 refresh() 让视图追踪文档/内容变化。本类不再自行解析文件。
-// 双语言纪律（doc/08 §2）：数据加载/持有/指纹判定在 C++（QML 只消费信号）。
+// 双语言纪律（doc/skin-system.md §2）：数据加载/持有/指纹判定在 C++（QML 只消费信号）。
 #pragma once
 
 #include <QObject>
@@ -32,7 +32,7 @@ class ChartSession : public QObject {
 public:
     explicit ChartSession(QObject* parent = nullptr);
 
-    /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/06 §3.6）。
+    /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/command-protocol.md §3.6）。
     /// 存在 Error 级诊断 → 失败并记录 errorMessage（协议语义：read_failed）。
     Q_INVOKABLE bool openChart(const QString& path);
     /// 2026-09 新建空谱面：走协议 session.new（空 chart 载入活动会话）；返回成功后 QML 重置

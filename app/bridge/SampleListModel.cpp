@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // core↔QML 桥接：采样列表模型（采样面板数据源，M2 第 4 步）。
 // 数据 = info 命令返回的 samples.wav + check 命令的 missing_wav（缺失标记）。
-// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/08 §2），QML 只绑定 ListView 与信号。
-// 设计（doc/05 §4.3）：
+// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/skin-system.md §2），QML 只绑定 ListView 与信号。
+// 设计（doc/ui-design.md §4.3）：
 // - 点击选中 = 会话状态「当前采样」，**不重排视图**（选中保持原位，避免列表漂移）；
 //   排序由显式 sortMode 控制（智能/id/文件名/引用数/最近使用）。
 // - 分组动态生成（模型按轨道类别 + player 统计；DP/2P 谱面自动出现 2P 组，不写死）。
-// - MRU 仅作「最近使用」排序模式的依据；会话状态不入谱面/undo（doc/06 §3）。
+// - MRU 仅作「最近使用」排序模式的依据；会话状态不入谱面/undo（doc/command-protocol.md §3）。
 #include "bridge/SampleListModel.hpp"
 
 #include "beatbench/core/json/Json.hpp"
@@ -297,7 +297,7 @@ void SampleListModel::rebuild() {
         }
         touch(QStringLiteral("all"), e);
         // 7K 惯用顺序：键 → 皿 → 背景（踏板/2P 等后置——ch19 在 7K 语义是保留/踏板，
-        // 仅谱面实际使用该通道时出现；9K/PMS 模式化映射表待模式支持时实现，doc/05 §5）
+        // 仅谱面实际使用该通道时出现；9K/PMS 模式化映射表待模式支持时实现，doc/ui-design.md §5）
         if (e.key1 > 0) touch(QStringLiteral("key1"), e);
         if (e.scratch1 > 0) touch(QStringLiteral("scratch1"), e);
         if (e.bgm > 0) touch(QStringLiteral("bgm"), e);

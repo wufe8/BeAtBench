@@ -1,6 +1,6 @@
 # core/ — 格式无关模型与命令框架
 
-> 零 Qt、零音频、零第三方运行时依赖。设计权威：`doc/02`（模型/命令/时序）、`doc/06` §3（命令 JSON 协议）。
+> 零 Qt、零音频、零第三方运行时依赖。设计权威：`doc/core-model.md`（模型/命令/时序）、`doc/command-protocol.md` §3（命令 JSON 协议）。
 
 ## 硬规则
 
@@ -13,4 +13,4 @@
 - 命名空间 `beatbench::<模块>`；文件 snake_case、类型 PascalCase；注释中文；
   每文件带 SPDX 头 `// SPDX-License-Identifier: GPL-3.0-only`。
 - `core/include/beatbench/core/json/` 是最小 JSON 实现（零依赖，命令协议用），不引第三方 JSON 库。
-- `#RANDOM/#IF` 块为 raw 兜底（播放/时序走 `expand_variants`）；结构化 AST 是 M9 规划（doc/04 §6）。
+- `#RANDOM/#IF` 块为 raw 兜底（播放/时序走 `expand_variants`）；结构化 AST 是 M9 规划（doc/development.md §6）。

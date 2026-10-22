@@ -1,14 +1,14 @@
-# BeAtBench UI 动作注册表设计（09）
+# BeAtBench UI 动作注册表设计
 
 > 状态：**设计稿 v1（定稿要点）**，实现状态见 §11。主题：**操作注册规范化**——把硬编码 UI 动作抽为“动作 id → 处理器”注册表，为皮肤系统（L2/L3）与扩展性铺路。
 > **读法**：§0–§10 是契约（id / invoke / 元数据）；§11 才是代码现状。§1 描述的是落地前动机，不要当现状。
-> 关联：`doc/08` §5（待办升级为本稿）、`doc/04`（M3 剩余）、`doc/06`（命令协议/插件分层，本稿的 UI 侧镜像）。
+> 关联：`doc/skin-system.md` §5（待办升级为本稿）、`doc/development.md`（M3 剩余）、`doc/command-protocol.md`（命令协议/插件分层，本稿的 UI 侧镜像）。
 
 ---
 
 ## 0. 决策
 
-1. **UiActionRegistry 落在 app/bridge（C++ QObject）**，QML 只读消费 + 触发——与 `CommandDispatcher` / `ThemeManager` 同层，遵守 doc/08 §2 双语言纪律；现有 QML 业务逻辑尚未全部迁入 C++；
+1. **UiActionRegistry 落在 app/bridge（C++ QObject）**，QML 只读消费 + 触发——与 `CommandDispatcher` / `ThemeManager` 同层，遵守 doc/skin-system.md §2 双语言纪律；现有 QML 业务逻辑尚未全部迁入 C++；
 2. **快捷键默认表代码内置**（注册表定义时声明）；覆写三层：注册默认 < 皮肤 `keymap.json` < 用户 QSettings（设置页）。`--keymap` 写入皮肤层，不覆盖用户改绑；
 3. **试点先行**：文件 / 编辑 / 视图 / 工具 四类高频动作先落地验证机制，其余动作进迁移清单分批替换；
 4. **边界**：动作 = UI 意图；命令 = 文档变更。动作处理器可组合 0..N 条 core 命令 + 视图刷新；注册表**不重复造命令层**。
@@ -20,15 +20,15 @@
 - 动作定义、快捷键、启用条件曾全部混在 QML JS 里：`Main.qml` 硬编码一批 `Shortcut` 直接绑函数，
   `SessionController.qml` 集中大量动作函数（`sessionCmd`/`dispatchCmd` + `placeNote`/`deleteSelection`/
   `quantizeSelection`/`transformSelection`/`saveChart`…）；
-- **L3 皮肤（重写 chrome，doc/08 §3）无法复用硬编码动作** → 皮肤壳必须按动作 id 触发；
-- 与 core“命令即接口”（doc/06 §1）同构：`cmd::Registry`（数据面）↔ `UiActionRegistry`（UI 面）——插件/皮肤按 id 发现与触发。
+- **L3 皮肤（重写 chrome，doc/skin-system.md §3）无法复用硬编码动作** → 皮肤壳必须按动作 id 触发；
+- 与 core“命令即接口”（doc/command-protocol.md §1）同构：`cmd::Registry`（数据面）↔ `UiActionRegistry`（UI 面）——插件/皮肤按 id 发现与触发。
 
 ## 2. 概念与边界
 
 | 层 | 对象 | 状态 | 说明 |
 |---|---|---|---|
 | UI 动作 | `UiAction`（id + 元数据 + 处理器） | 已落地（见 §11） | 用户意图：`file.open`、`edit.undo`、`view.toggleGrid`、`tool.select` |
-| 协议命令 | `cmd::Command`（无状态 JSON 信封） | 已落地 | 引擎能力唯一操作面（doc/06 §3） |
+| 协议命令 | `cmd::Command`（无状态 JSON 信封） | 已落地 | 引擎能力唯一操作面（doc/command-protocol.md §3） |
 | 编辑命令 | `EditCommand`（有状态 apply/invert） | 已落地 | 文档变更原语，由协议命令包装 |
 
 **关系**：`动作 → 处理器 → 0..N 条协议命令 dispatch + 视图刷新（chartSession.refresh()）`。
@@ -68,7 +68,7 @@
 
 - **注册点**：`app/main.cpp` 在 QML 根加载前注册动作；现有文件/编辑等动作由 C++ lambda 惰性查找 QML 根，再经 `QMetaObject::invokeMethod` 调用 QML 方法。注册面在 C++，不等于业务处理已全部迁入 C++；
 - **快捷键**：QML `Shortcut` 的 `sequence` 从注册表取值，`onActivated → invoke(id)`；文本输入焦点让行逻辑保留在 QML；
-- **皮肤触发**：`UiActionRegistry.invoke("edit.undo")` —— L3 皮肤与默认壳同一 API（doc/08 §3.5）。
+- **皮肤触发**：`UiActionRegistry.invoke("edit.undo")` —— L3 皮肤与默认壳同一 API（doc/skin-system.md §3.5）。
 
 ## 6. QML 侧消费
 
@@ -78,13 +78,13 @@
 
 > 动作入口已注册，不代表 QML 业务迁移或快捷键自动生成已完成；具体边界见 §11。
 
-## 9. 皮肤系统契约衔接（doc/08 §3.5 增补）
+## 9. 皮肤系统契约衔接（doc/skin-system.md §3.5 增补）
 
 - **第 5 条稳定契约 = UiActionRegistry API**（id 集 + invoke + 状态查询）：皮肤壳与默认壳同 API；
 - L3 皮肤重写 chrome：菜单/工具条 = 枚举动作注册表（不再硬编码）；
 - `keymap.json`：动作 id → 快捷键覆写，皮肤包可携带。现行优先级：注册默认 < 皮肤 keymap < 用户 QSettings；`--keymap` 与皮肤文件都进皮肤层。
 
-## 10. 扩展性衔接（doc/06）
+## 10. 扩展性衔接（doc/command-protocol.md）
 
 - **注册面即扩展点**：`CodecRegistry`（格式）/ `cmd::Registry`（命令）/ `UiActionRegistry`（UI 动作）三注册表并列；插件（M8+）= 向注册面注册的调用方，加载机制（plugin.json + 权限审批）后置；
 - 动作注册表不接插件进程（UI 侧私有）；插件命令经 `cmd::Registry` 出现后，皮肤/界面可按需触发。

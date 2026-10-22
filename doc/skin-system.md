@@ -1,8 +1,8 @@
-# BeAtBench — QML 技术选型与皮肤系统设计（08）
+# BeAtBench — QML 技术选型与皮肤系统设计
 
 > 状态：**决策稿 v1**。GUI 层采用 Qt Quick / QML；core 维持零 Qt 依赖。
-> 关联：`doc/04`（手册）；`doc/05`（前端界面设计构思）；
-> `doc/06-插件体系与时间单位设计.md`（命令协议/分层接口，不受影响）。
+> 关联：`doc/development.md`（手册）；`doc/ui-design.md`（前端界面设计构思）；
+> `doc/command-protocol.md`（命令协议/分层接口，不受影响）。
 > 配套设计参考：`doc/beatbench-ui-styles.html`（六套外观卡，本质是六份主题数据）。
 
 ## 0. 决策
@@ -25,7 +25,7 @@
 ## 2. 双语言纪律（桥接原则）
 
 - **逻辑放 C++（`app/bridge`），QML 只管表现与 `invoke`**；JS 不写散业务
-  （`SessionController.qml` 是迁移期例外，逐步回抽 C++，现状见 `doc/09` §11）。
+  （`SessionController.qml` 是迁移期例外，逐步回抽 C++，现状见 `doc/action-registry.md` §11）。
 - 新增业务不要往 `Main.qml` / `SessionController.qml` 堆 JS；handler 用字符串方法名只是迁移期兼容，
   新动作优先在 C++ 注册真实处理器。
 - 渲染路线：时间轴用 `QQuickPaintedItem`（QPainter 起步），瓶颈后迁 QSG。
@@ -82,9 +82,9 @@ skins/MySkin/
 
 1. `theme.json` schema（token 表以 `beatbench-ui-styles.html` 为准：bg/surface/surface2/border/text/muted/accent/accent2/on-accent/accent-soft/n1..n4/scratch/mine/ln/wave/radius/radius-sm/note-radius/fs）；
 2. `layout.json` schema；
-3. **命令协议**（doc/06 §3，不变——皮肤是界面，core 永远是引擎）；
+3. **命令协议**（doc/command-protocol.md §3，不变——皮肤是界面，core 永远是引擎）；
 4. 引擎暴露给 QML 的注册类型（见 §4）；
-5. `UiActionRegistry` 的动作 id、`invoke` 与状态查询（见 `doc/09`）；L3 加载仍未实现（§5）。
+5. `UiActionRegistry` 的动作 id、`invoke` 与状态查询（见 `doc/action-registry.md`）；L3 加载仍未实现（§5）。
 
 ### 3.6 默认皮肤 surface 清单（L2 layout.json 的命名插槽）
 
@@ -126,10 +126,10 @@ L2 布局重排的对象 = 命名插槽（surface）。默认皮肤（= 当前�
 - [ ] QML 侧键盘/IME 方案（编辑态抑制 IME；文本框已让行 Ctrl+Z 等）。
 
 > 已落地项（L1 运行时换肤、`theme.json` 颜色/非颜色 token、UI 动作注册表、工具条枚举、快捷键三层）
-> 见 `doc/04` §6 与 `doc/09` §11。
+> 见 `doc/development.md` §6 与 `doc/action-registry.md` §11。
 
 ## 6. 文件清单
 
-- 本稿（08）；
+- 本稿；
 - `doc/beatbench-ui-styles.html`（设计参考 + token 数据来源，随 doc/ 提交）；
 - `skins/`（内置 Aurora / Linear / OsuLight / Win10；L1 token + 可选 keymap.json）。

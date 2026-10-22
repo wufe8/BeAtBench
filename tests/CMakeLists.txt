@@ -128,7 +128,7 @@ target_link_libraries(reference_track_test PRIVATE GTest::gtest_main)
 beatbench_set_warnings(reference_track_test)
 add_test(NAME reference_track_tests COMMAND reference_track_test)
 
-# UiActionRegistry 单测（doc/09 §7 验收 4）：只依赖 Qt6::Core 的轻量目标。
+# UiActionRegistry 单测（doc/action-registry.md §7 验收 4）：只依赖 Qt6::Core 的轻量目标。
 # 仅在找到 Qt6 的构建配置中启用：MSVC build/（无 Qt）→ 自动跳过；
 # 需要时用 `cmake -S . -B build-uitest -DBEATBENCH_BUILD_TESTS=ON -DCMAKE_PREFIX_PATH=<Qt>`
 # 配置（gtest 走 FetchContent）。
@@ -178,7 +178,7 @@ if (Qt6Core_FOUND)
     beatbench_set_warnings(edit_utils_test)
     add_test(NAME edit_utils_tests COMMAND edit_utils_test)
 
-    # CommandDispatcher 单测（doc/06 §3）：QML 实际入口的 JSON 协议契约，
+    # CommandDispatcher 单测（doc/command-protocol.md §3）：QML 实际入口的 JSON 协议契约，
     # 覆盖 GUI 独有的「请求 JSON 非法 → bad_request」解析路径（与 CLI 入口一致性）。
     add_executable(command_dispatcher_test command_dispatcher_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/CommandDispatcher.cpp
@@ -191,7 +191,7 @@ if (Qt6Core_FOUND)
     beatbench_set_warnings(command_dispatcher_test)
     add_test(NAME command_dispatcher_tests COMMAND command_dispatcher_test)
 
-    # ThemeManager 单测（doc/08 §3.5）：链 Qt6::Gui（QColor）+ core 的 Json。
+    # ThemeManager 单测（doc/skin-system.md §3.5）：链 Qt6::Gui（QColor）+ core 的 Json。
     # 验证 theme.json 颜色 + 非颜色 token 覆写（L2 皮肤布局改动幅度的根基）。
     find_package(Qt6 COMPONENTS Gui QUIET)
     if (Qt6Gui_FOUND)

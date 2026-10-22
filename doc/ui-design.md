@@ -1,20 +1,20 @@
-# BeAtBench — 前端界面设计构思（05）
+# BeAtBench — 前端界面设计构思
 
 > 状态：**设计稿 v0.2**（QML 语汇；页面式布局已拍板）。
-> GUI 栈：**Qt Quick / QML**（`doc/08` 决策）；core 零 Qt 依赖、命令即接口不变（`doc/06 §3`）。
+> GUI 栈：**Qt Quick / QML**（`doc/skin-system.md` 决策）；core 零 Qt 依赖、命令即接口不变（`doc/command-protocol.md §3`）。
 > 配套预览（`doc/` 下，纯静态设计参照，非实现源码）：`doc/beatbench-ui-preview.html`（选定设计完整原型）、`doc/beatbench-ui-styles.html`（六套皮肤 token）、`doc/beatbench-ui-layouts.html`（布局探索 + 页面式推荐）。
 
 ## 0. 一句话定位
 
-GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：① 页面 / 布局结构；② 每页内容；③ 与皮肤系统（doc/08）的边界。
+GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：① 页面 / 布局结构；② 每页内容；③ 与皮肤系统（doc/skin-system.md）的边界。
 核心约束不变：**命令即接口**——GUI 只是引擎的另一个协议客户端（经 `CommandDispatcher` 调 `dispatch()`），界面不直接改 `Chart`。
 
 ## 1. 设计原则
 
 1. **命令即接口**：GUI = 协议客户端；每个编辑动作 = 一条 core 命令（`apply → 入 undo 栈 → 刷新`）。
-2. **双语言纪律**（doc/08 §2）：逻辑放 C++（bridge），QML 只管表现，JS 不写散。
+2. **双语言纪律**（doc/skin-system.md §2）：逻辑放 C++（bridge），QML 只管表现，JS 不写散。
 3. **页面式工作区**：顶部固定菜单栏 + 页面工具条（随页变）+ 页面内容区 + 底部页面条 + 状态栏。
-4. **深色默认 + 可换肤**：皮肤系统见 doc/08（L1 token / L2 布局 / L3 QML）。
+4. **深色默认 + 可换肤**：皮肤系统见 doc/skin-system.md（L1 token / L2 布局 / L3 QML）。
 5. **渲染分级**：时间轴用 `QQuickPaintedItem`（QPainter 复用）起步，瓶颈后迁 QSG。
 
 ## 2. 顶层信息架构：页面（Pages）
@@ -24,10 +24,10 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 | 页面 | 中文名 | 内容 | 里程碑 |
 |---|---|---|---|
 | `EditPage` | 编辑 | 调整谱面内容（note/LN/地雷/变速/元信息/文件绑定） | M2 核心 |
-| `SlicePage` | 切音 | 参考音频/MIDI 导入、切片、导出、铺入编辑区 | M6 已落地（细节以 doc/04 为准） |
+| `SlicePage` | 切音 | 参考音频/MIDI 导入、切片、导出、铺入编辑区 | M6 已落地（细节以 doc/development.md 为准） |
 | `TestPage` | 测试 | 试玩 / 预览 | 占位（试玩不在主线） |
 
-- 页面切换 = **底部页面条**（DaVinci Resolve 式）；同一文档 + 同一命令引擎，切页 = 切视图/工具条，**不是另起工具**（定位见 doc/02 §3）。
+- 页面切换 = **底部页面条**（DaVinci Resolve 式）；同一文档 + 同一命令引擎，切页 = 切视图/工具条，**不是另起工具**（定位见 doc/core-model.md §3）。
 
 ## 3. 主窗口布局（页面式）
 
@@ -73,7 +73,7 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 - **右 Dock**：属性面板（选中对象 → 命令）。
 
 ### 4.4 切音页 / 测试页
-- **切音页**：已落地（M6 切音工作台：导入/切分/导出/铺入；设计见 `doc/02` §3，现状见 `doc/04` §6）。
+- **切音页**：已落地（M6 切音工作台：导入/切分/导出/铺入；设计见 `doc/core-model.md` §3，现状见 `doc/development.md` §6）。
 - **测试页**：占位（试玩不在主线）。
 
 ## 5. 关键交互（不变）
@@ -81,7 +81,7 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 - 键盘：LR2 布局（`1-7` + 皿键 + 备用 `F1-F7`），编辑态抑制 IME；工具键占位 `V N L M H Z`，`Del` 删除、`Esc` 取消。
 - 鼠标：点放（`note.put`）/ 框选（会话状态）/ 拖动（`note.move`，`merge_with` 合并 undo）/ 滚轮微调。
 - snap / 量化：只作用于落点换算，不改数据精度。
-- QML 侧键盘 / IME 方案见 doc/08 §5 待办。
+- QML 侧键盘 / IME 方案见 doc/skin-system.md §5 待办。
 
 ## 6. 界面 ↔ core 命令映射（不变）
 
@@ -96,10 +96,10 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 | 元信息表单 | 改头部字段 | `meta.edit` | `Chart.meta` | |
 | 采样管理器 | 绑定/导入采样 | `sample.setFile` | `Chart.samples` | 文件绑定 |
 | BGA 面板 | 改 BGA | `bga.list` / `bga.put` / `bga.delete`（layer=base/poor/layer/layer2） | `Chart.bga_events` | BgaPanel + 视口 BGA 列放置 |
-| 切音工作台 | 切片 | `slice.detect`（grid/midi）与 GUI `SliceWorkspace` | core 切片规划 / GUI 工作区 | 音频瞬态检测不由该 JSON 命令提供，见 doc/06 §3.5 |
+| 切音工作台 | 切片 | `slice.detect`（grid/midi）与 GUI `SliceWorkspace` | core 切片规划 / GUI 工作区 | 音频瞬态检测不由该 JSON 命令提供，见 doc/command-protocol.md §3.5 |
 | 选择集/视口/播放头 | — | 无命令 | 会话状态 | 不入 undo |
 
-> QML 经 `CommandDispatcher`（bridge）调用，与 CLI 走同一 `dispatch()` 信封；命令名 / 协议见 doc/06 §3。
+> QML 经 `CommandDispatcher`（bridge）调用，与 CLI 走同一 `dispatch()` 信封；命令名 / 协议见 doc/command-protocol.md §3。
 
 ## 7. 设计语言（token）
 
@@ -107,7 +107,7 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 - 主色 `primary #6366f1`（靛蓝）、强调 `accent #22d3ee`（青）、`accent-soft`（浅底）、`on-accent`（主色上文字）、语义色 success/warn/danger
 - note 着色：按键轨 `n1..n4` 靛蓝系、皿 `scratch` 青、地雷 `mine` 红、LN 尾 `ln` 半透明
 - 字体：系统无衬线 + 等宽（标尺 / 数值 / 代码）
-- 完整 token 表 = `beatbench-ui-styles.html` 顶部 `:root`，也是 doc/08 §3.5 `theme.json` 的 schema 依据
+- 完整 token 表 = `beatbench-ui-styles.html` 顶部 `:root`，也是 doc/skin-system.md §3.5 `theme.json` 的 schema 依据
 - **落地（主题基线）**：token 已实现为 `app/bridge/ThemeManager.hpp`（Q_PROPERTY 只读，
   QML 经 context property `Theme` 全局读取；界面颜色/字体禁硬编码）；
   字体默认**黑体** `Microsoft YaHei UI`（备选 Noto Sans SC，OFL 可随包分发——打包 M7 定）+ 等宽 `Consolas`；
@@ -119,14 +119,14 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 
 思路：**不提供“空模板”，提供“完整默认皮肤 + 组件库 + 分层契约”。**
 
-1. **默认皮肤 = 完整产品界面（dogfooding，doc/08 §3.4）**：覆盖全部真实功能与边界情况（LN / 地雷 / 2P / 缺失采样告警…），mod 作者想改什么都能在默认皮肤里找到实现可抄——默认皮肤天然是最全的参考实现，不存在“太空”。
+1. **默认皮肤 = 完整产品界面（dogfooding，doc/skin-system.md §3.4）**：覆盖全部真实功能与边界情况（LN / 地雷 / 2P / 缺失采样告警…），mod 作者想改什么都能在默认皮肤里找到实现可抄——默认皮肤天然是最全的参考实现，不存在“太空”。
 2. **组件库 = 积木**：把编辑器拆成稳定小组件，每个有稳定 API + 文档 + 默认皮肤用法示例：
    `PageSwitcher` / `MainToolBar` / `EditorToolBar` / `ChartView` / `NoteLane` / `RulerView` / `WaveformView` / `SamplePanel` / `LintPanel` / `MetaPanel` / `BgaPanel` / `PropertyPanel`。
    mod 作者**组合**组件（乐高式），不必整页重写 → 直接缓解“无从下手”。
 3. **覆写粒度 = 组件粒度**：L3 按区域覆写 = 按组件替换；整页重写只是“所有组件全换”的特例。
 4. **契约三层稳定度**：内核（命令协议 / `theme.json` schema / engine 注册类型，永久稳定）< 组件 API（稳定，版本号演进）< 页面 / 布局（最灵活）。
 5. **从易到难路径**：L1 token → L2 layout.json → L3 单组件 → L3 整页；每层有文档 + 示例，门槛平滑。
-6. **页面是应用功能**：页面集由应用维护；皮肤覆写页面内容属于 L3 规划，当前未实现（doc/08 §5）。
+6. **页面是应用功能**：页面集由应用维护；皮肤覆写页面内容属于 L3 规划，当前未实现（doc/skin-system.md §5）。
 
 ## 9. 代码框架抽象（QML 桥接版）
 
@@ -143,14 +143,14 @@ app/
 ├─ bridge/                      # core↔QML 桥接（C++，逻辑在这）
 │  ├─ CommandDispatcher.{h,cpp} # QObject 包装 global_registry().dispatch()
 │  ├─ ChartSession.{hpp,cpp}    # 谱面会话 + TimingEngine + 渲染指纹（早期稿里的 ChartModel 未单独落地）
-│  ├─ ThemeManager.{hpp,cpp}    # token + theme.json 加载（doc/08）
+│  ├─ ThemeManager.{hpp,cpp}    # token + theme.json 加载（doc/skin-system.md）
 │  └─ UiActionRegistry / AudioEngine / SliceWorkspace / ChartViewItem …
 └─ style/                       # （可并入 bridge/ThemeManager）token 常量
 ```
 
 接线：QML 手势 → `CommandDispatcher.dispatch(...)` → core 命令 → `ChartSession.refresh()` → 视口重绘。会话状态（选择集/视口/播放头/布局）不入 undo。
 
-> 现状以 `doc/04` 为准。上表是设计期文件树；实际桥层是 `ChartSession` + `ChartViewItem`（自绘），没有独立 `ChartModel` / `TimingEngineAdapter`。SlicePage 已是 M6 工作台，TestPage 仍占位。
+> 现状以 `doc/development.md` 为准。上表是设计期文件树；实际桥层是 `ChartSession` + `ChartViewItem`（自绘），没有独立 `ChartModel` / `TimingEngineAdapter`。SlicePage 已是 M6 工作台，TestPage 仍占位。
 
 ## 10. 术语与命名约定（QML）
 
@@ -166,11 +166,11 @@ app/
 | 标尺 | `RulerView`（`MeasureRuler`/`SecondRuler`） | 小节 / 秒标尺 |
 | 轨道 | `Lane`（core）/ `NoteLane`（QML） | 皿 / 1-7 / BGM / 2P 列 |
 | 桥接 | `bridge/`（`CommandDispatcher`/`ChartSession`/…） | C++ 逻辑层，QML 只调它 |
-| 皮肤 | skin（L1/L2/L3，doc/08） | 覆写默认皮肤 |
+| 皮肤 | skin（L1/L2/L3，doc/skin-system.md） | 覆写默认皮肤 |
 
 约定：桌面应用**不用“页面”以外的 Web 词**；“页面”= 顶层任务模式，“面板”= Dock 内组件，“视口”= 自绘区。
 
 ## 11. 参考与文件
 
-- 本稿（05）；静态设计参照：`doc/beatbench-ui-preview.html` / `beatbench-ui-styles.html` / `beatbench-ui-layouts.html`；
-- 皮肤分层与 surface 清单 → `doc/08` §3；动作注册表 → `doc/09`；里程碑现状 → `doc/04` §7。
+- 本稿；静态设计参照：`doc/beatbench-ui-preview.html` / `beatbench-ui-styles.html` / `beatbench-ui-layouts.html`；
+- 皮肤分层与 surface 清单 → `doc/skin-system.md` §3；动作注册表 → `doc/action-registry.md`；里程碑现状 → `doc/development.md` §7。

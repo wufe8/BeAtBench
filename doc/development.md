@@ -6,7 +6,7 @@
 
 ## 1. 项目一句话
 
-BMS 谱面编辑器（替代 BMSE/iBMSC）。C++20 + Qt 6（GUI 层 Qt Quick/QML，core 零 Qt 依赖）+ CMake；许可 **GPL-3.0**（每个新文件加 SPDX 头 `// SPDX-License-Identifier: GPL-3.0-only`）。GUI 栈与皮肤系统见 **doc/08**。
+BMS 谱面编辑器（替代 BMSE/iBMSC）。C++20 + Qt 6（GUI 层 Qt Quick/QML，core 零 Qt 依赖）+ CMake；许可 **GPL-3.0**（每个新文件加 SPDX 头 `// SPDX-License-Identifier: GPL-3.0-only`）。GUI 栈与皮肤系统见 **doc/skin-system.md**。
 
 ## 2. 已定决策速查
 
@@ -15,7 +15,7 @@ BMS 谱面编辑器（替代 BMSE/iBMSC）。C++20 + Qt 6（GUI 层 Qt Quick/QML
 - 现行范围（M1–M6 已完成）：谱面信息 + 文件绑定 + note 摆放（含 LN/地雷/变速/undo）+ 随时播放 + 切音工作台。**不含**完整试玩（判定/计分；可选/外置）。
 - 核心模型**格式无关**：无通道号、无 36 进制 ID、无 1296 上限——全是 bms codec 层的映射（02 §1）。
 - 调用架构：**命令对象 = 唯一操作面**（`core/include/beatbench/core/command/`，命名空间 `beatbench::cmd`），GUI/CLI/未来 Lua 三种执行器共用（02 §2）；不存在复数 `commands/` 目录（M0 遗留已删）。
-- GUI 栈：**Qt Quick/QML + 分层皮肤系统**（doc/08）；core 零 Qt 依赖不变。
+- GUI 栈：**Qt Quick/QML + 分层皮肤系统**（doc/skin-system.md）；core 零 Qt 依赖不变。
 - 采样：wav/ogg，44100/48000Hz 优先（M4 起有解码）。
 
 ## 3. 仓库布局
@@ -82,7 +82,7 @@ cmake --build build-gui --target beatbench
   启用测试时还需 `-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=<已有源码>`。依赖版本分别见
   `audio/CMakeLists.txt` 与 `tests/CMakeLists.txt`；已下载源码复用不等于零依赖。
 - CMake 4 无需旗标：根 CMakeLists 已钳 `CMAKE_POLICY_VERSION_MINIMUM=3.5`。
-- CI 与发布流水线（三平台回归、deb/rpm/arch、Windows 包）见 `doc/10`、`doc/11`；
+- CI 与发布流水线（三平台回归、deb/rpm/arch、Windows 包）见 `doc/dev-workflow.md`、`doc/packaging.md`；
   本地门禁 `scripts/check.sh`（pre-push 自动跑快速档）。
 
 **当前边界**（未验证/未覆盖路径的完整台账在 `doc/pending/`）：
@@ -90,7 +90,7 @@ cmake --build build-gui --target beatbench
 - macOS `.app` 不内嵌 `BeatBench/` QML 模块目录，双击起不来（需 `QML2_IMPORT_PATH` 指向构建树）。
 - PortAudio 实时输出已在 Manjaro 实机确认播放正常，但只走 **ALSA** host API；
   Windows/macOS 声卡与 PulseAudio/PipeWire 原生路径未人工验证（CI 无声卡）。
-- GUI 交互中**拖拽**仍只有无头冒烟；悬停高亮可用 X11 指针注入自动化验证（doc/11 §2）。
+- GUI 交互中**拖拽**仍只有无头冒烟；悬停高亮可用 X11 指针注入自动化验证（doc/packaging.md §2）。
 
 ## 5. 代码约定
 
@@ -114,7 +114,7 @@ cmake --build build-gui --target beatbench
 （推进）；“跟随”只控播放期间视口是否与红线同步滚动；暂停不回 90%（停在播放位置）；
 scrub 拖动静音定位（拖动只滚红线、松手落音频）。
 
-**切音工作台**（M6，设计权威 doc/02 §3）：音频/MIDI/瞬态三类切片源；网格/MIDI/手动切分点与
+**切音工作台**（M6，设计权威 doc/core-model.md §3）：音频/MIDI/瞬态三类切片源；网格/MIDI/手动切分点与
 “到下一起点”开关；导出分片+fade+`#WAV` id 分配，可复制 raw 或“同时铺入编辑区”；
 woslicer 系键盘走 `UiActionRegistry`；切音页有独立撤销栈（不碰谱面）。
 
@@ -135,7 +135,7 @@ woslicer 系键盘走 `UiActionRegistry`；切音页有独立撤销栈（不碰�
 
 ### note 移动机制与数据模型抽象
 
-设计权威在 **doc/02 §4**（Lane/Note 两个 kind、目标列识别、moveSelection 分派与优先级、
+设计权威在 **doc/core-model.md §4**（Lane/Note 两个 kind、目标列识别、moveSelection 分派与优先级、
 连续轨道统一变换与钳制、ghost 预览镜像、`sub_line` 泛化）；实现细则以
 `app/bridge/ChartViewItem.hpp` 头注释与实现处注释为准。
 
@@ -149,7 +149,7 @@ woslicer 系键盘走 `UiActionRegistry`；切音页有独立撤销栈（不碰�
 | M4 | 试听、设置页、采样解码缓存、离线渲染器、波形显示、秒标尺、增量重渲染 | ✅ |
 | M5 | 编辑期间随时播放（播放头红线 + 视口跟随 + A-B 循环 + scrub 静音定位）+ 02 通道小节长编辑 + 变拍渲染 + File→新建 | ✅ |
 | M6 | 切音工作台（导入/切分/导出/交互/键盘）+ 瞬态检测（audio 源 onset） | ✅ |
-| M7 | 项目化工作流（文件夹即项目、多谱面会话/对比/批量、打包校验、`#WAV` 占用查询）——设计见 doc/07 | ⏳ |
+| M7 | 项目化工作流（文件夹即项目、多谱面会话/对比/批量、打包校验、`#WAV` 占用查询）——设计见 doc/project-workflow.md | ⏳ |
 | M8 | 边界与协议（SliceWorkspace 拆分、CSV exporter、MIDI tempo、下沉 SessionController、codec capabilities；跨平台 CI 与发布产物已先行落地，macOS 发布产物未做） | 🚧 |
 | M9 | 格式与项目模型（bmson codec 原型、持久化格式、`#RANDOM/#IF` 结构化 AST） | — |
 | M10+ | 生态与体验（i18n、可选试玩判定、性能基准、外部预览适配器、Lua/脚本接口、L2 布局皮肤） | — |
@@ -161,7 +161,7 @@ woslicer 系键盘走 `UiActionRegistry`；切音页有独立撤销栈（不碰�
 
 | 功能 | 里程碑 | 状态 | 说明 / 前置 |
 |---|---|---|---|
-| 文件夹导入 / 项目面板（一首歌多谱面） | M7 | ⏳ | 文件夹为导入单位；只索引/分析，不合并文档（见 doc/07） |
+| 文件夹导入 / 项目面板（一首歌多谱面） | M7 | ⏳ | 文件夹为导入单位；只索引/分析，不合并文档（见 doc/project-workflow.md） |
 | 多谱面会话 | M7 | ⏳ | 复用 SessionRegistry；共享采样解码缓存 |
 | 谱面对比（统计/结构/叠加） | M7 | ⏳ | 只读分析；共享播放头 |
 | 多谱面批量操作 | M7 | ⏳ | dry-run 预览 + 每谱面独立 undo 步 |
@@ -172,16 +172,16 @@ woslicer 系键盘走 `UiActionRegistry`；切音页有独立撤销栈（不碰�
 | SliceWorkspace / bridge 拆分 | M8 | ⏳ | 最小拆分：import/export/preview controller + boundary model |
 | codec capabilities / lossiness 声明 | M8 | ⏳ | 现仅 `version.api` + `capabilities` 的 formats/modes |
 | 命令协议版本化与 capabilities 扩展 | M8 | 🚧 | `version.api = 1` 已落地；插件能力协商未做 |
-| 跨平台 CI / 验证 | M8 | 🚧 | 三平台 CI 与 Linux/Windows 发布产物已落地（doc/11）；音频后端与交互覆盖面见 `doc/pending/` |
-| bmson codec 原型 | M9 | ⏳ | core 模型已格式无关（doc/02 §1） |
+| 跨平台 CI / 验证 | M8 | 🚧 | 三平台 CI 与 Linux/Windows 发布产物已落地（doc/packaging.md）；音频后端与交互覆盖面见 `doc/pending/` |
+| bmson codec 原型 | M9 | ⏳ | core 模型已格式无关（doc/core-model.md §1） |
 | 项目/工作区持久化格式 | M9 | ⏳ | 多文档会话目前为内存态 |
 | `#RANDOM/#IF` 结构化 AST 与可靠往返 | M9 | ⏳ | 现为 raw 兜底，见 §6 已知限制 |
 | 外部预览适配器（beatoraja/raindrop） | M10+ | ⏳ | 独立 adapter |
 | i18n 全文 | M10+ | ⏳ | 现有中文界面 + Qt 内置翻译 |
 | 性能基准 / 音频实时线程 | M10+ | ⏳ | — |
-| Lua / 脚本接口 | M10+ | ⏳ | 命令注册表已为第三执行器预留（doc/02 §2） |
+| Lua / 脚本接口 | M10+ | ⏳ | 命令注册表已为第三执行器预留（doc/core-model.md §2） |
 | 可选试玩判定模块 | M10+ | ⏳ | M5 已建 PlaybackPlan 映射层 |
-| L2 布局皮肤（`layout.json`） | M10+ | ⏳ | 设计见 doc/08 §3.6 |
+| L2 布局皮肤（`layout.json`） | M10+ | ⏳ | 设计见 doc/skin-system.md §3.6 |
 
 ## 8. 生态观察清单（每里程碑扫一遍）
 

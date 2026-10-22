@@ -33,7 +33,7 @@ scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测
 
 ## 3. 发布（版本与产物）
 
-发布操作以 [打包与发布](<11-打包与发布.md>) §5 为权威：release-please 提出版本 PR，人工放行后产生 tag 与发布产物，不将日常提交等同于发布授权。
+发布操作以 [打包与发布](packaging.md) 五、为权威：release-please 提出版本 PR，人工放行后产生 tag 与发布产物，不将日常提交等同于发布授权。
 
 ```bash
 # 在版本 PR 分支自查；默认 Qt 矩阵以脚本头为单一来源
@@ -43,7 +43,7 @@ gh workflow run package.yml --ref <分支>
 ```
 
 - `scripts/package-release.sh` 是 Windows 打包的共用实现；本地 `scripts/release.sh` 与 CI 均调用它。
-- Linux deb/rpm/arch 使用发行版系统 Qt；构建基线、兼容性与安装布局见 `doc/11`。
+- Linux deb/rpm/arch 使用发行版系统 Qt；构建基线、兼容性与安装布局见 `doc/packaging.md`。
 
 ## 4. 备份（单机单盘的两道保险）
 

@@ -2,7 +2,7 @@
 // 解码实现 = miniaudio（third_party/miniaudio miniaudio.h，公有领域）。
 // MA_IMPLEMENTATION 只能在此 TU 定义一次（多 TU 重复定义 = 链接错误）。
 // 统一输出：float32 交错立体声（含多声道向下混 + 位深/格式转换，miniaudio 内置）；
-// 不重采样——源率保留，混音回调按设备率插值（doc/02 §8 + M4.1 决策）。
+// 不重采样——源率保留，混音回调按设备率插值（doc/core-model.md §8 + M4.1 决策）。
 // ⚠️ Windows 路径：含非 ASCII 必须走 `ma_decoder_init_file_w`（宽字符），
 // 窄字符走 fopen ANSI 代码页（GBK）→ 日文谱面目录打开失败（2026-09 用户实测）。
 #include "beatbench/audio/AudioDecoder.hpp"

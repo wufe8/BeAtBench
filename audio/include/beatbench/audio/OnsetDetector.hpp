@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 瞬态（onset）检测（M6.5 切音工作台 audio 源）：从参考音频 PCM 自动找切分点。
 //
-// 定位（doc/02 §3 切片位置来源第三条「瞬态检测」）：手头只有音频 stem、没有 MIDI
+// 定位（doc/core-model.md §3 切片位置来源第三条「瞬态检测」）：手头只有音频 stem、没有 MIDI
 // 时的自动切分。算法 = 经典管线：STFT（Hann 窗 + radix-2 FFT）→ 谱通量
 // （spectral flux，半波整流差分）→ 相对阈值 + 绝对底线 + 局部极大峰值拾取 →
 // 最小间隔过滤。输出 onset 时间（秒，升序），交桥层落手动切分点集合。

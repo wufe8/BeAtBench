@@ -1,6 +1,6 @@
 # app/ — Qt Quick/QML GUI
 
-> Qt 6.4+（下限由 CI `probe-qt64` 守住）。设计权威：`doc/05`（界面）、`doc/08`（皮肤系统）、`doc/09`（动作注册）。
+> Qt 6.4+（下限由 CI `probe-qt64` 守住）。设计权威：`doc/ui-design.md`（界面）、`doc/skin-system.md`（皮肤系统）、`doc/action-registry.md`（动作注册）。
 
 ## 双语言纪律
 
@@ -18,7 +18,7 @@
   `add_executable(...)`。
 - **新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表**，否则运行时“类型不可用”。
 - **平台 palette 陷阱**：关键表面显式绑 Theme token（如 `ApplicationWindow.color: Theme.bg`），
-  不靠 palette 继承——Windows 平台主题会在窗口创建时覆盖启动时设置的 QPalette（doc/08 §3.3）。
+  不靠 palette 继承——Windows 平台主题会在窗口创建时覆盖启动时设置的 QPalette（doc/skin-system.md §3.3）。
 
 ## 约定
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 离线渲染器（M4.3b）：谱面 → 混合 PCM（→ WAV 文件）。
 //
-// 定位（doc/04 §M4.3b）：把「全谱 keysound 混合」做成可验证的闭环——
+// 定位（doc/development.md §M4.3b）：把「全谱 keysound 混合」做成可验证的闭环——
 // CLI 输出 wav 文件（正确性验证）+ 编辑器 Space 触发（M5 播放前的产物）。
 // 本类 = **区间渲染器**：把 [t0, t1) 时间区间内该响的采样混成 PCM。
 //   - 事件 → 秒：TimingEngine::time_us（BPM 分段/STOP 正确）；

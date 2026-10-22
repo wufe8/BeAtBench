@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 播放内核（voice 池混音，doc/02 §8「回调无锁无分配」）。
+// 播放内核（voice 池混音，doc/core-model.md §8「回调无锁无分配」）。
 //
 // 设计坐标（M4.1 决策，对齐 M5 完整播放）：
 // - 内核 = 声音引擎公共部分（解码→PCM→重采样→混音→回调输出），M5 调度器只新增

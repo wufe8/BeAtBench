@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// L1 主题 token 单点（doc/08 §3.5 / doc/05 §7）。
+// L1 主题 token 单点（doc/skin-system.md §3.5 / doc/ui-design.md §7）。
 // 默认皮肤骨架（M2）：token 值 = doc/beatbench-ui-preview.html :root（唯一数据源，改动先改预览）；
-// theme.json 加载与 schema 校验后置皮肤系统（doc/08 §6 待办）。
-// QML 经 context property `Theme` 只读访问；界面任何颜色/字体不得硬编码（doc/07 §4）。
-// 双语言纪律（doc/08 §2）：本类只提供 token 数据，无界面逻辑。
+// theme.json 加载与 schema 校验后置皮肤系统（doc/skin-system.md §6 待办）。
+// QML 经 context property `Theme` 只读访问；界面任何颜色/字体不得硬编码（doc/project-workflow.md §4）。
+// 双语言纪律（doc/skin-system.md §2）：本类只提供 token 数据，无界面逻辑。
 #pragma once
 
 #include <QColor>
@@ -24,7 +24,7 @@ public:
     explicit ThemeManager(QObject* parent = nullptr) : QObject(parent) {}
 
     // ---- 颜色 token（访问器；默认值见 doc/beatbench-ui-preview.html :root） ----
-    // NOTIFY tokensChanged：运行时换肤（loadTheme 重载）→ QML 绑定重算（doc/08 §3.3 运行时换肤）。
+    // NOTIFY tokensChanged：运行时换肤（loadTheme 重载）→ QML 绑定重算（doc/skin-system.md §3.3 运行时换肤）。
 #define BB_THEME_COLOR_PROP(name)              \
     Q_PROPERTY(QColor name READ name NOTIFY tokensChanged) \
     QColor name() const { return m_##name; }
@@ -47,7 +47,7 @@ public:
     BB_THEME_COLOR_PROP(danger)
     BB_THEME_COLOR_PROP(keyNote)        // 按键 note
     BB_THEME_COLOR_PROP(lnTail)         // LN 尾（rgba(139,156,248,.26)）
-    // 时间轴 note 着色（doc/05 §7；= beatbench-ui-styles.html 默认主题，仅本地/视觉语义）
+    // 时间轴 note 着色（doc/ui-design.md §7；= beatbench-ui-styles.html 默认主题，仅本地/视觉语义）
     BB_THEME_COLOR_PROP(n1)             // 键音 1（键 1/5/… → n1..n4 循环）
     BB_THEME_COLOR_PROP(n2)             // 键音 2
     BB_THEME_COLOR_PROP(n3)             // 键音 3
@@ -99,14 +99,14 @@ public:
     /// 未知 key = 跳过（qWarning 汇总）；返回覆写数量。-1 = 文件不存在/解析失败。**不**发射信号。
     Q_INVOKABLE int loadTheme(const QString& path, QString* error = nullptr);
 
-    /// 运行时换肤（doc/08 §3.3）：loadTheme + 在覆写成功后发射 tokensChanged → QML 绑定重算。
+    /// 运行时换肤（doc/skin-system.md §3.3）：loadTheme + 在覆写成功后发射 tokensChanged → QML 绑定重算。
     /// 若文件不存在/解析失败，返回 -1 且**不**发射信号（保持旧主题）。成功返回覆写数。
     Q_INVOKABLE int applyTheme(const QString& path);
 
     /// 重置回内置默认皮肤（皮肤菜单「默认」项）：恢复常量默认值 + 发射 tokensChanged。
     Q_INVOKABLE void resetDefault();
 
-    // ---- 内置皮肤目录（运行时换肤菜单枚举，doc/08 §3.3） ----
+    // ---- 内置皮肤目录（运行时换肤菜单枚举，doc/skin-system.md §3.3） ----
     /// 当前皮肤目录（""=内置默认，或最后一次应用/加载的皮肤目录）。NOTIFY tokensChanged →
     /// 皮肤菜单勾选态随运行时切换自动更新。
     Q_PROPERTY(QString activeSkin READ activeSkin NOTIFY tokensChanged)

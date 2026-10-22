@@ -1,6 +1,6 @@
 # audio/ — 音频后端
 
-> 零 Qt。构建/验证：`doc/04` §4；切音与渲染设计：`doc/02` §3。
+> 零 Qt。构建/验证：`doc/development.md` §4；切音与渲染设计：`doc/core-model.md` §3。
 
 ## 硬规则
 

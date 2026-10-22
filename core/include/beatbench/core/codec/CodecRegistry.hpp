@@ -11,7 +11,7 @@
 
 namespace beatbench::codec {
 
-/// 格式注册表（doc/06 规划、M3 落地）：format → Codec。
+/// 格式注册表（doc/command-protocol.md 规划、M3 落地）：format → Codec。
 /// - 注册：唯一 id（重复注册抛错）；扩展名全局唯一（同扩展名冲突抛错）；
 /// - 查找：按 id 或扩展名（大小写不敏感，含/不含点均可）；
 /// - capabilities 的 formats 列表改为动态声明（原 hardcode 移除）。

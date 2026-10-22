@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 系统剪贴板桥（2026-09）：编辑页 Ctrl+V 需要读系统剪贴板文本（切音页「复制 raw」/
 // 外部工具/手写 BMS 原始行）；Ctrl+C 把 note 剪贴板镜像写回系统（外部工具可粘）。
-// QML 经 context property `clipboard` 访问；QML 不直接碰 QClipboard（双语言纪律，doc/08 §2）。
+// QML 经 context property `clipboard` 访问；QML 不直接碰 QClipboard（双语言纪律，doc/skin-system.md §2）。
 #pragma once
 
 #include <QObject>

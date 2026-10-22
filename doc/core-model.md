@@ -1,7 +1,7 @@
-# BeAtBench — 核心模型与调用架构（02）
+# BeAtBench — 核心模型与调用架构
 
 > **现行权威**：格式无关模型、命令即接口的调用面、切音工作台设计、note 移动机制。
-> 关联：`doc/04`（现状手册）、`doc/06`（命令 JSON 协议规格）、`doc/08`（GUI/皮肤）。
+> 关联：`doc/development.md`（现状手册）、`doc/command-protocol.md`（命令 JSON 协议规格）、`doc/skin-system.md`（GUI/皮肤）。
 
 ## 1. 核心模型解耦（格式无关、模式无关）
 
@@ -79,7 +79,7 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
 `sub_line`；id = `idTextOf`/`sampleValueOf`；时间↔拍位 = timing 引擎。
 **新增组件**：MIDI 解析器（core 模块 + `midi.parse` 命令，headless 可测）。
 
-**实现状态**：`doc/04` §6。
+**实现状态**：`doc/development.md` §6。
 
 ## 4. note 移动机制与数据模型抽象（M3 权威说明）
 

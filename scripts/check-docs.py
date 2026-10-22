@@ -113,7 +113,7 @@ def check(staged=False):
         for number, line in lines:
             if re.match(r"^\s*(?:<{7}(?: |$)|={7}$|>{7}(?: |$)|\|{7}(?: |$))", line):
                 errors.append(f"{path}:{number}: 遗留冲突标记")
-        # PR31 accidentally prepended this table header to every line of doc/02.
+        # PR31 accidentally prepended this table header to every line of doc/core-model.md.
         if sum(line.startswith(BAD_PREFIX) for _, line in lines) > 1:
             errors.append(f"{path}: 表头前缀污染全文")
 
@@ -137,7 +137,7 @@ def check(staged=False):
             for match in INLINE.finditer(line):
                 value = match[2]
                 if value.startswith(PREFIXES) or value.startswith("local/doc"):
-                    # Existing docs use e.g. `doc/06 §3`.
+                    # Existing docs use e.g. `doc/command-protocol.md §3`.
                     targets.append((value.split()[0], False))
                 elif value in ("README.md", "AGENTS.md", "CMakeLists.txt"):
                     targets.append((value, False))

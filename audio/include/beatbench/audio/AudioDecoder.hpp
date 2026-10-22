@@ -7,7 +7,7 @@
 // ⚠️ Windows 宽字符路径（2026-09 用户实测）：**含非 ASCII 的路径**（日文谱面目录等）
 // 用窄字符 `ma_decoder_init_file` 会走 fopen ANSI 代码页（GBK）→ 打开失败无声。
 // MINIAudio 提供 `ma_decoder_init_file_w`（UTF-16）；Windows 侧一律用宽字符重载，
-// 非 Windows（POSIX 原生 UTF-8）用窄字符即够（跨平台见 doc/04 §音频）。
+// 非 Windows（POSIX 原生 UTF-8）用窄字符即够（跨平台见 doc/development.md §音频）。
 #pragma once
 
 #include <string>
