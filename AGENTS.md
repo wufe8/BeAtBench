@@ -7,7 +7,7 @@
 
 1. **本文件**（落点与维护约定）；
 2. `doc/development.md` —— 现状 / 构建 / 代码约定；
-3. 按任务查 `doc/README.md` 的“任务 → 文档”表。
+3. 按任务查 §6 文档地图。
 
 ## 2. 仓库布局
 
@@ -18,7 +18,7 @@
 | `cli/` | `beatbench-cli` 批处理入口（info/check/convert/version + `--json`） | [cli/AGENTS.md](cli/AGENTS.md) |
 | `app/` | Qt Quick/QML GUI：`bridge/`（C++）+ `qml/`（界面） | [app/AGENTS.md](app/AGENTS.md) |
 | `tests/` | GoogleTest 单测 | — |
-| `doc/` | 权威规格 / 设计 / 交接文档（提交）；文档地图在其 `README.md` | — |
+| `doc/` | 权威规格 / 设计 / 交接文档（提交）；文档地图见 §6 | — |
 | `doc/pending/` | 挂账台账（待裁决 / 未复现 / 未验证观察项，解决即删） | 见 §4 维护规则 |
 | `scripts/` | 门禁 / 打包 / 备份脚本 | — |
 | `local/` | 本机过程笔记、样本与临时产物（主仓库 gitignore，不推远程；公开代码与文档不得依赖） | 可独立建 git 仓库，仅作本地备份 |
@@ -47,6 +47,8 @@
 
 - 源文件一律 UTF-8；不要移除 MSVC 的 `/utf-8`。
 - 提交信息用 conventional commits（`feat` / `fix` / `docs` / `refactor` / `test` / `chore`）。
+- `CHANGELOG.md` 由 release-please 依 Conventional Commits 自动生成，不手动编辑
+  （含其中的文档引用——版本条目是发布快照，不随文档重组更新）。
 - 门禁钩子（安装：`git config core.hooksPath .githooks`）：pre-push 跑快速回归，
   pre-commit 跑 `scripts/check-docs.sh` 文档护栏。
 
@@ -79,4 +81,23 @@ markdown 内仓库路径指针有效性、中文弯引号。
 
 - 构建与测试：`doc/development.md` 四、（构建命令权威）；分支与门禁：`doc/dev-workflow.md`；打包与发布：`doc/packaging.md`。
 - 快速门禁：`scripts/check.sh --quick`；pre-push 自动执行，赶时间 `SKIP_CHECK=1 git push`。
-- 找不到文件 → `doc/README.md` 文档地图；地图也解答不了 → 按 §3 落点规则归类。
+- 找不到文件 → §6 文档地图；地图也解答不了 → 按 §3 落点规则归类。
+
+## 6. 文档地图
+
+| 文档 | 什么时候读 |
+|---|---|
+| `doc/development.md` | **新会话必读**：现状/构建/约定/里程碑速览 |
+| `doc/core-model.md` | 模型/调用架构/切音工作台/note 移动机制设计 |
+| `doc/command-protocol.md` | 命令 JSON 协议正式规格、插件三层漏斗、时间单位边界 |
+| `doc/project-workflow.md` | M7 项目化：多谱面导入/会话/对比/批量/打包 |
+| `doc/skin-system.md` | GUI 栈决策、分层皮肤系统（L1/L2/L3）、surface 清单 |
+| `doc/action-registry.md` | UI 动作注册表：id 命名、元数据、快捷键/皮肤触发 |
+| `doc/dev-workflow.md` | 分支模型、日常门禁、tag→发布放行、备份 |
+| `doc/packaging.md` | 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布流程 |
+| `doc/ui-design.md` | 页面式信息架构、区域设计、设计 token、术语约定 |
+| `doc/bms-format-notes.md` | BMS 格式逆向笔记（头部/定义/通道/长音/随机） |
+
+按任务取用：BMS codec → `development.md` 五、+ BMS 笔记；切音 → `core-model.md` 三、；
+协议/JSON → `command-protocol.md` 三、；界面/皮肤 → `ui-design.md` + `skin-system.md`；
+快捷键 → `action-registry.md`；构建/测试 → `development.md` 四、；发版 → `dev-workflow.md` + `packaging.md`。

@@ -94,7 +94,6 @@ macOS 打包范畴；② GUI 交互中悬停高亮可自动化验证（X11 指�
 
 | 文档 | 内容 |
 |---|---|
-| [`doc/README.md`](doc/README.md) | **文档地图**：按任务查该读哪份文档、文件落点约定 |
 | [`doc/development.md`](doc/development.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、当前状态 |
 | [`doc/core-model.md`](doc/core-model.md) | **模型/架构权威**：格式无关模型、命令即接口、切音工作台设计、note 移动机制 |
 | [`doc/command-protocol.md`](doc/command-protocol.md) | **命令 JSON 协议正式规格**、插件分层、时间单位边界 |

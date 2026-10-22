@@ -1,7 +1,7 @@
 # BeAtBench 开发手册（现状 + 开工引导）
 
 > **简版**：项目现状、构建命令、约定要点——读完即可开工。
-> 文档地图（按任务查该读哪份）见 [doc/README.md](./README.md)。
+> 文档地图（按任务查该读哪份）见根 [AGENTS.md](../AGENTS.md) §6。
 > 模块硬规则见各目录 `AGENTS.md`（core / audio / cli / app）。
 
 ## 一、项目一句话
