@@ -1,0 +1,4 @@
+# third_party 为 vendored 源码，保持上游原样
+third_party/
+# 生成文件（tools/gen_sjis_table.ps1 产物），请勿手改或格式化
+core/src/bms/sjis_table.hpp
