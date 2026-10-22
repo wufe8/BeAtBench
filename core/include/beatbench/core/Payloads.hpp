@@ -17,7 +17,7 @@ enum class NoteKind : std::uint8_t {
 
 /// 音符。LN：头尾是两条独立 Event，通过 ln_pair 互指（存 notes 容器下标）。
 /// lane = 轨道身份（由 codec 的通道映射表解析得出，格式无关）；
-/// 语义与 LNTYPE 1/2 的文本表示解耦——转换由 bms codec 负责（对齐稿 02 §4.1）。
+/// 语义与 LNTYPE 1/2 的文本表示解耦——转换由 bms codec 负责（doc/bms-format-notes.md）。
 struct Note {
     Lane lane;
     SampleRef sample;

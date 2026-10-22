@@ -38,14 +38,14 @@ public:
 
 /// 命令注册表（name → Command）。name 全局唯一；重复注册抛 CommandError。
 /// 内建命令见 register_builtin_commands；未来插件在加载时向
-/// global_registry() 注册自己的命令（doc/command-protocol.md §2）。
+/// global_registry() 注册自己的命令（doc/command-protocol.md 二、）。
 class Registry {
 public:
     void add(std::unique_ptr<Command> command);
     const Command* find(std::string_view name) const;
     std::vector<std::string> names() const;  ///< 按字典序
 
-    /// 完整信封分发（协议规范见 doc/command-protocol.md §3）：
+    /// 完整信封分发（协议规范见 doc/command-protocol.md 三、）：
     /// 请求  {"id"?:任意, "command":"name", "args"?:对象}
     /// 成功  {"id"?, "ok":true,  "result":…}
     /// 失败  {"id"?, "ok":false, "error":{"code":"…","message":"…"}}

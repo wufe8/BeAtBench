@@ -3,7 +3,7 @@
 > **现行权威**：格式无关模型、命令即接口的调用面、切音工作台设计、note 移动机制。
 > 关联：`doc/development.md`（现状手册）、`doc/command-protocol.md`（命令 JSON 协议规格）、`doc/skin-system.md`（GUI/皮肤）。
 
-## 1. 核心模型解耦（格式无关、模式无关）
+## 一、核心模型解耦（格式无关、模式无关）
 
 > 约束：不能只考虑传统 BMS 文本（1296 采样上限）；要兼容 bmson 与多种游玩模式。
 > 解法：**模型层不知道 BMS 文本的存在**，一切格式细节收敛到 codec 层。
@@ -33,7 +33,7 @@ lane 抽象；未来加 codec 不触碰模型。
 `#RANDOM/#IF/#SWITCH` 预处理）；编码 SJIS↔UTF-8 用内置码表（三平台一致），Windows 可选
 `MultiByteToWideChar` 交叉校验。
 
-## 2. 调用架构：命令即接口
+## 二、调用架构：命令即接口
 
 **核心模式：命令对象 = 唯一操作面。** 所有对文档的变更在 core 中都是类型化命令（JSON 可序列化）：
 解析 / 编辑（摆键/变速/元信息）/ 查询（时序换算/lint/往返校验）/ 输出（写出/编码转换/打包）。
@@ -51,7 +51,7 @@ lane 抽象；未来加 codec 不触碰模型。
 编辑操作 = Command（apply/invert/merge），BPM/STOP 编辑与 note 编辑共用命令栈；同一命令既是 undo 单元，
 也是 CLI 与脚本的调用单元。
 
-## 3. 切音工作台设计（M6）
+## 三、切音工作台设计（M6）
 
 **定位：工作区/模式切换。** 与编辑模式平级的顶层工作区（`SlicePage`），共享同一文档与音频引擎；
 进入切音 = 切换视图/工具条，不是另起工具。
@@ -79,15 +79,15 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
 `sub_line`；id = `idTextOf`/`sampleValueOf`；时间↔拍位 = timing 引擎。
 **新增组件**：MIDI 解析器（core 模块 + `midi.parse` 命令，headless 可测）。
 
-**实现状态**：`doc/development.md` §6。
+**实现状态**：`doc/development.md` 六、。
 
-## 4. note 移动机制与数据模型抽象（M3 权威说明）
+## 四、note 移动机制与数据模型抽象（M3 权威说明）
 
 > note 移动逻辑的单一权威说明；厘清“轨道类别”与“note 类型”的关系，
 > 便于将来导入其它格式时判断扩展点。实现细则（函数行为、参数表）以
 > `app/bridge/ChartViewItem.hpp` 头注释与实现处注释为准。
 
-### 4.1 两个 kind 必须区分
+### 1. 两个 kind 必须区分
 
 - **`Lane.kind`（`LaneKind`）= 轨道（通道）类别**：`enum class LaneKind { Key, Scratch, Pedal, Bgm }`；
   `struct Lane { player, kind, index }`。`player`（0/1）= SP/DP；`index`（`uint8_t`）= Key 的键号
@@ -99,7 +99,7 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
 角色来自通道，属性来自通道段（D1-E9 地雷、51-69 LN、`#LNOBJ`）。`BmsChannelRule` 把通道解读为
 `{ semantics, lane, note_kind, ln_channel, bga_layer }`。
 
-### 4.2 Note / Lane / Column 结构要点
+### 2. Note / Lane / Column 结构要点
 
 - `Note = { lane, sample, kind(NoteKind), ln_pair?, ln_channel, sub_line }`；`lane = {player, kind, index}`。
 - ⚠️ `sub_line` 对非 BGM note 恒为 0（解析器非 ch01 一律写 0）；判别“是否 BGM note”必须看
@@ -108,7 +108,7 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
   列序 = on-screen 连续序：BPM → STOP → S(皿) → key1..N → [2P] → [BGA 层] → BGM
   （聚合列 `subLine=-1` 或展开的 bgm1..bgmN）。**BGA 层的 lane 也是 `{0,bgm,0}`**，靠 `bgaLayer` 区分。
 
-### 4.3 目标列识别与移动分派
+### 3. 目标列识别与移动分派
 
 `laneAtX` 命中三类目标：游玩轨/BGM（`bgaLayer=-1` 无 `metaKind`，note 空间内移动）、
 BGA 层（`bgaLayer>=0`，0..3=base/poor/layer/layer2，note → BGA 事件转换）、
@@ -125,7 +125,7 @@ BPM/STOP（`metaKind`，note → 时序事件转换）。
 4. 纯时间移动（`targetLane` 空）只动时间、lane 不变；元事件/BGA 转换是**整组一次**
    `note.convert`（一个 undo 步），不参与逐 note 相对变换。BGA/时序对象自身的移动走 `metaMove` 另一套。
 
-### 4.4 各区语义与边界钳制
+### 4. 各区语义与边界钳制
 
 - **游玩轨（Key/Scratch/Pedal）**：BMS 文件层面通道无差异；编辑视图把它们当**一条连续演出轨道**，
   多选/跨 kind 拖动 = 连续平移（gap 保距，经 `laneAtColumn` 映射）。
@@ -138,13 +138,13 @@ note 空间内任何跨 lane 移动用**同一变换**：`目标序 = 目标基�
 bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移与“目标点往前无通道”冲突时塌缩，
 符合预期）；负向越界回绕当前不做。
 
-### 4.5 ghost 预览 / 后端命令
+### 5. ghost 预览 / 后端命令
 
 - `ChartViewItem::drawPreview` 与 `moveSelection` 镜像同一套分派分支，拖拽中先见落点。
 - 后端：note 空间内用 `note.move`（逐个 + Composite = 一个 undo 步；`to.sub_line` 显式给，否则按
   `(measure,pos)` 自动分配不冲突行）；跨命名空间用 `note.convert`。
 
-### 4.6 格式扩展性（forward-compat）
+### 6. 格式扩展性（forward-compat）
 
 - **已格式无关**：`player`（可扩展）、`index`（`uint8_t`）、`sub_line`（多路音频）、`NoteKind`（预留 Hidden）。
   模式差异（SP/DP/PMS/Battle）收敛在 ChartMode 配置的 Lane 集合。
@@ -154,7 +154,7 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
   （加枚举值 + 若干分派，受控扩展点）。保持 `Lane{player,kind,index}` 不变；新**属性**走 `NoteKind`
   或新字段（勿往 Lane 塞通道号）；仅新**轨道角色**才扩 `LaneKind`。
 
-### 4.7 `bgm_line` → `sub_line` 泛化（已实施）
+### 7. `bgm_line` → `sub_line` 泛化（已实施）
 
 > 把 BGM 专属的 `bgm_line` 泛化成通用的 `sub_line`（子通道/子行），让“任意基础通道同小节多行”被统一建模。
 

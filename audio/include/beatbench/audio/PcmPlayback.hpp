@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // M5 播放内核：预渲染 PCM 的播放状态机（零 Qt，audio/ 库内）。
 //
-// 定位（doc/development.md §M5）：M5 播放 = 播「渲染混音结果」——把 ChartSession 的
+// 定位（doc/development.md 六、）：M5 播放 = 播「渲染混音结果」——把 ChartSession 的
 // 内存 PCM（shared_ptr<vector<float>>）当作一个采样经 SamplePlayer 零拷贝播出。
-// 与 keysound 实时调度是两条路线（doc/core-model.md §PhaseB）；本类 = PCM 路线，UI 线程专用。
+// 与 keysound 实时调度是两条路线；本类 = PCM 路线，UI 线程专用。
 //
 // 状态机：Idle → Playing → Paused ↔ Playing → Stopped。currentSec = 时钟位置
 // （绝对秒，0 起 = 谱面时间轴）。时钟源 = SamplePlayer 的 callback 帧计数：

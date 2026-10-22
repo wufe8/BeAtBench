@@ -21,7 +21,7 @@ namespace {
 using beatbench::json::Json;
 using beatbench::json::JsonError;
 
-// theme.json key → 覆写成员函数（仅颜色；非颜色 token 后置，见 doc/skin-system.md §6）。
+// theme.json key → 覆写成员函数（仅颜色；非颜色 token 后置，见 doc/skin-system.md 五、）。
 // 色值支持 #RRGGBB / #AARRGGBB（QColor 两种都解析）。
 // 未知 key 不报错，仅跳过（汇总给调用方；skin 可只覆写它要的 token）。
 bool set_color(ThemeManager& th, const QString& key, const QString& value) {
@@ -121,7 +121,7 @@ int ThemeManager::loadTheme(const QString& path, QString* error) {
         QStringList unknown;
         for (const auto& [k, v] : req.as_object()) {
             const QString key = QString::fromUtf8(k.c_str());
-            // 下划线前缀的 key = 皮肤元注释（如 _comment），跳过不进未知汇总（doc/skin-system.md §3 约定）
+            // 下划线前缀的 key = 皮肤元注释（如 _comment），跳过不进未知汇总（doc/skin-system.md 三、 约定）
             if (key.startsWith(QLatin1Char('_'))) continue;
             if (v.is_string()) {
                 const QString value = QString::fromUtf8(v.as_str().c_str());
@@ -172,7 +172,7 @@ int ThemeManager::applyTheme(const QString& path) {
 }
 
 void ThemeManager::resetDefault() {
-    // 恢复内置默认皮肤骨架（doc/skin-system.md §3.4；= doc/beatbench-ui-preview.html :root 常量）。
+    // 恢复内置默认皮肤骨架（doc/skin-system.md 三、4.；= doc/beatbench-ui-preview.html :root 常量）。
     // 全部 token 逐项重置回默认值（与头文件成员默认值一致）。
 #define BB_THEME_RESET_COLOR(name, def) set_##name(QColor(QStringLiteral(def)));
     BB_THEME_RESET_COLOR(bg, "#0b0d10")

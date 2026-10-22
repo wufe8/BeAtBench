@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 编辑命令测试：note.put/move/delete 的 apply/invert 精确往返、merge 合并、
-// undo/redo 栈、随机命令序列可逆性（01 §5.6「命令可逆性」守卫）。
+// undo/redo 栈、随机命令序列可逆性（「命令可逆性」守卫）。
 // 全部合成 Chart，不依赖 local/。
 #include <gtest/gtest.h>
 
@@ -277,7 +277,7 @@ TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
     EXPECT_TRUE(at_m2);
 }
 
-// —— 随机序列可逆性（01 §5.6） ——
+// —— 随机序列可逆性 ——
 
 TEST(EditCommands, RandomSequenceReversible) {
     EditorSession s;

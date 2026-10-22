@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
-# 一键发布打包（Windows 64 位，Git Bash 下运行；doc/project-workflow.md §2 发布部署说明）
+# 一键发布打包（Windows 64 位，Git Bash 下运行；doc/project-workflow.md 二、 发布部署说明）
 #
 # 步骤：
 #   1. Release 构建（build-release）
@@ -180,7 +180,7 @@ rm -rf "$STAGE/qmltooling"
 
 echo "==> 裁剪未使用的 Qt Quick Controls 样式（只留 Basic + Fusion）
    app/main.cpp 无条件 QQuickStyle::setStyle(\"Fusion\")（选中它是因为 Fusion 尊重应用调色板，
-   见 doc/skin-system.md §2），控件样式**不会**随环境变量或皮肤切换；而 windeployqt 无从得知这点，会把
+   见 doc/skin-system.md 二、），控件样式**不会**随环境变量或皮肤切换；而 windeployqt 无从得知这点，会把
    Qt 安装里的全部样式一并部署。实测多余样式占解压后 ~15 MB，其中 FluentWinUI3 一家就
    5.4 MB / 854 个文件。
    保留 Basic：它是各样式公用的实现基线，删掉有退回默认外观的风险（省下的 2 MB 不值得冒）。"

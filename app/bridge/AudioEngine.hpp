@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // audio ↔ Qt GUI 桥：单发试听（M4.1）+ 音频设置（M4.2）。
-// 职责（双语言纪律 doc/skin-system.md §2：逻辑在 C++，QML 只消费信号/方法）：
+// 职责（双语言纪律 doc/skin-system.md 二、：逻辑在 C++，QML 只消费信号/方法）：
 // - 持有 SamplePlayer（内核）+ PortAudio 后端 + 后台解码线程池；
 // - playPreview(path)：相对路径按谱面目录解析 → 异步解码 → 回主线程 playPreview(voice)；
 // - 设置（M4.2）：设备/采样率/缓冲/主音量，QSettings 持久化，启动时应用；

@@ -26,7 +26,7 @@ namespace beatbench::bms {
 namespace {
 
 // 控制指令（保留在 raw_lines，不做头部字段；写回时原样输出）。
-// #RANDOM/#IF/#SWITCH 的语义展开属后续步骤（设计见 doc/development.md §6），
+// #RANDOM/#IF/#SWITCH 的语义展开属后续步骤（设计见 doc/development.md 六、），
 // 架构上先保证无损往返；可视化编辑采用「结构化容器」方案（不复制多份）。
 constexpr std::string_view kControlTags[] = {
     "RANDOM", "IF", "ELSEIF", "ELSE", "ENDIF",

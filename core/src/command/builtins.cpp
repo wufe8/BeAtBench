@@ -727,9 +727,9 @@ edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
 
 }  // namespace
 
-// —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/ui-design.md §9 工具栏值放置 + 右 dock 列表） ——
+// —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/ui-design.md 九、 工具栏值放置 + 右 dock 列表） ——
 // kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 微秒 /
-// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义（bms_writer §2），
+// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义，
 // 因此「值」是唯一编辑维度——ch03 内联/引用的文本差异对编辑透明。
 // 两种 GUI 形态共用同一套接口：
 //   - 工具栏值放置（思路1）：timing.put（同位替换）+ timing.delete；
@@ -799,7 +799,7 @@ public:
     }
 };
 
-// —— BGA 事件命令（M3：base/poor/layer/layer2；doc/ui-design.md §9 「BGA 面板/视口」） ——
+// —— BGA 事件命令（M3：base/poor/layer/layer2；doc/ui-design.md 九、 「BGA 面板/视口」） ——
 // 定位 = (measure, pos, layer)；sample = #BMPxx id。bga.list 数据源 + put/delete 增删改。
 
 class BgaListCommand : public Command {
@@ -1112,7 +1112,7 @@ public:
         } else {
             throw CommandError("bad_args", "缺少 text 或 lines");
         }
-        // M6.3 铺放（2026-09 用户，doc/core-model.md §3）：sub_line_mode = "fifo"（默认，历史行为）|
+        // M6.3 铺放（2026-09 用户，doc/core-model.md 三、）：sub_line_mode = "fifo"（默认，历史行为）|
         // "uniform"（子行接续——FIFO 照旧从 0 起解析，随后统一抬升：起点 = 目标小节段内已有
         // BGM 最高子行 + 1，无 → 0）。保证：同 tick 不与旧行冲突；旧行结构不动；新内容跨小节
         // 同列（统一 base，而非每小节独立接续）。
@@ -1756,8 +1756,8 @@ public:
     }
 };
 
-// —— 变换/量化（M3：doc/01 §D「量化/镜像/旋转」；批量 = CompositeCommand 一个 undo 步） ——
-// 输入 = selection 数组（前端物化，与 clipboard.copy 一致）；region 描述后置（handoff §区域）。
+// —— 变换/量化（M3「量化/镜像/旋转」设计；批量 = CompositeCommand 一个 undo 步） ——
+// 输入 = selection 数组（前端物化，与 clipboard.copy 一致）；region 描述后置。
 
 class NoteQuantizeCommand : public Command {
 public:
@@ -2103,7 +2103,7 @@ public:
     }
 };
 
-// —— 元信息编辑（doc/ui-design.md §107「元信息表单」→ meta.edit；批量 Composite 一个 undo 步） ——
+// —— 元信息编辑（doc/ui-design.md 六、「元信息表单」→ meta.edit；批量 Composite 一个 undo 步） ——
 
 class MetaListCommand : public Command {
 public:
@@ -2245,7 +2245,7 @@ public:
     }
 };
 
-// —— 多会话管理（2026-08 多标签页前瞻，doc/development.md §6） ——
+// —— 多会话管理（2026-08 多标签页前瞻，doc/development.md 六、） ——
 
 class SessionCreateCommand : public Command {
 public:

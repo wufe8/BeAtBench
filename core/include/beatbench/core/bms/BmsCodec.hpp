@@ -48,7 +48,7 @@ struct BmsReadResult {
 
 /// 解析 BMS 文本。
 /// 实现计划（M1）：纯标准库手写 parser——大小写不敏感、// 与 /* */ 注释、
-/// #RANDOM/#IF/#SWITCH 预处理、36 进制 ID 映射、通道号→Lane 映射（对齐稿 02 §4）。
+/// #RANDOM/#IF/#SWITCH 预处理、36 进制 ID 映射、通道号→Lane 映射（doc/bms-format-notes.md）。
 BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts = {});
 
 /// 读取 .bms 文件（含编码检测：BOM / #ENCODING / SJIS 启发式）。
@@ -56,7 +56,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts = {});
 /// 宽字符 API 打开（修复日文/非 ASCII 目录打不开，2026-09）。
 BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts = {});
 
-/// 写出 BMS 文本（M1 实现；归一化策略见对齐稿 02 §4.3）。
+/// 写出 BMS 文本（M1 实现）。
 std::string write_bms(const Chart& chart, const BmsWriteOptions& opts = {});
 
 /// #RANDOM/#IF/#SWITCH/#SETRANDOM 选择块展开（文本层预处理，不解析块内容）。

@@ -18,7 +18,7 @@
   `add_executable(...)`。
 - **新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表**，否则运行时“类型不可用”。
 - **平台 palette 陷阱**：关键表面显式绑 Theme token（如 `ApplicationWindow.color: Theme.bg`），
-  不靠 palette 继承——Windows 平台主题会在窗口创建时覆盖启动时设置的 QPalette（doc/skin-system.md §3.3）。
+  不靠 palette 继承——Windows 平台主题会在窗口创建时覆盖启动时设置的 QPalette（doc/skin-system.md 三、3.）。
 
 ## 约定
 

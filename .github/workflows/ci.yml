@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# CI：三平台构建 + 测试 + GUI 无头冒烟（doc/development.md §4 构建、M8「跨平台 CI」落地）。
+# CI：三平台构建 + 测试 + GUI 无头冒烟（doc/development.md 四、 构建、M8「跨平台 CI」落地）。
 #
 # 设计决策（为什么长这样）：
 # - Qt 统一 6.11.2：回归、打包与发布包用同一版本，避免「测的是 X、发的是 Y」。

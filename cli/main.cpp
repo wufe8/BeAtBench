@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// beatbench-cli：无 Qt 依赖的批处理入口（对齐稿 02 §6.1，P1 模式）。
+// beatbench-cli：无 Qt 依赖的批处理入口（P1 模式，见 doc/core-model.md 二、）。
 // 两种形态：
 // - 人类可读子命令：info / check / convert / version；
-// - --json <请求> 或 --json（读 stdin）：命令协议入口（doc/command-protocol.md §3），
+// - --json <请求> 或 --json（读 stdin）：命令协议入口（doc/command-protocol.md 三、），
 //   输出 JSON 信封到 stdout；exit 0 = 信封已产出（语义看 ok 字段），
 //   2 = 无法产出信封（请求 JSON 本身非法 / 无输入），1 = 内部异常。
 // GUI 与外部插件走同一协议（进程内 dispatch 或进程外 --json）。
@@ -86,7 +86,7 @@ void print_diagnostics(const std::vector<beatbench::codec::Diagnostic>& diags) {
 }
 
 int cmd_info(const std::string& path, const std::string& format) {
-    // M3：人类子命令与 --json 走同一 CodecRegistry（06 §3.6 单点逻辑）
+    // M3：人类子命令与 --json 走同一 CodecRegistry（doc/command-protocol.md 三、6. 单点逻辑）
     const auto* codec =
         format.empty() ? beatbench::codec::global_codec_registry().by_path(path)
                        : beatbench::codec::global_codec_registry().by_id(format);

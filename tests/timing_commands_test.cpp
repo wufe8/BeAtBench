@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 时间轴事件命令测试：timing.put / timing.delete / timing.list 的 apply/invert
-// 精确往返、同位替换语义、undo/redo 栈、协议 dispatch 链路（doc/ui-design.md §9「工具栏值放置」
+// 精确往返、同位替换语义、undo/redo 栈、协议 dispatch 链路（doc/ui-design.md 九、「工具栏值放置」
 // + 右 dock 管理列表；两种 GUI 形态共用同一套接口）。
 // 全部合成 Chart，不依赖 local/。
 #include <gtest/gtest.h>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // core↔QML 桥接：lint 列表模型（lint 面板数据源，M2 第 4 步）。
 // 数据 = check 命令响应：lint.missing_wav（结构化）+ diagnostics（诊断）。
-// 检索/装配逻辑在 C++（双语言纪律 doc/skin-system.md §2），QML 只绑定展示。
+// 检索/装配逻辑在 C++（双语言纪律 doc/skin-system.md 二、），QML 只绑定展示。
 #pragma once
 
 #include <QAbstractListModel>

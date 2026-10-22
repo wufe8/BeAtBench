@@ -77,6 +77,6 @@ markdown 内仓库路径指针有效性、中文弯引号。
 
 ## 5. 构建 / 门禁 / 发布
 
-- 构建与测试：`doc/development.md` §4（构建命令权威）；分支与门禁：`doc/dev-workflow.md`；打包与发布：`doc/packaging.md`。
+- 构建与测试：`doc/development.md` 四、（构建命令权威）；分支与门禁：`doc/dev-workflow.md`；打包与发布：`doc/packaging.md`。
 - 快速门禁：`scripts/check.sh --quick`；pre-push 自动执行，赶时间 `SKIP_CHECK=1 git push`。
 - 找不到文件 → `doc/README.md` 文档地图；地图也解答不了 → 按 §3 落点规则归类。

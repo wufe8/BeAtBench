@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // core↔QML 桥接：采样列表模型（采样面板数据源，M2 第 4 步）。
 // 数据 = info 命令返回的 samples.wav + check 命令的 missing_wav（缺失标记）。
-// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/skin-system.md §2），QML 只绑定 ListView 与信号。
+// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/skin-system.md 二、），QML 只绑定 ListView 与信号。
 // 交互设计（权威；doc/ui-design.md 只留指针）：
 // - 纯搜索确认框：文件名/ID 实时过滤（ID 大小写敏感，兼容 base62 1a/1A；文件名不敏感；
 //   输入兼容 #WAV 前缀）；输入时 ↑↓ 导航、Enter 确认 = 设为当前采样。
 // - 点击选中 = 会话状态“当前采样”，不重排视图（选中保持原位，避免列表漂移）；
 //   排序由显式 sortMode 控制（智能/id/文件名/引用数/最近使用）。
 // - 分组动态生成（模型按轨道类别 + player 统计；DP/2P 谱面自动出现 2P 组，不写死）。
-// - MRU 仅作“最近使用”排序模式的依据；会话状态不入谱面/undo（doc/command-protocol.md §3）。
+// - MRU 仅作“最近使用”排序模式的依据；会话状态不入谱面/undo（doc/command-protocol.md 三、）。
 #pragma once
 
 #include <QAbstractListModel>

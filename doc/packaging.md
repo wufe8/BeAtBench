@@ -1,9 +1,9 @@
 # 打包与发布说明（Linux deb/rpm/arch 与 Windows zip）
 
-> 关联：`doc/development.md` §4（构建 / CI）、`.github/workflows/package.yml`、
+> 关联：`doc/development.md` 四、（构建 / CI）、`.github/workflows/package.yml`、
 > `scripts/package-linux.sh`、`scripts/verify-linux-package.sh`、`scripts/package-release.sh`。
 
-## 1. 流水线总览
+## 一、流水线总览
 
 `.github/workflows/package.yml` 独立于 `ci.yml` 的回归门禁，只负责产出 Linux 发布级产物。
 触发方式为 tag（`v*`）、手动 `workflow_dispatch` 与每周 schedule；tag 名必须等于 `v<CMakeLists 版本>`
@@ -29,7 +29,7 @@
 > 附上去（**只附加产物，不写说明**，避免两处都可写 Release 而打架；轮询上限 50 分钟，
 > 超时明确失败，产物仍留在 artifact 里可手动上传）。手动 dispatch 到分支时不执行该作业。
 
-## 2. Qt 依赖策略
+## 二、Qt 依赖策略
 
 Linux 包使用**发行版系统 Qt**（不捆绑 Qt 运行时）：
 
@@ -58,7 +58,7 @@ QML 入口加载（`QQmlApplicationEngine::loadFromModule` 6.5 才引入，6.4 �
 ⚠️ 悬停高亮的**无头冒烟覆盖不到**（offscreen 平台没有真实指针），但真实 X11 平台可做**指针注入**
 自动化（定位窗口 → `XWarpPointer`/`XTestFakeMotionEvent`，配合 app 自身的 `--screenshot` 抓帧）；
 2026-10-09 已在 Manjaro（发行版 Qt 6.11.2 + 安装包）实测通过——分隔条由 `#2E2540` 变 `#765B36`
-（= `border` 叠 `accent` @ `0.35` 的理论值）。改动后仍建议在 Qt 6.11 与发行版 Qt 上各看一次（见 §5）。
+（= `border` 叠 `accent` @ `0.35` 的理论值）。改动后仍建议在 Qt 6.11 与发行版 Qt 上各看一次（见 五、）。
 
 ### Qt 6.12 的 qmlcachegen 崩溃与绕过（2026-10 实测）
 
@@ -77,7 +77,7 @@ Qt 修复后删除该绕过（条件写在 `app/CMakeLists.txt`，删除点明�
 > 用户侧影响：在 Qt 6.12.x 上**从源码构建** BeAtBench 也会触发同一崩溃，本绕过同样保护他们；
 > 因此绕过放在 `app/CMakeLists.txt` 而不是打包脚本里。
 
-## 3. 安装布局
+## 三、安装布局
 
 布局由 `app/CMakeLists.txt` 的 install 规则单一维护，打包脚本以
 `DESTDIR=<pkgroot> cmake --install` 复用（包格式只加元数据）：
@@ -112,7 +112,7 @@ Windows 包（`beatbench-v<ver>-win64.zip`）与 Linux 包策略相反：**内�
 > 别只看 CI 绿，要本地跑一次 `scripts/package-release.sh`（脚本内置冒烟：GUI 截图 + 皮肤切换
 > 断言 + CLI 自报版本断言）。
 
-## 4. 本地复现
+## 四、本地复现
 
 ```bash
 # 构建 deb（在 Debian 12 容器内；rpm 换 fedora:43；arch 用钉定的快照容器 + 同日
@@ -129,7 +129,7 @@ podman run --rm -v "$PWD/out-linux:/pkgs:ro" -v "$PWD:/src:ro" ubuntu:24.04 \
 Windows 发布包在 CI 之外仍可用 `scripts/package-release.sh` 本地产出（Windows +
 Git Bash + MinGW + Qt 6.11，环境变量见脚本头部注释）。
 
-## 5. 发布流程（release-please 自动发版 → 推 tag 出全平台产物）
+## 五、发布流程（release-please 自动发版 → 推 tag 出全平台产物）
 
 版本推进与 CHANGELOG 已交给 release-please（`.github/workflows/release-please.yml`，
 配置在仓库根 `release-please-config.json` + `.release-please-manifest.json`）：
@@ -159,13 +159,13 @@ Git Bash + MinGW + Qt 6.11，环境变量见脚本头部注释）。
 
 > **2026-10-09 已对 0.3.2 的 arch 包做过一轮实机验收**（Manjaro，发行版 Qt 6.11.2）：
 > `pacman -U` 安装后核对安装清单；空目录下 offscreen 与真实 X11 都能起
-> GUI；悬停高亮用指针注入确认变色（§2）；音频播放正常，但只走 **ALSA** host API（§6）。
+> GUI；悬停高亮用指针注入确认变色（二、）；音频播放正常，但只走 **ALSA** host API（六、）。
 > 未覆盖：deb/rpm 实机、Qt 6.12 真机复现、`namcap`。
 
 > 若 `release.yml` 在 `attach-to-release` 的轮询窗口内没建出 Release，该作业会失败并在
 > 日志里提示——Linux 包仍在 Actions artifact 里，可 `gh release upload` 手动补。
 
-## 6. 边界与非目标
+## 六、边界与非目标
 
 - 未支持：包签名 / GPG、Flatpak / AppImage、AUR / COPR / PPA 等仓库渠道、
   aarch64（仅 x86_64）、macOS 打包、文件类型关联（MIME）。Release 的创建与说明文字
@@ -173,7 +173,7 @@ Git Bash + MinGW + Qt 6.11，环境变量见脚本头部注释）。
 - **Windows 打包归属**：只由 `release.yml` 产出；`package.yml` 不构建 Windows 包。
 - AppStream 元数据已随包提供（软件中心可见）。
 - Linux GUI 交互：**拖拽**在 CI 中只有无头冒烟，仍需人工确认；**悬停高亮**已可用指针注入
-  自动化验证（§2），2026-10-09 在 Manjaro 实机（安装包）通过。
+  自动化验证（二、），2026-10-09 在 Manjaro 实机（安装包）通过。
 - **实时音频输出**：CI 无声卡，仍需人工验证。2026-10-09 Manjaro 实机确认播放正常，但 Linux 上
   PortAudio 只启用 **ALSA** host API（JACK 后端未编译进来；PipeWire / PulseAudio 系统经
   `pipewire-alsa` / `pulse-alsa` 兼容层）——PulseAudio / PipeWire 原生路径与 Windows/macOS

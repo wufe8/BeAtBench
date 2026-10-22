@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 音频后端薄抽象（doc/core-model.md §5.1）：枚举设备/开关流/回调/缓冲参数。
+// 音频后端薄抽象：枚举设备/开关流/回调/缓冲参数。
 // 实现 = PortAudio（WASAPI 默认；ASIO 后置，见 backend_portaudio.cpp）。
 // 注意：本接口零 Qt；回调线程为 PortAudio 创建，回调内必须无锁无分配
 // （voice 混音见 SamplePlayer，用短临界区/无锁结构）。

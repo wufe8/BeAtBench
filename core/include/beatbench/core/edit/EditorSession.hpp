@@ -18,8 +18,8 @@
 namespace beatbench::edit {
 
 /// 编辑会话：持有可编辑文档（Chart）+ undo/redo 栈 + 执行编辑命令。
-/// 纯 core 零 Qt；GUI/CLI/测试三方复用（02 §6.1「命令对象 = 唯一操作面」的文档侧承载）。
-/// 会话状态（Selection/Viewport/Playhead）不入 undo 栈（01 §5.6）——由调用方自持。
+/// 纯 core 零 Qt；GUI/CLI/测试三方复用（doc/core-model.md 二、「命令对象 = 唯一操作面」的文档侧承载）。
+/// 会话状态（Selection/Viewport/Playhead）不入 undo 栈——由调用方自持。
 class EditorSession {
 public:
     EditorSession();
@@ -64,7 +64,7 @@ public:
     std::string undo_label() const;
     std::string redo_label() const;
 
-    /// 选择集（会话状态，不入 undo 栈；doc/01 §5.6）。
+    /// 选择集（会话状态，不入 undo 栈）。
     /// load() 时清空；编辑命令不改 selection（note 值标识天然稳定）。
     const Selection& selection() const { return m_selection; }
     Selection& selection_mut() { return m_selection; }
@@ -115,7 +115,7 @@ private:
 
 // —— 具体编辑命令（edit_commands.cpp 实现） ——
 
-/// 放置 note（doc/ui-design.md §9「视口点放」→ note.put）。
+/// 放置 note（doc/ui-design.md 九、「视口点放」→ note.put）。
 /// 语义：在 (measure, pos) 的 lane 上放 sample 引用的 note。
 /// 逆操作：精确删除该 (measure, pos, lane) 处、匹配 sample 的 note。
 ///
@@ -151,7 +151,7 @@ private:
     std::optional<std::size_t> m_paired_head;
 };
 
-/// 移动 note（doc/ui-design.md §9「视口拖动」→ note.move，merge_with 合并拖动）。
+/// 移动 note（doc/ui-design.md 九、「视口拖动」→ note.move，merge_with 合并拖动）。
 /// 语义：把 (from_measure, from_pos, lane) 处、匹配 sample 的 note 移到目标位置。
 /// 逆操作：移回原位。连续移动同一 note → merge 为一个 undo 步。
 ///
@@ -202,7 +202,7 @@ private:
     Rational m_last_delta{0, 1};
 };
 
-/// 删除 note（doc/ui-design.md §9「选择集删除」→ note.delete）。
+/// 删除 note（doc/ui-design.md 九、「选择集删除」→ note.delete）。
 /// 语义：删除 (measure, pos, lane) 处匹配 sample 的 note。
 /// 逆操作：精确恢复该 note（含原容器位置近似——重插同 (measure,pos,lane,sample)）。
 class DeleteNoteCommand : public EditCommand {
@@ -228,7 +228,7 @@ private:
     std::optional<Event<Note>> m_partner;
 };
 
-/// 量化 note 位置（doc/01 §D「量化(quantize)」→ note.quantize）。
+/// 量化 note 位置（M3「量化(quantize)」设计 → note.quantize）。
 /// 语义：把 (measure, pos, lane, sample) 处匹配 note 的 pos 吸附到 snapNum/snapDen 网格
 /// （目标 pos = k*snapNum/snapDen，k = round(pos*snapDen/snapNum)）。
 /// 只改 pos，**不动 lane/sample/ln_pair**（量化不该拆 LN——头尾各自吸附到网格）。
@@ -255,7 +255,7 @@ private:
     Rational m_new_pos;
 };
 
-/// 变换选中 note（doc/01 §D「镜像/旋转（LR2 式 mirror/random）」→ note.transform）。
+/// 变换选中 note（M3「镜像/旋转（LR2 式 mirror/random）」设计 → note.transform）。
 /// 语义：对选中 note 做轨道变换——mirror = 左右镜像（key i ↔ key max-i+1，scratch/pedal
 /// 不变）；rotate = key 轨循环移位（rotate=1 → key1→key2…key7→key1；负数反向）。
 /// 只改 lane，**不动 pos/sample/ln_pair**（LN 头尾同轨，变换后仍同轨）。
@@ -300,7 +300,7 @@ private:
 /// max_key 由调用方按谱面模式传入（chart_mode_key_count），本函数不感知模式。
 Lane transform_lane(const Lane& lane, bool mirror, int rotate, int max_key);
 
-/// 编辑头部字段（doc/ui-design.md §107「元信息表单」→ meta.edit）。
+/// 编辑头部字段（doc/ui-design.md 六、「元信息表单」→ meta.edit）。
 /// 语义：设置 Chart.meta[key] = value。**value 为空串 = 删除该字段**（元信息表单清空输入）。
 /// 逆操作：恢复原值（原不存在 → 移除；原存在 → 恢复旧值）。
 /// 批量 = CompositeCommand 包多个（一个 undo 步）。键名统一大写（meta 键规范）。
@@ -344,7 +344,7 @@ private:
     bool m_changed = false;
 };
 
-/// 放置/改值 BGA 事件（doc/ui-design.md §9「BGA 面板/视口」→ bga.put）。
+/// 放置/改值 BGA 事件（doc/ui-design.md 九、「BGA 面板/视口」→ bga.put）。
 /// 语义：在 (measure, pos) 的 layer（0=base 1=poor 2=layer 3=layer2）放 sample 引用的
 /// #BMPxx 事件。同 (measure,pos,layer) 已存在 → 改值（同位替换）；否则插入。
 /// 逆操作：恢复旧值 / 删除插入（精确快照）。
@@ -366,7 +366,7 @@ private:
     std::optional<std::size_t> m_applied_index;  ///< 插入下标（invert 用）
 };
 
-/// 删除 BGA 事件（doc/ui-design.md §9「BGA 列表删除」→ bga.delete）。
+/// 删除 BGA 事件（doc/ui-design.md 九、「BGA 列表删除」→ bga.delete）。
 /// 语义：删除 (measure, pos, layer) 的 BGA 事件；不存在 → 无操作。
 /// 逆操作：精确恢复（快照 + 原位）。
 class BgaDeleteCommand : public EditCommand {

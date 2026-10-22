@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // M6.3 分片导出布局（纯计算，零 Qt/零音频）：#WAV id 分配 + 切片→拍位 + 可复制 BMS raw。
 //
-// 定位（doc/core-model.md §3 M6.3）：切音工作台把参考音频切成 one-shot 分片并导出为 .wav，
+// 定位（doc/core-model.md 三、 M6.3）：切音工作台把参考音频切成 one-shot 分片并导出为 .wav，
 // 再按拍位铺进 ch01（BGM）重建谱面。本模块 = 布局层（与文件 I/O / 音频解码解耦）：
 // - 分配最低空闲 #WAV id（跳过谱面已占用；支持「导出起始 id」连续分配）；
 // - 把每个切片起点（区间秒）换算成拍位（measure + pos）；

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 切片位置规划（M6.2 切音）：从「位置源」（网格 / MIDI note）推导切片边界。
 //
-// 定位（doc/core-model.md §3）：切片位置源可切换——网格（BPM/拍细分，确定性、可单测）先行，
+// 定位（doc/core-model.md 三、）：切片位置源可切换——网格（BPM/拍细分，确定性、可单测）先行，
 // MIDI 为推荐音乐源（note on/off 天然给边界）。本模块 = 纯计算（零 Qt/零依赖）：
 // 输入位置源配置/MidiFile → 输出切片表（start/end 秒）。offset（全局）在此应用：
 // 秒 = 原始秒 + offsetSec（正 = MIDI/网格相对音频延后；用户 2026-09 拍板：先全局）。

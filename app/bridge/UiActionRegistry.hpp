@@ -2,7 +2,7 @@
 // UI 动作注册表（doc/action-registry.md 操作注册规范化）。
 // 把硬编码 UI 动作抽为「动作 id → 处理器」注册表，为皮肤系统（L2/L3）与扩展性铺路。
 // QML 经 context property `uiActions` 只读访问 + 触发（与 ThemeManager / CommandDispatcher 同层）。
-// 双语言纪律（doc/skin-system.md §2）：本类只提供动作注册与触发，不含 UI 表现逻辑。
+// 双语言纪律（doc/skin-system.md 二、）：本类只提供动作注册与触发，不含 UI 表现逻辑。
 #pragma once
 
 #include <functional>
@@ -38,7 +38,7 @@ struct UiActionDef {
     QString prefix;          // 工具条按钮前缀文本（如 "1 "；默认空）
     QString scope;           // 快捷键作用域（""=全局；"edit"/"slice"=页面）。
                              // 冲突判定只在作用域重叠时生效：全局 ↔ 一切；同作用域互斥；
-                             // edit ↔ slice 不冲突（编辑页/切音页 Space 各绑一次，doc/action-registry.md §11）。
+                             // edit ↔ slice 不冲突（编辑页/切音页 Space 各绑一次，doc/action-registry.md 九、）。
 };
 
 class UiActionRegistry : public QObject {
@@ -102,14 +102,14 @@ public:
     /// 按类别过滤的动作 id 列表。
     Q_INVOKABLE QStringList idsByCategory(const QString& category) const;
 
-    /// 工具条分组访问器（doc/action-registry.md §11 工具条注册化）：toolbar 分组可从皮肤/注册表查询。
+    /// 工具条分组访问器（doc/action-registry.md 九、 工具条注册化）：toolbar 分组可从皮肤/注册表查询。
     Q_INVOKABLE QString toolbar(const QString& id) const;
     Q_INVOKABLE QString control(const QString& id) const;   // 工具条控件（"button"/"check"）
     Q_INVOKABLE QString tooltip(const QString& id) const;   // 工具条 hover 提示
     Q_INVOKABLE QString value(const QString& id) const;     // 工具选择值（互斥 active 判定）
     Q_INVOKABLE QString prefix(const QString& id) const;    // 按钮前缀（如 "1 "）
 
-    /// 按工具条分组过滤的动作 id 列表（doc/action-registry.md §11 工具条枚举渲染）。
+    /// 按工具条分组过滤的动作 id 列表（doc/action-registry.md 九、 工具条枚举渲染）。
     Q_INVOKABLE QStringList idsByToolbar(const QString& toolbar) const;
 
     // ---- 触发（皮肤壳 / 快捷键唯一入口） ----

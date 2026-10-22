@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 变换/量化命令测试：note.quantize（吸附网格）/ note.transform（镜像/旋转）的
 // apply/invert 精确往返、批量 Composite 一个 undo 步、协议 dispatch。
-// 依据 doc/01 §D「量化/镜像/旋转（LR2 式 mirror/random）」。
+// 依据 M3 设计「量化/镜像/旋转（LR2 式 mirror/random）」。
 #include <gtest/gtest.h>
 
 #include <algorithm>

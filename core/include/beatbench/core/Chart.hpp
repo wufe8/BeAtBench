@@ -40,7 +40,7 @@ enum class IdBase : std::uint8_t {
 };
 
 /// 权威谱面模型（格式无关）。任何 codec 都能填充；
-/// 未知头部字段与格式扩展 → extensions 透传，保证往返保真（对齐稿 02 §4）。
+/// 未知头部字段与格式扩展 → extensions 透传，保证往返保真（doc/core-model.md）。
 struct Chart {
     std::unordered_map<std::string, std::string> meta;  ///< 头部字段，键名大写、值原样
     /// 定义表：键 = (kind, id)。BMS 的 36 进制编号由 bms codec 映射；

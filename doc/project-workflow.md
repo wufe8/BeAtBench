@@ -1,9 +1,9 @@
 # M7 设计：项目化工作流（Project Workspace）
 
-> 状态：**未实现的设计草案**。以下项目模型、`project.*` 命令、界面与验收目标均为规划，不是当前可用能力；排期权威见 `doc/development.md` §7。
-> 关联：`doc/core-model.md`（模型/命令架构）、`doc/command-protocol.md` §3（JSON 协议）、`doc/skin-system.md`（GUI 分层）。
+> 状态：**未实现的设计草案**。以下项目模型、`project.*` 命令、界面与验收目标均为规划，不是当前可用能力；排期权威见 `doc/development.md` 七、。
+> 关联：`doc/core-model.md`（模型/命令架构）、`doc/command-protocol.md` 三、（JSON 协议）、`doc/skin-system.md`（GUI 分层）。
 
-## 1. 背景与目标
+## 一、背景与目标
 
 ### 要解决的问题
 
@@ -31,7 +31,7 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 - 不在 M7 拆 `SliceWorkspace`（M8）；M7 的 `#WAV` 占用走 core 查询，**不进 SliceWorkspace**。
 - 不做 i18n / 试玩判定 / L2 皮肤（M10+）。
 
-## 2. 领域模型（core 新增 `project/`，格式无关、零 Qt）
+## 二、领域模型（core 新增 `project/`，格式无关、零 Qt）
 
 | 类型 | 关键字段 | 说明 |
 |---|---|---|
@@ -46,7 +46,7 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 - 扫描先只读头部（`#TITLE`/`#WAV`/`#BPM`/`#PLAYLEVEL` 等），主数据按需后台解析（大包不卡 UI）。
 - 识别：扩展名 `.bms/.bme/.bml/.pms` + 头部有效性；编码沿用现有检测。
 
-## 3. 命令（core/command，headless 可测）
+## 三、命令（core/command，headless 可测）
 
 | 命令 | 入参 | 出参 | 说明 |
 |---|---|---|---|
@@ -58,7 +58,7 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 
 > `project.compare` / `project.batch` 必须是纯 core 能力（CLI 可直接用），GUI 只做展示与确认。
 
-## 4. 功能分期
+## 四、功能分期
 
 ### M7.1 文件夹导入 + 项目面板（基础，必做）
 
@@ -102,14 +102,14 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 - core 查询命令：哪个 wav 被哪些 note/谱面引用、冲突、缺失。
 - 项目面板/采样面板展示；**不进 SliceWorkspace**（保持单谱切音职责边界）。
 
-## 5. UI 落点
+## 五、UI 落点
 
 - **项目面板**（左 dock 或独立页）：谱面表 + 资源表 + 操作按钮。
 - **对比视图**：统计卡片 + 叠加时间轴 + A/B 切换。
 - **顶部多文档标签条**（`doc/skin-system.md` surface 已规划）。
 - 新 QML 文件必须加入 `app/CMakeLists.txt` 的 `QML_FILES` 显式列表。
 
-## 6. 关键决策（需拍板）
+## 六、关键决策（需拍板）
 
 1. **Project 不合并文档**——保证 undo/保存语义不变。
 2. 多谱面关系先按“文件 + 头部 DIFFICULTY/PLAYLEVEL”归类，不做数据库/难度变体元数据。
@@ -118,13 +118,13 @@ BMS/音游的天然单位不是“一个 .bms 文件”，而是**一首歌的�
 5. 打包提供可选“严格模式”（引用/大小写/编码全过才允许打包）。
 6. 大包性能：先头部扫描，统计后台补。
 
-## 7. 验收基线
+## 七、验收基线
 
 - core：`project.scan/verify/compare/batch/pack` 单测，不依赖 `local/`。
 - GUI 冒烟：打开文件夹 → 列谱面 → 开多个 → 对比 → 批量 → 打包，出截图。
-- 完成后同步 `doc/development.md` §6 状态与 §7 里程碑表。
+- 完成后同步 `doc/development.md` 六、 状态与 七、 里程碑表。
 
-## 8. 开放问题
+## 八、开放问题
 
 - 一首歌的“项目”边界：仅单层文件夹，还是递归（BMS 大包/多曲合集）？
 - 对比是否要支持“同谱不同版本”（文件历史 / 改前改后 diff）？

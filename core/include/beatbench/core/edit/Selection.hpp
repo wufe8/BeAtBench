@@ -12,7 +12,7 @@ namespace beatbench::edit {
 
 /// note 值标识（选择集/剪贴板元素）：(measure, pos, lane, sample)。
 /// 用值而非容器下标：编辑（插入/删除/移动）会改变下标，值标识天然鲁棒——
-/// undo 后 note 回来了，selection 仍指向它（01 §5.6：选择是会话状态，不入 undo）。
+/// undo 后 note 回来了，selection 仍指向它（选择是会话状态，不入 undo）。
 /// sub_line：BGM 行序号（仅 lane.kind==Bgm 有意义）。BMS 同小节多行 ch01 的 note 在
 /// (measure,pos,lane,sample) 上完全同值，**必须带行号消歧**（2026-09 用户反馈：多行 BGM
 /// note 无法精确定位/移动）。非 BGM note = 0（不参与匹配）。
@@ -37,7 +37,7 @@ struct NoteRef {
 };
 
 /// 选择集：无序 note 集合（有序容器便于确定性输出/对比）。
-/// 会话状态，不入 undo 栈（doc/01 §5.6）；由 EditorSession 持有。
+/// 会话状态，不入 undo 栈；由 EditorSession 持有。
 class Selection {
 public:
     void add(NoteRef ref) { m_refs.insert(std::move(ref)); }

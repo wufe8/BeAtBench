@@ -3,7 +3,7 @@
 > 面向单人开发的轻量流程：**目标是少一次“事后补 commit”**。
 > 相关脚本：`scripts/check.sh`、`scripts/check-version.sh`、`scripts/release.sh`、`scripts/backup.sh`、`.githooks/pre-push`。
 
-## 1. 分支
+## 一、分支
 
 | 分支 | 用途 | 规则 |
 |---|---|---|
@@ -12,11 +12,11 @@
 | `fix/*` | 发布线独立修复 | 从 `master` 切，只包含该基线所需修复；是否及何时同步 `dev` 另行安排 |
 | `feat/*`（可选） | 大改动的隔离 | 从 `dev` 切，改完合回 `dev` |
 
-流程：本地开发并提交 → 自测（`scripts/check.sh`）→ 获授权后推送并开 PR → 合入发布线；发布放行流程见 §3。
+流程：本地开发并提交 → 自测（`scripts/check.sh`）→ 获授权后推送并开 PR → 合入发布线；发布放行流程见 三、。
 
 本地提交不等于推送授权；公开源码与规格可以进入主仓库，会话记录和开发流水不进入公开分支。
 
-## 2. 日常门禁（替代“手动 CI”）
+## 二、日常门禁（替代“手动 CI”）
 
 ```bash
 scripts/check.sh                 # 全量：配置 + 构建 + ctest + GUI 无头冒烟（含 QML 作用域告警断言）
@@ -31,7 +31,7 @@ scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测
 - 预设（`CMakePresets.json`）：`cmake --preset core|gui|check`；本机路径在 `CMakeUserPresets.json`（gitignore）里。
 - CI（`.github/workflows/ci.yml`）是同一套检查的远端副本：**本地快档 + CI 全量**，两者不重复造轮子。
 
-## 3. 发布（版本与产物）
+## 三、发布（版本与产物）
 
 发布操作以 [打包与发布](packaging.md) 五、为权威：release-please 提出版本 PR，人工放行后产生 tag 与发布产物，不将日常提交等同于发布授权。
 
@@ -45,7 +45,7 @@ gh workflow run package.yml --ref <分支>
 - `scripts/package-release.sh` 是 Windows 打包的共用实现；本地 `scripts/release.sh` 与 CI 均调用它。
 - Linux deb/rpm/arch 使用发行版系统 Qt；构建基线、兼容性与安装布局见 `doc/packaging.md`。
 
-## 4. 备份（单机单盘的两道保险）
+## 四、备份（单机单盘的两道保险）
 
 ```bash
 scripts/backup.sh            # 主仓库：先提交未保存改动，再生成 git bundle；运行前检查工作树

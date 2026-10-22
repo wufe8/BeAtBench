@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // beatbench：Qt Quick/QML GUI 入口（M2，页面式工作区，doc/ui-design.md v0.2）。
 // 桥接对象 CommandDispatcher 以 context property `beatbench` 暴露给 QML；
-// QML 只与 JSON 信封字符串交换（doc/command-protocol.md §3 协议不变）。
-// 主题：Fusion + 深色调色板 + ThemeManager token（context property `Theme`，doc/project-workflow.md §4 禁硬编码）。
+// QML 只与 JSON 信封字符串交换（doc/command-protocol.md 三、 协议不变）。
+// 主题：Fusion + 深色调色板 + ThemeManager token（context property `Theme`，doc/project-workflow.md 四、 禁硬编码）。
 // 调试：--screenshot <png> 渲染完成后 grabWindow 保存并退出（视觉迭代/验收用）。
 #include <QCoreApplication>
 #include <QDir>
@@ -66,7 +66,7 @@ static void messageToLog(QtMsgType type, const QMessageLogContext&, const QStrin
 }
 
 // 系统控件本地化（FileDialog 等 Qt 内置文本 → 中文）：加载 Qt 自带 qtbase_zh_CN.qm。
-// 应用内全文 i18n（qsTr → .ts/.qm 管线）按里程碑 M8 启动，本步只做「基础准备」（doc/development.md §8 #9）。
+// 应用内全文 i18n（qsTr → .ts/.qm 管线）按里程碑 M8 启动，本步只做「基础准备」（doc/development.md 八、 #9）。
 static void loadNativeTranslations(QGuiApplication& app) {
     auto* tr = new QTranslator(&app);
     const QString path = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
                                                  static_cast<int>(beatbench::kVersion.size())));
     qInstallMessageHandler(messageToLog);  // 调试期：Qt 消息落盘（GUI 无控制台）
 
-    // 全局深色基线（doc/skin-system.md §2）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；
+    // 全局深色基线（doc/skin-system.md 二、）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；
     // 值全部来自 ThemeManager token（单一数据源）。
     QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
     beatbench::app::SampleListModel sampleModel;
     beatbench::app::LintListModel lintModel;
     // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
-    // 与 info/check 命令共用同一 core 解析入口（doc/command-protocol.md §3.6）
+    // 与 info/check 命令共用同一 core 解析入口（doc/command-protocol.md 三、6.）
     beatbench::app::ChartSession chartSession;
     // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
     beatbench::app::AudioEngine audioEngine;
@@ -301,7 +301,7 @@ int main(int argc, char** argv) {
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
     audioEngine.setChartSession(&chartSession);
 
-    // ---- 动作注册（doc/action-registry.md §5/§7）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
+    // ---- 动作注册（doc/action-registry.md 五、/九、）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
     // 是函数式绑定，只在首帧求值一次（注册表为空则取到空串）。若在 loadFromModule 后注册，
     // 菜单项文字/快捷键序列已成空 → 不可见、快捷键不触发（2026-09 用户实测 A1/A3）。
     // handler 在此刻拿不到 QML 根（未加载），故**惰性解析**：invoke 时经 engine 取根再调
@@ -351,7 +351,7 @@ int main(int argc, char** argv) {
         uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit", nullptr, qml("uiActionDelete")});
         uiActions.addSeparator(QStringLiteral("edit"));  // 分隔线：编辑操作 ↔ 播放/渲染/取消
         // 编辑页播放/渲染/取消（2026-09 快捷键收尾）：进注册表 → 设置页可改绑。
-        // scope="edit" 与切音页 slice.playPause 的 Space 作用域隔离（doc/action-registry.md §11）。
+        // scope="edit" 与切音页 slice.playPause 的 Space 作用域隔离（doc/action-registry.md 九、）。
         uiActions.add(UiActionDef{.id = "edit.playPause",
                                   .label = QCoreApplication::tr("播放/暂停（谱面）"),
                                   .shortcut = "Space",
@@ -376,7 +376,7 @@ int main(int argc, char** argv) {
                                   .shortcut = "Ctrl+,",
                                   .category = "app",
                                   .handler = qml("openSettings")});
-        // 视图动作（checkable：勾选态 QML 自持，注册表仅声明；见 doc/action-registry.md §12）
+        // 视图动作（checkable：勾选态 QML 自持，注册表仅声明；见 doc/action-registry.md 一、2）
         uiActions.add(UiActionDef{"view.toggleGrid", QCoreApplication::tr("网格"), "", "view", nullptr, qml("toggleGrid"), true});
         uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "", "view", nullptr, qml("uiActionToggleChannelIds"), true});
         uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view", nullptr, qml("uiActionToggleExtras"), true});
@@ -475,7 +475,7 @@ int main(int argc, char** argv) {
     // 显式绑 Theme token（`ApplicationWindow.color` / `MenuBar.background`），不依赖 palette 继承。
     app.setPalette(pal);
 
-    // ---- 运行时换肤（doc/skin-system.md §3.3）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定重算。
+    // ---- 运行时换肤（doc/skin-system.md 三、3.）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定重算。
     // 应用级 QPalette（Fusion 内置控件：菜单/对话框/默认按钮）与 token 脱钩，需在此同步重建——
     // 把 theme token 重建 QPalette 并 set 到 qApp（见上方 pal 构建；抽出函数复用）。 ----
     const auto rebuildPalette = [&theme, &app] {

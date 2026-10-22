@@ -361,7 +361,7 @@ QString UiActionRegistry::conflictId(const QString& id, const QString& seq) cons
     if (seq.isEmpty()) return {};
     auto* self = findConst(id);
     const QString selfScope = self ? self->scope : QString();
-    // 作用域隔离（doc/action-registry.md §11）：空 = 全局，与一切重叠；不同页面作用域互不冲突
+    // 作用域隔离（doc/action-registry.md 九、）：空 = 全局，与一切重叠；不同页面作用域互不冲突
     //（编辑页 Space 与切音页 Space 各绑一次，不算冲突）。
     const auto overlaps = [](const QString& a, const QString& b) {
         return a.isEmpty() || b.isEmpty() || a == b;

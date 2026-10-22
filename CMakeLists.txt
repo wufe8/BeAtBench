@@ -52,7 +52,7 @@ add_subdirectory(audio)
 # CLI：无第三方依赖，始终构建
 add_subdirectory(cli)
 
-# GUI：找不到 Qt 时自动跳过（见 doc/development.md §构建）
+# GUI：找不到 Qt 时自动跳过（见 doc/development.md 四、）
 if(BEATBENCH_BUILD_APP)
   find_package(Qt6 QUIET COMPONENTS Qml Quick QuickControls2)
   if(Qt6_FOUND)
