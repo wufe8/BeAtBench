@@ -5,7 +5,7 @@
 `app/main.cpp` 以 rootContext context property 注入 `Theme`（连同 `beatbench`/`uiActions` 等），
 QML 工具链（qmlcachegen/qmllint/qmlls）对 context property 天然不可见，`qt_add_qml_module`
 自带的 `all_qmllint` 目标在存量上直接失败（全部为 Theme 引用的 unqualified access，
-按 warning 级别即失败）。Theme 迁移 `QML_SINGLETON`/`QML_NAMED_ELEMENT` 属 doc/08 范围重构，
+按 warning 级别即失败）。Theme 迁移 `QML_SINGLETON`/`QML_NAMED_ELEMENT` 属 doc/skin-system.md 范围重构，
 不属于机械清零。
 
 ## 出口条件
