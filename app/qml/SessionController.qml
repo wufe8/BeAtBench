@@ -7,7 +7,7 @@
 // 依赖注入：Main 实例化时设置 window（宿主 ApplicationWindow）与 editPage（EditPage 实例）。
 //       逻辑函数内部照旧用 window.*（读会话状态）与 editPage.*（视图操作）；
 //       chartSession/sampleModel/lintModel/beatbench 是全局 context property，可直接访问。
-// 双语言纪律（doc/08 §2）：本组件是「业务逻辑 + 状态主机」，不含 UI 元素；UI 信号经 Main 委托进。
+// 双语言纪律（doc/skin-system.md 二、）：本组件是「业务逻辑 + 状态主机」，不含 UI 元素；UI 信号经 Main 委托进。
 import QtQuick
 
 QtObject {

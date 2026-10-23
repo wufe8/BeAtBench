@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 切片位置规划测试（M6.2）：网格（BPM/细分/offset/时长夹逼/非法参数）+
 // MIDI（note → 切片、offset 应用、时长夹逼）+ slice.detect 命令 dispatch。
+#include "beatbench/core/slice/Slice.hpp"
+
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -15,17 +17,16 @@
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/midi/MidiFile.hpp"
-#include "beatbench/core/slice/Slice.hpp"
 
-using beatbench::cmd::Registry;
 using beatbench::cmd::register_builtin_commands;
+using beatbench::cmd::Registry;
 using beatbench::json::Json;
 using beatbench::midi::MidiFile;
 using beatbench::midi::MidiNote;
 using beatbench::slice::GridConfig;
-using beatbench::slice::SlicePlan;
 using beatbench::slice::plan_from_grid;
 using beatbench::slice::plan_from_midi;
+using beatbench::slice::SlicePlan;
 
 namespace {
 
@@ -33,17 +34,15 @@ bool near(double a, double b, double eps = 1e-9) { return std::fabs(a - b) <= ep
 
 // 单音符 MIDI 字节（与 midi_parse_test 同构）：C4 ch0 0→480tick，tempo 500000
 const std::vector<std::uint8_t> kOneNoteMidi = {
-    'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 1, 0, 2, 0x01, 0xE0,
-    'M', 'T', 'r', 'k', 0, 0, 0, 11, 0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20,
-    0x00, 0xFF, 0x2F, 0x00,
-    'M', 'T', 'r', 'k', 0, 0, 0, 13, 0x00, 0x90, 0x3C, 0x64, 0x83, 0x60, 0x80,
-    0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00};
+    'M',  'T',  'h',  'd',  0,    0,    0,    6,    0,    1,    0,    2,    0x01, 0xE0,
+    'M',  'T',  'r',  'k',  0,    0,    0,    11,   0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1,
+    0x20, 0x00, 0xFF, 0x2F, 0x00, 'M',  'T',  'r',  'k',  0,    0,    0,    13,   0x00,
+    0x90, 0x3C, 0x64, 0x83, 0x60, 0x80, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00};
 
 std::filesystem::path temp_dir() {
     static const std::string sub =
-        "bb_slice_test_" +
-        std::to_string(static_cast<unsigned long long>(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
+        "bb_slice_test_" + std::to_string(static_cast<unsigned long long>(
+                               std::chrono::steady_clock::now().time_since_epoch().count()));
     const auto dir = std::filesystem::temp_directory_path() / sub;
     std::filesystem::create_directories(dir);
     return dir;
@@ -56,7 +55,7 @@ std::filesystem::path temp_dir() {
 TEST(SlicePlan, GridBasic) {
     GridConfig cfg;
     cfg.bpm = 120.0;
-    cfg.subdivision = 4;   // 16 分（120BPM → cell 0.125s）
+    cfg.subdivision = 4;  // 16 分（120BPM → cell 0.125s）
     cfg.durationSec = 1.0;
     const SlicePlan p = plan_from_grid(cfg);
     ASSERT_EQ(p.slices.size(), 8u);
@@ -83,7 +82,7 @@ TEST(SlicePlan, GridOffset) {
 TEST(SlicePlan, GridTriplet) {
     GridConfig cfg;
     cfg.bpm = 120.0;
-    cfg.subdivision = 3;   // 三连
+    cfg.subdivision = 3;  // 三连
     cfg.durationSec = 0.2;
     const SlicePlan p = plan_from_grid(cfg);
     ASSERT_EQ(p.slices.size(), 2u);
@@ -231,17 +230,19 @@ TEST(SliceDetectCommand, BadSourceAndArgs) {
     Json a1 = Json::object();
     a1.set("source", "noise");
     EXPECT_EQ(err_of([&] {
-        Json req = Json::object();
-        req.set("command", "slice.detect");
-        req.set("args", a1);
-        return req;
-    }()), "bad_args");
+                  Json req = Json::object();
+                  req.set("command", "slice.detect");
+                  req.set("args", a1);
+                  return req;
+              }()),
+              "bad_args");
     Json a2 = Json::object();
     a2.set("source", "midi");  // 缺 file
     EXPECT_EQ(err_of([&] {
-        Json req = Json::object();
-        req.set("command", "slice.detect");
-        req.set("args", a2);
-        return req;
-    }()), "bad_args");
+                  Json req = Json::object();
+                  req.set("command", "slice.detect");
+                  req.set("args", a2);
+                  return req;
+              }()),
+              "bad_args");
 }

@@ -4,7 +4,7 @@
 // M6.3c UI 改良（用户 2026-09）：控件瘦身 + 左 dock（MIDI 音符/切片/网格三页签，
 // 网格页留待手动切片）、raw 右 dock（IDE 式输出）、「MIDI 线」Ctrl 临时开关
 // （网格模式参考 MIDI 线，为手动切片做准备）、导出加「起始小节」。
-// 数据侧全部在 SliceWorkspace（C++）；本页只做装配与交互（doc/08 §2 双语言纪律）。
+// 数据侧全部在 SliceWorkspace（C++）；本页只做装配与交互（doc/skin-system.md 二、 双语言纪律）。
 // woslicerII 参考（键盘 + 网格节拍 + 末端 fade + 無音切）→ M6.2 切分交互时实现。
 import QtQuick
 import QtQuick.Controls

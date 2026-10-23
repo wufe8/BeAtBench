@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // All launch requests are intercepted; these tests never start external applications.
 #include <gtest/gtest.h>
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -9,8 +10,9 @@
 #include <QUuid>
 #include <memory>
 #include <vector>
-#include "bridge/ChartFileActions.hpp"
+
 #include "beatbench/core/edit/SessionRegistry.hpp"
+#include "bridge/ChartFileActions.hpp"
 
 namespace {
 using beatbench::app::ChartFileActions;
@@ -24,12 +26,13 @@ QByteArray bytes(const QString& path) {
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
 }
 class ChartFileActionsTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         previousActive = session_registry().active_id();
         const QString root = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
         ASSERT_TRUE(QDir().mkpath(root));
-        temporary = std::make_unique<QTemporaryDir>(QDir(root).filePath("chart-file-actions-XXXXXX"));
+        temporary =
+            std::make_unique<QTemporaryDir>(QDir(root).filePath("chart-file-actions-XXXXXX"));
         ASSERT_TRUE(temporary->isValid());
         pathA = temporary->filePath(QString::fromUtf8("谱面 A, 100% & data.bms"));
         pathB = temporary->filePath("B.pms");
@@ -46,7 +49,7 @@ protected:
             return launchError;
         });
         QObject::connect(actions.get(), &ChartFileActions::statusMessage,
-            [this](const QString& message) { status = message; });
+                         [this](const QString& message) { status = message; });
     }
     void TearDown() override {
         actions.reset();
@@ -98,7 +101,8 @@ TEST_F(ChartFileActionsTest, MissingFileDirectoryAndEmbeddedNullAreRejected) {
 
 TEST_F(ChartFileActionsTest, ResolvesCurrentActiveDocumentWithoutSavingOrChangingUndo) {
     auto* session = session_registry().by_id(a);
-    ASSERT_TRUE(session->exec(std::make_unique<beatbench::edit::MetaEditCommand>("TITLE", "unsaved")));
+    ASSERT_TRUE(
+        session->exec(std::make_unique<beatbench::edit::MetaEditCommand>("TITLE", "unsaved")));
     const auto revision = session->revision();
     const auto undo = session->undo_depth();
     ASSERT_TRUE(session->is_dirty());
@@ -141,13 +145,15 @@ TEST_F(ChartFileActionsTest, TextEditorEitherUsesInjectedLauncherOrExplicitlyRep
 
 TEST(ChartFileLaunchPolicy, WindowsEditorNeverUsesFileAssociationOrShellCommand) {
     const QString path = QString::fromUtf8("C:/songs/谱面, a & calc.exe %PATH%.bms");
-    const auto request = ChartFileActions::launchRequest(Action::EditText, Platform::Windows, path, "C:/Windows/System32");
+    const auto request = ChartFileActions::launchRequest(Action::EditText, Platform::Windows, path,
+                                                         "C:/Windows/System32");
     EXPECT_EQ(request.kind, Kind::Process);
     EXPECT_EQ(request.program, "C:/Windows/System32/notepad.exe");
     ASSERT_EQ(request.arguments.size(), 1);
     EXPECT_EQ(QDir::fromNativeSeparators(request.arguments.first()), path);
     EXPECT_TRUE(request.url.isEmpty());
-    EXPECT_EQ(ChartFileActions::launchRequest(Action::EditText, Platform::Windows, path).kind, Kind::Unsupported);
+    EXPECT_EQ(ChartFileActions::launchRequest(Action::EditText, Platform::Windows, path).kind,
+              Kind::Unsupported);
 }
 
 TEST(ChartFileLaunchPolicy, WindowsRevealUsesNativeFileIdentityNotParsedExplorerArguments) {
@@ -168,21 +174,24 @@ TEST(ChartFileLaunchPolicy, MacEditorExplicitlyUsesTextEditAndSeparatePath) {
 }
 
 TEST(ChartFileLaunchPolicy, OtherPlatformsOpenOnlyDirectoryUrlOrKnownTextEditor) {
-    const QString path = QDir::current().absoluteFilePath(QString::fromUtf8("歌曲 100% # &/chart.bms"));
+    const QString path =
+        QDir::current().absoluteFilePath(QString::fromUtf8("歌曲 100% # &/chart.bms"));
     const auto reveal = ChartFileActions::launchRequest(Action::Reveal, Platform::Other, path);
     EXPECT_EQ(reveal.kind, Kind::DirectoryUrl);
     EXPECT_EQ(reveal.url.toLocalFile(), QFileInfo(path).absolutePath());
     EXPECT_TRUE(reveal.program.isEmpty());
-    const auto unavailable = ChartFileActions::launchRequest(Action::EditText, Platform::Other, path);
+    const auto unavailable =
+        ChartFileActions::launchRequest(Action::EditText, Platform::Other, path);
     EXPECT_EQ(unavailable.kind, Kind::Unsupported);
     EXPECT_FALSE(unavailable.error.isEmpty());
-    const auto editor = ChartFileActions::launchRequest(Action::EditText, Platform::Other, path, {}, "/usr/bin/gedit");
+    const auto editor = ChartFileActions::launchRequest(Action::EditText, Platform::Other, path, {},
+                                                        "/usr/bin/gedit");
     EXPECT_EQ(editor.kind, Kind::Process);
     EXPECT_EQ(editor.program, "/usr/bin/gedit");
     EXPECT_EQ(editor.arguments, QStringList({"--", path}));
     EXPECT_TRUE(editor.url.isEmpty());
 }
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);

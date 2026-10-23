@@ -2,7 +2,7 @@
 // 属性检查器（右 Dock「属性」标签页，M2/M3 边界）：显示当前选中 note 集合的详情。
 // 纯表现 + 只读（数据 = EditPage.selection，由 Main 的 selectionRefs 回填，与 ChartView 同源）；
 // 「修改采样…」按钮 = M3 编辑入口（转发 noteEditRequested → Main 弹 note.setSample 对话框）。
-// 双语言纪律（doc/08 §2）：id/通道号语义在 C++（chartSession.idTextOf/laneChannel），
+// 双语言纪律（doc/skin-system.md 二、）：id/通道号语义在 C++（chartSession.idTextOf/laneChannel），
 // QML 只做展示与分发；不直接 dispatch 编辑命令。
 import QtQuick
 import QtQuick.Controls

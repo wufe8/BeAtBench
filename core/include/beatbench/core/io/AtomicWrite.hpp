@@ -20,8 +20,7 @@ struct WriteResult {
 WriteResult atomic_write_file(const std::filesystem::path& dest, const void* data,
                               std::size_t size);
 
-inline WriteResult atomic_write_file(const std::filesystem::path& dest,
-                                     std::string_view text) {
+inline WriteResult atomic_write_file(const std::filesystem::path& dest, std::string_view text) {
     return atomic_write_file(dest, text.data(), text.size());
 }
 

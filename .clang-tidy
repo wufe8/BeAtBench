@@ -1,0 +1,16 @@
+# clang-tidy 门禁配置：一方代码（core/audio/cli）静态检查，CI 全量 --warnings-as-errors 拦截。
+# 禁用项（有意设计，勿随手打开）：
+# - bugprone-signed-bitwise：JSON/编码层的 int 位运算为有意实现
+# - bugprone-easily-swappable-parameters：BMS 接口按位置传参为既有契约
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-function-size,
+  readability-function-cognitive-complexity,
+  -bugprone-signed-bitwise,
+  -bugprone-easily-swappable-parameters,
+CheckOptions:
+  - key: readability-function-size.NestingThreshold
+    value: '4'
+HeaderFilterRegex: '/(core|audio|cli)/'

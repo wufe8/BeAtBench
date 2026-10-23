@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -64,9 +64,12 @@ Json selection_json(const std::vector<NoteRef>& refs) {
         Json lane = Json::object();
         lane.set("player", static_cast<std::int64_t>(r.lane.player));
         std::string kind = "key";
-        if (r.lane.kind == LaneKind::Scratch) kind = "scratch";
-        else if (r.lane.kind == LaneKind::Pedal) kind = "pedal";
-        else if (r.lane.kind == LaneKind::Bgm) kind = "bgm";
+        if (r.lane.kind == LaneKind::Scratch)
+            kind = "scratch";
+        else if (r.lane.kind == LaneKind::Pedal)
+            kind = "pedal";
+        else if (r.lane.kind == LaneKind::Bgm)
+            kind = "bgm";
         lane.set("kind", kind);
         lane.set("index", static_cast<std::int64_t>(r.lane.index));
         item.set("lane", std::move(lane));
@@ -90,9 +93,9 @@ TEST(LnMoveRegion, BothSelectedKeepsPair) {
     req.set("command", "note.moveRegion");
     Json args = Json::object();
     args.set("selection", selection_json({
-        {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
-        {1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1},
-    }));
+                              {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                              {1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1},
+                          }));
     Json delta = Json::object();
     delta.set("measure", 1);
     Json dpos = Json::object();
@@ -139,9 +142,9 @@ TEST(LnMoveRegion, BothSelectedCrossLaneKeepsPair) {
     req.set("command", "note.moveRegion");
     Json args = Json::object();
     args.set("selection", selection_json({
-        {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
-        {1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1},
-    }));
+                              {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                              {1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1},
+                          }));
     Json delta = Json::object();
     delta.set("measure", 0);
     Json dpos = Json::object();

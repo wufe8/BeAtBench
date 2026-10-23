@@ -3,14 +3,13 @@
 // DocumentService 统一持有各文档桥；主视图只切换当前项，副视图可固定另一项。
 // 空 sessionId 的跟随 active 行为仅保留兼容既有桥层调用/测试。
 // 文档由 core EditorSession 持有；编辑后 refresh() 追踪本实例版本，不自行解析文件。
-// 双语言纪律（doc/08 §2）：数据加载/持有/指纹判定在 C++（QML 只消费信号）。
+// 双语言纪律（doc/skin-system.md 二、）：数据加载/持有/指纹判定在 C++（QML 只消费信号）。
 #pragma once
 
 #include <QObject>
 #include <QString>
 #include <QThreadPool>
 #include <QVariantMap>
-
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -18,9 +17,9 @@
 #include <mutex>
 #include <string>
 
+#include "beatbench/audio/WaveformPyramid.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/timing/TimingEngine.hpp"
-#include "beatbench/audio/WaveformPyramid.hpp"
 
 namespace beatbench::app {
 
@@ -33,13 +32,13 @@ class ChartSession : public QObject {
     Q_PROPERTY(int measureCount READ measureCount NOTIFY documentChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
 
-public:
+   public:
     explicit ChartSession(QObject* parent = nullptr);
     ~ChartSession() override;
     QString sessionId() const { return m_boundSessionId; }
     void setSessionId(const QString& id);
 
-    /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/06 §3.6）。
+    /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/command-protocol.md 三、6.）。
     /// 存在 Error 级诊断 → 失败并记录 errorMessage（协议语义：read_failed）。
     Q_INVOKABLE bool openChart(const QString& path);
     /// 2026-09 新建空谱面：走协议 session.new（空 chart 载入活动会话）；返回成功后 QML 重置
@@ -136,8 +135,7 @@ public:
         const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
         double sampleRate);  ///< 锁定 m_noteSnapMutex → 非 const（mutex 解 const）。
     /// 渲染完成后更新 note 快照（全量渲染后调用；供下次 diff）。
-    void updateNoteSnapshot(const beatbench::Chart& chart,
-                            const beatbench::TimingEngine& timing);
+    void updateNoteSnapshot(const beatbench::Chart& chart, const beatbench::TimingEngine& timing);
 
     /// M4.3c 波形显示：最近渲染的 min/max 金字塔查询。
     /// 帧区间 [frameLo, frameHi)（已夹逼）→ {min, max}（mono 混音）。
@@ -166,21 +164,21 @@ public:
     QString path() const { return m_path; }
     Q_INVOKABLE QString errorMessage() const { return m_error; }
     bool hasChart() const { return chart() != nullptr; }
-    QString activeSessionId() const { return QString::fromStdString(m_sessionId); }
+    Q_INVOKABLE QString activeSessionId() const { return QString::fromStdString(m_sessionId); }
 
     /// 小节数 = 最大事件小节 + 1（空谱 = 0）。
     int measureCount() const;
 
-signals:
+   signals:
     void sessionIdChanged();
-    void chartChanged();      ///< 兼容旧接口：文档或内容任一变化
-    void documentChanged();   ///< 活动会话/文档切换（QML 应重置视图滚动）
-    void contentChanged();    ///< 同文档内容变化（QML 保持视图滚动）
-    void dirtyChanged();      ///< 未保存状态变化
+    void chartChanged();     ///< 兼容旧接口：文档或内容任一变化
+    void documentChanged();  ///< 活动会话/文档切换（QML 应重置视图滚动）
+    void contentChanged();   ///< 同文档内容变化（QML 保持视图滚动）
+    void dirtyChanged();     ///< 未保存状态变化
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
 
-private:
+   private:
     void attachSession(bool rebuildTiming);
     void resetRenderState();  ///< 换文档：丢弃 PCM/金字塔并作废 in-flight
     void syncDirty();
@@ -202,7 +200,7 @@ private:
     bool m_initialized = false;  ///< 首次 attach 强制重建 timing
     bool m_dirty = false;
     // —— M4.3c+ 后台渲染 ——
-    std::atomic<bool> m_renderInFlight{false};   ///< 渲染中（去重）
+    std::atomic<bool> m_renderInFlight{false};      ///< 渲染中（去重）
     std::atomic<std::uint64_t> m_renderVersion{0};  ///< 版本号（过期结果丢弃）
     struct RenderedAudioHolder;
     std::shared_ptr<RenderedAudioHolder> m_rendered;  ///< 最近结果（线程安全；null = 无）

@@ -1,0 +1,12 @@
+---
+# 现有代码风格的固化为机器可执行约定（选型分析见 doc/development.md 五、代码格式化一节）：
+# - 基座 Google：K&R attached 大括号、左对齐指针、主头文件优先的 include 分块、
+#   允许单行短 if/loop（WithoutElse）、`// namespace` 收尾注释，全部与现状一致；
+# - 与 Google 默认仅差缩进与列宽两项：4 空格缩进（零 Tab）、列宽 100。
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left
+DerivePointerAlignment: false
+# 注释不重排：clang-tidy 的 NOLINTNEXTLINE 必须紧贴下一行，被折行即失效（2026-10 与 lint 门禁合并时实测）
+ReflowComments: false

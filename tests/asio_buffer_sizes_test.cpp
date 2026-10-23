@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Pure validation: no PortAudio, audio devices, Qt or driver SDK required.
-#include "beatbench/audio/AsioBufferSizes.hpp"
 #include <gtest/gtest.h>
+
 #include <limits>
+
+#include "beatbench/audio/AsioBufferSizes.hpp"
 
 namespace {
 using beatbench::audio::AsioBufferSizes;
@@ -10,7 +12,11 @@ using beatbench::audio::resolveAsioBufferSize;
 using beatbench::audio::validAsioBufferSizes;
 
 TEST(AsioBufferSizes, LegalRequestTable) {
-    struct Case { AsioBufferSizes sizes; long request; long expected; };
+    struct Case {
+        AsioBufferSizes sizes;
+        long request;
+        long expected;
+    };
     const Case cases[] = {
         {{256, 256, 256, 0}, 0, 256},
         {{256, 256, 256, 0}, 256, 256},
@@ -27,7 +33,7 @@ TEST(AsioBufferSizes, LegalRequestTable) {
         {{48, 240, 144, 48}, 192, 192},
         {{48, 240, 144, 48}, 240, 240},
         {{48, 240, 144, 48}, 128, 0},
-        {{33, 97, 65, 32}, 65, 65}, // Step relative to minimum.
+        {{33, 97, 65, 32}, 65, 65},  // Step relative to minimum.
         {{33, 97, 65, 32}, 64, 0},
         {{1, 3, 2, 1}, 1, 1},
         {{1, 3, 2, 1}, 3, 3},
@@ -44,12 +50,19 @@ TEST(AsioBufferSizes, LegalRequestTable) {
 
 TEST(AsioBufferSizes, MalformedDriverMetadata) {
     const AsioBufferSizes cases[] = {
-        {}, {0, 512, 256, -1}, {-32, 512, 256, -1},
-        {512, 32, 256, -1}, {32, 512, 0, -1},
-        {32, 512, 1024, -1}, {32, 512, 192, -1},
-        {33, 512, 256, -1}, {32, 513, 256, -1},
-        {32, 512, 256, -2}, {32, 512, 256, 0},
-        {256, 256, 128, 0}, {48, 240, 128, 48},
+        {},
+        {0, 512, 256, -1},
+        {-32, 512, 256, -1},
+        {512, 32, 256, -1},
+        {32, 512, 0, -1},
+        {32, 512, 1024, -1},
+        {32, 512, 192, -1},
+        {33, 512, 256, -1},
+        {32, 513, 256, -1},
+        {32, 512, 256, -2},
+        {32, 512, 256, 0},
+        {256, 256, 128, 0},
+        {48, 240, 128, 48},
     };
     for (const auto& sizes : cases) {
         EXPECT_FALSE(validAsioBufferSizes(sizes));
@@ -81,4 +94,4 @@ TEST(AsioBufferSizes, SignedLimitsAndOverflowEdges) {
     static_assert(resolveAsioBufferSize({32, 1024, 256, -1}, 0) == 256);
     static_assert(resolveAsioBufferSize({1, largest, largest, 1}, largest) == largest);
 }
-} // namespace
+}  // namespace

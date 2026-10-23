@@ -19,8 +19,8 @@
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/midi/MidiFile.hpp"
 
-using beatbench::cmd::Registry;
 using beatbench::cmd::register_builtin_commands;
+using beatbench::cmd::Registry;
 using beatbench::json::Json;
 using beatbench::midi::MidiError;
 using beatbench::midi::MidiFile;
@@ -88,10 +88,9 @@ std::vector<std::uint8_t> midi_file(std::uint16_t format, std::uint16_t ntrks,
 std::vector<std::uint8_t> tempo_event(std::uint32_t delta, std::uint32_t us) {
     std::vector<std::uint8_t> v;
     put_vlq(v, delta);
-    v.insert(v.end(), {0xFF, 0x51, 0x03,
-                       static_cast<std::uint8_t>((us >> 16) & 0xFF),
-                       static_cast<std::uint8_t>((us >> 8) & 0xFF),
-                       static_cast<std::uint8_t>(us & 0xFF)});
+    v.insert(v.end(),
+             {0xFF, 0x51, 0x03, static_cast<std::uint8_t>((us >> 16) & 0xFF),
+              static_cast<std::uint8_t>((us >> 8) & 0xFF), static_cast<std::uint8_t>(us & 0xFF)});
     return v;
 }
 
@@ -110,8 +109,7 @@ std::vector<std::uint8_t> eot(std::uint32_t delta = 0) {
     return v;
 }
 
-std::vector<std::uint8_t> note_on(std::uint32_t delta, std::uint8_t pitch,
-                                  std::uint8_t vel = 100) {
+std::vector<std::uint8_t> note_on(std::uint32_t delta, std::uint8_t pitch, std::uint8_t vel = 100) {
     std::vector<std::uint8_t> v;
     put_vlq(v, delta);
     v.insert(v.end(), {0x90, pitch, vel});
@@ -135,10 +133,9 @@ bool near(double a, double b, double eps = 1e-9) { return std::fabs(a - b) <= ep
 
 TEST(MidiParse, Format1Basic) {
     // 轨0：tempo 500000（120BPM）+ 4/4 拍号 + EOT；轨1：C4 on(0) → off(480)
-    const auto bytes = midi_file(
-        1, 2, 480,
-        {concat({tempo_event(0, 500000), timesig_event(0, 4, 2), eot(0)}),
-         concat({note_on(0, 60), note_off(480, 60), eot(0)})});
+    const auto bytes = midi_file(1, 2, 480,
+                                 {concat({tempo_event(0, 500000), timesig_event(0, 4, 2), eot(0)}),
+                                  concat({note_on(0, 60), note_off(480, 60), eot(0)})});
     const MidiFile m = parse_midi_bytes(bytes);
 
     EXPECT_EQ(m.format, 1);
@@ -168,10 +165,10 @@ TEST(MidiParse, Format1Basic) {
 
 TEST(MidiParse, TempoChangeAcrossSegments) {
     // 前半 120BPM（0.5s），tick480 起 240BPM（250000us）
-    const auto bytes = midi_file(
-        1, 2, 480,
-        {concat({tempo_event(0, 500000), tempo_event(480, 250000), eot(0)}),
-         concat({note_on(0, 60), note_off(960, 60), eot(0)})});
+    const auto bytes =
+        midi_file(1, 2, 480,
+                  {concat({tempo_event(0, 500000), tempo_event(480, 250000), eot(0)}),
+                   concat({note_on(0, 60), note_off(960, 60), eot(0)})});
     const MidiFile m = parse_midi_bytes(bytes);
 
     ASSERT_EQ(m.notes.size(), 1u);
@@ -187,12 +184,15 @@ TEST(MidiParse, TempoChangeAcrossSegments) {
 TEST(MidiParse, RunningStatus) {
     // Note On(0x90 3C 64) 后，事件省略状态字节（running status 复用 0x90）：
     // delta 127 + 3C 00 = Note On vel 0 → 规范视作 Note Off。
-    const auto bytes = midi_file(
-        1, 1, 480,
-        {concat({note_on(0, 60),
-                 [] { std::vector<std::uint8_t> v; put_vlq(v, 127);
-                      v.insert(v.end(), {0x3C, 0x00}); return v; }(),
-                 eot(0)})});
+    const auto bytes = midi_file(1, 1, 480,
+                                 {concat({note_on(0, 60),
+                                          [] {
+                                              std::vector<std::uint8_t> v;
+                                              put_vlq(v, 127);
+                                              v.insert(v.end(), {0x3C, 0x00});
+                                              return v;
+                                          }(),
+                                          eot(0)})});
     const MidiFile m = parse_midi_bytes(bytes);
     ASSERT_EQ(m.notes.size(), 1u);
     EXPECT_EQ(m.notes[0].startTick, 0);
@@ -200,9 +200,7 @@ TEST(MidiParse, RunningStatus) {
 }
 
 TEST(MidiParse, NoteOnVelZeroIsOff) {
-    const auto bytes = midi_file(
-        1, 1, 480,
-        {concat({note_on(0, 60), note_on(16, 60, 0), eot(0)})});
+    const auto bytes = midi_file(1, 1, 480, {concat({note_on(0, 60), note_on(16, 60, 0), eot(0)})});
     const MidiFile m = parse_midi_bytes(bytes);
     ASSERT_EQ(m.notes.size(), 1u);
     EXPECT_EQ(m.notes[0].startTick, 0);
@@ -211,9 +209,7 @@ TEST(MidiParse, NoteOnVelZeroIsOff) {
 
 TEST(MidiParse, MultiByteDelta) {
     // VLQ：200 → 0x81 0x48
-    const auto bytes = midi_file(
-        1, 1, 480,
-        {concat({note_on(0, 60), note_off(200, 60), eot(0)})});
+    const auto bytes = midi_file(1, 1, 480, {concat({note_on(0, 60), note_off(200, 60), eot(0)})});
     const MidiFile m = parse_midi_bytes(bytes);
     ASSERT_EQ(m.notes.size(), 1u);
     EXPECT_EQ(m.notes[0].endTick, 200);
@@ -221,8 +217,7 @@ TEST(MidiParse, MultiByteDelta) {
 
 TEST(MidiParse, DefaultTempo120) {
     // 无 tempo 事件 → 默认 500000（120BPM）
-    const auto bytes = midi_file(1, 1, 480,
-                                 {concat({note_on(0, 60), note_off(480, 60), eot(0)})});
+    const auto bytes = midi_file(1, 1, 480, {concat({note_on(0, 60), note_off(480, 60), eot(0)})});
     const MidiFile m = parse_midi_bytes(bytes);
     ASSERT_EQ(m.notes.size(), 1u);
     EXPECT_TRUE(near(m.notes[0].endSec, 0.5));
@@ -242,19 +237,17 @@ TEST(MidiParse, Format0AndDanglingOnWarning) {
 // —— 硬错误 ——
 
 TEST(MidiParse, Errors) {
-    EXPECT_THROW(parse_midi_bytes({}), MidiError);                       // 空
-    EXPECT_THROW(parse_midi_bytes({1, 2, 3}), MidiError);                // 过短
+    EXPECT_THROW(parse_midi_bytes({}), MidiError);                              // 空
+    EXPECT_THROW(parse_midi_bytes({1, 2, 3}), MidiError);                       // 过短
     EXPECT_THROW(parse_midi_bytes(concat({{'X', 'X', 'X', 'X'}})), MidiError);  // 非 MThd
 
     // 头部合法 + 轨道内运行状态缺失
-    const auto bad = midi_file(
-        1, 1, 480,
-        {[] {
-             std::vector<std::uint8_t> v;
-             put_vlq(v, 0);
-             v.push_back(0x3C);  // 数据字节但无前置状态
-             return v;
-         }()});
+    const auto bad = midi_file(1, 1, 480, {[] {
+                                   std::vector<std::uint8_t> v;
+                                   put_vlq(v, 0);
+                                   v.push_back(0x3C);  // 数据字节但无前置状态
+                                   return v;
+                               }()});
     EXPECT_THROW(parse_midi_bytes(bad), MidiError);
 }
 
@@ -264,9 +257,8 @@ namespace {
 
 std::filesystem::path temp_dir() {
     static const std::string sub =
-        "bb_midi_test_" +
-        std::to_string(static_cast<unsigned long long>(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
+        "bb_midi_test_" + std::to_string(static_cast<unsigned long long>(
+                              std::chrono::steady_clock::now().time_since_epoch().count()));
     const auto dir = std::filesystem::temp_directory_path() / sub;
     std::filesystem::create_directories(dir);
     return dir;
@@ -282,10 +274,9 @@ TEST(MidiParseCommand, DispatchOkAndBadPath) {
     // 临时 .mid（格式1：一轨 tempo，一轨一个 C4 音符）
     const auto path = temp_dir() / "sample.mid";
     std::ofstream out(path, std::ios::binary);
-    const auto bytes = midi_file(
-        1, 2, 480,
-        {concat({tempo_event(0, 500000), eot(0)}),
-         concat({note_on(0, 60), note_off(480, 60), eot(0)})});
+    const auto bytes = midi_file(1, 2, 480,
+                                 {concat({tempo_event(0, 500000), eot(0)}),
+                                  concat({note_on(0, 60), note_off(480, 60), eot(0)})});
     out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     out.close();

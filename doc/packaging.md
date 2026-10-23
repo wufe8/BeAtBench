@@ -1,14 +1,12 @@
 # 打包与发布说明（Linux deb/rpm/arch 与 Windows zip）
 
-> 状态：2026-09 落地。关联：`doc/04` §4（构建 / CI）、`.github/workflows/package.yml`、
+> 关联：`doc/development.md` 四、（构建 / CI）、`.github/workflows/package.yml`、
 > `scripts/package-linux.sh`、`scripts/verify-linux-package.sh`、`scripts/package-release.sh`。
 
-## 1. 流水线总览
+## 一、流水线总览
 
 `.github/workflows/package.yml` 独立于 `ci.yml` 的回归门禁，只负责产出 Linux 发布级产物。
-触发方式为 tag（`v*`）、手动 `workflow_dispatch`、每周 schedule，以及**只对打包面文件生效的
-`pull_request`**（`paths` 过滤 `scripts/**` 与本 workflow 自身：2026-10-12 起，改打包脚本或流水线的
-PR 能在合并前被这条流水线验证；改源码不触发，不拖慢日常 CI）。tag 名必须等于 `v<CMakeLists 版本>`
+触发方式为 tag（`v*`）、手动 `workflow_dispatch`、每周 schedule，以及仅针对 `scripts/**` 与本工作流的 `pull_request` 路径过滤；tag 名必须等于 `v<CMakeLists 版本>`
 （workflow 内有版本一致性校验，防版本与标签脱节）。
 
 | job | 构建基线 | 产物 | 安装冒烟矩阵 |
@@ -31,7 +29,7 @@ PR 能在合并前被这条流水线验证；改源码不触发，不拖慢日�
 > 附上去（**只附加产物，不写说明**，避免两处都可写 Release 而打架；轮询上限 50 分钟，
 > 超时明确失败，产物仍留在 artifact 里可手动上传）。手动 dispatch 到分支时不执行该作业。
 
-## 2. Qt 依赖策略
+## 二、Qt 依赖策略
 
 Linux 包使用**发行版系统 Qt**（不捆绑 Qt 运行时）：
 
@@ -51,78 +49,38 @@ QML 入口加载（`QQmlApplicationEngine::loadFromModule` 6.5 才引入，6.4 �
 `HoverHandler`（6.0 起可用）不是为了 6.4 —— `SplitHandle` 自 5.13 就有 ——
 而是为了绕开附加属性的作用域坑（嵌套子对象须 id 限定）与非官方的 `SplitView.hovered`。
 
-**产物不绑定 Qt 小版本（2026-10）**。QtCore 的 `qt_version_tag` 哨兵
-（`qversiontagging.h`）会把编译时的 Qt 主次版本写成 ELF 符号版本依赖（如 `Qt_6.12`），
-产物只能在 ≥ 构建 Qt 的系统上加载——v0.3.2 的 arch 包即因此翻车：滚动容器拉到
-Qt 6.12，系统 Qt 6.11 启动即报 `version 'Qt_6.12' not found`。现行三层防线：
+**Qt 符号兼容性**：禁用版本哨兵不等于可以在任意旧 Qt 上运行。产物必须同时满足 API 与实际导出符号的运行下限：
 
-1. **构建侧禁哨兵**：顶层 CMakeLists 全局定义 `QT_NO_VERSION_TAGGING`（官方开关），
-   产物对 Qt 只留泛化 `Qt_6` 依赖，兼容性回归 API 下限 6.4（由 probe-qt64 守住）；
-2. **打包侧机械断言（只拦哨兵这一类）**：`package-linux.sh` 的 `assert_portable_qt_links`
-   对 staging 内全部 ELF 检查 VERNEED，出现 `Qt_6.x` 小版本 tag 即失败（正反向验证过：
-   新产物通过、v0.3.2 坏包被拦）。⚠️ **它不是通用安全网**：只查符号*版本 tag*，而
-   v0.4.0 的 arch 包**没有任何 `Qt_6.x` tag**、却被它放行——那正是崩掉的那个包。
-   普通导出符号的缺口靠第 3 条（构建面 == 运行下限）与**在下限环境里安装冒烟**兜住；
-3. **构建面钉定 = 覆盖面**（arch 钉 archive 快照）：`package.yml` 的 `ARCH_ROOTFS` 钉在
-   20260927 weekly（日期由 tag 内嵌 `YYYYMMDD` 派生，单一编辑点 + 8 位校验），
-   `linux-arch` 的构建容器与安装冒烟容器都用该快照 + 同日 archive mirrorlist；
-   快照内 `qt6-base` 是 **6.11.2-3**。
-   滚动容器的产物符号面由**构建时的 Qt 头文件**决定——Qt 只承诺向后兼容（旧构建跑新运行时，
-   反向不承诺）。v0.3.2/v0.4.0 的实例：Qt **6.12.0** 新增了一批**库导出**的 `QVariant`
-   右值构造函数（6.11.2 的 `qvariant.h` 里右值 ctor 只有 1 个、且是 inline 的
-   `QVariant(QVariant&&)`；6.12.0 有 18 个、只有声明没有 inline 体），用 6.12 头文件编译时
-   **重载决议改选这些新重载**，产物因此引用 6.11 库里不存在的符号
-   （`_ZN8QVariantC1EO7QString` / `_ZN8QVariantC1EO4QMapI7QStringS_E`，反解即
-   `QVariant(QString&&)` / `QVariant(QMap<QString,QVariant>&&)`）。
-   时间线（以 archive **当日 `extra.db`** 为准——归档目录里的历史文件存在，不代表当日它在库）：
-   6.11.2-3 自 2026-08-28 起是 extra 当前版本 → 6.12.0-1/-2 于 **10-01** 入库、随后被回退
-   （10-02/05/07 的 db 仍是 6.11.2-3）→ **10-07 19:15 UTC 6.12.0-2 重新入库**，10-08 起成为
-   当前版本并保持至今（10-12 复核仍在库）。v0.3.2（10-08）与 v0.4.0（10-11）都构建在
-   "6.12 已在库"的期，所以**受影响的是仍为 6.11.x 的系统**（Manjaro 至今是 6.11.2-3；
-   Arch 已升级到 6.12 的用户反而能跑），启动即 `symbol lookup error`。
-   钉定后符号面固定在 6.11.2：6.12 库向后导出旧符号，产物继续可用；**无需定期 bump**，
-   但换更晚的 `ARCH_ROOTFS` 就等于抬高该通道下限（换前先核对当日 `extra.db` 的 qt6-base，
-   `ARCH_QT_FLOOR` 断言会拦下"钉了更晚快照却忘了改下限"）。
+1. 顶层 CMake 定义 `QT_NO_VERSION_TAGGING`，避免引入 `Qt_6.x` 小版本哨兵；
+2. `scripts/package-linux.sh` 的 `assert_portable_qt_links` 检查 staging 内 ELF 的 VERNEED，发现小版本 tag 即失败。该断言只查版本 tag，不能发现泛化 `Qt_6` 下缺失的普通导出符号；
+3. Arch 的构建与安装冒烟使用 `package.yml` 中 `ARCH_ROOTFS` 钉定的快照与同日 archive 仓库。Qt 只保证旧构建在新运行时上的向后兼容，使用更新头文件可能引用旧库没有的符号。更换快照前核对当日 `extra.db` 中的 qt6-base 版本；抬高构建面可能抬高运行下限。每周 schedule 验证钉定基线，不代表追踪最新滚动 Qt。
 
-### 各通道的运行下限（覆盖 = 构建面）
+### 各通道的运行下限与复核
 
-运行兼容性需以产物引用的实际符号为准：
+运行兼容性由构建时 Qt 的实际符号面决定，不仅由声明的 API 下限决定：
 
-| 通道 | 构建面（= 运行下限） | 覆盖范围 | 机械校验 |
-|---|---|---|---|
-| deb | Debian 12：Qt **6.4.2**（产物要求 glibc ≥ 2.34） | Qt 6.4.2 → 6.12.0 全部可解析（实测） | `QT_FLOOR=6.4`：probe-qt64 断言探针容器仍是 6.4.x；构建容器与下限同为 `debian:12`（tag 即声明） |
-| rpm | Fedora 43：Qt **6.10.2**（glibc ≥ 2.38） | Fedora 43+（Qt ≥ 6.10.2） | 基线由容器 tag `fedora:43` 声明（Fedora 用户只会 ≥ 该 Qt） |
-| arch | 快照 20260927：Qt **6.11.2-3**（glibc ≥ 2.43） | Qt ≥ 6.11.2（Arch / Manjaro 当前面） | `ARCH_QT_FLOOR=6.11.2`：linux-arch 断言钉定仓库解析出的 qt6-base 版本 |
-| Windows zip | 捆绑 Qt 6.11.1 | 自带运行时，与系统 Qt 无关 | — |
+| 通道 | 构建面 / 运行下限 | 校验 |
+|---|---|---|
+| deb | Debian 12，Qt 6.4.2 | `probe-qt64` / `QT_FLOOR` |
+| rpm | Fedora 43，Qt 6.10.2 | 发行版基线与安装冒烟 |
+| arch | 钉定快照，Qt 6.11.2-3 | `ARCH_QT_FLOOR=6.11.2` 与同快照安装冒烟 |
+| Windows zip | 捆绑 Qt，版本以发布流水线为准 | 包内自带运行时，不依赖系统 Qt |
 
-> 想让某个通道覆盖更老的 Qt，只能把构建面压到更老（例如 arch 压到 6.4.2，就要用 2023 年的
-> 工具链编当前代码）；反之，抬快照或换更晚的发行版基线就会抬高下限。**改方案时先改这张表。**
-
-### 复核某个产物能跑在哪些 Qt 上
-
-`scripts/check-qt-symbol-floor.py`（只用 stdlib + `readelf`）把"能不能在那个 Qt 上启动"
-变成一条命令：产物里所有泛化 `Qt_6` 的未定义符号，必须能在目标 Qt 的 libQt6 里找到导出
-（这正是 `assert_portable_qt_links` 看不见的那一类，见上文第 2 条）。
+`scripts/check-qt-symbol-floor.py` 用 stdlib + `readelf` 比较产物未定义符号与参考 Qt 库的导出，可发现 `assert_portable_qt_links` 只查版本 tag 时漏掉的普通符号缺口：
 
 ```bash
-# ① 单个目标 Qt：把该 Qt 的 libQt6*.so* 放进一个目录（容器内拷出、发行版包解开都行）
-python3 scripts/check-qt-symbol-floor.py --qt-libs /path/to/qt/lib \
-  dist/beatbench-v0.4.0-1-amd64.deb
-
-# ② 多版本矩阵：--qt-root 下每个子目录一个版本，目录名即版本号
-python3 scripts/check-qt-symbol-floor.py --qt-root /path/to/qt-ref \
-  arch.pkg.tar.zst deb.pkg rpm.pkg
+python3 scripts/check-qt-symbol-floor.py --qt-libs /path/to/qt/lib out-linux/*.pkg.tar.zst
+python3 scripts/check-qt-symbol-floor.py --qt-root /path/to/qt-ref arch.pkg.tar.zst deb.pkg rpm.pkg
 ```
 
-参考库从哪来：Arch archive 保留每个小版本的包，**脚本头部注释里有一段可直接复制的抓取循环**
-（6.4.2 → 6.12.0 约 300 MB）；Debian/Ubuntu 用 `qt6-base-dev` 的库目录同样可作参考集。
+参考库可从对应发行版包提取；更换构建基线时复核运行下限，不把新头文件构建当作旧 Qt 兼容证明。
 
 ⚠️ 悬停高亮的**无头冒烟覆盖不到**（offscreen 平台没有真实指针），但真实 X11 平台可做**指针注入**
 自动化（定位窗口 → `XWarpPointer`/`XTestFakeMotionEvent`，配合 app 自身的 `--screenshot` 抓帧）；
 2026-10-09 已在 Manjaro（发行版 Qt 6.11.2 + 安装包）实测通过——分隔条由 `#2E2540` 变 `#765B36`
-（= `border` 叠 `accent` @ `0.35` 的理论值）。改动后仍建议在 Qt 6.11 与发行版 Qt 上各看一次（见 §5）。
+（= `border` 叠 `accent` @ `0.35` 的理论值）。改动后仍建议在 Qt 6.11 与发行版 Qt 上各看一次（见 五、）。
 
-### Qt 6.12 的 qmlcachegen 崩溃与绕过（2026-10 实测）
+### Qt 6.12 的 qmlcachegen 崩溃与绕过
 
 **现象**：Arch（系统 Qt **6.12.0**）构建时 `qmlcachegen` 编译
 `app/qml/components/ChartView.qml` **确定性崩溃**（`SIGSEGV`，`si_addr=0xb8`），
@@ -130,18 +88,7 @@ python3 scripts/check-qt-symbol-floor.py --qt-root /path/to/qt-ref \
 极难定位；结果是 Arch 包直接出不来。deb（Qt 6.4.2）、rpm（Fedora 43）、`probe-qt64`
 均不受影响，是 Qt 6.12 特有。
 
-**定位过程**（临时调试工作流，结论已固化到 `app/CMakeLists.txt` 注释）：
-
-| 实验 | 结果 |
-|---|---|
-| configure 后（尚无 `beatbench.qmltypes`）手动跑同一命令 | ✅ 成功 |
-| 完整构建生成 `BeatBench/beatbench.qmltypes` 后，同一命令 | ❌ 必崩（`-j1` 亦然，内存充足） |
-| 移走 `beatbench.qmltypes` / 换成只含 `module:` 的空文件 | ✅ 成功 |
-| 单独喂任一 `Component` 块 / 剥掉全部 `Property` | ✅ 都不崩 |
-| 关掉 AOT stats、换 `-o` 路径、`ulimit -s unlimited`、`--only-bytecode` | ❌ 无影响 |
-
-即：**qmlcachegen 解析模块自己生成的 qmltypes 时崩溃，且要多个组件带属性才触发**
-（疑为聚合/规模触发的空指针），属上游 Qt 缺陷。
+故障涉及生成的模块 qmltypes；具体诊断与实现条件以 `app/CMakeLists.txt` 的注释为准，不将调试试验流水作为构建契约。
 
 **绕过**：仅当 Qt ∈ [6.12, 6.13) 时给 `qt_add_qml_module` 加 `NO_CACHEGEN` ——
 跳过 QML 字节码预编译，QML 仍打进资源、运行时编译，**功能等价**，只损失一点首屏编译开销。
@@ -150,7 +97,7 @@ Qt 修复后删除该绕过（条件写在 `app/CMakeLists.txt`，删除点明�
 > 用户侧影响：在 Qt 6.12.x 上**从源码构建** BeAtBench 也会触发同一崩溃，本绕过同样保护他们；
 > 因此绕过放在 `app/CMakeLists.txt` 而不是打包脚本里。
 
-## 3. 安装布局
+## 三、安装布局
 
 布局由 `app/CMakeLists.txt` 的 install 规则单一维护，打包脚本以
 `DESTDIR=<pkgroot> cmake --install` 复用（包格式只加元数据）：
@@ -167,34 +114,27 @@ GUI 与 CLI 同包安装（单包策略）；可执行依赖系统 Qt，无需 R
 
 ### Windows 包内容与裁剪
 
+可选 ASIO 以 [ASIO 音频输出](<12-ASIO音频输出.md>) 为权威：默认 OFF，显式 ON 的 SDK 来源、许可/对应源码材料、包内 ON/OFF 标识与待人工验收矩阵不能省略。
+
 Windows 包（`beatbench-v<ver>-win64.zip`）与 Linux 包策略相反：**内嵌整套 Qt 运行时**
 （`windeployqt` 部署 + 应用自己的 `BeatBench/` QML 模块 + `skins/`），因为 Windows 没有
 系统 Qt。为避免把构建机上与运行无关的东西一起发出去，`scripts/package-release.sh` 打包阶段
-做四类裁剪：
+执行以下裁剪：
 
-| 裁剪 | 手段 | 实测省（解压后） |
-|---|---|---|
-| Qt Quick 3D 残留（`dxcompiler.dll`、`Qt6Quick3DUtils.dll`） | `windeployqt --no-system-dxc-compiler --no-quick3dutils` | 19.75 MB |
-| Qt Quick Controls 样式（只留 Basic + Fusion） | 删 `qml/QtQuick/Controls/<样式>` 与对应样式 DLL，带「保留项还在 + 无漏删样式」断言 | ~14.3 MB |
-| 翻译（只留中文） | 删其余 `*.qm`（既有步骤） | — |
-| `qmltooling`（QML 调试用） | 删目录（既有步骤） | — |
+| 裁剪 | 手段 |
+|---|---|
+| Qt Quick 3D 残留 | `windeployqt --no-system-dxc-compiler --no-quick3dutils` |
+| Qt Quick Controls 样式 | 只留 Basic + Fusion 及相应 DLL，并断言保留项与删除项 |
+| 翻译 | 只留中文 |
+| QML 调试工具 | 删除 `qmltooling` |
 
-背景（两个坑都真实发生过）：
-
-- **样式**：`app/main.cpp` 无条件 `QQuickStyle::setStyle("Fusion")`（选 Fusion 是因为它尊重应用
-  调色板，见 doc/08 §2），控件样式不会随环境变量或皮肤变化；而 `windeployqt` 无从得知，
-  会把 Qt 安装里的全部样式一起部署。保留 `Basic` 是因为它可能是实现基线，省那 2 MB 不值得冒险。
-- **Quick3D**：只在**装了 `qtquick3d` 的完整 Qt**（本机开发环境）上才会多带；CI 的 aqt 最小安装
-  没有。所以 v0.3.1 的 Windows 包（本地打包）多发了 19.8 MB 死重，而 CI 打的包没有。
-
-裁剪后本机实测：zip **38.66 → 24.92 MiB（−35.5%）**，解压 106.3 → 71.6 MB、1480 → 351 个文件；
-载入真实谱面的界面截图与裁剪前**像素级等价**（AE 887 / 1,024,000 像素，同包两次运行的噪声底是 884）。
+应用在 `app/main.cpp` 固定使用 Fusion；Basic 保留为控件实现基线。Quick3D 残留取决于构建机 Qt 安装内容，不能仅凭 CI 最小 Qt 环境推定本机包不会夹带它们。
 
 > ⚠️ 这条链路目前**只有 `release.yml` 走**（tag 时），PR CI 不构建 Windows 包——所以改动后
 > 别只看 CI 绿，要本地跑一次 `scripts/package-release.sh`（脚本内置冒烟：GUI 截图 + 皮肤切换
 > 断言 + CLI 自报版本断言）。
 
-## 4. 本地复现
+## 四、本地复现
 
 ```bash
 # 构建 deb（在 Debian 12 容器内；rpm 换 fedora:43）
@@ -225,12 +165,12 @@ python3 scripts/check-qt-symbol-floor.py --qt-libs /path/to/qt/lib out-linux/*.p
 
 > **在没有容器运行时的发行版实机上**做安装验收：直接 `sudo pacman -U <pkg>`，
 > 不要先 `pacman -Sy`（在滚动发行版上是部分升级反模式）；`verify-linux-package.sh`
-> 已按"容器/实机"分流自动跳过 `-Sy`。
+> 已按“容器/实机”分流自动跳过 `-Sy`。
 
 Windows 发布包在 CI 之外仍可用 `scripts/package-release.sh` 本地产出（Windows +
 Git Bash + MinGW + Qt 6.11，环境变量见脚本头部注释）。
 
-## 5. 发布流程（release-please 自动发版 → 推 tag 出全平台产物）
+## 五、发布流程（release-please 自动发版 → 推 tag 出全平台产物）
 
 版本推进与 CHANGELOG 已交给 release-please（`.github/workflows/release-please.yml`，
 配置在仓库根 `release-please-config.json` + `.release-please-manifest.json`）：
@@ -240,7 +180,7 @@ Git Bash + MinGW + Qt 6.11，环境变量见脚本头部注释）。
    自动联动 `CMakeLists.txt` project VERSION、`Version.hpp` kVersion、README 下载/安装名
    （文件内 `x-release-please` 标记）并生成 CHANGELOG 版本小节；
 2. 合并 release PR 前在 PR 分支本地自查（release.yml 会用同样的 `--strict` 把关）：
-   `scripts/check-version.sh vx.y.z --strict --qt-version 6.11 --qt-floor 6.4`；
+   `scripts/check-version.sh vx.y.z --strict`；
 3. 合并 release PR → 自动打 tag vx.y.z 并建 GitHub Release（说明 = CHANGELOG 小节）→
    同时触发两条流水线——
    - `release.yml`：严格版本一致性 → 完整回归（Release 构建 + 全部单测）→
@@ -248,41 +188,34 @@ Git Bash + MinGW + Qt 6.11，环境变量见脚本头部注释）。
    - `package.yml`：`probe-qt64`（Qt 6.4 下限）+ Linux deb/rpm/arch 构建与目标发行版
      安装冒烟 → `attach-to-release` 轮询等到 Release 出现后**把 Linux 包附上**；
      另有每周 schedule 跑同矩阵（不碰 Release），在钉定的 arch 基线上做 master 回归检测——
-     不替代当前版本验收；必要时手动补跑。
+     schedule 不替代当前版本验收；需要时用 `workflow_dispatch` 手动补跑并核对结果；
 4. 核对 Release 资产：Windows zip、deb、rpm、pkg.tar.zst 及各自 `.sha256` 是否齐全
    （`gh release view vx.y.z`）；
 5. 人工验收（首次必有）：装 Linux 包确认 GUI 起得来、分隔条悬停高亮与基本交互、
    实时音频输出。
 
-> ⚠️ **必须配置**仓库 secret `RELEASE_PLEASE_TOKEN`（PAT）——**不存在可用的 `GITHUB_TOKEN`
-> 降级路径**，两条独立的理由：
-> ① 用 `GITHUB_TOKEN` 打的 tag **不会**触发 `release.yml` / `package.yml`（GitHub 防递归）；
-> ② 本仓库 Settings → Actions → General 的 “Allow GitHub Actions to create and approve pull
->    requests” 处于**关闭**状态，`GITHUB_TOKEN` 连 release PR 都建不出来。
-> 所以缺这个 secret 时 `release-please.yml` 会在**建 PR 那一步直接失败**（不是「tag 已打、产物
-> 不构建」那种可手动补跑的状态）；workflow 里有一段检查步骤会先打出对应的 warning。
-> PAT 权限（fine-grained，且只授权本仓库）：**Contents: RW + Issues: RW + Pull requests: RW**。
-> Issues 是必需的：release-please 会给 release PR 打 `autorelease: pending` 标签，而打标签属于
-> **Issues** 权限，仅给 `pull-requests: RW` 不覆盖（classic PAT 则勾 `repo`，可另加 `workflow`）。
+> ⚠️ 必须配置仓库 secret `RELEASE_PLEASE_TOKEN`（PAT，Contents / Issues / Pull requests 均需写权限）。
+> 当前仓库未开启 Actions 使用 `GITHUB_TOKEN` 创建 PR，缺少 PAT 可能在建版本 PR 时直接失败；
+> 且 `GITHUB_TOKEN` 产生的 tag 不触发发布流水线（GitHub 防递归），不能当作可用的降级路径。
+> 如果 tag/Release 已存在而产物缺失，可手动 dispatch 补跑；这不替代缺失的版本 PR 或授权。
 
 > **2026-10-09 已对 0.3.2 的 arch 包做过一轮实机验收**（Manjaro，发行版 Qt 6.11.2）：
-> `pacman -U` 安装后包内 56 个文件与 `pacman -Ql` 一致；空目录下 offscreen 与真实 X11 都能起
-> GUI；悬停高亮用指针注入确认变色（§2）；音频播放正常，但只走 **ALSA** host API（§6）。
+> `pacman -U` 安装后核对安装清单；空目录下 offscreen 与真实 X11 都能起
+> GUI；悬停高亮用指针注入确认变色（二、）；音频播放正常，但只走 **ALSA** host API（六、）。
 > 未覆盖：deb/rpm 实机、Qt 6.12 真机复现、`namcap`。
 
 > 若 `release.yml` 在 `attach-to-release` 的轮询窗口内没建出 Release，该作业会失败并在
 > 日志里提示——Linux 包仍在 Actions artifact 里，可 `gh release upload` 手动补。
 
-## 6. 边界与非目标
+## 六、边界与非目标
 
-- 本轮不做：包签名 / GPG、Flatpak / AppImage、AUR / COPR / PPA 等仓库渠道、
+- 未支持：包签名 / GPG、Flatpak / AppImage、AUR / COPR / PPA 等仓库渠道、
   aarch64（仅 x86_64）、macOS 打包、文件类型关联（MIME）。Release 的创建与说明文字
-  由 `release.yml` 单一维护（Linux 包只做「附加产物」，不写说明）。
-- **Windows 打包归属已收敛**：曾同时存在 `package.yml::windows-package` 与 `release.yml`
-  两条 Windows 构建路径，现已删除前者（Windows 只由 `release.yml` 产，Release 资产即唯一产物）。
+  由 `release.yml` 单一维护（Linux 包只做“附加产物”，不写说明）。
+- **Windows 打包归属**：只由 `release.yml` 产出；`package.yml` 不构建 Windows 包。
 - AppStream 元数据已随包提供（软件中心可见）。
 - Linux GUI 交互：**拖拽**在 CI 中只有无头冒烟，仍需人工确认；**悬停高亮**已可用指针注入
-  自动化验证（§2），2026-10-09 在 Manjaro 实机（安装包）通过。
+  自动化验证（二、），2026-10-09 在 Manjaro 实机（安装包）通过。
 - **实时音频输出**：CI 无声卡，仍需人工验证。2026-10-09 Manjaro 实机确认播放正常，但 Linux 上
   PortAudio 只启用 **ALSA** host API（JACK 后端未编译进来；PipeWire / PulseAudio 系统经
   `pipewire-alsa` / `pulse-alsa` 兼容层）——PulseAudio / PipeWire 原生路径与 Windows/macOS

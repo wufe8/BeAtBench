@@ -5,6 +5,8 @@
 // ⑤ WAV 写出（文件非空 + 头有效）。
 // 不依赖磁盘图谱（注入解码器）+ 真实 WAV（writeTestWav 已有）。
 #define _USE_MATH_DEFINES
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -13,8 +15,6 @@
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 
@@ -22,9 +22,9 @@ namespace {
 
 using beatbench::audio::DecodedSample;
 using beatbench::audio::DecodeResult;
-using beatbench::audio::SampleCache;
 using beatbench::audio::render_chart;
 using beatbench::audio::render_chart_range;
+using beatbench::audio::SampleCache;
 
 /// 合成正弦采样（计数 1 = 创建者；与真实解码一致）。
 DecodedSample* makeSine(double rate, double freq, double seconds, float amp = 0.5f) {
@@ -64,7 +64,8 @@ TEST(ChartRendererTest, RenderSingleNote) {
     chart.meta["BPM"] = "120";
     chart.samples[{beatbench::SampleKind::Wav, 1}] = {"kick.wav", ""};
     beatbench::Event<beatbench::Note> ev;
-    ev.measure = 0; ev.pos = beatbench::Rational(0, 1);
+    ev.measure = 0;
+    ev.pos = beatbench::Rational(0, 1);
     ev.value.sample.id = 1;
     ev.value.lane.kind = beatbench::LaneKind::Key;
     ev.value.lane.index = 1;
@@ -74,9 +75,8 @@ TEST(ChartRendererTest, RenderSingleNote) {
     timing.rebuild(chart);
 
     SampleCache cache;
-    installDecoder(cache, "kick.wav", [](const std::string&) {
-        return makeSine(44100.0, 440.0, 0.5);
-    });
+    installDecoder(cache, "kick.wav",
+                   [](const std::string&) { return makeSine(44100.0, 440.0, 0.5); });
 
     const auto r = render_chart_range(chart, timing, cache, 44100.0, 0.0, 0.6, "");
     ASSERT_TRUE(r.ok) << r.message;
@@ -95,22 +95,27 @@ TEST(ChartRendererTest, MixTwoNotes) {
     chart.samples[{beatbench::SampleKind::Wav, 1}] = {"a.wav", ""};
     chart.samples[{beatbench::SampleKind::Wav, 2}] = {"b.wav", ""};
     beatbench::Event<beatbench::Note> e1, e2;
-    e1.measure = 0; e1.pos = beatbench::Rational(0, 1); e1.value.sample.id = 1;
-    e1.value.lane.kind = beatbench::LaneKind::Key; e1.value.lane.index = 1;
-    e2.measure = 0; e2.pos = beatbench::Rational(1, 2); e2.value.sample.id = 2;
-    e2.value.lane.kind = beatbench::LaneKind::Key; e2.value.lane.index = 2;
-    chart.notes.push_back(e1); chart.notes.push_back(e2);
+    e1.measure = 0;
+    e1.pos = beatbench::Rational(0, 1);
+    e1.value.sample.id = 1;
+    e1.value.lane.kind = beatbench::LaneKind::Key;
+    e1.value.lane.index = 1;
+    e2.measure = 0;
+    e2.pos = beatbench::Rational(1, 2);
+    e2.value.sample.id = 2;
+    e2.value.lane.kind = beatbench::LaneKind::Key;
+    e2.value.lane.index = 2;
+    chart.notes.push_back(e1);
+    chart.notes.push_back(e2);
 
     beatbench::TimingEngine timing;
     timing.rebuild(chart);
 
     SampleCache cache;
-    installDecoder(cache, "a.wav", [](const std::string&) {
-        return makeSine(44100.0, 440.0, 0.3);
-    });
-    installDecoder(cache, "b.wav", [](const std::string&) {
-        return makeSine(44100.0, 220.0, 0.3);
-    });
+    installDecoder(cache, "a.wav",
+                   [](const std::string&) { return makeSine(44100.0, 440.0, 0.3); });
+    installDecoder(cache, "b.wav",
+                   [](const std::string&) { return makeSine(44100.0, 220.0, 0.3); });
 
     const auto r = render_chart_range(chart, timing, cache, 44100.0, 0.0, 1.0, "");
     ASSERT_TRUE(r.ok) << r.message;
@@ -125,8 +130,11 @@ TEST(ChartRendererTest, BackFillBeforeRangeStart) {
     chart.meta["BPM"] = "120";
     chart.samples[{beatbench::SampleKind::Wav, 1}] = {"a.wav", ""};
     beatbench::Event<beatbench::Note> ev;
-    ev.measure = 0; ev.pos = beatbench::Rational(1, 4); ev.value.sample.id = 1;
-    ev.value.lane.kind = beatbench::LaneKind::Key; ev.value.lane.index = 1;
+    ev.measure = 0;
+    ev.pos = beatbench::Rational(1, 4);
+    ev.value.sample.id = 1;
+    ev.value.lane.kind = beatbench::LaneKind::Key;
+    ev.value.lane.index = 1;
     chart.notes.push_back(ev);
 
     beatbench::TimingEngine timing;
@@ -156,9 +164,11 @@ TEST(ChartRendererTest, ZeroSampleIdSilent) {
     beatbench::Chart chart;
     chart.meta["BPM"] = "120";
     beatbench::Event<beatbench::Note> ev;
-    ev.measure = 0; ev.pos = beatbench::Rational(0, 1);
+    ev.measure = 0;
+    ev.pos = beatbench::Rational(0, 1);
     ev.value.sample.id = 0;
-    ev.value.lane.kind = beatbench::LaneKind::Key; ev.value.lane.index = 1;
+    ev.value.lane.kind = beatbench::LaneKind::Key;
+    ev.value.lane.index = 1;
     chart.notes.push_back(ev);
 
     beatbench::TimingEngine timing;
@@ -180,9 +190,11 @@ TEST(ChartRendererTest, DecodeFailureSkipsNotCrash) {
     chart.meta["BPM"] = "120";
     chart.samples[{beatbench::SampleKind::Wav, 1}] = {"missing.wav", ""};
     beatbench::Event<beatbench::Note> ev;
-    ev.measure = 0; ev.pos = beatbench::Rational(0, 1);
+    ev.measure = 0;
+    ev.pos = beatbench::Rational(0, 1);
     ev.value.sample.id = 1;
-    ev.value.lane.kind = beatbench::LaneKind::Key; ev.value.lane.index = 1;
+    ev.value.lane.kind = beatbench::LaneKind::Key;
+    ev.value.lane.index = 1;
     chart.notes.push_back(ev);
 
     beatbench::TimingEngine timing;
@@ -193,10 +205,16 @@ TEST(ChartRendererTest, DecodeFailureSkipsNotCrash) {
     SampleCache cache;
     cache.setDecoders(
         [](const std::string&) -> DecodeResult {
-            DecodeResult r; r.ok = false; r.message = "文件不存在"; return r;
+            DecodeResult r;
+            r.ok = false;
+            r.message = "文件不存在";
+            return r;
         },
         [](const std::wstring&) -> DecodeResult {
-            DecodeResult r; r.ok = false; r.message = "文件不存在"; return r;
+            DecodeResult r;
+            r.ok = false;
+            r.message = "文件不存在";
+            return r;
         });
 
     // 关键回归：不得崩溃；输出应为静音（全 0）
@@ -216,9 +234,11 @@ TEST(ChartRendererTest, WideCharSourceDirJapanese) {
     chart.meta["BPM"] = "120";
     chart.samples[{beatbench::SampleKind::Wav, 1}] = {"kick.wav", ""};
     beatbench::Event<beatbench::Note> ev;
-    ev.measure = 0; ev.pos = beatbench::Rational(0, 1);
+    ev.measure = 0;
+    ev.pos = beatbench::Rational(0, 1);
     ev.value.sample.id = 1;
-    ev.value.lane.kind = beatbench::LaneKind::Key; ev.value.lane.index = 1;
+    ev.value.lane.kind = beatbench::LaneKind::Key;
+    ev.value.lane.index = 1;
     chart.notes.push_back(ev);
 
     beatbench::TimingEngine timing;
@@ -228,17 +248,22 @@ TEST(ChartRendererTest, WideCharSourceDirJapanese) {
     std::wstring gotPath;
     SampleCache cache;
     cache.setDecoders(
-        [](const std::string&) -> DecodeResult { DecodeResult r; r.ok = false; return r; },
+        [](const std::string&) -> DecodeResult {
+            DecodeResult r;
+            r.ok = false;
+            return r;
+        },
         [&](const std::wstring& p) -> DecodeResult {
             gotPath = p;
-            DecodeResult r; r.ok = true;
+            DecodeResult r;
+            r.ok = true;
             r.sample = makeSine(44100.0, 440.0, 0.3);
             return r;
         });
 
     const std::wstring dir = L"C:\\songs\\\u5f7c\u5cb8\u5e30\u822a";
-    const auto r = beatbench::audio::render_chart_range_w(
-        chart, timing, cache, 44100.0, 0.0, 1.0, dir);
+    const auto r =
+        beatbench::audio::render_chart_range_w(chart, timing, cache, 44100.0, 0.0, 1.0, dir);
     ASSERT_TRUE(r.ok) << r.message;
     // 解码器收到的路径 = dir + "/" + kick.wav（resolve_audio_path_w 原样存在时返回原样；
     // 测试注入无磁盘文件 → 返回原路径 → get_w 按宽路径）
@@ -302,15 +327,18 @@ TEST(ChartRendererTest, IncrementalRangeEqualsFullSlice) {
     chart.samples[{beatbench::SampleKind::Wav, 3}] = {"c.wav", ""};
     // 变速：BPM 200；measure 1 pos 0 → 100
     beatbench::Event<beatbench::Bpm> bpmEv;
-    bpmEv.measure = 1; bpmEv.pos = beatbench::Rational(0, 1); bpmEv.value.value = 100.0;
+    bpmEv.measure = 1;
+    bpmEv.pos = beatbench::Rational(0, 1);
+    bpmEv.value.value = 100.0;
     chart.bpm_events.push_back(bpmEv);
 
-    const auto addNote = [&](std::uint32_t m, const beatbench::Rational& p,
-                             std::uint32_t id) {
+    const auto addNote = [&](std::uint32_t m, const beatbench::Rational& p, std::uint32_t id) {
         beatbench::Event<beatbench::Note> ev;
-        ev.measure = m; ev.pos = p;
+        ev.measure = m;
+        ev.pos = p;
         ev.value.sample.id = id;
-        ev.value.lane.kind = beatbench::LaneKind::Key; ev.value.lane.index = 1;
+        ev.value.lane.kind = beatbench::LaneKind::Key;
+        ev.value.lane.index = 1;
         chart.notes.push_back(ev);
     };
 
@@ -321,16 +349,19 @@ TEST(ChartRendererTest, IncrementalRangeEqualsFullSlice) {
     EXPECT_EQ(timing.time_us({0, beatbench::Rational(1, 4)}), 300000);
     EXPECT_EQ(timing.time_us({1, beatbench::Rational(0, 1)}), 1200000);
 
-    addNote(0, beatbench::Rational(0, 1), 1);         // t=0.0（a 2.5s → 尾音到 2.5）
-    addNote(0, beatbench::Rational(1, 2), 2);         // t=0.6（b 0.5s）
-    addNote(1, beatbench::Rational(1, 2), 3);         // t=1.8（c 1.5s → 尾音到 3.3）
-    addNote(2, beatbench::Rational(1, 4), 3);         // t=3.6（c 1.5s；BPM 100 段）
-    addNote(2, beatbench::Rational(2, 4), 2);         // t=4.2（b 0.5s → 尾音到 4.7）
+    addNote(0, beatbench::Rational(0, 1), 1);  // t=0.0（a 2.5s → 尾音到 2.5）
+    addNote(0, beatbench::Rational(1, 2), 2);  // t=0.6（b 0.5s）
+    addNote(1, beatbench::Rational(1, 2), 3);  // t=1.8（c 1.5s → 尾音到 3.3）
+    addNote(2, beatbench::Rational(1, 4), 3);  // t=3.6（c 1.5s；BPM 100 段）
+    addNote(2, beatbench::Rational(2, 4), 2);  // t=4.2（b 0.5s → 尾音到 4.7）
 
     SampleCache cache;
-    installDecoder(cache, "a.wav", [](const std::string&) { return makeSine(44100.0, 440.0, 2.5); });
-    installDecoder(cache, "b.wav", [](const std::string&) { return makeSine(44100.0, 220.0, 0.5); });
-    installDecoder(cache, "c.wav", [](const std::string&) { return makeSine(44100.0, 330.0, 1.5); });
+    installDecoder(cache, "a.wav",
+                   [](const std::string&) { return makeSine(44100.0, 440.0, 2.5); });
+    installDecoder(cache, "b.wav",
+                   [](const std::string&) { return makeSine(44100.0, 220.0, 0.5); });
+    installDecoder(cache, "c.wav",
+                   [](const std::string&) { return makeSine(44100.0, 330.0, 1.5); });
 
     // 全量渲染 [0, 5.5)
     const auto full = render_chart_range(chart, timing, cache, 44100.0, 0.0, 5.5, "");

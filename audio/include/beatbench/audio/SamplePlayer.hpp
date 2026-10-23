@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 播放内核（voice 池混音，doc/02 §8「回调无锁无分配」）。
+// 播放内核（voice 池混音；回调无锁无分配）。
 //
 // 设计坐标（M4.1 决策，对齐 M5 完整播放）：
 // - 内核 = 声音引擎公共部分（解码→PCM→重采样→混音→回调输出），M5 调度器只新增
 //   「调用 play() 的方式」，不改内核——试听 = 只有 1 个 voice 的谱面播放，两条路径
-//   共享同一内核（用户拍板，见 02 §6/§8 + M4.1 架构确认）。
+//   共享同一内核（用户拍板 + M4.1 架构确认）。
 // - play(sample, volume, startSec)：startSec = 起始秒（M5 任意起播倒推所需剩余时长
 //   的直接落点；M4.1 恒 0）。
 // - 回调线程（后端创建）与 UI 线程之间：SPSC ring 命令队列（无锁原子，无分配）+
@@ -34,11 +34,11 @@ inline constexpr int kPcmSlot = 6;
 inline constexpr int kRefPcmSlot = 5;
 
 class SamplePlayer {
-public:
+   public:
     /// 并发原语：命令/事件 ring（单生产者单消费者；容量须为 2 的幂）。
     template <typename T, std::size_t N>
     class SpscRing {
-    public:
+       public:
         static_assert((N & (N - 1)) == 0, "capacity must be power of two");
         bool push(const T& v) {
             const std::uint32_t h = m_head.load(std::memory_order_relaxed);
@@ -63,17 +63,18 @@ public:
             return N - (h - t);
         }
         bool empty() const {
-            return m_head.load(std::memory_order_acquire) ==
-                   m_tail.load(std::memory_order_acquire);
+            return m_head.load(std::memory_order_acquire) == m_tail.load(std::memory_order_acquire);
         }
 
-    private:
+       private:
         T m_data[N] = {};
         std::atomic<std::uint32_t> m_head{0};
         std::atomic<std::uint32_t> m_tail{0};
     };
 
-    enum { kMaxVoices = 8, kPreviewVoice = 7 };
+    // 常量（非枚举：无类型集语义；kMaxVoices 作数组界，kPreviewVoice 作槽位比较）
+    static constexpr int kMaxVoices = 8;
+    static constexpr int kPreviewVoice = 7;
 
     /// 播放一个采样（**所有权转移**：调用方把对 sample 的 1 份持有转给本函数）。
     /// 若返回 false（命令队列满）→ 引用**已归还**（本函数内部 unref），调用方不再持有。
@@ -136,24 +137,22 @@ public:
     }
     /// PCM voice（kPcmSlot）启动时的输出帧基线（渲染帧数 = total - baseline；
     /// 试听不影响——只记 kPcmSlot 的 Started）。-1 = 未在播。
-    std::int64_t pcmBaselineFrame() const {
-        return m_pcmBaseline.load(std::memory_order_relaxed);
-    }
+    std::int64_t pcmBaselineFrame() const { return m_pcmBaseline.load(std::memory_order_relaxed); }
     /// PCM voice 起始秒 + 采样时长（segmeted 加载/显示用，非时钟）。
     void pcmInfo(double* startSec, double* durationSec) const {
         if (startSec) *startSec = m_pcmStartSec.load(std::memory_order_relaxed);
         if (durationSec) *durationSec = m_pcmDurationSec.load(std::memory_order_relaxed);
     }
 
-private:
+   private:
     enum class CmdType : std::uint8_t { Start, Stop, StopAll, StartSharedPcm };
     struct Command {
         CmdType type = CmdType::StopAll;
         DecodedSample* sample = nullptr;  ///< Start：要播的采样（裸指针，引用已转移）
         float volume = 1.0f;
         double startSec = 0.0;
-        int slot = -1;                    ///< 目标槽位（-1 = 任意空闲；kPreviewVoice=试听槽）
-        double sampleRate = 0.0;          ///< StartSharedPcm：共享 PCM 采样率
+        int slot = -1;            ///< 目标槽位（-1 = 任意空闲；kPreviewVoice=试听槽）
+        double sampleRate = 0.0;  ///< StartSharedPcm：共享 PCM 采样率
         std::uint32_t previewGeneration = 0;
     };
     enum class EventType : std::uint8_t { Started, Ended };
@@ -165,13 +164,13 @@ private:
 
     struct Voice {
         DecodedSample* sample = nullptr;
-        std::uint64_t framePos = 0;      ///< 当前源帧（整数部分）
-        double frac = 0.0;               ///< 源帧小数部分（插值）
-        double step = 1.0;               ///< 源帧/输出帧 = srcRate / deviceRate
+        std::uint64_t framePos = 0;  ///< 当前源帧（整数部分）
+        double frac = 0.0;           ///< 源帧小数部分（插值）
+        double step = 1.0;           ///< 源帧/输出帧 = srcRate / deviceRate
         // M5 startSec 截取：起点源帧（包络 base——相对截取点算，见 render 注释）
         std::uint64_t startFrame0 = 0;
         float volume = 1.0f;
-        float env = 0.0f;                ///< 0..1 包络（起止防爆音）
+        float env = 0.0f;  ///< 0..1 包络（起止防爆音）
         bool active = false;
         std::uint32_t previewGeneration = 0;
     };
@@ -180,13 +179,13 @@ private:
     Voice m_voices[kMaxVoices];
     double m_deviceRate = 44100.0;
 
-    SpscRing<Command, 256> m_cmdRing;               ///< UI → 回调
-    SpscRing<Event, 64> m_eventRing;                ///< 回调 → UI
+    SpscRing<Command, 256> m_cmdRing;  ///< UI → 回调
+    SpscRing<Event, 64> m_eventRing;   ///< 回调 → UI
     std::atomic<std::uint32_t> m_previewGeneration{0};
     // Enough for a full command batch plus all active voices awaiting GUI reclamation.
-    SpscRing<DecodedSample*, 1024> m_reclaimRing;    ///< 回调 → UI（归还；UI 线程 delete）
+    SpscRing<DecodedSample*, 1024> m_reclaimRing;  ///< 回调 → UI（归还；UI 线程 delete）
     std::atomic<int> m_activeCount{0};
-    std::atomic<float> m_masterVolume{1.0f};        ///< 主音量（UI 写/回调读）
+    std::atomic<float> m_masterVolume{1.0f};  ///< 主音量（UI 写/回调读）
     /// M5 时钟：回调整体输出帧数（所有 render 调用累计）。
     std::atomic<std::uint64_t> m_totalFrames{0};
     /// M5 时钟：kPcmSlot 启动时的输出帧基线（回调事件设置；UI 读）。

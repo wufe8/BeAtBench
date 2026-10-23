@@ -17,7 +17,7 @@ enum class NoteKind : std::uint8_t {
 
 /// 音符。LN：头尾是两条独立 Event，通过 ln_pair 互指（存 notes 容器下标）。
 /// lane = 轨道身份（由 codec 的通道映射表解析得出，格式无关）；
-/// 语义与 LNTYPE 1/2 的文本表示解耦——转换由 bms codec 负责（对齐稿 02 §4.1）。
+/// 语义与 LNTYPE 1/2 的文本表示解耦——转换由 bms codec 负责（doc/bms-format-notes.md）。
 struct Note {
     Lane lane;
     SampleRef sample;
@@ -76,9 +76,7 @@ struct Stop {
     friend bool operator==(const Stop& a, const Stop& b) {
         return a.count == b.count;  // 排除 ref_id
     }
-    friend bool operator<(const Stop& a, const Stop& b) {
-        return a.count < b.count;
-    }
+    friend bool operator<(const Stop& a, const Stop& b) { return a.count < b.count; }
 };
 
 /// 节拍事件（BMS ch02：每小节拍数，4/4 = 4；0.5 = 半拍小节）。
@@ -87,9 +85,7 @@ struct MeasureLen {
     double beats = 4.0;
 
     friend bool operator==(const MeasureLen&, const MeasureLen&) = default;
-    friend bool operator<(const MeasureLen& a, const MeasureLen& b) {
-        return a.beats < b.beats;
-    }
+    friend bool operator<(const MeasureLen& a, const MeasureLen& b) { return a.beats < b.beats; }
 };
 
 /// BGA 对象（#BMPxx 引用 + 图层 + 不透明度，最小骨架；ARGB 滤镜后续加）。

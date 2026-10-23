@@ -23,14 +23,17 @@ inline bool is_c36_digit(char c) {
 inline std::uint32_t c36_to_u32(std::string_view s, std::size_t digits = 2) {
     std::uint32_t v = 0;
     std::size_t n = s.size();
-    if (n < digits) n = digits;  // 不足位数等价于前导 '0'
+    if (n < digits) n = digits;      // 不足位数等价于前导 '0'
     std::size_t begin = n - digits;  // 取尾部 digits 位
     for (std::size_t i = begin; i < s.size(); ++i) {
         char c = s[i];
         std::uint32_t d = 0;
-        if (c >= '0' && c <= '9') d = static_cast<std::uint32_t>(c - '0');
-        else if (c >= 'A' && c <= 'Z') d = static_cast<std::uint32_t>(c - 'A') + 10;
-        else if (c >= 'a' && c <= 'z') d = static_cast<std::uint32_t>(c - 'a') + 10;
+        if (c >= '0' && c <= '9')
+            d = static_cast<std::uint32_t>(c - '0');
+        else if (c >= 'A' && c <= 'Z')
+            d = static_cast<std::uint32_t>(c - 'A') + 10;
+        else if (c >= 'a' && c <= 'z')
+            d = static_cast<std::uint32_t>(c - 'a') + 10;
         v = v * 36 + d;
     }
     return v;
@@ -73,9 +76,12 @@ inline std::uint32_t c62_to_u32(std::string_view s, std::size_t digits = 2) {
     for (std::size_t i = begin; i < s.size(); ++i) {
         const char c = s[i];
         std::uint32_t d = 0;
-        if (c >= '0' && c <= '9') d = static_cast<std::uint32_t>(c - '0');
-        else if (c >= 'A' && c <= 'Z') d = static_cast<std::uint32_t>(c - 'A') + 10;
-        else if (c >= 'a' && c <= 'z') d = static_cast<std::uint32_t>(c - 'a') + 36;
+        if (c >= '0' && c <= '9')
+            d = static_cast<std::uint32_t>(c - '0');
+        else if (c >= 'A' && c <= 'Z')
+            d = static_cast<std::uint32_t>(c - 'A') + 10;
+        else if (c >= 'a' && c <= 'z')
+            d = static_cast<std::uint32_t>(c - 'a') + 36;
         v = v * 62 + d;
     }
     return v;

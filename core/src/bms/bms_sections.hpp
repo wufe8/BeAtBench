@@ -11,14 +11,14 @@
 namespace beatbench::bms::detail {
 
 inline constexpr std::string_view kSectionHeaderLine = "*---------------------- HEADER FIELD";
-inline constexpr std::string_view kSectionDefLine    = "*---------------------- DEFINITION FIELD";
-inline constexpr std::string_view kSectionDataLine   = "*---------------------- MAIN DATA FIELD";
-inline constexpr std::string_view kSectionRawLine    = "*---------------------- EXPANSION FIELD";
+inline constexpr std::string_view kSectionDefLine = "*---------------------- DEFINITION FIELD";
+inline constexpr std::string_view kSectionDataLine = "*---------------------- MAIN DATA FIELD";
+inline constexpr std::string_view kSectionRawLine = "*---------------------- EXPANSION FIELD";
 
 /// 是否为 writer 生成的分割线注释（精确匹配；行首无空白）。
 inline bool is_section_banner(std::string_view line) {
-    return line == kSectionHeaderLine || line == kSectionDefLine ||
-           line == kSectionDataLine || line == kSectionRawLine;
+    return line == kSectionHeaderLine || line == kSectionDefLine || line == kSectionDataLine ||
+           line == kSectionRawLine;
 }
 
 }  // namespace beatbench::bms::detail

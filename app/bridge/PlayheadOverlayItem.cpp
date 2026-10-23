@@ -7,9 +7,9 @@
 #include <QPainterPath>
 #include <QPolygonF>
 
+#include "beatbench/core/timing/TimingEngine.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/ChartViewItem.hpp"
-#include "beatbench/core/timing/TimingEngine.hpp"
 
 namespace beatbench::app {
 
@@ -160,7 +160,10 @@ void PlayheadOverlayItem::paint(QPainter* p) {
         if (hasChart) {
             if (m_playheadSec >= 0.0) {
                 const qreal pyPlay = yForSec(m_playheadSec);
-                if (pyPlay > -1.0 && pyPlay < h + 1.0) { py = pyPlay; draw = true; }
+                if (pyPlay > -1.0 && pyPlay < h + 1.0) {
+                    py = pyPlay;
+                    draw = true;
+                }
             } else {
                 draw = true;
             }

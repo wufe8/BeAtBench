@@ -6,31 +6,31 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
-
 #include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "bridge/DocumentService.hpp"
-#include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
+#include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
+#include "bridge/DocumentService.hpp"
 
 namespace {
 using beatbench::app::DocumentService;
 using beatbench::edit::session_registry;
 
 class DocumentServiceTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         auto& reg = session_registry();
         previousActive_ = reg.active_id();
         previousIds_ = reg.ids();
         const QString base = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
         ASSERT_TRUE(QDir().mkpath(base));
-        temporary_ = std::make_unique<QTemporaryDir>(QDir(base).filePath(QStringLiteral("document-service-XXXXXX")));
+        temporary_ = std::make_unique<QTemporaryDir>(
+            QDir(base).filePath(QStringLiteral("document-service-XXXXXX")));
         ASSERT_TRUE(temporary_->isValid());
         aPath_ = temporary_->filePath(QStringLiteral("A.bms"));
         bPath_ = temporary_->filePath(QStringLiteral("B.bms"));
@@ -100,8 +100,11 @@ protected:
 TEST_F(DocumentServiceTest, CreatesSelectedModesWithoutOverwritingExistingDocuments) {
     const auto a = service_.open(aPath_);
     const auto b = service_.openReference(bPath_);
-    ASSERT_TRUE(ok(a)); ASSERT_TRUE(ok(b)); ASSERT_TRUE(edit(idOf(a)));
-    auto* aCore = session(idOf(a)); auto* bCore = session(idOf(b));
+    ASSERT_TRUE(ok(a));
+    ASSERT_TRUE(ok(b));
+    ASSERT_TRUE(edit(idOf(a)));
+    auto* aCore = session(idOf(a));
+    auto* bCore = session(idOf(b));
     const auto aNotes = aCore->chart().notes;
     const auto aUndo = aCore->undo_depth();
     for (const auto* mode : {"sp7k", "dp", "battle", "pms9k"}) {
@@ -110,20 +113,22 @@ TEST_F(DocumentServiceTest, CreatesSelectedModesWithoutOverwritingExistingDocume
         const auto created = service_.create(QString::fromLatin1(mode));
         ASSERT_TRUE(ok(created)) << created.value("error").toString().toStdString();
         const auto id = idOf(created);
-        ASSERT_NE(id, idOf(a)); ASSERT_NE(id, idOf(b));
+        ASSERT_NE(id, idOf(a));
+        ASSERT_NE(id, idOf(b));
         ASSERT_NE(session(id), nullptr);
         EXPECT_EQ(service_.instances().size(), count + 1);
         EXPECT_EQ(session(id)->chart().mode_id.value_or(""), mode);
         EXPECT_EQ(service_.activeId(), id);
         EXPECT_EQ(aCore->chart().notes, aNotes);
         EXPECT_EQ(aCore->undo_depth(), aUndo);
-        EXPECT_TRUE(aCore->is_dirty()); EXPECT_FALSE(bCore->is_dirty());
+        EXPECT_TRUE(aCore->is_dirty());
+        EXPECT_FALSE(bCore->is_dirty());
         EXPECT_EQ(bCore->chart().meta.at("TITLE"), "B");
         EXPECT_EQ(service_.session(id)->playKeyCount(), std::string(mode) == "pms9k" ? 9 : 7);
         EXPECT_FALSE(service_.session(id)->codecModes().contains("pms9k-bmesp"));
         ASSERT_TRUE(edit(id));
         const auto target = temporary_->filePath(QString::fromLatin1(mode) +
-            (std::string(mode) == "pms9k" ? ".pms" : ".bms"));
+                                                 (std::string(mode) == "pms9k" ? ".pms" : ".bms"));
         ASSERT_TRUE(ok(service_.save(id, target)));
         const auto reopened = beatbench::bms::read_bms_file(target.toUtf8().toStdString());
         EXPECT_EQ(reopened.chart.mode_id.value_or(""), mode);
@@ -137,7 +142,8 @@ TEST_F(DocumentServiceTest, CreatesSelectedModesWithoutOverwritingExistingDocume
         EXPECT_FALSE(ok(rejected));
         EXPECT_EQ(session_registry().ids(), ids);
         EXPECT_EQ(service_.activeId(), idOf(a));
-        EXPECT_EQ(aCore->chart().notes, aNotes); EXPECT_EQ(aCore->undo_depth(), aUndo);
+        EXPECT_EQ(aCore->chart().notes, aNotes);
+        EXPECT_EQ(aCore->undo_depth(), aUndo);
         EXPECT_EQ(bCore->chart().meta.at("TITLE"), "B");
     }
 }
@@ -204,8 +210,8 @@ TEST_F(DocumentServiceTest, ReusesNormalizedPathWithoutReloadingDirtyDocument) {
     ASSERT_TRUE(writeChart(aPath_, "External Change"));
     ASSERT_TRUE(ok(service_.open(bPath_)));
     const auto count = session_registry().ids().size();
-    const QString alias = QDir::current().relativeFilePath(
-        temporary_->path() + QStringLiteral("/./A.bms"));
+    const QString alias =
+        QDir::current().relativeFilePath(temporary_->path() + QStringLiteral("/./A.bms"));
     const auto reused = service_.open(alias);
     ASSERT_TRUE(ok(reused));
     EXPECT_TRUE(reused.value("reused").toBool());
@@ -526,14 +532,16 @@ TEST_F(DocumentServiceTest, ConfirmationUsesEachDocumentsPmsDialectAndCaseInsens
     ASSERT_TRUE(writeChart(safePath, "Safe"));
     const auto a = service_.open(safePath);
     const auto b = service_.openReference(bPath_);
-    ASSERT_TRUE(ok(a)); ASSERT_TRUE(ok(b));
+    ASSERT_TRUE(ok(a));
+    ASSERT_TRUE(ok(b));
     auto aChart = session(idOf(a))->chart();
     aChart.mode_id = "pms9k";
     session(idOf(a))->load(std::move(aChart), safePath.toUtf8().toStdString());
     auto bChart = session(idOf(b))->chart();
     bChart.mode_id = "pms9k-bmesp";
     session(idOf(b))->load(std::move(bChart), bPath_.toUtf8().toStdString());
-    ASSERT_TRUE(edit(idOf(a))); ASSERT_TRUE(edit(idOf(b)));
+    ASSERT_TRUE(edit(idOf(a)));
+    ASSERT_TRUE(edit(idOf(b)));
     const auto diskA = readBytes(safePath), diskB = readBytes(bPath_);
     const auto saved = service_.saveDirtyNamed(true);
     EXPECT_FALSE(ok(saved));
@@ -554,7 +562,8 @@ TEST_F(DocumentServiceTest, ConfirmationUsesEachDocumentsPmsDialectAndCaseInsens
 TEST_F(DocumentServiceTest, DefaultAndExplicitFalseKeepSavingPmsWithNonPmsSuffixes) {
     const auto a = service_.open(aPath_);
     const auto b = service_.open(bPath_);
-    ASSERT_TRUE(ok(a)); ASSERT_TRUE(ok(b));
+    ASSERT_TRUE(ok(a));
+    ASSERT_TRUE(ok(b));
     auto aChart = session(idOf(a))->chart();
     aChart.mode_id = "pms9k";
     session(idOf(a))->load(std::move(aChart), aPath_.toUtf8().toStdString());
@@ -562,22 +571,28 @@ TEST_F(DocumentServiceTest, DefaultAndExplicitFalseKeepSavingPmsWithNonPmsSuffix
     bChart.mode_id = "pms9k-bmesp";
     session(idOf(b))->load(std::move(bChart), bPath_.toUtf8().toStdString());
     const auto diskA = readBytes(aPath_), diskB = readBytes(bPath_);
-    ASSERT_TRUE(edit(idOf(a))); ASSERT_TRUE(edit(idOf(b)));
+    ASSERT_TRUE(edit(idOf(a)));
+    ASSERT_TRUE(edit(idOf(b)));
     const auto saved = service_.saveDirtyNamed();
     EXPECT_TRUE(ok(saved));
     EXPECT_EQ(saved.value("saved").toInt(), 2);
     EXPECT_TRUE(saved.value("confirmation").toList().isEmpty());
-    EXPECT_FALSE(session(idOf(a))->is_dirty()); EXPECT_FALSE(session(idOf(b))->is_dirty());
-    EXPECT_NE(readBytes(aPath_), diskA); EXPECT_NE(readBytes(bPath_), diskB);
+    EXPECT_FALSE(session(idOf(a))->is_dirty());
+    EXPECT_FALSE(session(idOf(b))->is_dirty());
+    EXPECT_NE(readBytes(aPath_), diskA);
+    EXPECT_NE(readBytes(bPath_), diskB);
     EXPECT_EQ(service_.activeId(), idOf(b));
 
-    ASSERT_TRUE(session(idOf(a))->undo()); ASSERT_TRUE(session(idOf(b))->undo());
-    ASSERT_TRUE(session(idOf(a))->is_dirty()); ASSERT_TRUE(session(idOf(b))->is_dirty());
+    ASSERT_TRUE(session(idOf(a))->undo());
+    ASSERT_TRUE(session(idOf(b))->undo());
+    ASSERT_TRUE(session(idOf(a))->is_dirty());
+    ASSERT_TRUE(session(idOf(b))->is_dirty());
     const auto explicitFalse = service_.saveDirtyNamed(false);
     EXPECT_TRUE(ok(explicitFalse));
     EXPECT_EQ(explicitFalse.value("saved").toInt(), 2);
     EXPECT_TRUE(explicitFalse.value("confirmation").toList().isEmpty());
-    EXPECT_FALSE(session(idOf(a))->is_dirty()); EXPECT_FALSE(session(idOf(b))->is_dirty());
+    EXPECT_FALSE(session(idOf(a))->is_dirty());
+    EXPECT_FALSE(session(idOf(b))->is_dirty());
     EXPECT_EQ(service_.activeId(), idOf(b));
 }
 

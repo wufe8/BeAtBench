@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-#include <QObject>
 #include <QAbstractItemModel>
-#include <atomic>
-#include <functional>
-#include "beatbench/core/project/Project.hpp"
+#include <QObject>
 #include <QString>
 #include <QStringList>
-#include <QVariantList>
-#include <QVariantMap>
 #include <QThreadPool>
 #include <QUrl>
+#include <QVariantList>
+#include <QVariantMap>
+#include <atomic>
+#include <functional>
 #include <memory>
+
+#include "beatbench/core/project/Project.hpp"
 
 namespace beatbench::app {
 
@@ -31,7 +32,8 @@ struct ProjectSnapshot;
 class ProjectController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString root READ root NOTIFY summaryChanged)
-    Q_PROPERTY(QString state READ state NOTIFY stateChanged)  ///< idle/indexing/parsing/ready/cancelled/error
+    Q_PROPERTY(QString state READ state NOTIFY
+                   stateChanged)  ///< idle/indexing/parsing/ready/cancelled/error
     Q_PROPERTY(QString errorText READ errorText NOTIFY stateChanged)
     Q_PROPERTY(QVariantList charts READ charts NOTIFY chartsChanged)
     Q_PROPERTY(QVariantList resources READ resources NOTIFY resourcesChanged)
@@ -49,13 +51,14 @@ class ProjectController : public QObject {
     Q_PROPERTY(QStringList sliceTargets READ sliceTargets NOTIFY sliceTargetsChanged)
     Q_PROPERTY(int sliceTargetCount READ sliceTargetCount NOTIFY sliceTargetsChanged)
 
-public:
+   public:
     // Dependency injection for deterministic slow/failing scanner tests; never called on GUI.
     struct ScanFunctions {
         std::function<beatbench::project::Project(const std::string&,
-                                                 const beatbench::project::ScanOptions&)> index;
-        std::function<void(beatbench::project::Project&,
-                           const beatbench::project::ScanOptions&)> parse;
+                                                  const beatbench::project::ScanOptions&)>
+            index;
+        std::function<void(beatbench::project::Project&, const beatbench::project::ScanOptions&)>
+            parse;
     };
     explicit ProjectController(QObject* parent = nullptr);
     explicit ProjectController(ScanFunctions functions, QObject* parent = nullptr);
@@ -72,8 +75,8 @@ public:
     QAbstractItemModel* resourceModel() const;
     QAbstractItemModel* resourceUsesModel() const;
     Q_INVOKABLE void setChartFilter(bool onlyOpen, const QString& text);
-    Q_INVOKABLE void setResourceFilter(const QString& kind, bool onlyMissing,
-                                       bool onlyUnreferenced, const QString& text);
+    Q_INVOKABLE void setResourceFilter(const QString& kind, bool onlyMissing, bool onlyUnreferenced,
+                                       const QString& text);
     Q_INVOKABLE QVariantMap chartDetails(const QString& path) const;
     Q_INVOKABLE QVariantMap selectResource(const QString& path);
     int missingCount() const { return m_missingCount; }
@@ -117,7 +120,7 @@ public:
     /// 返回人类可读摘要（"已保存 N 个谱面" / "无改动" / 含失败项）。
     Q_INVOKABLE QString saveSliceTargets(const QString& editorPath);
 
-signals:
+   signals:
     void stateChanged();
     void summaryChanged();
     void chartsChanged();
@@ -126,7 +129,7 @@ signals:
     void openStatesChanged();
     void sliceTargetsChanged();
 
-private:
+   private:
     void stopScan();
     void publishSnapshot(const std::shared_ptr<const ProjectSnapshot>& snapshot);
 

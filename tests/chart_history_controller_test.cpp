@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Standalone Qt Core event-loop tests; never use the author's QSettings/store.
 #include <gtest/gtest.h>
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
@@ -14,11 +15,12 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "beatbench/core/edit/EditorSession.hpp"
+#include "beatbench/core/edit/SessionRegistry.hpp"
 #include "bridge/ChartHistoryController.hpp"
 #include "bridge/ChartSnapshotStore.hpp"
 #include "bridge/DocumentService.hpp"
-#include "beatbench/core/edit/EditorSession.hpp"
-#include "beatbench/core/edit/SessionRegistry.hpp"
 
 namespace {
 using beatbench::app::ChartHistoryController;
@@ -31,7 +33,8 @@ bool waitIdle(ChartHistoryController& controller) {
     QEventLoop loop;
     QTimer timeout;
     timeout.setSingleShot(true);
-    QObject::connect(&controller, &ChartHistoryController::operationFinished, &loop, &QEventLoop::quit);
+    QObject::connect(&controller, &ChartHistoryController::operationFinished, &loop,
+                     &QEventLoop::quit);
     QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
     timeout.start(5000);
     loop.exec();
@@ -39,7 +42,7 @@ bool waitIdle(ChartHistoryController& controller) {
 }
 
 class ChartHistoryControllerTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         previousIds = session_registry().ids();
         previousActive = session_registry().active_id();
@@ -50,14 +53,17 @@ protected:
         const QString base = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
         ASSERT_TRUE(QDir().mkpath(base));
         const QString canonical = QFileInfo(base).canonicalFilePath();
-        temporary = std::make_unique<QTemporaryDir>(QDir(canonical.isEmpty() ? base : canonical)
-            .filePath(QStringLiteral("history-controller-XXXXXX")));
+        temporary = std::make_unique<QTemporaryDir>(
+            QDir(canonical.isEmpty() ? base : canonical)
+                .filePath(QStringLiteral("history-controller-XXXXXX")));
         ASSERT_TRUE(temporary->isValid());
         QCoreApplication::setOrganizationName(QStringLiteral("BeAtBench-isolated-tests"));
         QCoreApplication::setApplicationName(QUuid::createUuid().toString(QUuid::WithoutBraces));
         QSettings::setDefaultFormat(QSettings::IniFormat);
-        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary->filePath("settings-user"));
-        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, temporary->filePath("settings-system"));
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           temporary->filePath("settings-user"));
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope,
+                           temporary->filePath("settings-system"));
         QSettings settings;
         settings.setFallbacksEnabled(false);
         settings.clear();
@@ -78,12 +84,13 @@ protected:
         controller = std::make_unique<ChartHistoryController>(documents.get(), nullptr, root);
     }
     void TearDown() override {
-        controller.reset(); // joins worker before removing temp/settings/session resources
+        controller.reset();  // joins worker before removing temp/settings/session resources
         QCoreApplication::sendPostedEvents();
         documents.reset();
         auto& registry = session_registry();
         for (const auto& id : registry.ids())
-            if (std::find(previousIds.begin(), previousIds.end(), id) == previousIds.end()) registry.close(id);
+            if (std::find(previousIds.begin(), previousIds.end(), id) == previousIds.end())
+                registry.close(id);
         registry.activate(previousActive);
         QSettings::setDefaultFormat(oldFormat);
         QCoreApplication::setOrganizationName(oldOrganization);
@@ -137,8 +144,10 @@ TEST_F(ChartHistoryControllerTest, SaveCancellationOnlyConsumesOriginalDocument)
     QString requested;
     QObject::connect(controller.get(), &ChartHistoryController::saveRequested,
                      [&](const QString& id) { requested = id; });
-    QObject::connect(controller.get(), &ChartHistoryController::operationFinished,
-                     [&](bool ok) { ++completed; EXPECT_FALSE(ok); });
+    QObject::connect(controller.get(), &ChartHistoryController::operationFinished, [&](bool ok) {
+        ++completed;
+        EXPECT_FALSE(ok);
+    });
     controller->requestSavedSnapshot("pending");
     EXPECT_EQ(requested, aId);
     EXPECT_TRUE(controller->busy());
@@ -199,7 +208,8 @@ TEST_F(ChartHistoryControllerTest, ActiveTabChangeDoesNotRetargetSnapshotOrResto
     const auto copies = QDir(temporary->path()).entryList({"*.bms"}, QDir::Files);
     ASSERT_EQ(copies.size(), 3);
     for (const auto& name : copies)
-        if (name != "A.bms" && name != "B.bms") EXPECT_EQ(bytes(temporary->filePath(name)), beforeA);
+        if (name != "A.bms" && name != "B.bms")
+            EXPECT_EQ(bytes(temporary->filePath(name)), beforeA);
 }
 
 TEST_F(ChartHistoryControllerTest, PendingSaveRejectsRetargetAndExit) {
@@ -260,7 +270,8 @@ TEST_F(ChartHistoryControllerTest, ProjectBrowseClosedPathRestoresWithoutOpening
     ASSERT_TRUE(session_registry().activate(bId.toUtf8().toStdString()));
     int dialogs = 0, saves = 0;
     QObject::connect(controller.get(), &ChartHistoryController::showRequested, [&] { ++dialogs; });
-    QObject::connect(controller.get(), &ChartHistoryController::saveRequested, [&](const QString&) { ++saves; });
+    QObject::connect(controller.get(), &ChartHistoryController::saveRequested,
+                     [&](const QString&) { ++saves; });
     controller->browseHistory(aPath);
     ASSERT_TRUE(waitIdle(*controller));
     EXPECT_TRUE(controller->documentId().isEmpty());
@@ -301,7 +312,7 @@ TEST_F(ChartHistoryControllerTest, DestructionJoinsActiveWorkerAndDropsQueuedDel
     EXPECT_EQ(history.value("entries").toList().size(), 1);
     EXPECT_EQ(bytes(aPath), QByteArray("#TITLE A\n#BPM 120\n"));
 }
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);

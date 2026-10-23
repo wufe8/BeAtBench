@@ -18,14 +18,14 @@
 #include <unordered_set>
 #include <utility>
 
-#include "beatbench/core/Version.hpp"
 #include "beatbench/core/ChartMode.hpp"
+#include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChartCheck.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 #include "beatbench/core/codec/Codec.hpp"
 #include "beatbench/core/codec/CodecRegistry.hpp"
-#include "beatbench/core/codec/BmsChannelMaps.hpp"
 #include "beatbench/core/command/Midi.hpp"
 #include "beatbench/core/command/Project.hpp"
 #include "beatbench/core/command/Slice.hpp"
@@ -46,9 +46,7 @@ using beatbench::codec::global_codec_registry;
 
 // —— 参数工具 ——
 
-[[noreturn]] void bad_args(const std::string& message) {
-    throw CommandError("bad_args", message);
-}
+[[noreturn]] void bad_args(const std::string& message) { throw CommandError("bad_args", message); }
 
 const std::string& arg_str(const Json& args, const char* key) {
     if (!args.is_object()) bad_args("args 必须是对象");
@@ -126,18 +124,24 @@ bool lane_can_ln(const Chart& chart, const Lane& lane) {
 
 std::string severity_str(beatbench::codec::Severity s) {
     switch (s) {
-        case beatbench::codec::Severity::Error: return "error";
-        case beatbench::codec::Severity::Warning: return "warning";
-        default: return "info";
+        case beatbench::codec::Severity::Error:
+            return "error";
+        case beatbench::codec::Severity::Warning:
+            return "warning";
+        default:
+            return "info";
     }
 }
 
 // LintIssue 用 bms::Severity（与 codec::Severity 同语义、不同类型）
 std::string severity_str(beatbench::bms::Severity s) {
     switch (s) {
-        case beatbench::bms::Severity::Error: return "error";
-        case beatbench::bms::Severity::Warning: return "warning";
-        default: return "info";
+        case beatbench::bms::Severity::Error:
+            return "error";
+        case beatbench::bms::Severity::Warning:
+            return "warning";
+        default:
+            return "info";
     }
 }
 
@@ -153,6 +157,7 @@ Json diags_json(const std::vector<beatbench::codec::Diagnostic>& diags) {
     return arr;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——采样表 JSON 组装分支
 Json samples_json(const Chart& chart) {
     Json wav = Json::array(), bmp = Json::array(), bpm = Json::array(), stop = Json::array();
     const auto usage = collect_sample_usage(chart);
@@ -177,8 +182,10 @@ Json samples_json(const Chart& chart) {
         }
         e.set("usage", std::move(u));
         if (has_def) {
-            if (kind == SampleKind::Wav || kind == SampleKind::Bmp) e.set("file", def->file);
-            else e.set("value", def->value);
+            if (kind == SampleKind::Wav || kind == SampleKind::Bmp)
+                e.set("file", def->file);
+            else
+                e.set("value", def->value);
         } else {
             e.set("file", "");  // 未绑定采样槽位（切音工作区手工版）
         }
@@ -221,7 +228,7 @@ Json samples_json(const Chart& chart) {
 // —— 命令实现 ——
 
 class VersionCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "version"; }
     Json run(const Json& args) const override {
         Json out = Json::object();
@@ -234,7 +241,7 @@ public:
 };
 
 class CapabilitiesCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "capabilities"; }
     Json run(const Json& args) const override {
         Json out = Json::object();
@@ -260,7 +267,7 @@ public:
 };
 
 class InfoCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "info"; }
     Json run(const Json& args) const override {
         const std::string& path = arg_str(args, "path");
@@ -305,8 +312,9 @@ public:
 };
 
 class CheckCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "check"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
     Json run(const Json& args) const override {
         const std::string& path = arg_str(args, "path");
         const Codec* codec = resolve_codec(args, path);
@@ -319,8 +327,10 @@ public:
 
         std::size_t errors = 0, warnings = 0;
         for (const auto& d : result.diagnostics) {
-            if (d.severity == beatbench::codec::Severity::Error) ++errors;
-            else if (d.severity == beatbench::codec::Severity::Warning) ++warnings;
+            if (d.severity == beatbench::codec::Severity::Error)
+                ++errors;
+            else if (d.severity == beatbench::codec::Severity::Warning)
+                ++warnings;
         }
 
         Json out = Json::object();
@@ -351,8 +361,7 @@ public:
                 e.set("resolved", issue.resolved);
                 e.set("message", issue.message);
                 ext_mismatch.push_back(std::move(e));
-            } else if (issue.code == "overlapping_notes" ||
-                       issue.code == "dangling_ln") {
+            } else if (issue.code == "overlapping_notes" || issue.code == "dangling_ln") {
                 // 位置信息（measure/pos/lane/sample）供 GUI 定位到具体 note
                 Json e = Json::object();
                 e.set("message", issue.message);
@@ -368,9 +377,12 @@ public:
                     lane.set("player", static_cast<std::int64_t>(issue.lane_player));
                     // LaneKind 枚举：Key=0 Scratch=1 Pedal=2 Bgm=3
                     std::string kind = "key";
-                    if (issue.lane_kind == 1) kind = "scratch";
-                    else if (issue.lane_kind == 2) kind = "pedal";
-                    else if (issue.lane_kind == 3) kind = "bgm";
+                    if (issue.lane_kind == 1)
+                        kind = "scratch";
+                    else if (issue.lane_kind == 2)
+                        kind = "pedal";
+                    else if (issue.lane_kind == 3)
+                        kind = "bgm";
                     lane.set("kind", std::move(kind));
                     lane.set("index", static_cast<std::int64_t>(issue.lane_index));
                     e.set("lane", std::move(lane));
@@ -399,8 +411,7 @@ public:
         bool has_blocking = errors != 0;
         if (!has_blocking) {
             for (const auto& issue : lint) {
-                if (issue.severity == Severity::Error ||
-                    issue.severity == Severity::Warning) {
+                if (issue.severity == Severity::Error || issue.severity == Severity::Warning) {
                     has_blocking = true;
                     break;
                 }
@@ -412,7 +423,7 @@ public:
 };
 
 class ConvertCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "convert"; }
     Json run(const Json& args) const override {
         const std::string& in_path = arg_str(args, "input");
@@ -441,8 +452,8 @@ public:
         }
 
         if (!overwrite && std::filesystem::exists(out_path)) {
-            throw CommandError("output_exists", "输出文件已存在: " + out_path +
-                                                    "（传 overwrite:true 覆盖）");
+            throw CommandError("output_exists",
+                               "输出文件已存在: " + out_path + "（传 overwrite:true 覆盖）");
         }
         const auto result = codec->read(in_path, ropts);
         bool has_error = false;
@@ -462,8 +473,8 @@ public:
         res.set("bytes", static_cast<std::int64_t>(text.size()));
         res.set("format", std::string(codec->id()));
         if (result.chart.mode_id) res.set("mode", *result.chart.mode_id);
-        res.set("from_encoding", result.detected_encoding.empty() ? enc_name
-                                                                  : result.detected_encoding);
+        res.set("from_encoding",
+                result.detected_encoding.empty() ? enc_name : result.detected_encoding);
         res.set("to_encoding", enc_name);
         res.set("diagnostics", diags_json(result.diagnostics));
         return res;
@@ -517,14 +528,19 @@ Lane lane_from_json(const Json& j) {
     if (const Json* k = j.find("kind")) {
         if (!k->is_string()) throw CommandError("bad_args", "lane.kind 应为字符串");
         auto s = k->as_str();
-        for (auto& c : s) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        if (s != "key" && s != "scratch" && s != "pedal" && s != "bgm" &&
-            s != "normal" && s != "ln" && s != "mine")
+        for (auto& c : s)
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (s != "key" && s != "scratch" && s != "pedal" && s != "bgm" && s != "normal" &&
+            s != "ln" && s != "mine")
             throw CommandError("bad_args", "未知 lane.kind");
-        if (s == "scratch") l.kind = LaneKind::Scratch;
-        else if (s == "pedal") l.kind = LaneKind::Pedal;
-        else if (s == "bgm") l.kind = LaneKind::Bgm;
-        else l.kind = LaneKind::Key;
+        if (s == "scratch")
+            l.kind = LaneKind::Scratch;
+        else if (s == "pedal")
+            l.kind = LaneKind::Pedal;
+        else if (s == "bgm")
+            l.kind = LaneKind::Bgm;
+        else
+            l.kind = LaneKind::Key;
     }
     return l;
 }
@@ -532,10 +548,14 @@ Lane lane_from_json(const Json& j) {
 // Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）
 const char* lane_kind_str(LaneKind k) {
     switch (k) {
-        case LaneKind::Scratch: return "scratch";
-        case LaneKind::Pedal: return "pedal";
-        case LaneKind::Bgm: return "bgm";
-        default: return "key";
+        case LaneKind::Scratch:
+            return "scratch";
+        case LaneKind::Pedal:
+            return "pedal";
+        case LaneKind::Bgm:
+            return "bgm";
+        default:
+            return "key";
     }
 }
 
@@ -582,13 +602,13 @@ std::optional<NoteKind> source_note_kind(const Json& item) {
     bad_args("note_kind 应为 normal/mine");
 }
 
-template<class T>
+template <class T>
 std::unique_ptr<T> with_source_identity(std::unique_ptr<T> command, const Json& item) {
     command->set_source_identity(source_ln_channel(item), source_note_kind(item));
     return command;
 }
 
-template<class T>
+template <class T>
 std::unique_ptr<T> with_source_identity(std::unique_ptr<T> command, const edit::NoteRef& ref) {
     command->set_source_identity(ref.ln_channel, ref.note_kind);
     return command;
@@ -625,7 +645,7 @@ std::vector<edit::NoteRef> selection_from_json(const Json& args) {
         }
         ref.ln_channel = source_ln_channel(item);
         ref.note_kind = source_note_kind(item);
-        refs.push_back(std::move(ref));
+        refs.push_back(ref);
     }
     return refs;
 }
@@ -669,8 +689,7 @@ SampleKind sample_kind_arg(const Json& args) {
         if (s == "bmp") return SampleKind::Bmp;
         if (s == "bpm") return SampleKind::Bpm;
         if (s == "stop") return SampleKind::Stop;
-        if (s != "wav")
-            throw CommandError("bad_args", "kind 应 wav/bmp/bpm/stop（默认 wav）");
+        if (s != "wav") throw CommandError("bad_args", "kind 应 wav/bmp/bpm/stop（默认 wav）");
     }
     return SampleKind::Wav;
 }
@@ -687,6 +706,7 @@ double number_arg(const Json& args, const char* key) {
 
 // 时间轴事件集合 → JSON 数组（timing.list 结果；按 (measure,pos) 升序）
 // kind 未知 → bad_args（协议层兜底，命令层不产生该情况）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——时序事件 JSON 组装分支
 Json timing_events_json(const Chart& chart, std::string_view kind) {
     Json arr = Json::array();
     const auto push = [&](std::uint32_t measure, const Rational& pos, double value,
@@ -726,7 +746,7 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
                     char* end = nullptr;
                     const double d = std::strtod(it->second.value.c_str(), &end);
                     if (end != it->second.value.c_str() && *end == '\0')
-                        v = std::llround(d) * 1.0;
+                        v = static_cast<double>(std::llround(d));
                 }
             }
             push(ev.measure, ev.pos, v, ev.value.ref_id);
@@ -734,8 +754,8 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
     } else if (kind == "measure") {
         for (const auto& ev : chart.measure_events) push(ev.measure, ev.pos, ev.value.beats);
     } else {
-        throw CommandError("bad_args", "未知 kind '" + std::string(kind) +
-                                           "'（支持 bpm / stop / measure）");
+        throw CommandError("bad_args",
+                           "未知 kind '" + std::string(kind) + "'（支持 bpm / stop / measure）");
     }
     return arr;
 }
@@ -764,9 +784,9 @@ edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
 
 }  // namespace
 
-// —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/05 §9 工具栏值放置 + 右 dock 列表） ——
+// —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/ui-design.md 九、 工具栏值放置 + 右 dock 列表） ——
 // kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 微秒 /
-// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义（bms_writer §2），
+// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义，
 // 因此「值」是唯一编辑维度——ch03 内联/引用的文本差异对编辑透明。
 // 两种 GUI 形态共用同一套接口：
 //   - 工具栏值放置（思路1）：timing.put（同位替换）+ timing.delete；
@@ -774,7 +794,7 @@ edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
 // 「选中批量改值」= 客户端对每个选中事件发一个 timing.put（或 CompositeCommand 包装）。
 
 class TimingListCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "timing.list"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -789,7 +809,7 @@ public:
 };
 
 class TimingPutCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "timing.put"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -804,11 +824,10 @@ public:
             if (!r->is_string()) throw CommandError("bad_args", "ref 应为字符串 id");
             const auto& chart = session.chart();
             const std::string s = r->as_str();
-            ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2)
-                                                  : bms::c36_to_u32(s, 2);
+            ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         }
-        const bool ok = session.exec(
-            std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
+        const bool ok =
+            session.exec(std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
@@ -818,7 +837,7 @@ public:
 };
 
 class TimingDeleteCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "timing.delete"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -826,8 +845,8 @@ public:
         const auto kind = timing_kind_arg(args);
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
-        const bool ok = session.exec(
-            std::make_unique<edit::DeleteTimingCommand>(kind, measure, pos));
+        const bool ok =
+            session.exec(std::make_unique<edit::DeleteTimingCommand>(kind, measure, pos));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
@@ -836,11 +855,11 @@ public:
     }
 };
 
-// —— BGA 事件命令（M3：base/poor/layer/layer2；doc/05 §9 「BGA 面板/视口」） ——
+// —— BGA 事件命令（M3：base/poor/layer/layer2；doc/ui-design.md 九、 「BGA 面板/视口」） ——
 // 定位 = (measure, pos, layer)；sample = #BMPxx id。bga.list 数据源 + put/delete 增删改。
 
 class BgaListCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "bga.list"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -875,7 +894,7 @@ public:
 };
 
 class BgaPutCommandCmd : public Command {
-public:
+   public:
     std::string_view name() const override { return "bga.put"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -895,7 +914,7 @@ public:
 };
 
 class BgaDeleteCommandCmd : public Command {
-public:
+   public:
     std::string_view name() const override { return "bga.delete"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -916,7 +935,7 @@ public:
 // from = {layer, measure, pos}（当前事件）；to = {layer?, measure?, pos?}（缺省沿用 from）。
 
 class BgaMoveCommandCmd : public Command {
-public:
+   public:
     std::string_view name() const override { return "bga.move"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -955,7 +974,7 @@ public:
 
 // timing.move：单 undo 步移动 BPM/STOP 事件（时间；值保持不变）。不支持 measure 事件。
 class TimingMoveCommandCmd : public Command {
-public:
+   public:
     std::string_view name() const override { return "timing.move"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -977,7 +996,11 @@ public:
         bool found = false;
         if (kind == edit::TimingKind::Bpm) {
             for (const auto& e : chart.bpm_events)
-                if (e.measure == fm && e.pos == fp) { value = e.value.value; found = true; break; }
+                if (e.measure == fm && e.pos == fp) {
+                    value = e.value.value;
+                    found = true;
+                    break;
+                }
         } else {
             for (const auto& e : chart.stop_events)
                 if (e.measure == fm && e.pos == fp) {
@@ -1008,8 +1031,9 @@ public:
 // `#NNN02:<值>` 小节长度行（ch01 多行按 sub_line FIFO 与原解析器一致）。
 
 class ClipboardCopyCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "clipboard.copy"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——复制协议需逐项消歧并校验 LN 两端完整性
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1033,18 +1057,19 @@ public:
             std::size_t found_i = 0;
             for (std::size_t i = 0; i < chart.notes.size(); ++i) {
                 const auto& ev = chart.notes[i];
-                if (ev.measure == ref.measure && ev.pos == ref.pos &&
-                    ev.value.lane == ref.lane && ev.value.sample.id == ref.sample &&
-                    ev.value.sub_line == ref.sub_line &&
-                    (!ref.ln_channel || ev.value.ln_channel == *ref.ln_channel) &&
-                    (!ref.note_kind || ev.value.kind == *ref.note_kind) && !claimed.contains(i)) {
+                if (ev.measure == ref.measure && ev.pos == ref.pos && ev.value.lane == ref.lane &&
+                    ev.value.sample.id == ref.sample && ev.value.sub_line == ref.sub_line &&
+                    ev.value.ln_channel == ref.ln_channel.value_or(ev.value.ln_channel) &&
+                    ev.value.kind == ref.note_kind.value_or(ev.value.kind) &&
+                    !claimed.contains(i)) {
                     // 别名收敛后两个合法物件可能拥有完全相同的引用值；逐一认领，
                     // 否则完整LN选择也会反复命中第一端、被误判为半选。
                     if (found) {
                         if (found->value.ln_channel != ev.value.ln_channel ||
                             found->value.kind != ev.value.kind)
-                            throw CommandError("bad_args", "选择引用不明确；请提供 ln_channel/note_kind");
-                        continue; // Identical aliases are still claimed FIFO.
+                            throw CommandError("bad_args",
+                                               "选择引用不明确；请提供 ln_channel/note_kind");
+                        continue;  // Identical aliases are still claimed FIFO.
                     }
                     found = &ev;
                     found_i = i;
@@ -1056,12 +1081,10 @@ public:
             if (!found)
                 throw CommandError("not_found", "选择集中的 note 在谱面中不存在（可能已被删除）");
             claimed.insert(found_i);
-            const bool want_ln =
-                found->value.ln_channel && found->value.lane.kind != LaneKind::Bgm;
-            const auto ch = bms::bms_channel_for_mode(mode, found->value.lane, want_ln,
-                                                      found->value.kind);
-            if (ch.empty())
-                throw CommandError("unsupported", "选中 note 无法表示为 BMS 通道");
+            const bool want_ln = found->value.ln_channel && found->value.lane.kind != LaneKind::Bgm;
+            const auto ch =
+                bms::bms_channel_for_mode(mode, found->value.lane, want_ln, found->value.kind);
+            if (ch.empty()) throw CommandError("unsupported", "选中 note 无法表示为 BMS 通道");
             cells.push_back(CopyCell{ref, ch, found});
             selected_idx.push_back(found_i);
         }
@@ -1114,7 +1137,7 @@ public:
         return out;
     }
 
-private:
+   private:
     // id 文本（按 chart.id_base 进制）
     static std::string fmt_id_text(const Chart& chart, std::uint32_t id) {
         return chart.id_base == IdBase::Base62 ? bms::u32_to_c62(id, 2) : bms::u32_to_c36(id, 2);
@@ -1127,8 +1150,9 @@ private:
 };
 
 class ClipboardPasteCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "clipboard.paste"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1159,7 +1183,7 @@ public:
         } else {
             throw CommandError("bad_args", "缺少 text 或 lines");
         }
-        // M6.3 铺放（2026-09 用户，doc/02 §3）：sub_line_mode = "fifo"（默认，历史行为）|
+        // M6.3 铺放（2026-09 用户，doc/core-model.md 三、）：sub_line_mode = "fifo"（默认，历史行为）|
         // "uniform"（子行接续——FIFO 照旧从 0 起解析，随后统一抬升：起点 = 目标小节段内已有
         // BGM 最高子行 + 1，无 → 0）。保证：同 tick 不与旧行冲突；旧行结构不动；新内容跨小节
         // 同列（统一 base，而非每小节独立接续）。
@@ -1212,8 +1236,8 @@ public:
                 const auto id_num = decode_id_text(chart, line.substr(3, k - 3));
                 while (k < line.size() && (line[k] == ' ' || line[k] == '\t')) ++k;
                 std::string_view file = line.substr(k);
-                while (!file.empty() && (file.back() == ' ' || file.back() == '\t' ||
-                                         file.back() == '\r'))
+                while (!file.empty() &&
+                       (file.back() == ' ' || file.back() == '\t' || file.back() == '\r'))
                     file.remove_suffix(1);
                 if (file.empty() || id_num == 0) continue;  // 无路径/占位 id 00 → 忽略
                 wav_defs.emplace_back(id_num, std::string(file));
@@ -1228,7 +1252,10 @@ public:
             std::uint32_t measure = 0;
             bool ok_digits = true;
             for (std::size_t i = 0; i < 3; ++i) {
-                if (token[i] < '0' || token[i] > '9') { ok_digits = false; break; }
+                if (token[i] < '0' || token[i] > '9') {
+                    ok_digits = false;
+                    break;
+                }
                 measure = measure * 10 + static_cast<std::uint32_t>(token[i] - '0');
             }
             if (!ok_digits) continue;
@@ -1240,8 +1267,7 @@ public:
             // ch02 小节长度：整段一个数值（文件值 = 整小节记号倍数，1 = 4/4；模型存四分拍 ×4）
             if (rule->semantics == bms::ChannelSemantics::MeasureLen) {
                 double beats = 0.0;
-                if (parse_double_text(data, beats))
-                    measure_defs.emplace_back(measure, beats * 4.0);
+                if (parse_double_text(data, beats)) measure_defs.emplace_back(measure, beats * 4.0);
                 continue;
             }
             // 其余非 Note 语义（ch03 内联 BPM / ch04 BGA / ch08-09 引用…）粘贴暂不支持 → 跳过
@@ -1255,8 +1281,8 @@ public:
                 if (slot == "00") continue;
                 edit::NoteRef ref;
                 ref.measure = measure;
-                ref.pos = Rational(static_cast<std::int64_t>(i),
-                                   static_cast<std::int64_t>(n_slots));
+                ref.pos =
+                    Rational(static_cast<std::int64_t>(i), static_cast<std::int64_t>(n_slots));
                 ref.lane = rule->lane;
                 ref.sample = decode_id_text(chart, slot);
                 ref.sub_line = sub_line;
@@ -1268,24 +1294,30 @@ public:
             }
         }
         if (parsed.empty() && wav_defs.empty() && measure_defs.empty())
-            throw CommandError("bad_args",
-                               "未解析到任何 note/定义（剪贴板内容无法识别；需要 BMS 数据行或 #WAVxx 定义）");
+            throw CommandError(
+                "bad_args",
+                "未解析到任何 note/定义（剪贴板内容无法识别；需要 BMS 数据行或 #WAVxx 定义）");
 
         // 偏移：剪贴板最小 measure（note 与小节长共同）→ target_measure（默认 = 最小，即原位）
         std::uint32_t min_m = 0;
         bool have_m = false;
         for (const auto& r : parsed) {
-            if (!have_m || r.measure < min_m) { have_m = true; min_m = r.measure; }
+            if (!have_m || r.measure < min_m) {
+                have_m = true;
+                min_m = r.measure;
+            }
         }
         for (const auto& d : measure_defs) {
-            if (!have_m || d.first < min_m) { have_m = true; min_m = d.first; }
+            if (!have_m || d.first < min_m) {
+                have_m = true;
+                min_m = d.first;
+            }
         }
         std::uint32_t target = have_m ? min_m : 0;
         if (const Json* t = args.find("target_measure")) {
             target = static_cast<std::uint32_t>(t->as_i64());
         }
-        const std::int64_t offset =
-            have_m ? static_cast<std::int64_t>(target) - min_m : 0;
+        const std::int64_t offset = have_m ? static_cast<std::int64_t>(target) - min_m : 0;
 
         // ---- 子行接续（"uniform"）：目标小节段内已有 BGM 最高子行 + 1 = 统一起点 ----
         if (sub_line_mode == "uniform") {
@@ -1318,23 +1350,22 @@ public:
         for (const auto& [m, beats] : measure_defs)
             comp->add(std::make_unique<edit::PutTimingCommand>(
                 edit::TimingKind::Measure,
-                static_cast<std::uint32_t>(static_cast<std::int64_t>(m) + offset),
-                Rational(0, 1), beats));
+                static_cast<std::uint32_t>(static_cast<std::int64_t>(m) + offset), Rational(0, 1),
+                beats));
         for (std::size_t i = 0; i < parsed.size(); ++i) {
             const auto& r = parsed[i];
             const bool ln_kind = i < parsed_ln.size() && parsed_ln[i];
-            const NoteKind kind =
-                (i < parsed_kind.size()) ? parsed_kind[i] : NoteKind::Normal;
+            const NoteKind kind = (i < parsed_kind.size()) ? parsed_kind[i] : NoteKind::Normal;
             comp->add(std::make_unique<edit::PutNoteCommand>(
-                static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset),
-                r.pos, r.lane, r.sample, ln_kind, kind, r.sub_line));
+                static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset), r.pos,
+                r.lane, r.sample, ln_kind, kind, r.sub_line));
         }
         const bool ok = session.exec(std::move(comp));
         Json placed = Json::array();
         for (const auto& r : parsed) {
             Json item = Json::object();
-            item.set("measure", static_cast<std::int64_t>(
-                         static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset)));
+            item.set("measure", static_cast<std::int64_t>(static_cast<std::uint32_t>(
+                                    static_cast<std::int64_t>(r.measure) + offset)));
             Json pos = Json::object();
             pos.set("num", r.pos.num);
             pos.set("den", r.pos.den);
@@ -1343,9 +1374,12 @@ public:
             lane.set("player", static_cast<std::int64_t>(r.lane.player));
             lane.set("index", static_cast<std::int64_t>(r.lane.index));
             const char* kind = "key";
-            if (r.lane.kind == LaneKind::Bgm) kind = "bgm";
-            else if (r.lane.kind == LaneKind::Scratch) kind = "scratch";
-            else if (r.lane.kind == LaneKind::Pedal) kind = "pedal";
+            if (r.lane.kind == LaneKind::Bgm)
+                kind = "bgm";
+            else if (r.lane.kind == LaneKind::Scratch)
+                kind = "scratch";
+            else if (r.lane.kind == LaneKind::Pedal)
+                kind = "pedal";
             lane.set("kind", kind);
             item.set("lane", std::move(lane));
             item.set("sample", static_cast<std::int64_t>(r.sample));
@@ -1364,7 +1398,7 @@ public:
         return out;
     }
 
-private:
+   private:
     // id 文本 → 数值（按 chart.id_base）
     static std::uint32_t decode_id_text(const Chart& chart, std::string_view id_text) {
         return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(id_text, 2)
@@ -1372,10 +1406,8 @@ private:
     }
 };
 
-
-
 class SessionLoadCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.load"; }
     Json run(const Json& args) const override {
         const std::string& path = arg_str(args, "path");
@@ -1389,7 +1421,7 @@ public:
             }
         }
         auto& session = session_from_args(args);
-        session.load(std::move(result.chart), path);
+        session.load(result.chart, path);
         // 注入持久化钩子（崩溃备份/自动保存用；按本文件 codec 写出）
         session.set_persist_hook(make_persist_hook(codec));
         Json out = Json::object();
@@ -1403,7 +1435,7 @@ public:
 // session.new：新建空谱面（2026-09）。创建 0 小节的空 Chart 载入会话；前端把编辑 floor seed 到
 // 1（渲染/可放小节 0）。放进 note 即长真实小节数；空小节保存时被 BMS 丢弃。路径空 → 保存走另存为。
 class SessionNewCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.new"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -1436,8 +1468,9 @@ public:
 };
 
 class SessionSaveCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.save"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
@@ -1503,7 +1536,7 @@ public:
 // args: {autosave?:bool, backup?:bool} 任一提供则设置；返回当前状态。
 // 默认 backup=true（每次编辑后写 path+".bak"）、autosave=false。
 class SessionAutosaveCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.autosave"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -1532,14 +1565,14 @@ public:
 // 返回 issues 数组（{code,severity,message,measure,pos,lane,sample}）。
 // wav_ext_mismatch 聚合为**一条 info**（上千条同因不刷屏；2026-09 用户）。
 class SessionLintCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.lint"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——会话 lint 聚合与定位字段序列化分支
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
         std::filesystem::path base_dir(".");
-        if (!session.path().empty())
-            base_dir = std::filesystem::path(session.path()).parent_path();
+        if (!session.path().empty()) base_dir = std::filesystem::path(session.path()).parent_path();
         const auto lint = beatbench::bms::lint_chart(session.chart(), base_dir);
         Json arr = Json::array();
         // 1) 聚合 wav_ext_mismatch（信息级，一条）
@@ -1557,9 +1590,8 @@ public:
             Json e = Json::object();
             e.set("code", "wav_ext_mismatch");
             e.set("severity", "info");
-            e.set("message", std::to_string(ext_count) +
-                                 " 个采样文件扩展名与引用不符（示例: " + ext_first_file +
-                                 " → " + ext_first_resolved + "）");
+            e.set("message", std::to_string(ext_count) + " 个采样文件扩展名与引用不符（示例: " +
+                                 ext_first_file + " → " + ext_first_resolved + "）");
             e.set("measure", static_cast<std::int64_t>(0));
             arr.push_back(std::move(e));
         }
@@ -1581,9 +1613,12 @@ public:
                 Json lane = Json::object();
                 lane.set("player", static_cast<std::int64_t>(issue.lane_player));
                 std::string kind = "key";
-                if (issue.lane_kind == 1) kind = "scratch";
-                else if (issue.lane_kind == 2) kind = "pedal";
-                else if (issue.lane_kind == 3) kind = "bgm";
+                if (issue.lane_kind == 1)
+                    kind = "scratch";
+                else if (issue.lane_kind == 2)
+                    kind = "pedal";
+                else if (issue.lane_kind == 3)
+                    kind = "bgm";
                 lane.set("kind", kind);
                 lane.set("index", static_cast<std::int64_t>(issue.lane_index));
                 e.set("lane", std::move(lane));
@@ -1613,8 +1648,9 @@ public:
 };
 
 class NotePutCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.put"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
@@ -1653,23 +1689,25 @@ public:
                     throw CommandError("bad_args", "参数类型错误: kind 应为字符串");
                 }
                 const auto& s = k->as_str();
-                if (s == "ln") ln_kind = true;
-                else if (s == "mine") kind = NoteKind::Landmine;
+                if (s == "ln")
+                    ln_kind = true;
+                else if (s == "mine")
+                    kind = NoteKind::Landmine;
                 else if (s != "normal") {
-                    throw CommandError("bad_args", "未知 kind '" + s + "'（支持 normal / ln / mine）");
+                    throw CommandError("bad_args",
+                                       "未知 kind '" + s + "'（支持 normal / ln / mine）");
                 }
             }
         }
         // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
         // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
         // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
-        if (bms::bms_channel_for_mode(session.chart().mode_id.value_or("sp7k"),
-                                      lane, ln_kind, kind).empty()) {
+        if (bms::bms_channel_for_mode(session.chart().mode_id.value_or("sp7k"), lane, ln_kind, kind)
+                .empty()) {
             throw CommandError("bad_args", "该轨道/音符类型无法表示为当前模式的 BMS 通道");
         }
         if (ln_kind && !lane_can_ln(session.chart(), lane)) {
-            throw CommandError("bad_args",
-                               "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
+            throw CommandError("bad_args", "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
         }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
             measure, pos, lane, sample, ln_kind, kind, sub_line));
@@ -1682,7 +1720,7 @@ public:
 };
 
 class NoteMoveCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.move"; }
 
     // 解析单个 move 项（from + to）：from = {measure, pos, lane?, sample}；
@@ -1728,9 +1766,10 @@ public:
             if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
             to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
-        return with_source_identity(std::make_unique<edit::MoveNoteCommand>(
-            from_m, from_pos, lane, sample, to_m, to_pos, false, to_lane, from_sub_line,
-            to_sub_line), *from);
+        return with_source_identity(
+            std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m, to_pos,
+                                                    false, to_lane, from_sub_line, to_sub_line),
+            *from);
     }
 
     Json run(const Json& args) const override {
@@ -1775,8 +1814,9 @@ public:
 };
 
 class NoteDeleteCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.delete"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——命令协议参数解析分支表（协议即分支）
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
@@ -1801,8 +1841,9 @@ public:
                 if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
                 sub_line = static_cast<std::uint32_t>(bl->as_i64());
             }
-            return with_source_identity(std::make_unique<edit::DeleteNoteCommand>(
-                measure, pos, lane, sample, sub_line), item);
+            return with_source_identity(
+                std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line),
+                item);
         };
         // selection 数组 = 批量删除（一个 CompositeCommand / 一次备份）；单对象路径保持兼容。
         if (args.find("selection")) {
@@ -1829,11 +1870,11 @@ public:
     }
 };
 
-// —— 变换/量化（M3：doc/01 §D「量化/镜像/旋转」；批量 = CompositeCommand 一个 undo 步） ——
-// 输入 = selection 数组（前端物化，与 clipboard.copy 一致）；region 描述后置（handoff §区域）。
+// —— 变换/量化（M3「量化/镜像/旋转」设计；批量 = CompositeCommand 一个 undo 步） ——
+// 输入 = selection 数组（前端物化，与 clipboard.copy 一致）；region 描述后置。
 
 class NoteQuantizeCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.quantize"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -1860,8 +1901,10 @@ public:
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(with_source_identity(std::make_unique<edit::QuantizeNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, snap_num, snap_den), r));
+            comp->add(
+                with_source_identity(std::make_unique<edit::QuantizeNoteCommand>(
+                                         r.measure, r.pos, r.lane, r.sample, snap_num, snap_den),
+                                     r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -1873,7 +1916,7 @@ public:
 };
 
 class NoteTransformCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.transform"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -1946,7 +1989,7 @@ public:
 // note.toggleLn：selection 中每个 note——LN → 断开两端变单点；单点 → 向前找最近
 // 同 lane 同 sample 未配对单点配成 LN（找不到则跳过）。返回 converted 数（实际改变）。
 class NoteToggleLnCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.toggleLn"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -1965,7 +2008,8 @@ public:
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
             comp->add(with_source_identity(std::make_unique<edit::ToggleLnCommand>(
-                r.measure, r.pos, r.lane, r.sample, r.sub_line), r));
+                                               r.measure, r.pos, r.lane, r.sample, r.sub_line),
+                                           r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -1998,8 +2042,9 @@ edit::ConvertTarget convert_target_from_json(const Json& args) {
 }  // namespace
 
 class NoteConvertCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.convert"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
@@ -2011,37 +2056,53 @@ public:
         // 位移语义（2026-09）：支持绝对 to_measure/to_pos（单 note 精调）
         // 或统一 delta（{measure,pos}，与 moveRegion 同语义——多选整组位移，逐个加）。
         // 两者可给出则 delta 优先；都不给 = 原位转换。
-        std::uint32_t delta_m = 0; Rational delta_p(0, 1);
+        std::uint32_t delta_m = 0;
+        Rational delta_p(0, 1);
         bool has_delta = false;
         if (const Json* d = args.find("delta")) {
             if (!d->is_object()) throw CommandError("bad_args", "delta 应为对象 {measure,pos}");
-            if (d->find("measure")) delta_m = static_cast<std::uint32_t>(d->find("measure")->as_i64());
+            if (d->find("measure"))
+                delta_m = static_cast<std::uint32_t>(d->find("measure")->as_i64());
             if (d->find("pos")) delta_p = pos_from_json(*d);
             has_delta = true;
         }
-        std::uint32_t abs_m = 0; Rational abs_p(0, 1);
+        std::uint32_t abs_m = 0;
+        Rational abs_p(0, 1);
         bool has_abs = args.find("to_measure") || args.find("to_pos");
         if (args.find("to_measure")) abs_m = u32_arg(args, "to_measure");
         if (args.find("to_pos")) abs_p = pos_from_json(args);
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            std::uint32_t tm; Rational tp;
+            std::uint32_t tm;
+            Rational tp;
             if (has_delta) {
                 std::int64_t to_m = static_cast<std::int64_t>(r.measure) + delta_m;
                 Rational to_pos = r.pos + delta_p;
-                while (to_pos.num < 0) { to_pos = to_pos + Rational(1, 1); --to_m; }
-                while (to_pos.num >= to_pos.den) { to_pos = to_pos - Rational(1, 1); ++to_m; }
+                while (to_pos.num < 0) {
+                    to_pos = to_pos + Rational(1, 1);
+                    --to_m;
+                }
+                while (to_pos.num >= to_pos.den) {
+                    to_pos = to_pos - Rational(1, 1);
+                    ++to_m;
+                }
                 if (to_m < 0) continue;
-                tm = static_cast<std::uint32_t>(to_m); tp = to_pos;
+                tm = static_cast<std::uint32_t>(to_m);
+                tp = to_pos;
             } else if (has_abs) {
-                tm = abs_m; tp = abs_p;
+                tm = abs_m;
+                tp = abs_p;
             } else {
-                tm = r.measure; tp = r.pos;
+                tm = r.measure;
+                tp = r.pos;
             }
-            comp->add(with_source_identity(std::make_unique<edit::ConvertNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, r.sub_line, target, tm, tp), r));
+            comp->add(with_source_identity(
+                std::make_unique<edit::ConvertNoteCommand>(r.measure, r.pos, r.lane, r.sample,
+                                                           r.sub_line, target, tm, tp),
+                r));
         }
-        if (comp->size() == 0) throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
+        if (comp->size() == 0)
+            throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
@@ -2055,7 +2116,7 @@ public:
 // args: {kind, source:{layer?,measure,pos}, target:{lane:{player,kind,index}}}。
 
 class NoteConvertBackCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.convertBack"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2097,7 +2158,7 @@ public:
 // 实现：逐 note 算 to = ref.pos + delta（归一 [0,1) 进位/借位到 measure），
 // 包进 CompositeCommand（一个 undo 步）；与 note.quantize/note.transform 同族。
 class NoteMoveRegionCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.moveRegion"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2117,7 +2178,8 @@ public:
         // 可选 to_lane：整组统一换轨（拖拽横向移动）；缺省 = 纯时间
         std::optional<Lane> to_lane;
         if (const Json* tl = args.find("to_lane")) {
-            if (!tl->is_object()) throw CommandError("bad_args", "to_lane 应为对象 {player,kind,index}");
+            if (!tl->is_object())
+                throw CommandError("bad_args", "to_lane 应为对象 {player,kind,index}");
             to_lane = lane_from_json(*tl);
         }
         // 可选 to_sub_line：目标 BGM 行序号（BGM 子轨间移动；缺省 = 按目标小节行数自动分配）
@@ -2156,14 +2218,17 @@ public:
             }
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
-                comp->add(with_source_identity(std::make_unique<edit::ConvertNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
-                    static_cast<std::uint32_t>(to_m), to_pos), r));
+                comp->add(with_source_identity(
+                    std::make_unique<edit::ConvertNoteCommand>(
+                        r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
+                        static_cast<std::uint32_t>(to_m), to_pos),
+                    r));
             } else {
-                comp->add(with_source_identity(std::make_unique<edit::MoveNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample,
-                    static_cast<std::uint32_t>(to_m), to_pos, false, to_lane,
-                    r.sub_line, to_sub_line), r));
+                comp->add(with_source_identity(
+                    std::make_unique<edit::MoveNoteCommand>(
+                        r.measure, r.pos, r.lane, r.sample, static_cast<std::uint32_t>(to_m),
+                        to_pos, false, to_lane, r.sub_line, to_sub_line),
+                    r));
             }
         }
         if (comp->size() == 0) {
@@ -2178,10 +2243,10 @@ public:
     }
 };
 
-// —— 元信息编辑（doc/05 §107「元信息表单」→ meta.edit；批量 Composite 一个 undo 步） ——
+// —— 元信息编辑（doc/ui-design.md 六、「元信息表单」→ meta.edit；批量 Composite 一个 undo 步） ——
 
 class MetaListCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "meta.list"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2207,7 +2272,7 @@ public:
 };
 
 class MetaEditCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "meta.edit"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2253,7 +2318,7 @@ public:
 // meta.rawEdit：{lines:[...]} 整组替换（RawLinesEditCommand，一个 undo 步；空值=清空）。
 
 class MetaRawCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "meta.raw"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2267,7 +2332,7 @@ public:
 };
 
 class MetaRawEditCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "meta.rawEdit"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2288,7 +2353,7 @@ public:
 };
 
 class SessionDirtyCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.dirty"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2303,7 +2368,7 @@ public:
 };
 
 class SessionUndoCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.undo"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2317,7 +2382,7 @@ public:
 };
 
 class SessionRedoCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.redo"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2330,10 +2395,10 @@ public:
     }
 };
 
-// —— 多会话管理（2026-08 多标签页前瞻，doc/04 §6） ——
+// —— 多会话管理（2026-08 多标签页前瞻，doc/development.md 六、） ——
 
 class SessionCreateCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.create"; }
     Json run(const Json& args) const override {
         const std::string& id = arg_str(args, "id");
@@ -2353,7 +2418,7 @@ public:
 };
 
 class SessionCloseCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.close"; }
     Json run(const Json& args) const override {
         const std::string& id = arg_str(args, "id");
@@ -2371,7 +2436,7 @@ public:
 };
 
 class SessionActivateCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.activate"; }
     Json run(const Json& args) const override {
         const std::string& id = arg_str(args, "id");
@@ -2392,7 +2457,7 @@ public:
 // 重映射定义表键 + 所有引用该 id 的 note/BGA/BPM/STOP 引用（一个 undo 步）。
 
 class SampleRenameCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "sample.rename"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2421,7 +2486,7 @@ public:
 // session.samples：返回当前内存会话的定义表（WAV 列表；供面板在编辑后刷新，与 info 同构）。
 
 class SessionSamplesCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "session.samples"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2438,7 +2503,7 @@ public:
 //   定位该 note，把其引用采样改为 to（一个 undo 步；仅改这一条 note）。
 
 class SampleSetFileCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "sample.setFile"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2463,7 +2528,7 @@ public:
 // sample.setValue：{id:"XX", value:"200", kind?:"bpm"|"stop"} → 设置定义表 (kind,id) 的数值原文本。
 // 用于右 Dock「#BPM/#STOP 定义」手工编辑 id→值（与 BGA/WAV 的 sample.setFile 平行）。
 class SampleSetValueCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "sample.setValue"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2488,7 +2553,7 @@ public:
 // sample.delete：{id:"XX", kind?:"bmp"|"wav"|"bpm"|"stop"} → 从定义表移除 (kind,id) 条目。
 // 引用仍保留 id（只删定义，不删引用——文件管理器「解绑文件」语义）；写回时缺定义会派生。
 class SampleDeleteCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "sample.delete"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2510,7 +2575,7 @@ public:
 };
 
 class NoteSetSampleCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "note.setSample"; }
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
@@ -2536,8 +2601,10 @@ public:
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t to_id = decode(to);
-        const bool ok = session.exec(with_source_identity(std::make_unique<edit::SetNoteSampleCommand>(
-            measure, pos, lane, sample, sub_line, to_id), args));
+        const bool ok =
+            session.exec(with_source_identity(std::make_unique<edit::SetNoteSampleCommand>(
+                                                  measure, pos, lane, sample, sub_line, to_id),
+                                              args));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // core↔QML 桥接：采样列表模型（采样面板数据源，M2 第 4 步）。
 // 数据 = info 命令返回的 samples.wav + check 命令的 missing_wav（缺失标记）。
-// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/08 §2），QML 只绑定 ListView 与信号。
-// 设计（doc/05 §4.3）：
+// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/skin-system.md 二、），QML 只绑定 ListView 与信号。
+// 设计（doc/ui-design.md 四、.3）：
 // - 点击选中 = 会话状态「当前采样」，**不重排视图**（选中保持原位，避免列表漂移）；
 //   排序由显式 sortMode 控制（智能/id/文件名/引用数/最近使用）。
 // - 分组动态生成（模型按轨道类别 + player 统计；DP/2P 谱面自动出现 2P 组，不写死）。
-// - MRU 仅作「最近使用」排序模式的依据；会话状态不入谱面/undo（doc/06 §3）。
+// - MRU 仅作「最近使用」排序模式的依据；会话状态不入谱面/undo（doc/command-protocol.md 三、）。
 #include "bridge/SampleListModel.hpp"
-
-#include "beatbench/core/json/Json.hpp"
 
 #include <algorithm>
 #include <map>
 #include <utility>
+
+#include "beatbench/core/json/Json.hpp"
 
 namespace beatbench::app {
 
@@ -35,14 +35,29 @@ QString usage_text(const Json& arr, int* k1, int* s1, int* p1, int* k2, int* s2,
         const QString s = v.is_string() ? QString::fromUtf8(v.as_str().c_str()) : QString();
         int* counter = nullptr;
         QString label;
-        if (s == "keys") { counter = k1; label = QStringLiteral("键音"); }
-        else if (s == "scratch") { counter = s1; label = QStringLiteral("皿"); }
-        else if (s == "pedal") { counter = p1; label = QStringLiteral("踏板"); }
-        else if (s == "keys2") { counter = k2; label = QStringLiteral("2P·键音"); }
-        else if (s == "scratch2") { counter = s2; label = QStringLiteral("2P·皿"); }
-        else if (s == "pedal2") { counter = p2; label = QStringLiteral("2P·踏板"); }
-        else if (s == "bgm") { counter = bgm; label = QStringLiteral("背景"); }
-        else continue;
+        if (s == "keys") {
+            counter = k1;
+            label = QStringLiteral("键音");
+        } else if (s == "scratch") {
+            counter = s1;
+            label = QStringLiteral("皿");
+        } else if (s == "pedal") {
+            counter = p1;
+            label = QStringLiteral("踏板");
+        } else if (s == "keys2") {
+            counter = k2;
+            label = QStringLiteral("2P·键音");
+        } else if (s == "scratch2") {
+            counter = s2;
+            label = QStringLiteral("2P·皿");
+        } else if (s == "pedal2") {
+            counter = p2;
+            label = QStringLiteral("2P·踏板");
+        } else if (s == "bgm") {
+            counter = bgm;
+            label = QStringLiteral("背景");
+        } else
+            continue;
         if (counter) ++*counter;
         if (!parts.contains(label)) parts.push_back(label);
     }
@@ -82,21 +97,33 @@ QVariant SampleListModel::data(const QModelIndex& index, int role) const {
         return {};
     const Entry& e = m_rows[static_cast<std::size_t>(index.row())];
     switch (role) {
-        case IdRole: return e.id;
-        case FileRole: return e.file;
-        case RefsRole: return e.refs;
-        case FirstMeasureRole: return e.firstMeasure;
-        case UsageRole: return e.usage;
-        case MissingRole: return e.missing;
-        case ExtMismatchRole: return e.extMismatch;
-        default: return {};
+        case IdRole:
+            return e.id;
+        case FileRole:
+            return e.file;
+        case RefsRole:
+            return e.refs;
+        case FirstMeasureRole:
+            return e.firstMeasure;
+        case UsageRole:
+            return e.usage;
+        case MissingRole:
+            return e.missing;
+        case ExtMismatchRole:
+            return e.extMismatch;
+        default:
+            return {};
     }
 }
 
 QHash<int, QByteArray> SampleListModel::roleNames() const {
-    return {{IdRole, "id"},             {FileRole, "file"},         {RefsRole, "refs"},
-            {FirstMeasureRole, "firstMeasure"},                    {UsageRole, "usage"},
-            {MissingRole, "missing"},   {ExtMismatchRole, "extMismatch"}};
+    return {{IdRole, "id"},
+            {FileRole, "file"},
+            {RefsRole, "refs"},
+            {FirstMeasureRole, "firstMeasure"},
+            {UsageRole, "usage"},
+            {MissingRole, "missing"},
+            {ExtMismatchRole, "extMismatch"}};
 }
 
 // ---- 数据装载（全量条目进 m_all；此后只重建 m_rows 视图） ----
@@ -126,13 +153,14 @@ void SampleListModel::loadFromInfo(const QString& infoJson) {
                 const Json& item = items[i];
                 Entry e;
                 if (const Json* v = item.find("id")) e.id = QString::fromUtf8(v->as_str().c_str());
-                if (const Json* v = item.find("file")) e.file = QString::fromUtf8(v->as_str().c_str());
+                if (const Json* v = item.find("file"))
+                    e.file = QString::fromUtf8(v->as_str().c_str());
                 if (const Json* v = item.find("refs")) e.refs = static_cast<int>(v->as_i64());
                 if (const Json* v = item.find("first_measure"))
                     e.firstMeasure = static_cast<int>(v->as_i64());
                 if (const Json* v = item.find("usage"))
-                    e.usage = usage_text(*v, &e.key1, &e.scratch1, &e.pedal1,
-                                         &e.key2, &e.scratch2, &e.pedal2, &e.bgm);
+                    e.usage = usage_text(*v, &e.key1, &e.scratch1, &e.pedal1, &e.key2, &e.scratch2,
+                                         &e.pedal2, &e.bgm);
                 // 回填旧缺失/扩展名校验标志（改名/编辑后不丢 lint 灯；见上）
                 if (const auto it = prev_flags.find(e.id); it != prev_flags.end()) {
                     e.missing = it->second.first;
@@ -229,8 +257,7 @@ void SampleListModel::selectId(const QString& id) {
     m_mru.removeAll(id);
     m_mru.push_front(id);
     emit currentSampleChanged(id);
-    if (m_sortMode == SortRecent)
-        rebuild();
+    if (m_sortMode == SortRecent) rebuild();
 }
 
 QString SampleListModel::currentSample() const {
@@ -255,8 +282,9 @@ int SampleListModel::indexOfId(const QString& id) const {
 }
 
 QString SampleListModel::idAt(int row) const {
-    return (row >= 0 && row < static_cast<int>(m_rows.size())) ? m_rows[static_cast<std::size_t>(row)].id
-                                                               : QString();
+    return (row >= 0 && row < static_cast<int>(m_rows.size()))
+               ? m_rows[static_cast<std::size_t>(row)].id
+               : QString();
 }
 
 int SampleListModel::firstRowWithFilePrefix(const QString& prefix) const {
@@ -290,7 +318,10 @@ void SampleListModel::rebuild() {
     std::vector<Group> g;
     const auto touch = [&](const QString& id, const Entry& e) {
         for (auto& gr : g) {
-            if (gr.id == id) { ++gr.n; return; }
+            if (gr.id == id) {
+                ++gr.n;
+                return;
+            }
         }
         g.push_back({id, 1});
     };
@@ -302,7 +333,7 @@ void SampleListModel::rebuild() {
         }
         touch(QStringLiteral("all"), e);
         // 7K 惯用顺序：键 → 皿 → 背景（踏板/2P 等后置——ch19 在 7K 语义是保留/踏板，
-        // 仅谱面实际使用该通道时出现；9K/PMS 模式化映射表待模式支持时实现，doc/05 §5）
+        // 仅谱面实际使用该通道时出现；9K/PMS 模式化映射表待模式支持时实现，doc/ui-design.md 五、）
         if (e.key1 > 0) touch(QStringLiteral("key1"), e);
         if (e.scratch1 > 0) touch(QStringLiteral("scratch1"), e);
         if (e.bgm > 0) touch(QStringLiteral("bgm"), e);
@@ -354,33 +385,32 @@ void SampleListModel::rebuild() {
         if (a->firstMeasure != b->firstMeasure) return a->firstMeasure < b->firstMeasure;
         return a->id < b->id;
     };
-    std::sort(view.begin(), view.end(),
-              [this, &cmp_smart](const Entry* a, const Entry* b) {
-                  switch (m_sortMode) {
-                      case SortId:
-                          return a->id < b->id;
-                      case SortFile: {
-                          const int c = a->file.toLower().compare(b->file.toLower());
-                          if (c != 0) return c < 0;
-                          return a->id < b->id;
-                      }
-                      case SortRefs: {
-                          if (a->refs != b->refs) return a->refs > b->refs;
-                          return a->id < b->id;
-                      }
-                      case SortRecent: {
-                          const int ia = m_mru.indexOf(a->id);
-                          const int ib = m_mru.indexOf(b->id);
-                          // 未用（-1）排最后；已用按新→旧
-                          const bool ua = ia < 0, ub = ib < 0;
-                          if (ua != ub) return !ua;
-                          if (ia != ib) return ia < ib;
-                          return cmp_smart(a, b);
-                      }
-                      default:
-                          return cmp_smart(a, b);
-                  }
-              });
+    std::sort(view.begin(), view.end(), [this, &cmp_smart](const Entry* a, const Entry* b) {
+        switch (m_sortMode) {
+            case SortId:
+                return a->id < b->id;
+            case SortFile: {
+                const int c = a->file.toLower().compare(b->file.toLower());
+                if (c != 0) return c < 0;
+                return a->id < b->id;
+            }
+            case SortRefs: {
+                if (a->refs != b->refs) return a->refs > b->refs;
+                return a->id < b->id;
+            }
+            case SortRecent: {
+                const int ia = m_mru.indexOf(a->id);
+                const int ib = m_mru.indexOf(b->id);
+                // 未用（-1）排最后；已用按新→旧
+                const bool ua = ia < 0, ub = ib < 0;
+                if (ua != ub) return !ua;
+                if (ia != ib) return ia < ib;
+                return cmp_smart(a, b);
+            }
+            default:
+                return cmp_smart(a, b);
+        }
+    });
 
     beginResetModel();
     m_rows.clear();

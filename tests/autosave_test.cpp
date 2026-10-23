@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -59,12 +59,12 @@ TEST(Autosave, BackupWrittenOnEdit) {
         out.close();
         return true;
     });
-    EXPECT_TRUE(s.backup_enabled());   // 默认开
+    EXPECT_TRUE(s.backup_enabled());     // 默认开
     EXPECT_FALSE(s.autosave_enabled());  // 默认关
 
     // 编辑 → 写 .bak（崩溃备份），不写原路径（autosave 关）
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
     EXPECT_TRUE(std::filesystem::exists(path + ".bak"));
     EXPECT_FALSE(std::filesystem::exists(path));  // autosave 关 → 原文件不写
 
@@ -95,9 +95,9 @@ TEST(Autosave, AutosaveWritesOriginalPath) {
     });
     s.set_autosave_enabled(true);
 
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
-    EXPECT_TRUE(std::filesystem::exists(path));       // 自动保存 → 写原路径
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
+    EXPECT_TRUE(std::filesystem::exists(path));           // 自动保存 → 写原路径
     EXPECT_TRUE(std::filesystem::exists(path + ".bak"));  // 备份也写
     const auto content = read_file(path);
     EXPECT_EQ(content, "persisted:" + path);
@@ -118,8 +118,8 @@ TEST(Autosave, BackupFailureIsVisible) {
         if (error) *error = "磁盘满（测试注入）";
         return false;
     });
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
     EXPECT_EQ(s.last_backup_error(), "磁盘满（测试注入）");
     std::filesystem::remove_all(dir);
 }
@@ -127,10 +127,10 @@ TEST(Autosave, BackupFailureIsVisible) {
 TEST(Autosave, NoHookNoPathNoWrite) {
     // 无 persist_hook → 编辑不落盘
     EditorSession s;
-    s.load(make_chart());  // 无 path
+    s.load(make_chart());         // 无 path
     s.set_persist_hook(nullptr);  // 显式无 hook
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
     // 无异常即可；backup 需要 hook + path 才生效
     EXPECT_TRUE(s.backup_enabled());
 }

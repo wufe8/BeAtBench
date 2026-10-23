@@ -139,7 +139,10 @@ TEST(WaveformPyramid, RebuildRange) {
     const std::size_t frames = 8 * WaveformPyramid::kBaseBucket;  // 8 桶
     auto pcm = std::make_shared<std::vector<float>>(2 * frames, 0.0f);
     // 初始：全 0.2（静音判定阈值下非零，但 display 可见）
-    for (std::size_t f = 0; f < frames; ++f) { (*pcm)[2 * f] = 0.2f; (*pcm)[2 * f + 1] = 0.2f; }
+    for (std::size_t f = 0; f < frames; ++f) {
+        (*pcm)[2 * f] = 0.2f;
+        (*pcm)[2 * f + 1] = 0.2f;
+    }
     WaveformPyramid p;
     p.build(pcm, 2, 44100.0);
     ASSERT_TRUE(p.valid());
@@ -150,8 +153,8 @@ TEST(WaveformPyramid, RebuildRange) {
     EXPECT_FLOAT_EQ(rAll.max, 0.2f);
 
     // 修改第 4 桶（帧 [4*256, 5*256)）→ 0.9
-    for (std::size_t f = 4 * WaveformPyramid::kBaseBucket;
-         f < 5 * WaveformPyramid::kBaseBucket; ++f) {
+    for (std::size_t f = 4 * WaveformPyramid::kBaseBucket; f < 5 * WaveformPyramid::kBaseBucket;
+         ++f) {
         (*pcm)[2 * f] = 0.9f;
         (*pcm)[2 * f + 1] = 0.9f;
     }

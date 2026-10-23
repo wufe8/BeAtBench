@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// beatbench：Qt Quick/QML GUI 入口（M2，页面式工作区，doc/05 v0.2）。
+// beatbench：Qt Quick/QML GUI 入口（M2，页面式工作区，doc/ui-design.md v0.2）。
 // 桥接对象 CommandDispatcher 以 context property `beatbench` 暴露给 QML；
-// QML 只与 JSON 信封字符串交换（doc/06 §3 协议不变）。
-// 主题：Fusion + 深色调色板 + ThemeManager token（context property `Theme`，doc/07 §4 禁硬编码）。
+// QML 只与 JSON 信封字符串交换（doc/command-protocol.md 三、 协议不变）。
+// 主题：Fusion + 深色调色板 + ThemeManager token（context property `Theme`，doc/project-workflow.md 四、 禁硬编码）。
 // 调试：--screenshot <png> 渲染完成后 grabWindow 保存并退出（视觉迭代/验收用）。
 #include <QCoreApplication>
 #include <QDir>
@@ -15,32 +15,33 @@
 #include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
-#include <QQuickItem>
 #include <QStringList>
 #include <QTextStream>
-#include <QTimer>
 #include <QThreadPool>
+#include <QTimer>
 #include <QTranslator>
 #include <QUrl>
 #include <QVariant>
+#include <cstring>
 
 #include "beatbench/core/Version.hpp"
-#include <cstring>
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
+#include "beatbench/core/json/Json.hpp"
 #include "bridge/AudioEngine.hpp"
-#include "bridge/ChartSession.hpp"
-#include "bridge/ChartHistoryController.hpp"
 #include "bridge/ChartFileActions.hpp"
+#include "bridge/ChartHistoryController.hpp"
+#include "bridge/ChartSession.hpp"
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
-#include "bridge/EditUtils.hpp"
 #include "bridge/DocumentService.hpp"
+#include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
 #include "bridge/ProjectController.hpp"
@@ -49,15 +50,13 @@
 #include "bridge/SliceWorkspace.hpp"
 #include "bridge/ThemeManager.hpp"
 #include "bridge/UiActionRegistry.hpp"
-#include "beatbench/core/json/Json.hpp"
 
 // QML 加载/运行期错误落盘（GUI 应用无控制台；调试期保留，发布前可去）
 static void dumpQmlWarnings(const QList<QQmlError>& warnings) {
     QFile out(QStringLiteral("beatbench-qml-errors.log"));
     if (out.open(QIODevice::Append | QIODevice::Text)) {
         QTextStream ts(&out);
-        for (const auto& e : warnings)
-            ts << e.toString() << Qt::endl;
+        for (const auto& e : warnings) ts << e.toString() << Qt::endl;
     }
 }
 
@@ -72,7 +71,7 @@ static void messageToLog(QtMsgType type, const QMessageLogContext&, const QStrin
 }
 
 // 系统控件本地化（FileDialog 等 Qt 内置文本 → 中文）：加载 Qt 自带 qtbase_zh_CN.qm。
-// 应用内全文 i18n（qsTr → .ts/.qm 管线）按里程碑 M8 启动，本步只做「基础准备」（doc/04 §8 #9）。
+// 应用内全文 i18n（qsTr → .ts/.qm 管线）按里程碑 M8 启动，本步只做「基础准备」（doc/development.md 八、 #9）。
 static void loadNativeTranslations(QGuiApplication& app) {
     auto* tr = new QTranslator(&app);
     const QString path = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
@@ -99,53 +98,56 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
         return;
     }
     QTimer* wait = nullptr;
-    QTimer::singleShot(waitRender ? 0 : initialDelayMs, win, [win, outPath, waitRender, expectIncremental, playDuration] {
-        if (waitRender) {
-            // 波形/增量验收：等 ChartSession 渲染完成（renderFinished → QML 置
-            // debugRenderDone）+ 增量也完成（--click-after-render 场景等 count ≥ 2）。
-            // 纯渲染场景（无点击）count ≥ 1 即可（增量不会发生）。
-            static QTimer poll;
-            poll.setInterval(300);
-            // ⚠️ poll 是 static（无自动存储期）：lambda 按标准禁止按引用捕获它，
-            // clang 直接报错（GCC/MSVC 放行）。static 不需要捕获，体内直呼即可。
-            QObject::connect(&poll, &QTimer::timeout, &poll, [win, outPath, expectIncremental, playDuration] {
-                const bool done = win->property("debugRenderDone").toBool();
-                const int cnt = win->property("debugRenderCount").toInt();
-                if (!done) return;
-                if (expectIncremental && cnt < 2) return;  // 增量未完成
-                poll.stop();
-                // M5 --play：渲染完成后自动播放（QML 处理）；截图延迟 playDuration 秒
-                // 让播放时钟推进（验收：状态栏时间 / 位置变化）。
-                if (playDuration > 0.0) {
-                    QTimer::singleShot(
-                        static_cast<int>(playDuration * 1000.0), win,
-                        [win, outPath] {
-                            const QImage img = win->grabWindow();
-                            if (img.save(outPath))
-                                qInfo("screenshot saved: %s", qPrintable(outPath));
-                            else
-                                qWarning("screenshot save failed: %s", qPrintable(outPath));
-                            QCoreApplication::exit(0);
-                        });
-                    return;
-                }
-                const QImage img = win->grabWindow();
-                if (img.save(outPath))
-                    qInfo("screenshot saved: %s", qPrintable(outPath));
-                else
-                    qWarning("screenshot save failed: %s", qPrintable(outPath));
-                QCoreApplication::exit(0);
-            });
-            poll.start();
-            return;
-        }
-        const QImage img = win->grabWindow();
-        if (img.save(outPath))
-            qInfo("screenshot saved: %s", qPrintable(outPath));
-        else
-            qWarning("screenshot save failed: %s", qPrintable(outPath));
-        QCoreApplication::exit(0);
-    });
+    QTimer::singleShot(
+        waitRender ? 0 : initialDelayMs, win,
+        [win, outPath, waitRender, expectIncremental, playDuration] {
+            if (waitRender) {
+                // 波形/增量验收：等 ChartSession 渲染完成（renderFinished → QML 置
+                // debugRenderDone）+ 增量也完成（--click-after-render 场景等 count ≥ 2）。
+                // 纯渲染场景（无点击）count ≥ 1 即可（增量不会发生）。
+                static QTimer poll;
+                poll.setInterval(300);
+                // ⚠️ poll 是 static（无自动存储期）：lambda 按标准禁止按引用捕获它，
+                // clang 直接报错（GCC/MSVC 放行）。static 不需要捕获，体内直呼即可。
+                QObject::connect(
+                    &poll, &QTimer::timeout, &poll,
+                    [win, outPath, expectIncremental, playDuration] {
+                        const bool done = win->property("debugRenderDone").toBool();
+                        const int cnt = win->property("debugRenderCount").toInt();
+                        if (!done) return;
+                        if (expectIncremental && cnt < 2) return;  // 增量未完成
+                        poll.stop();
+                        // M5 --play：渲染完成后自动播放（QML 处理）；截图延迟 playDuration 秒
+                        // 让播放时钟推进（验收：状态栏时间 / 位置变化）。
+                        if (playDuration > 0.0) {
+                            QTimer::singleShot(
+                                static_cast<int>(playDuration * 1000.0), win, [win, outPath] {
+                                    const QImage img = win->grabWindow();
+                                    if (img.save(outPath))
+                                        qInfo("screenshot saved: %s", qPrintable(outPath));
+                                    else
+                                        qWarning("screenshot save failed: %s", qPrintable(outPath));
+                                    QCoreApplication::exit(0);
+                                });
+                            return;
+                        }
+                        const QImage img = win->grabWindow();
+                        if (img.save(outPath))
+                            qInfo("screenshot saved: %s", qPrintable(outPath));
+                        else
+                            qWarning("screenshot save failed: %s", qPrintable(outPath));
+                        QCoreApplication::exit(0);
+                    });
+                poll.start();
+                return;
+            }
+            const QImage img = win->grabWindow();
+            if (img.save(outPath))
+                qInfo("screenshot saved: %s", qPrintable(outPath));
+            else
+                qWarning("screenshot save failed: %s", qPrintable(outPath));
+            QCoreApplication::exit(0);
+        });
 }
 
 // 调试/迭代用：--open <bms 路径>——启动即「打开谱面」，走 QML openChart()（与 Ctrl+O 同路径，
@@ -160,13 +162,12 @@ static int loadKeymap(const QString& path, beatbench::app::UiActionRegistry& uiA
         return -1;
     }
     try {
-        const auto req = beatbench::json::Json::parse(
-            QTextStream(&f).readAll().toStdString());
+        const auto req = beatbench::json::Json::parse(QTextStream(&f).readAll().toStdString());
         QVariantMap map;
         if (req.is_object()) {
             for (const auto& [k, v] : req.as_object()) {
-                if (v.is_string()) map.insert(QString::fromUtf8(k.c_str()),
-                                              QString::fromUtf8(v.as_str().c_str()));
+                if (v.is_string())
+                    map.insert(QString::fromUtf8(k.c_str()), QString::fromUtf8(v.as_str().c_str()));
             }
         }
         const int n = uiActions.applyKeymap(map);
@@ -186,13 +187,12 @@ static LONG WINAPI recordUnhandledCrash(EXCEPTION_POINTERS* ex) {
     if (ex && ex->ExceptionRecord) {
         const auto* er = ex->ExceptionRecord;
         char buf[512];
-        std::snprintf(buf, sizeof(buf),
-                      "CRASH: code=0x%08X flags=0x%08X addr=%p\n",
+        std::snprintf(buf, sizeof(buf), "CRASH: code=0x%08X flags=0x%08X addr=%p\n",
                       static_cast<unsigned>(er->ExceptionCode),
                       static_cast<unsigned>(er->ExceptionFlags),
                       static_cast<void*>(er->ExceptionAddress));
-        HANDLE h = CreateFileW(L"beatbench-crash.txt", GENERIC_WRITE, FILE_SHARE_READ,
-                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        HANDLE h = CreateFileW(L"beatbench-crash.txt", GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h != INVALID_HANDLE_VALUE) {
             DWORD w = 0;
             WriteFile(h, buf, static_cast<DWORD>(std::strlen(buf)), &w, nullptr);
@@ -212,10 +212,10 @@ int main(int argc, char** argv) {
     app.setApplicationName(QStringLiteral("BeAtBench"));
     // GUI 版本串同样取自单一来源 kVersion（QApplication::applicationVersion、关于页）
     app.setApplicationVersion(QString::fromUtf8(beatbench::kVersion.data(),
-                                                 static_cast<int>(beatbench::kVersion.size())));
+                                                static_cast<int>(beatbench::kVersion.size())));
     qInstallMessageHandler(messageToLog);  // 调试期：Qt 消息落盘（GUI 无控制台）
 
-    // 全局深色基线（doc/08 §2）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；
+    // 全局深色基线（doc/skin-system.md 二、）：Fusion 尊重应用调色板，菜单/对话框/默认控件一次变深；
     // 值全部来自 ThemeManager token（单一数据源）。
     QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
@@ -228,7 +228,8 @@ int main(int argc, char** argv) {
         const QString viaApp = QDir(QCoreApplication::applicationDirPath()).filePath(p);
         return QDir(viaApp).exists() ? viaApp : QString();
     };
-    QString cliSkinDir;  // 解析后的 --skin 目录（供下方 keymap.json 复用，避免主题/keymap 各解析一次）
+    QString
+        cliSkinDir;  // 解析后的 --skin 目录（供下方 keymap.json 复用，避免主题/keymap 各解析一次）
     // L1 皮肤：--skin <dir> 加载 dir/theme.json 覆盖 token（须在下面用 theme.* 建 QPalette
     // 与 loadFromModule 之前，否则 CONSTANT 属性已被首帧绑定按默认值求值）。
     const int skinIdx = app.arguments().indexOf(QStringLiteral("--skin"));
@@ -240,8 +241,10 @@ int main(int argc, char** argv) {
             if (QFile::exists(themePath)) {
                 QString err;
                 const int n = theme.loadTheme(themePath, &err);
-                if (n >= 0) qInfo("皮肤 theme.json 覆写 %d 个 token（%s）", n, qPrintable(themePath));
-                else qWarning() << "皮肤 theme.json 加载失败:" << err;
+                if (n >= 0)
+                    qInfo("皮肤 theme.json 覆写 %d 个 token（%s）", n, qPrintable(themePath));
+                else
+                    qWarning() << "皮肤 theme.json 加载失败:" << err;
             }
             // skin.json 清单（name/version/api）本步不强校验——L1 只消费 theme.json。
         } else {
@@ -294,20 +297,22 @@ int main(int argc, char** argv) {
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
     beatbench::app::ResourceBindingController resourceBindingController(&documentService);
-    QObject::connect(&resourceBindingController, &beatbench::app::ResourceBindingController::bindingsApplied,
-                     &documentService, [&] {
-        documentService.refresh();
-        projectController.refreshOpenStates();
-    });
+    QObject::connect(&resourceBindingController,
+                     &beatbench::app::ResourceBindingController::bindingsApplied, &documentService,
+                     [&] {
+                         documentService.refresh();
+                         projectController.refreshOpenStates();
+                     });
     beatbench::app::ChartHistoryController chartHistoryController(&documentService);
     beatbench::app::ChartFileActions chartFileActions;
 
     QQmlApplicationEngine engine;
-    QObject::connect(&chartFileActions, &beatbench::app::ChartFileActions::statusMessage,
-        &engine, [&engine](const QString& message) {
-            if (auto* root = engine.rootObjects().value(0))
-                QMetaObject::invokeMethod(root, "setStatus", Qt::DirectConnection, Q_ARG(QVariant, QVariant(message)));
-        });
+    QObject::connect(&chartFileActions, &beatbench::app::ChartFileActions::statusMessage, &engine,
+                     [&engine](const QString& message) {
+                         if (auto* root = engine.rootObjects().value(0))
+                             QMetaObject::invokeMethod(root, "setStatus", Qt::DirectConnection,
+                                                       Q_ARG(QVariant, QVariant(message)));
+                     });
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
     engine.rootContext()->setContextProperty(QStringLiteral("beatbench"), &dispatcher);
     engine.rootContext()->setContextProperty(QStringLiteral("uiActions"), &uiActions);
@@ -321,21 +326,23 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("clipboard"), &clipboardBridge);
     engine.rootContext()->setContextProperty(QStringLiteral("editUtils"), &editUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
-    engine.rootContext()->setContextProperty(QStringLiteral("resourceBindingController"), &resourceBindingController);
+    engine.rootContext()->setContextProperty(QStringLiteral("resourceBindingController"),
+                                             &resourceBindingController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
-    engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"), &chartHistoryController);
+    engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"),
+                                             &chartHistoryController);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
     audioEngine.setChartSession(initialSession);
-    QObject::connect(&documentService, &beatbench::app::DocumentService::currentSessionChanged,
-                     &engine, [&] {
-        auto* current = documentService.currentSession();
-        audioEngine.setChartSession(current);
-        sliceWorkspace.setChartSession(current);
-        // 兼容已有面板的 context 名称；它只是集合当前项的别名，不再是第二份文档桥。
-        engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), current);
-    });
+    QObject::connect(
+        &documentService, &beatbench::app::DocumentService::currentSessionChanged, &engine, [&] {
+            auto* current = documentService.currentSession();
+            audioEngine.setChartSession(current);
+            sliceWorkspace.setChartSession(current);
+            // 兼容已有面板的 context 名称；它只是集合当前项的别名，不再是第二份文档桥。
+            engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), current);
+        });
 
-    // ---- 动作注册（doc/09 §5/§7）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
+    // ---- 动作注册（doc/action-registry.md 五、/九、）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
     // 是函数式绑定，只在首帧求值一次（注册表为空则取到空串）。若在 loadFromModule 后注册，
     // 菜单项文字/快捷键序列已成空 → 不可见、快捷键不触发（2026-09 用户实测 A1/A3）。
     // handler 在此刻拿不到 QML 根（未加载），故**惰性解析**：invoke 时经 engine 取根再调
@@ -370,40 +377,56 @@ int main(int argc, char** argv) {
             });
         };
         // 文件动作（label 用 QCoreApplication::tr，因为 main 函数不是 QObject）
-        uiActions.add(UiActionDef{"file.new", QCoreApplication::tr("新建谱面"), "Ctrl+N", "file", nullptr, qml("newChart")});
-        uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file", nullptr, qml("uiActionOpen")});
+        uiActions.add(UiActionDef{"file.new", QCoreApplication::tr("新建谱面"), "Ctrl+N", "file",
+                                  nullptr, qml("newChart")});
+        uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file",
+                                  nullptr, qml("uiActionOpen")});
         // M7：打开歌曲文件夹（项目页只读索引版，doc/07 §9.1 阶段①）
-        uiActions.add(UiActionDef{"file.openFolder", QCoreApplication::tr("打开歌曲文件夹…"), "Ctrl+Shift+O", "file", nullptr, qml("uiActionOpenFolder")});
-        uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file", nullptr, qml("saveChart")});
-        uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S", "file", nullptr, qml("uiActionSaveAs")});
-        uiActions.add(UiActionDef{.id = "file.history",
-            .label = QCoreApplication::tr("谱面历史…"), .category = "file",
-            .handler = ActionHandler([&chartHistoryController, &documentService](const QVariantMap&) {
-                chartHistoryController.showHistory(documentService.activeId());
-                return true;
-            })});
+        uiActions.add(UiActionDef{"file.openFolder", QCoreApplication::tr("打开歌曲文件夹…"),
+                                  "Ctrl+Shift+O", "file", nullptr, qml("uiActionOpenFolder")});
+        uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file",
+                                  nullptr, qml("saveChart")});
+        uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S",
+                                  "file", nullptr, qml("uiActionSaveAs")});
+        uiActions.add(UiActionDef{
+            .id = "file.history",
+            .label = QCoreApplication::tr("谱面历史…"),
+            .category = "file",
+            .handler =
+                ActionHandler([&chartHistoryController, &documentService](const QVariantMap&) {
+                    chartHistoryController.showHistory(documentService.activeId());
+                    return true;
+                })});
         uiActions.add(UiActionDef{.id = "file.revealInFileManager",
-            .label = QCoreApplication::tr("在文件管理器中打开"), .category = "file",
-            .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
-                return chartFileActions.revealActiveChart();
-            })});
+                                  .label = QCoreApplication::tr("在文件管理器中打开"),
+                                  .category = "file",
+                                  .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
+                                      return chartFileActions.revealActiveChart();
+                                  })});
         uiActions.add(UiActionDef{.id = "file.openInTextEditor",
-            .label = QCoreApplication::tr("用文本编辑器打开"), .category = "file",
-            .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
-                return chartFileActions.openActiveChartInTextEditor();
-            })});
+                                  .label = QCoreApplication::tr("用文本编辑器打开"),
+                                  .category = "file",
+                                  .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
+                                      return chartFileActions.openActiveChartInTextEditor();
+                                  })});
         uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：文件操作 ↔ 退出
-        uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file", nullptr, qml("uiActionExit")});
+        uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file",
+                                  nullptr, qml("uiActionExit")});
         // 编辑动作
-        uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit", nullptr, qml("undoEdit")});
-        uiActions.add(UiActionDef{"edit.redo", QCoreApplication::tr("重做"), "Ctrl+Y", "edit", nullptr, qml("redoEdit")});
+        uiActions.add(UiActionDef{"edit.undo", QCoreApplication::tr("撤销"), "Ctrl+Z", "edit",
+                                  nullptr, qml("undoEdit")});
+        uiActions.add(UiActionDef{"edit.redo", QCoreApplication::tr("重做"), "Ctrl+Y", "edit",
+                                  nullptr, qml("redoEdit")});
         uiActions.addSeparator(QStringLiteral("edit"));  // 分隔线：撤销/重做 ↔ 复制/粘贴
-        uiActions.add(UiActionDef{"edit.copy", QCoreApplication::tr("复制"), "Ctrl+C", "edit", nullptr, qml("copySelection")});
-        uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit", nullptr, qml("pasteClipboard")});
-        uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit", nullptr, qml("uiActionDelete")});
+        uiActions.add(UiActionDef{"edit.copy", QCoreApplication::tr("复制"), "Ctrl+C", "edit",
+                                  nullptr, qml("copySelection")});
+        uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit",
+                                  nullptr, qml("pasteClipboard")});
+        uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit",
+                                  nullptr, qml("uiActionDelete")});
         uiActions.addSeparator(QStringLiteral("edit"));  // 分隔线：编辑操作 ↔ 播放/渲染/取消
         // 编辑页播放/渲染/取消（2026-09 快捷键收尾）：进注册表 → 设置页可改绑。
-        // scope="edit" 与切音页 slice.playPause 的 Space 作用域隔离（doc/09 §11）。
+        // scope="edit" 与切音页 slice.playPause 的 Space 作用域隔离（doc/action-registry.md 九、）。
         uiActions.add(UiActionDef{.id = "edit.playPause",
                                   .label = QCoreApplication::tr("播放/暂停（谱面）"),
                                   .shortcut = "Space",
@@ -428,31 +451,69 @@ int main(int argc, char** argv) {
                                   .shortcut = "Ctrl+,",
                                   .category = "app",
                                   .handler = qml("openSettings")});
-        // 视图动作（checkable：勾选态 QML 自持，注册表仅声明；见 doc/09 §12）
-        uiActions.add(UiActionDef{"view.toggleGrid", QCoreApplication::tr("网格"), "", "view", nullptr, qml("toggleGrid"), true});
-        uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "", "view", nullptr, qml("uiActionToggleChannelIds"), true});
-        uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view", nullptr, qml("uiActionToggleExtras"), true});
-        uiActions.add(UiActionDef{"view.zoomIn", QCoreApplication::tr("放大"), "=", "view", nullptr, qml("zoomInView")});
-        uiActions.add(UiActionDef{"view.zoomOut", QCoreApplication::tr("缩小"), "-", "view", nullptr, qml("zoomOutView")});
+        // 视图动作（checkable：勾选态 QML 自持，注册表仅声明；见 doc/action-registry.md 一、2）
+        uiActions.add(UiActionDef{"view.toggleGrid", QCoreApplication::tr("网格"), "", "view",
+                                  nullptr, qml("toggleGrid"), true});
+        uiActions.add(UiActionDef{"view.toggleChannelIds", QCoreApplication::tr("通道 ID"), "",
+                                  "view", nullptr, qml("uiActionToggleChannelIds"), true});
+        uiActions.add(UiActionDef{"view.toggleExtras", QCoreApplication::tr("更多轨道"), "", "view",
+                                  nullptr, qml("uiActionToggleExtras"), true});
+        uiActions.add(UiActionDef{"view.zoomIn", QCoreApplication::tr("放大"), "=", "view", nullptr,
+                                  qml("zoomInView")});
+        uiActions.add(UiActionDef{"view.zoomOut", QCoreApplication::tr("缩小"), "-", "view",
+                                  nullptr, qml("zoomOutView")});
         // 工具动作（数字键 1-5；handler = 设置 editorTool 属性）
         // toolbar="tool" = 编辑工具条工具选择条（互斥单选；value = 当前工具，prefix = 快捷键前缀）。
-        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr, setProp("editorTool", "pan"), false, false, false, "tool", "button", QCoreApplication::tr("平移视口（拖拽空白区）"), "pan", "1 "});
-        uiActions.add(UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr, setProp("editorTool", "select"), false, false, false, "tool", "button", QCoreApplication::tr("点选/框选 note（Shift 加选；Ctrl 临时显示通道 id）"), "select", "2 "});
-        uiActions.add(UiActionDef{"tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr, setProp("editorTool", "note"), false, false, false, "tool", "button", QCoreApplication::tr("在当前采样槽位放置 note（吸附按 snap）"), "note", "3 "});
-        uiActions.add(UiActionDef{"tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr, setProp("editorTool", "ln"), false, false, false, "tool", "button", QCoreApplication::tr("放置 LN（同轨连点两次：先头后尾；Esc 取消）"), "ln", "4 "});
-        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr, setProp("editorTool", "mine"), false, false, false, "tool", "button", QCoreApplication::tr("放置地雷（mine note）"), "mine", "5 "});
+        uiActions.add(UiActionDef{"tool.pan", QCoreApplication::tr("拖拽"), "1", "tool", nullptr,
+                                  setProp("editorTool", "pan"), false, false, false, "tool",
+                                  "button", QCoreApplication::tr("平移视口（拖拽空白区）"), "pan",
+                                  "1 "});
+        uiActions.add(
+            UiActionDef{"tool.select", QCoreApplication::tr("选择"), "2", "tool", nullptr,
+                        setProp("editorTool", "select"), false, false, false, "tool", "button",
+                        QCoreApplication::tr("点选/框选 note（Shift 加选；Ctrl 临时显示通道 id）"),
+                        "select", "2 "});
+        uiActions.add(UiActionDef{
+            "tool.note", QCoreApplication::tr("放置"), "3", "tool", nullptr,
+            setProp("editorTool", "note"), false, false, false, "tool", "button",
+            QCoreApplication::tr("在当前采样槽位放置 note（吸附按 snap）"), "note", "3 "});
+        uiActions.add(UiActionDef{
+            "tool.ln", QCoreApplication::tr("LN"), "4", "tool", nullptr,
+            setProp("editorTool", "ln"), false, false, false, "tool", "button",
+            QCoreApplication::tr("放置 LN（同轨连点两次：先头后尾；Esc 取消）"), "ln", "4 "});
+        uiActions.add(UiActionDef{"tool.mine", QCoreApplication::tr("地雷"), "5", "tool", nullptr,
+                                  setProp("editorTool", "mine"), false, false, false, "tool",
+                                  "button", QCoreApplication::tr("放置地雷（mine note）"), "mine",
+                                  "5 "});
         // 变换动作（toolbar="transform" = 页面工具条变换条；新变换可注册进组，工具条自动渲染）
-        uiActions.add(UiActionDef{"tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr, qml("quantizeSelection"), false, false, false, "transform", "button", QCoreApplication::tr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")});
-        uiActions.add(UiActionDef{"tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, qml("uiActionMirror"), false, false, false, "transform", "button", QCoreApplication::tr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")});
-        uiActions.add(UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr, qml("uiActionRotate"), false, false, false, "transform", "button", QCoreApplication::tr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")});
-        uiActions.add(UiActionDef{"tool.addMeasure", QCoreApplication::tr("加一小节"), "", "tool", nullptr, qml("addMeasure"), false, false, false, "transform", "button", QCoreApplication::tr("在末尾追加一个可编辑小节（未用到的小节保存时被 BMS 舍弃）")});
+        uiActions.add(UiActionDef{
+            "tool.quantize", QCoreApplication::tr("量化"), "", "tool", nullptr,
+            qml("quantizeSelection"), false, false, false, "transform", "button",
+            QCoreApplication::tr("把选中 note 吸附到当前 snap 网格（一个 undo 步；先选中再点）")});
+        uiActions.add(UiActionDef{
+            "tool.mirror", QCoreApplication::tr("镜像"), "", "tool", nullptr, qml("uiActionMirror"),
+            false, false, false, "transform", "button",
+            QCoreApplication::tr("左右镜像选中 note（key i ↔ key 8-i；一个 undo 步）")});
+        uiActions.add(
+            UiActionDef{"tool.rotate", QCoreApplication::tr("旋转"), "", "tool", nullptr,
+                        qml("uiActionRotate"), false, false, false, "transform", "button",
+                        QCoreApplication::tr("循环右移一格 key 轨（1→2→…→7→1；一个 undo 步）")});
+        uiActions.add(UiActionDef{
+            "tool.addMeasure", QCoreApplication::tr("加一小节"), "", "tool", nullptr,
+            qml("addMeasure"), false, false, false, "transform", "button",
+            QCoreApplication::tr("在末尾追加一个可编辑小节（未用到的小节保存时被 BMS 舍弃）")});
         // tool.toggleLn：编辑工具条专属（单点↔LN 转换），保持硬编码渲染；不并入 transform 组。
-        uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool", nullptr, qml("toggleLnSelection")});
+        uiActions.add(UiActionDef{"tool.toggleLn", QCoreApplication::tr("单点/LN"), "", "tool",
+                                  nullptr, qml("toggleLnSelection")});
         // 页面切换动作
-        uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view", nullptr, setProp("currentPage", 0), true});
-        uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view", nullptr, setProp("currentPage", 1), true});
-        uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view", nullptr, setProp("currentPage", 2), true});
-        uiActions.add(UiActionDef{"view.page.project", QCoreApplication::tr("项目页"), "", "view", nullptr, setProp("currentPage", 3), true});
+        uiActions.add(UiActionDef{"view.page.edit", QCoreApplication::tr("编辑页"), "", "view",
+                                  nullptr, setProp("currentPage", 0), true});
+        uiActions.add(UiActionDef{"view.page.slice", QCoreApplication::tr("切音页"), "", "view",
+                                  nullptr, setProp("currentPage", 1), true});
+        uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view",
+                                  nullptr, setProp("currentPage", 2), true});
+        uiActions.add(UiActionDef{"view.page.project", QCoreApplication::tr("项目页"), "", "view",
+                                  nullptr, setProp("currentPage", 3), true});
         // 切音页动作（M6.4f 键盘 2026-09 用户 woslicer 系；category=slice 无菜单，仅快捷键）。
         // 生产 handler 直接调用 QML 的正式 dispatchSliceAction 方法；debugSliceAct 只保留给
         // --slice-act 的异步调试队列，避免生产动作借用 debug 属性和轮询管线。
@@ -465,8 +526,7 @@ int main(int argc, char** argv) {
                 }
                 const bool invoked = QMetaObject::invokeMethod(
                     root, "dispatchSliceAction", Q_ARG(QString, QString::fromLatin1(act)));
-                if (!invoked)
-                    qWarning() << "UiActionRegistry: 切音动作入口不可用" << act;
+                if (!invoked) qWarning() << "UiActionRegistry: 切音动作入口不可用" << act;
                 return invoked;
             });
         };
@@ -477,19 +537,32 @@ int main(int argc, char** argv) {
                                   .category = "slice",
                                   .handler = sliceAct("playPause"),
                                   .scope = "slice"});
-        uiActions.add(UiActionDef{"slice.beatLeft", QCoreApplication::tr("选中拍子左移"), "Left", "slice", nullptr, sliceAct("beatLeft")});
-        uiActions.add(UiActionDef{"slice.beatRight", QCoreApplication::tr("选中拍子右移"), "Right", "slice", nullptr, sliceAct("beatRight")});
-        uiActions.add(UiActionDef{"slice.rowUp", QCoreApplication::tr("视口上行"), "Up", "slice", nullptr, sliceAct("rowUp")});
-        uiActions.add(UiActionDef{"slice.rowDown", QCoreApplication::tr("视口下行"), "Down", "slice", nullptr, sliceAct("rowDown")});
-        uiActions.add(UiActionDef{"slice.togglePoint", QCoreApplication::tr("放置/消去切分点"), "Z", "slice", nullptr, sliceAct("togglePoint")});
-        uiActions.add(UiActionDef{"slice.clearPoints", QCoreApplication::tr("清除全部切分点"), "C", "slice", nullptr, sliceAct("clearPoints")});
-        uiActions.add(UiActionDef{"slice.copyPoints", QCoreApplication::tr("复制切分点"), "V", "slice", nullptr, sliceAct("copyPoints")});
-        uiActions.add(UiActionDef{"slice.pastePoints", QCoreApplication::tr("粘贴切分点"), "B", "slice", nullptr, sliceAct("pastePoints")});
-        uiActions.add(UiActionDef{"slice.detect", QCoreApplication::tr("生成切片"), "Ctrl+G", "slice", nullptr, sliceAct("detect")});
-        uiActions.add(UiActionDef{"slice.clearSlices", QCoreApplication::tr("清除切片"), "Ctrl+Shift+G", "slice", nullptr, sliceAct("clearSlices")});
-        uiActions.add(UiActionDef{"slice.export", QCoreApplication::tr("导出分片"), "Ctrl+E", "slice", nullptr, sliceAct("export")});
-        uiActions.add(UiActionDef{"slice.importAudio", QCoreApplication::tr("导入音频"), "Ctrl+I", "slice", nullptr, sliceAct("importAudio")});
-        uiActions.add(UiActionDef{"slice.importMidi", QCoreApplication::tr("导入 MIDI"), "Ctrl+M", "slice", nullptr, sliceAct("importMidi")});
+        uiActions.add(UiActionDef{"slice.beatLeft", QCoreApplication::tr("选中拍子左移"), "Left",
+                                  "slice", nullptr, sliceAct("beatLeft")});
+        uiActions.add(UiActionDef{"slice.beatRight", QCoreApplication::tr("选中拍子右移"), "Right",
+                                  "slice", nullptr, sliceAct("beatRight")});
+        uiActions.add(UiActionDef{"slice.rowUp", QCoreApplication::tr("视口上行"), "Up", "slice",
+                                  nullptr, sliceAct("rowUp")});
+        uiActions.add(UiActionDef{"slice.rowDown", QCoreApplication::tr("视口下行"), "Down",
+                                  "slice", nullptr, sliceAct("rowDown")});
+        uiActions.add(UiActionDef{"slice.togglePoint", QCoreApplication::tr("放置/消去切分点"), "Z",
+                                  "slice", nullptr, sliceAct("togglePoint")});
+        uiActions.add(UiActionDef{"slice.clearPoints", QCoreApplication::tr("清除全部切分点"), "C",
+                                  "slice", nullptr, sliceAct("clearPoints")});
+        uiActions.add(UiActionDef{"slice.copyPoints", QCoreApplication::tr("复制切分点"), "V",
+                                  "slice", nullptr, sliceAct("copyPoints")});
+        uiActions.add(UiActionDef{"slice.pastePoints", QCoreApplication::tr("粘贴切分点"), "B",
+                                  "slice", nullptr, sliceAct("pastePoints")});
+        uiActions.add(UiActionDef{"slice.detect", QCoreApplication::tr("生成切片"), "Ctrl+G",
+                                  "slice", nullptr, sliceAct("detect")});
+        uiActions.add(UiActionDef{"slice.clearSlices", QCoreApplication::tr("清除切片"),
+                                  "Ctrl+Shift+G", "slice", nullptr, sliceAct("clearSlices")});
+        uiActions.add(UiActionDef{"slice.export", QCoreApplication::tr("导出分片"), "Ctrl+E",
+                                  "slice", nullptr, sliceAct("export")});
+        uiActions.add(UiActionDef{"slice.importAudio", QCoreApplication::tr("导入音频"), "Ctrl+I",
+                                  "slice", nullptr, sliceAct("importAudio")});
+        uiActions.add(UiActionDef{"slice.importMidi", QCoreApplication::tr("导入 MIDI"), "Ctrl+M",
+                                  "slice", nullptr, sliceAct("importMidi")});
         qInfo("UI 动作注册完成：%d 个", static_cast<int>(uiActions.ids().size()));
 
         // 快捷键查询优先级：用户 QSettings > 皮肤层（--keymap 或皮肤 keymap.json）> 注册默认。
@@ -502,8 +575,8 @@ int main(int argc, char** argv) {
             const int skinIdx2 = app.arguments().indexOf(QStringLiteral("--skin"));
             if (skinIdx2 >= 0 && skinIdx2 + 1 < app.arguments().size()) {
                 // 复用上面 --skin 的解析结果（含 exe 目录回退）；未解析出目录时退回原始参数。
-                const QString skinPath = cliSkinDir.isEmpty()
-                                             ? app.arguments().at(skinIdx2 + 1) : cliSkinDir;
+                const QString skinPath =
+                    cliSkinDir.isEmpty() ? app.arguments().at(skinIdx2 + 1) : cliSkinDir;
                 const QString p = QDir(skinPath).filePath(QStringLiteral("keymap.json"));
                 if (QFile::exists(p)) loadKeymap(p, uiActions);
             }
@@ -528,7 +601,7 @@ int main(int argc, char** argv) {
     // 显式绑 Theme token（`ApplicationWindow.color` / `MenuBar.background`），不依赖 palette 继承。
     app.setPalette(pal);
 
-    // ---- 运行时换肤（doc/08 §3.3）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定重算。
+    // ---- 运行时换肤（doc/skin-system.md 三、3.）：Theme.token 是 NOTIFY 属性，tokensChanged → QML 绑定重算。
     // 应用级 QPalette（Fusion 内置控件：菜单/对话框/默认按钮）与 token 脱钩，需在此同步重建——
     // 把 theme token 重建 QPalette 并 set 到 qApp（见上方 pal 构建；抽出函数复用）。 ----
     const auto rebuildPalette = [&theme, &app] {
@@ -550,8 +623,8 @@ int main(int argc, char** argv) {
         pal.setColor(QPalette::Disabled, QPalette::ButtonText, theme.textFaint());
         app.setPalette(pal);
     };
-    QObject::connect(&theme, &beatbench::app::ThemeManager::tokensChanged,
-                     &app, [rebuildPalette] { rebuildPalette(); });
+    QObject::connect(&theme, &beatbench::app::ThemeManager::tokensChanged, &app,
+                     [rebuildPalette] { rebuildPalette(); });
 
     // 注册已完成、QML 根已加载：补一次 enabled/checked 状态同步（QML 的 Component.onCompleted
     // 在 loadFromModule 期间已执行，此时注册未完成 → 由这里兜底 Main.qml 的 updateActionStates
@@ -637,8 +710,7 @@ int main(int argc, char** argv) {
             } else {
                 const QString dir = theme.skinDirResolved(skinName);
                 if (!dir.isEmpty())
-                    uiActions.applyKeymapFile(
-                        QDir(dir).filePath(QStringLiteral("keymap.json")));
+                    uiActions.applyKeymapFile(QDir(dir).filePath(QStringLiteral("keymap.json")));
             }
         }
     }
@@ -649,8 +721,7 @@ int main(int argc, char** argv) {
         bool ok = false;
         const int p = args.at(pageIdx + 1).toInt(&ok);
         if (ok) {
-            if (QObject* root = engine.rootObjects().value(0))
-                root->setProperty("currentPage", p);
+            if (QObject* root = engine.rootObjects().value(0)) root->setProperty("currentPage", p);
         }
     }
 
@@ -858,8 +929,7 @@ int main(int argc, char** argv) {
     }
     // --perf-log：时间轴 paint 帧耗时采样（QML 消息日志；配 --screenshot 验收性能）
     if (args.contains(QStringLiteral("--perf-log"))) {
-        if (QObject* root = engine.rootObjects().value(0))
-            root->setProperty("debugPerfLog", true);
+        if (QObject* root = engine.rootObjects().value(0)) root->setProperty("debugPerfLog", true);
     }
 
     // --grid <0|1>：调试网格开关（验证 showGrid → 槽位弱线绘制链路；配 --screenshot）
@@ -991,8 +1061,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (engine.rootObjects().isEmpty())
-        return -1;
+    if (engine.rootObjects().isEmpty()) return -1;
     const int exitCode = app.exec();
     // 桥层后台任务投递回调时仍持有接收对象的裸地址；先等工作线程结束，再销毁桥层。
     // 队列中的回调由 QObject 析构移除，不在退出后重新应用旧结果。

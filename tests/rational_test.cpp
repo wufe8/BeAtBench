@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include <gtest/gtest.h>
-
 #include "beatbench/core/Rational.hpp"
+
+#include <gtest/gtest.h>
 
 using beatbench::Rational;
 

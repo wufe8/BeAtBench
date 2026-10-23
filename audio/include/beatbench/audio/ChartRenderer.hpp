@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 离线渲染器（M4.3b）：谱面 → 混合 PCM（→ WAV 文件）。
 //
-// 定位（doc/04 §M4.3b）：把「全谱 keysound 混合」做成可验证的闭环——
+// 定位（doc/development.md 六、）：把「全谱 keysound 混合」做成可验证的闭环——
 // CLI 输出 wav 文件（正确性验证）+ 编辑器 Space 触发（M5 播放前的产物）。
 // 本类 = **区间渲染器**：把 [t0, t1) 时间区间内该响的采样混成 PCM。
 //   - 事件 → 秒：TimingEngine::time_us（BPM 分段/STOP 正确）；
@@ -29,9 +29,7 @@ namespace beatbench::audio {
 struct RenderedAudio {
     double sampleRate = 0.0;
     std::vector<float> interleavedStereo;  // L,R,L,R…（帧数 = size()/2）
-    std::size_t frameCount() const {
-        return interleavedStereo.size() / 2;
-    }
+    std::size_t frameCount() const { return interleavedStereo.size() / 2; }
     double durationSeconds() const {
         return sampleRate > 0.0 ? static_cast<double>(frameCount()) / sampleRate : 0.0;
     }
@@ -40,8 +38,8 @@ struct RenderedAudio {
 /// 渲染结果（含错误信息；中文面向 UI/CLI）。
 struct RenderResult {
     bool ok = false;
-    RenderedAudio audio;   ///< ok 时有效
-    std::string message;   ///< 失败原因
+    RenderedAudio audio;  ///< ok 时有效
+    std::string message;  ///< 失败原因
 };
 
 /// 16-bit PCM WAV 写出（渲染结果 → 文件；供 CLI save 与编辑器导出）。
@@ -60,28 +58,23 @@ bool write_wav_file_w(const std::wstring& path, const RenderedAudio& audio,
 /// timing 由调用方重建（或内部按 chart 重建——需要 timing 的 events 语义，
 /// 见 ChartSession.refresh 的指纹判定；此处简化为内部新建）。
 /// cache 为解码缓存（无 = 每次新解码；传暂存用）。返回全曲 [0, 结束)。
-RenderResult render_chart(const beatbench::Chart& chart,
-                           const beatbench::TimingEngine& timing,
-                           SampleCache& cache, double sampleRate = 44100.0,
-                           const std::string& sourceDir = "");
+RenderResult render_chart(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
+                          SampleCache& cache, double sampleRate = 44100.0,
+                          const std::string& sourceDir = "");
 /// 宽字符版（Windows 日文路径用；非 Windows 传 UTF-8 宽字符）。
-RenderResult render_chart_w(const beatbench::Chart& chart,
-                            const beatbench::TimingEngine& timing,
-                            SampleCache& cache, double sampleRate,
-                            const std::wstring& sourceDir);
+RenderResult render_chart_w(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
+                            SampleCache& cache, double sampleRate, const std::wstring& sourceDir);
 
 /// 区间渲染（[t0, t1) 秒；t1 ≤ 0 = 到曲末）。render_chart 的底层实现，
 /// 也供 M5 任意起播/循环区间复用。t0/0 ≤ t1；越界自动夹逼。
 RenderResult render_chart_range(const beatbench::Chart& chart,
-                                const beatbench::TimingEngine& timing,
-                                SampleCache& cache, double sampleRate,
-                                double t0, double t1,
+                                const beatbench::TimingEngine& timing, SampleCache& cache,
+                                double sampleRate, double t0, double t1,
                                 const std::string& sourceDir = "");
 /// 宽字符版。
 RenderResult render_chart_range_w(const beatbench::Chart& chart,
-                                  const beatbench::TimingEngine& timing,
-                                  SampleCache& cache, double sampleRate,
-                                  double t0, double t1,
+                                  const beatbench::TimingEngine& timing, SampleCache& cache,
+                                  double sampleRate, double t0, double t1,
                                   const std::wstring& sourceDir);
 
 }  // namespace beatbench::audio

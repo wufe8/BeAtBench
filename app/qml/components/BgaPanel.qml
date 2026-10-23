@@ -2,7 +2,7 @@
 // BGA 面板（左 Dock「BGA」标签页，2026-09）：#BMP 定义 + base/poor/layer/layer2 事件管理。
 // 数据源 = session.samples（bmp 数组）+ bga.list（当前层事件，升序）。
 // 编辑经信号 → Main 走 bga.put/delete、sample.setFile/rename(kind=bmp)，成功后 Main 调 reload()。
-// 双语言纪律（doc/08 §2）：本组件纯展示 + 事件分发，不直接 dispatch 编辑命令（只读 dispatch 可）。
+// 双语言纪律（doc/skin-system.md 二、）：本组件纯展示 + 事件分发，不直接 dispatch 编辑命令（只读 dispatch 可）。
 // 预览（图像解码）后置：此处只编辑定义与事件，不渲染位图。
 import QtQuick
 import QtQuick.Controls

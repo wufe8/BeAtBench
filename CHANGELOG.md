@@ -2,6 +2,48 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [0.4.2](https://github.com/wufe8/BeAtBench/compare/v0.4.1...v0.4.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **audio:** SampleCache 单飞二次确认，避免同键重复解码 ([#40](https://github.com/wufe8/BeAtBench/issues/40)) ([b3c0f8a](https://github.com/wufe8/BeAtBench/commit/b3c0f8a83dd7c9e1d865d71538a6f85c66bb508a))
+* **docs:** repair public documentation and portable commit guard ([#33](https://github.com/wufe8/BeAtBench/issues/33)) ([c766906](https://github.com/wufe8/BeAtBench/commit/c766906a79506902c77b3036c9885f43f30c5824))
+* **scripts:** check.sh Qt 自动探测补 Arch 标准位置 /usr/lib/qt6 ([#30](https://github.com/wufe8/BeAtBench/issues/30)) ([12c8325](https://github.com/wufe8/BeAtBench/commit/12c8325db1c5e718deb28a2f0fd8172d4fb68652))
+
+## [0.4.1](https://github.com/wufe8/BeAtBench/compare/v0.4.0...v0.4.1) (2026-10-20)
+
+
+### Features
+
+* **app:** 新建谱面可选游玩模式（模式系统阶段一） ([55a98f6](https://github.com/wufe8/BeAtBench/commit/55a98f6b011f1531ea4cc0cd5400d304c423d0c5))
+* **core:** 9key 通道 BME-SP 型约定探测与写回约定跟随 ([8907a7c](https://github.com/wufe8/BeAtBench/commit/8907a7cd2e1505eb9dd0ed85169396be4eb58819))
+
+
+### Bug Fixes
+
+* **app:** confirm unsafe PMS suffix before writing files ([a595498](https://github.com/wufe8/BeAtBench/commit/a595498e4f5b0e7c231b08924e23f18b65b1c1ce))
+* **app:** PMS 拖动/ghost/变换选择/通道显示接模式键数与写出通道 ([524fa8e](https://github.com/wufe8/BeAtBench/commit/524fa8ef8224c6f7a2de28cb63a0b59abaae2923))
+* **ci:** avoid stale job API results in blocking summary ([4b4c69b](https://github.com/wufe8/BeAtBench/commit/4b4c69b54a13c7c5beb1be244c6bd42846a6a306))
+* **core:** 9key 通道读写分离，读侧统一别名表按 hitkey 参考表固定键位 ([47d92be](https://github.com/wufe8/BeAtBench/commit/47d92be104aa7964f9cababc7cbed0ba1177c72a))
+* **core:** reject unwritable note transform targets atomically ([6f214f5](https://github.com/wufe8/BeAtBench/commit/6f214f5a7696f29e6764255d4752d813602ab40f))
+* **core:** session.new 非法 mode 拒绝、PLAYER 按模式推导、变换按模式键数 ([f20962e](https://github.com/wufe8/BeAtBench/commit/f20962ebc128c4cf5af44aedafbbecd94abbee6f))
+* integrate PMS compatibility and mode editing repairs ([f322a66](https://github.com/wufe8/BeAtBench/commit/f322a662113c13928f3f51e8f40b9e4664bd76e7))
+* **pkg:** --no-quick3dutils 改为探测后再传（无 qtquick3d 的 Qt 上它不存在，v0.4.0 首发因此失败） ([cf167ac](https://github.com/wufe8/BeAtBench/commit/cf167acb4e57f226938d4b460d8e374683c3dc90))
+* **pkg:** --no-quick3dutils 改为探测后再传（无 qtquick3d 的 Qt 上它不存在，v0.4.0 首发因此失败） ([af5704c](https://github.com/wufe8/BeAtBench/commit/af5704ce15466db5fe8911b3a12a5b54af3817fb))
+* **pkg:** 打包脚本显式指定 C 编译器（PortAudio 是 C，混用工具链时报假缺头） ([9f9837a](https://github.com/wufe8/BeAtBench/commit/9f9837aa1b1f5b75f3f36b7e437127556278a7a3))
+* **pms:** preserve alias notes and make mode editing safe ([2afc2e0](https://github.com/wufe8/BeAtBench/commit/2afc2e0470f29514adbe347fda8012faea2b66c7))
+
+
+### Documentation
+
+* document accepted LN limitations for patch release ([7e2ea5d](https://github.com/wufe8/BeAtBench/commit/7e2ea5daeaf59d356c1cf5027ae247a3e94c2c9b))
+
+### 已知问题
+
+* **LN 头尾采样不同**：LN 通道物件在编辑后按轨道与采样 ID 重新配对。导入的 LN 若头尾采样 ID 不同，编辑后可能失去配对，保存时可能降为普通音。LNTYPE 1 下使用相同采样 ID 的完整头尾可避开此特定触发条件。
+* **孤立 LN 端点**：缺少另一端的 LN 通道物件，保存时可能降为普通音。保存前请运行谱面检查（lint）并处理未配对 LN 提示；lint 不会自动修复或强制阻止保存。
+
 ## [0.4.0](https://github.com/wufe8/BeAtBench/compare/v0.3.2...v0.4.0) (2026-10-11)
 
 

@@ -21,28 +21,28 @@ namespace beatbench::project {
 
 /// 扫描失败（根路径非法等）。code = 稳定机器码（协议用），what() = 中文消息。
 class ProjectError : public std::runtime_error {
-public:
-    ProjectError(std::string code, std::string message);
+   public:
+    ProjectError(std::string code, const std::string& message);
     const std::string& code() const noexcept { return code_; }
 
-private:
+   private:
     std::string code_;
 };
 
 /// 引用来源：文件 ← 谱面 / 定义 ID / 头部字段（doc/07 §2）。
 /// 保留出处而非只记计数——"同一文件被多谱不同 ID 使用"要能准确列出。
 enum class RefSource : std::uint8_t {
-    Define,      ///< #WAVxx / #BMPxx 定义表条目
-    HeaderField, ///< 头部字段（#STAGEFILE / #BANNER / #BACKBMP / #PREVIEW）
+    Define,       ///< #WAVxx / #BMPxx 定义表条目
+    HeaderField,  ///< 头部字段（#STAGEFILE / #BANNER / #BACKBMP / #PREVIEW）
 };
 
 /// 一条引用出处。
 struct ResourceUse {
     std::string chart;  ///< 引用它的谱面（项目根相对路径，'/' 分隔）
     RefSource source = RefSource::Define;
-    std::string kind;   ///< "wav" / "bmp"（定义来源）；头部字段来源 = 推断的类别名
-    std::string id;     ///< 定义 ID 原文本（如 "01"）；头部字段来源为空
-    std::string field;  ///< 头部字段名（如 "STAGEFILE"）；定义来源为空
+    std::string kind;      ///< "wav" / "bmp"（定义来源）；头部字段来源 = 推断的类别名
+    std::string id;        ///< 定义 ID 原文本（如 "01"）；头部字段来源为空
+    std::string field;     ///< 头部字段名（如 "STAGEFILE"）；定义来源为空
     std::size_t refs = 0;  ///< 该谱面内的事件引用数（0 = 定义了但无事件使用）
 };
 
@@ -64,11 +64,11 @@ struct ChartRef {
     std::string player;
 
     // —— 统计（文本解析所得）——
-    std::size_t notes = 0;      ///< 普通 note 数（不含地雷）
-    std::size_t ln_pairs = 0;   ///< LN 对数
-    std::size_t mines = 0;      ///< 地雷数
-    std::size_t bga = 0;        ///< BGA 事件数
-    double bpm_min = 0.0;       ///< 全谱 BPM 最小（含 #BPM 初值）；0 = 无 BPM 信息
+    std::size_t notes = 0;     ///< 普通 note 数（不含地雷）
+    std::size_t ln_pairs = 0;  ///< LN 对数
+    std::size_t mines = 0;     ///< 地雷数
+    std::size_t bga = 0;       ///< BGA 事件数
+    double bpm_min = 0.0;      ///< 全谱 BPM 最小（含 #BPM 初值）；0 = 无 BPM 信息
     double bpm_max = 0.0;
     double duration_sec = 0.0;  ///< 末尾事件时间（秒）；0 = 空谱或未做完整统计
 
@@ -86,15 +86,15 @@ struct ChartRef {
 /// 资源条目：**以文件为单位**（doc/07 §2），不是以槽位为单位。
 /// 状态维度（§9.7）：实际缺失 / 扩展名回退 / 大小写差异 / 项目外 / 已定义未使用。
 struct ResourceRef {
-    std::string path;      ///< 实际文件的项目根相对路径；缺失时 = 声明的归一路径；
-                           ///< 项目外引用为归一化绝对路径
-    std::string declared;  ///< 声明原样（仅当与 path 不同：扩展名回退 / 大小写差异）
-    std::string kind;      ///< 小写扩展名（wav/ogg/mp3/bmp/jpg/mpg…）；无扩展名 = ""
-    bool on_disk = false;  ///< 磁盘上是否存在（含扩展名回退 / 大小写回退命中）
-    bool outside = false;  ///< 实际文件在项目根之外（如 `../audio/x.wav`）
-    bool ext_fallback = false;  ///< 按「同名异扩展」命中（与 lint missing_wav 口径一致）
-    bool case_differs = false;  ///< 仅大小写差异命中
-    std::size_t total_refs = 0; ///< 各谱面事件引用数合计（0 = 已定义未使用）
+    std::string path;               ///< 实际文件的项目根相对路径；缺失时 = 声明的归一路径；
+                                    ///< 项目外引用为归一化绝对路径
+    std::string declared;           ///< 声明原样（仅当与 path 不同：扩展名回退 / 大小写差异）
+    std::string kind;               ///< 小写扩展名（wav/ogg/mp3/bmp/jpg/mpg…）；无扩展名 = ""
+    bool on_disk = false;           ///< 磁盘上是否存在（含扩展名回退 / 大小写回退命中）
+    bool outside = false;           ///< 实际文件在项目根之外（如 `../audio/x.wav`）
+    bool ext_fallback = false;      ///< 按「同名异扩展」命中（与 lint missing_wav 口径一致）
+    bool case_differs = false;      ///< 仅大小写差异命中
+    std::size_t total_refs = 0;     ///< 各谱面事件引用数合计（0 = 已定义未使用）
     std::vector<ResourceUse> uses;  ///< 引用出处；空 = 磁盘文件无已知谱面引用
 
     /// 有已知引用（含只被定义表声明）。
@@ -105,7 +105,7 @@ struct ResourceRef {
 
 /// 项目清单（某次扫描 / 补解析后的快照）。
 struct Project {
-    std::string root;  ///< 规范化后的绝对路径（UTF-8）
+    std::string root;        ///< 规范化后的绝对路径（UTF-8）
     bool truncated = false;  ///< 是否因 max_charts/max_entries 提前停止
     std::vector<ChartRef> charts;
     std::vector<ResourceRef> resources;

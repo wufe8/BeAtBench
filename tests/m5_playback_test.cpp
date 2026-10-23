@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // M5 播放单测：PcmPlayback（状态机 + 时钟）+ PlaybackPlan（映射层）。
 // 无设备/无 Qt：SamplePlayer 纯 DSP + 命令队列可独立测试（同 audio_test）。
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <memory>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "beatbench/audio/DecodedSample.hpp"
 #include "beatbench/audio/PcmPlayback.hpp"
@@ -218,9 +218,9 @@ TEST(PcmPlaybackTest, LoopBOnlyPausesAtB) {
     EXPECT_FALSE(pb.loopEnabled());  // 无 A → 非循环
     ASSERT_TRUE(pb.seek(1.0));
     ASSERT_TRUE(pb.play(1.0f));
-    renderFrames(player, 44100);          // 1s → 2.0
-    renderFrames(player, 44100 / 10);     // 0.1s → 2.1 > B
-    EXPECT_TRUE(pb.loopTick());           // 到 B → 暂停
+    renderFrames(player, 44100);       // 1s → 2.0
+    renderFrames(player, 44100 / 10);  // 0.1s → 2.1 > B
+    EXPECT_TRUE(pb.loopTick());        // 到 B → 暂停
     EXPECT_EQ(pb.state(), PcmPlayback::State::Paused);
     EXPECT_NEAR(pb.currentSec(), 2.0, 0.15);
     pb.stop();
@@ -271,10 +271,14 @@ TEST(PlaybackPlanTest, StopAndChangingBpm) {
     chart.meta["BPM"] = "120";
     // measure 0：BPM 120；measure 1：BPM 240；measure 2：STOP 1 次（1/192 全音符）
     beatbench::Event<beatbench::Bpm> bpm;
-    bpm.measure = 1; bpm.pos = beatbench::Rational(0, 1); bpm.value.value = 240;
+    bpm.measure = 1;
+    bpm.pos = beatbench::Rational(0, 1);
+    bpm.value.value = 240;
     chart.bpm_events.push_back(bpm);
     beatbench::Event<beatbench::Stop> stop;
-    stop.measure = 1; stop.pos = beatbench::Rational(2, 4); stop.value.count = 192;
+    stop.measure = 1;
+    stop.pos = beatbench::Rational(2, 4);
+    stop.value.count = 192;
     chart.stop_events.push_back(stop);
     for (int i = 0; i < 4; ++i) {
         beatbench::Event<beatbench::Note> n;
@@ -307,7 +311,9 @@ TEST(PlaybackPlanTest, Bpm9999xxxZeroDuration) {
     chart.samples[{beatbench::SampleKind::Wav, 1}].file = "kick.wav";
     // measure 0 起点就换 9999280（事件在 pos0）
     beatbench::Event<beatbench::Bpm> bpm;
-    bpm.measure = 0; bpm.pos = beatbench::Rational(0, 1); bpm.value.value = 9999280;
+    bpm.measure = 0;
+    bpm.pos = beatbench::Rational(0, 1);
+    bpm.value.value = 9999280;
     chart.bpm_events.push_back(bpm);
     // 段内 note（pos1/4 与 pos3/4）
     for (int i = 1; i <= 3; i += 2) {
@@ -335,8 +341,8 @@ TEST(PcmPlaybackTest, DualInstancesIndependentPlayAndSeek) {
     SamplePlayer player;
     PcmPlayback chartPb(&player, 44100.0);
     PcmPlayback refPb(&player, 44100.0, beatbench::audio::kRefPcmSlot);
-    chartPb.load(makePcm(44100.0, 44100 * 2), 44100.0);           // 2s
-    refPb.load(makePcm(44100.0, 44100 * 2, 0.3f), 44100.0);       // 2s（低振幅可区分）
+    chartPb.load(makePcm(44100.0, 44100 * 2), 44100.0);      // 2s
+    refPb.load(makePcm(44100.0, 44100 * 2, 0.3f), 44100.0);  // 2s（低振幅可区分）
     ASSERT_TRUE(chartPb.play(1.0f));
     ASSERT_TRUE(refPb.play(1.0f));
     // 1s 渲染：两 voice 同时输出（混音峰值验证）+ 时钟前进

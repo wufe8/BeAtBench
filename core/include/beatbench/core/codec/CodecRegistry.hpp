@@ -11,13 +11,13 @@
 
 namespace beatbench::codec {
 
-/// 格式注册表（doc/06 规划、M3 落地）：format → Codec。
+/// 格式注册表（doc/command-protocol.md 规划、M3 落地）：format → Codec。
 /// - 注册：唯一 id（重复注册抛错）；扩展名全局唯一（同扩展名冲突抛错）；
 /// - 查找：按 id 或扩展名（大小写不敏感，含/不含点均可）；
 /// - capabilities 的 formats 列表改为动态声明（原 hardcode 移除）。
 /// 线程安全：M1 单线程约定；多线程化时在此加锁即可（与命令注册表一致）。
 class CodecRegistry {
-public:
+   public:
     void add(std::unique_ptr<Codec> codec);
 
     /// 按 id 查找（大小写敏感，协议 id 稳定）。
@@ -32,7 +32,7 @@ public:
     /// 全部已注册格式 id（按注册序或字典序，供 capabilities 输出）。
     std::vector<std::string> ids() const;
 
-private:
+   private:
     std::vector<std::unique_ptr<Codec>> codecs_;  // 保有所有权
 };
 

@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -51,8 +51,8 @@ TEST(BgmLine, DisambiguateDelete) {
     EditorSession s;
     s.load(make_chart());
     // 删除 sub_line=1 的那个
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Bgm, 0}, 0x22, 1)));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(1, Rational(0, 1),
+                                                           Lane{0, LaneKind::Bgm, 0}, 0x22, 1)));
     ASSERT_EQ(s.chart().notes.size(), 2u);
     // 剩下 sub_line=0 的 + key1
     bool saw_b0 = false;
@@ -74,9 +74,9 @@ TEST(BgmLine, MoveAcrossSubLane) {
     EditorSession s;
     s.load(make_chart());
     // 把 sub_line=0 移到同小节 sub_line=1（同 pos）
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Bgm, 0}, 0x22,
-        1, Rational(0, 1), false, std::nullopt, 0, 1)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Bgm, 0}, 0x22,
+                                                 1, Rational(0, 1), false, std::nullopt, 0, 1)));
     ASSERT_EQ(s.chart().notes.size(), 3u);
     // 现在两个 Bgm note 都在 sub_line=1？——不，移动后原 0 变 1，原 1 仍在 1
     // （同 pos 同 lane 同 sample 两 note 均 line=1——允许（编辑器合并显示问题另议；
@@ -107,9 +107,9 @@ TEST(BgmLine, MoveAcrossSubLane) {
 TEST(BgmLine, BgmToKey) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Bgm, 0}, 0x22,
-        1, Rational(1, 4), false, Lane{0, LaneKind::Key, 3}, 0)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Bgm, 0}, 0x22, 1,
+                                          Rational(1, 4), false, Lane{0, LaneKind::Key, 3}, 0)));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 3u);
     bool found = false;

@@ -2,9 +2,6 @@
 // BMS 文本解析：头部字段 + 定义表 + 数据行事件化（notes/bpm/stop/measure/bga）+ LN 配对。
 // 输入约定：read_bms 接收已解码的 UTF-8 文本；read_bms_file 负责编码检测与解码。
 // 通道号 → Lane/语义的映射收敛在 ChannelMap（换格式 = 换映射规则）。
-#include "beatbench/core/bms/BmsCodec.hpp"
-#include "beatbench/core/LnPairing.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -16,10 +13,11 @@
 #include <string_view>
 #include <vector>
 
+#include "beatbench/core/LnPairing.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
-
 #include "bms_sections.hpp"
 #include "encoding.hpp"
 
@@ -27,14 +25,14 @@ namespace beatbench::bms {
 namespace {
 
 // 控制指令（保留在 raw_lines，不做头部字段；写回时原样输出）。
-// #RANDOM/#IF/#SWITCH 的语义展开属后续步骤（设计见 doc/04 §6），
+// #RANDOM/#IF/#SWITCH 的语义展开属后续步骤（设计见 doc/development.md 六、），
 // 架构上先保证无损往返；可视化编辑采用「结构化容器」方案（不复制多份）。
 constexpr std::string_view kControlTags[] = {
-    "RANDOM", "IF", "ELSEIF", "ELSE", "ENDIF",
-    "SWITCH", "CASE", "DEFAULT", "ENDSWITCH",
-    "SETRANDOM", "ENCODING",
+    "RANDOM", "IF",      "ELSEIF",    "ELSE",      "ENDIF",    "SWITCH",
+    "CASE",   "DEFAULT", "ENDSWITCH", "SETRANDOM", "ENCODING",
 };
 
+// NOLINTNEXTLINE(readability-function-size)——控制指令识别链
 inline bool is_control_tag(std::string_view tag) {
     for (const auto t : kControlTags) {
         if (tag.size() == t.size()) {
@@ -113,8 +111,7 @@ double resolve_bpm(const Chart& chart, std::string_view slot, int number,
                    std::vector<Diagnostic>& diags) {
     if (slot.size() == 2) {
         const auto id = decode_id(chart, slot);
-        if (const auto it = chart.samples.find({SampleKind::Bpm, id});
-            it != chart.samples.end()) {
+        if (const auto it = chart.samples.find({SampleKind::Bpm, id}); it != chart.samples.end()) {
             double d = 0;
             if (parse_double(it->second.value, d)) return d;
         }
@@ -128,8 +125,8 @@ double resolve_bpm(const Chart& chart, std::string_view slot, int number,
     }
     double d = 0;
     if (parse_double(slot, d)) return d;
-    diags.push_back({Severity::Warning,
-                     "无法解析 BPM 值（按 130 处理）: " + std::string(slot), number});
+    diags.push_back(
+        {Severity::Warning, "无法解析 BPM 值（按 130 处理）: " + std::string(slot), number});
     return 130.0;
 }
 
@@ -147,21 +144,21 @@ std::int64_t resolve_stop_count(const Chart& chart, std::string_view slot, int n
                                 std::vector<Diagnostic>& diags) {
     if (slot.size() == 2) {
         const auto id = decode_id(chart, slot);
-        if (const auto it = chart.samples.find({SampleKind::Stop, id});
-            it != chart.samples.end()) {
+        if (const auto it = chart.samples.find({SampleKind::Stop, id}); it != chart.samples.end()) {
             double d = 0;
             if (parse_double(it->second.value, d)) {
                 return static_cast<std::int64_t>(std::llround(d));
             }
         }
     }
-    diags.push_back({Severity::Warning,
-                     "无法解析 STOP 引用（跳过）: " + std::string(slot), number});
+    diags.push_back(
+        {Severity::Warning, "无法解析 STOP 引用（跳过）: " + std::string(slot), number});
     return 0;
 }
 
 }  // namespace
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BMS 逐行解析状态机（格式核心，勿轻拆）
 BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     BmsReadResult result;
     Chart& chart = result.chart;
@@ -199,8 +196,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     for (const auto& [line, number] : lines) {
         if (line.empty() || line[0] != '#') continue;
         const auto token = field_token(line);
-        const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
-                                      token.size();
+        const std::size_t token_end =
+            static_cast<std::size_t>(token.data() - line.data()) + token.size();
         if (upper_ascii(token) != "BASE") continue;
         const auto v = trim_view(field_value(line, token_end));
         if (v == "62") {
@@ -222,11 +219,12 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             (void)number;
             if (line.empty() || line[0] != '#') continue;
             const auto token = field_token(line);
-            const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
-                                          token.size();
+            const std::size_t token_end =
+                static_cast<std::size_t>(token.data() - line.data()) + token.size();
             if (upper_ascii(token) != "PLAYER") continue;
             const auto v = field_value(line, token_end);
-            if (!v.empty()) player = std::atoi(std::string(v).c_str());
+            if (!v.empty())
+                player = static_cast<int>(std::strtol(std::string(v).c_str(), nullptr, 10));
             break;  // 首个 #PLAYER 即生效
         }
         if (player == 3) {
@@ -254,8 +252,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     // 证据行语义与主循环一致：跳过块注释 /* */、// 与 * 行注释、空行；数据行须含
     // 非 00 槽位（全 00 行不构成证据）；通道大小写折叠（36 进制）。
     // 显式 opts.mode = "pms9k-bmesp" 可强制（跳过探测）。
-    if (chart.mode_id && chart.mode_id->rfind("pms9k", 0) == 0 &&
-        *chart.mode_id != "pms9k-bmesp") {
+    if (chart.mode_id && chart.mode_id->rfind("pms9k", 0) == 0 && *chart.mode_id != "pms9k-bmesp") {
         bool bmesp_used = false;
         bool std_used = false;
         int first_bmesp_line = 0;
@@ -275,7 +272,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 in_block_comment = rest.find("*/") == std::string_view::npos;
                 continue;
             }
-            if (rest.starts_with("//") || rest.starts_with("*")) continue;
+            if (rest.starts_with("//") || rest.starts_with('*')) continue;
             if (line[0] != '#') continue;
             const auto token = field_token(line);
             // 数据行：#mmmcc:（3 位小节 + 2 位 36 进制通道 + ':'；与主循环判定一致）
@@ -285,8 +282,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 continue;
             }
             if (!is_ascii_digit(token[0]) || !is_ascii_digit(token[1]) ||
-                !is_ascii_digit(token[2]) || !is_c36_digit(token[3]) ||
-                !is_c36_digit(token[4])) {
+                !is_ascii_digit(token[2]) || !is_c36_digit(token[3]) || !is_c36_digit(token[4])) {
                 continue;
             }
             // 全 00 数据行不构成证据（与主循环「00 槽位为空」一致）
@@ -302,14 +298,10 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             // 证据集合（大小写折叠后匹配）：
             //   BME-SP 别名：16-19（普通）/ 56-59（LN）/ D6-D9（地雷）
             //   标准别名：22-25（普通）/ 62-65（LN）/ E2-E5（地雷）
-            const char c0 =
-                static_cast<char>(std::toupper(static_cast<unsigned char>(token[3])));
-            const char c1 =
-                static_cast<char>(std::toupper(static_cast<unsigned char>(token[4])));
-            const bool bmesp_ev =
-                (c0 == '1' || c0 == '5' || c0 == 'D') && c1 >= '6' && c1 <= '9';
-            const bool std_ev =
-                (c0 == '2' || c0 == '6' || c0 == 'E') && c1 >= '2' && c1 <= '5';
+            const char c0 = static_cast<char>(std::toupper(static_cast<unsigned char>(token[3])));
+            const char c1 = static_cast<char>(std::toupper(static_cast<unsigned char>(token[4])));
+            const bool bmesp_ev = (c0 == '1' || c0 == '5' || c0 == 'D') && c1 >= '6' && c1 <= '9';
+            const bool std_ev = (c0 == '2' || c0 == '6' || c0 == 'E') && c1 >= '2' && c1 <= '5';
             if (bmesp_ev) {
                 if (!bmesp_used) first_bmesp_line = number;
                 bmesp_used = true;
@@ -322,7 +314,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 result.diagnostics.push_back(
                     {Severity::Warning,
                      "9key 通道约定混用（标准与 BME-SP 别名共存）：混合编码部分播放器"
-                     "不兼容，按标准 PMS 判读；保存时将统一写为标准通道", first_bmesp_line});
+                     "不兼容，按标准 PMS 判读；保存时将统一写为标准通道",
+                     first_bmesp_line});
             } else {
                 chart.mode_id = "pms9k-bmesp";
             }
@@ -345,20 +338,34 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         const auto& line = lines[li].text;
         if (line.empty() || line[0] != '#') continue;
         const auto token = field_token(line);
-        const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
-                                      token.size();
+        const std::size_t token_end =
+            static_cast<std::size_t>(token.data() - line.data()) + token.size();
         const auto up = upper_ascii(token);
         SampleKind kind{};
         std::size_t prefix_len = 0;
         bool is_def = false;
-        if (up.size() >= 5 && up.starts_with("WAV")) { kind = SampleKind::Wav; prefix_len = 3; is_def = true; }
-        else if (up.size() >= 5 && up.starts_with("BMP")) { kind = SampleKind::Bmp; prefix_len = 3; is_def = true; }
-        else if (up.size() >= 5 && up.starts_with("BPM")) { kind = SampleKind::Bpm; prefix_len = 3; is_def = true; }
-        else if (up.size() >= 6 && up.starts_with("STOP")) { kind = SampleKind::Stop; prefix_len = 4; is_def = true; }
+        if (up.size() >= 5 && up.starts_with("WAV")) {
+            kind = SampleKind::Wav;
+            prefix_len = 3;
+            is_def = true;
+        } else if (up.size() >= 5 && up.starts_with("BMP")) {
+            kind = SampleKind::Bmp;
+            prefix_len = 3;
+            is_def = true;
+        } else if (up.size() >= 5 && up.starts_with("BPM")) {
+            kind = SampleKind::Bpm;
+            prefix_len = 3;
+            is_def = true;
+        } else if (up.size() >= 6 && up.starts_with("STOP")) {
+            kind = SampleKind::Stop;
+            prefix_len = 4;
+            is_def = true;
+        }
         if (!is_def) continue;
         // id 取原始大小写；36 模式折叠为大写、62 模式原样（见 norm_id_text）
         const auto id_part = norm_id_text(chart, token.substr(prefix_len));
-        if (id_part.size() != 2 || !is_id_digit(chart, id_part[0]) || !is_id_digit(chart, id_part[1])) {
+        if (id_part.size() != 2 || !is_id_digit(chart, id_part[0]) ||
+            !is_id_digit(chart, id_part[1])) {
             continue;  // 3 位 id 变体等：留待主循环（raw 保留）
         }
         const auto value = field_value(line, token_end);
@@ -391,7 +398,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             if (opts.preserve_comments) raw.emplace_back(line);
             continue;
         }
-        if (rest.starts_with("//") || rest.starts_with("*")) {
+        if (rest.starts_with("//") || rest.starts_with('*')) {
             // BMSE 风格：// 行注释、* 星号注释
             // 结构分割线（bms_sections.hpp）是 writer 生成的装饰、不算用户注释：
             // 豁免不入 raw_lines，否则 写→读→写 每次在尾部累积一份（幂等性破坏）。
@@ -406,8 +413,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         }
 
         const auto token = field_token(line);
-        const std::size_t token_end = static_cast<std::size_t>(token.data() - line.data()) +
-                                      token.size();
+        const std::size_t token_end =
+            static_cast<std::size_t>(token.data() - line.data()) + token.size();
 
         // ---- 定义行：#WAVxx / #BMPxx / #BPMxx / #STOPxx ----
         // 前缀长度：WAV/BMP/BPM = 3，STOP = 4；id 恰 2 位 36 进制
@@ -415,14 +422,28 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         SampleKind kind{};
         std::size_t prefix_len = 0;
         bool is_def = false;
-        if (up.size() >= 5 && up.starts_with("WAV")) { kind = SampleKind::Wav; prefix_len = 3; is_def = true; }
-        else if (up.size() >= 5 && up.starts_with("BMP")) { kind = SampleKind::Bmp; prefix_len = 3; is_def = true; }
-        else if (up.size() >= 5 && up.starts_with("BPM")) { kind = SampleKind::Bpm; prefix_len = 3; is_def = true; }
-        else if (up.size() >= 6 && up.starts_with("STOP")) { kind = SampleKind::Stop; prefix_len = 4; is_def = true; }
+        if (up.size() >= 5 && up.starts_with("WAV")) {
+            kind = SampleKind::Wav;
+            prefix_len = 3;
+            is_def = true;
+        } else if (up.size() >= 5 && up.starts_with("BMP")) {
+            kind = SampleKind::Bmp;
+            prefix_len = 3;
+            is_def = true;
+        } else if (up.size() >= 5 && up.starts_with("BPM")) {
+            kind = SampleKind::Bpm;
+            prefix_len = 3;
+            is_def = true;
+        } else if (up.size() >= 6 && up.starts_with("STOP")) {
+            kind = SampleKind::Stop;
+            prefix_len = 4;
+            is_def = true;
+        }
         if (is_def) {
             // id 取原始大小写；36 模式折叠为大写、62 模式原样（见 norm_id_text）
             const auto id_part = norm_id_text(chart, token.substr(prefix_len));
-            if (id_part.size() == 2 && is_id_digit(chart, id_part[0]) && is_id_digit(chart, id_part[1])) {
+            if (id_part.size() == 2 && is_id_digit(chart, id_part[0]) &&
+                is_id_digit(chart, id_part[1])) {
                 const auto id = decode_id(chart, id_part);
                 const auto value = field_value(line, token_end);
                 SampleDef def;
@@ -491,8 +512,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                         if (v.size() % 2 == 1) {
                             double bpm = 0;
                             if (parse_double(v, bpm)) {
-                                chart.bpm_events.push_back(
-                                    {measure, Rational(0, 1), Bpm{bpm}});
+                                chart.bpm_events.push_back({measure, Rational(0, 1), Bpm{bpm}});
                                 continue;
                             }
                             // 非数值 → 落入下方 2 字符槽位解析（宽容）
@@ -510,8 +530,10 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                     // 子行序号（2026-09 泛化）：任意 Note 通道同小节多行 = 子行（原样保留结构），
                     // 按 (measure,channel) FIFO 递增（空行也占位）。allow_sub_lines=false 的通道
                     // 出现多行由 lint 软警告（见 chart_check 的 sub_lines_not_allowed）。
-                    const std::uint32_t sub_line = (rule->semantics == ChannelSemantics::Note)
-                        ? sub_line_counts[{measure, std::string(channel)}]++ : 0u;
+                    const std::uint32_t sub_line =
+                        (rule->semantics == ChannelSemantics::Note)
+                            ? sub_line_counts[{measure, std::string(channel)}]++
+                            : 0u;
                     const auto push_slot = [&](std::string_view slot, std::size_t i) {
                         const Rational pos(static_cast<std::int64_t>(i),
                                            static_cast<std::int64_t>(n_slots));
@@ -546,8 +568,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 break;
                             }
                             case ChannelSemantics::StopRef: {
-                                const auto count = resolve_stop_count(chart, slot, number,
-                                                                      result.diagnostics);
+                                const auto count =
+                                    resolve_stop_count(chart, slot, number, result.diagnostics);
                                 if (count != 0) {
                                     Stop stop;
                                     stop.count = count;
@@ -603,7 +625,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                 }
             }
             if (alpha_num) {
-                if (up_tag == "BASE") continue;  // id 进制指令：预扫描已结构化（chart.id_base），不入 meta
+                if (up_tag == "BASE")
+                    continue;  // id 进制指令：预扫描已结构化（chart.id_base），不入 meta
                 chart.meta[up_tag] = std::string(field_value(line, token_end));
                 continue;
             }
@@ -624,14 +647,17 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
         const bool orphan_tail = lnobj && !n.ln_channel && n.kind == NoteKind::Normal &&
                                  n.lane.kind != LaneKind::Bgm && n.sample.id == *lnobj;
         if (!n.ln_channel && !orphan_tail) continue;
-        result.diagnostics.push_back({Severity::Warning,
-            (orphan_tail ? "未配对 LN 尾（缺少头）: 行 " : "未闭合 LN 头（缺少尾）: 行 ") +
-                std::to_string(note_lines[i]), note_lines[i]});
+        result.diagnostics.push_back(
+            {Severity::Warning,
+             (orphan_tail ? "未配对 LN 尾（缺少头）: 行 " : "未闭合 LN 头（缺少尾）: 行 ") +
+                 std::to_string(note_lines[i]),
+             note_lines[i]});
     }
 
     return result;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——文件装载：编码与模式探测分支
 BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts) {
     BmsReadResult result;
 
@@ -642,8 +668,7 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     const std::filesystem::path fs_path = std::filesystem::u8path(path);
     std::ifstream file(fs_path, std::ios::binary);
     if (!file.is_open()) {
-        result.diagnostics.push_back(
-            {Severity::Error, "无法打开文件: " + path, 0});
+        result.diagnostics.push_back({Severity::Error, "无法打开文件: " + path, 0});
         return result;
     }
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -665,27 +690,24 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         std::size_t pos = 0;
         while (pos <= bv.size()) {
             const auto e = bv.find('\n', pos);
-            auto line = (e == std::string_view::npos) ? bv.substr(pos)
-                                                      : bv.substr(pos, e - pos);
+            auto line = (e == std::string_view::npos) ? bv.substr(pos) : bv.substr(pos, e - pos);
             if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
             const auto line_view = line;  // 原始字节行（未解码）
             // 找 #PLAYER（大小写不敏感；行首可有空白）
             std::size_t p = 0;
-            while (p < line_view.size() &&
-                   (line_view[p] == ' ' || line_view[p] == '\t')) ++p;
+            while (p < line_view.size() && (line_view[p] == ' ' || line_view[p] == '\t')) ++p;
             if (p < line_view.size() && line_view[p] == '#') {
                 std::size_t i = p + 1;
                 std::string tag;
                 while (i < line_view.size() && line_view[i] != ' ' && line_view[i] != '\t' &&
                        line_view[i] != ':') {
-                    tag.push_back(static_cast<char>(
-                        std::toupper(static_cast<unsigned char>(line_view[i]))));
+                    tag.push_back(
+                        static_cast<char>(std::toupper(static_cast<unsigned char>(line_view[i]))));
                     ++i;
                 }
                 if (tag == "PLAYER") {
                     while (i < line_view.size() &&
-                           (line_view[i] == ' ' || line_view[i] == '\t' ||
-                            line_view[i] == ':')) {
+                           (line_view[i] == ' ' || line_view[i] == '\t' || line_view[i] == ':')) {
                         ++i;
                     }
                     std::string val;
@@ -693,7 +715,8 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
                         val.push_back(line_view[i]);
                         ++i;
                     }
-                    if (!val.empty()) player = std::atoi(val.c_str());
+                    if (!val.empty())
+                        player = static_cast<int>(std::strtol(val.c_str(), nullptr, 10));
                     break;
                 }
             }
@@ -717,12 +740,12 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     }
 
     // UTF-16 BOM：本阶段不支持（后续按需）
-    if (bytes.size() >= 2 &&
-        ((static_cast<unsigned char>(bytes[0]) == 0xFF &&
-          static_cast<unsigned char>(bytes[1]) == 0xFE) ||
-         (static_cast<unsigned char>(bytes[0]) == 0xFE &&
-          static_cast<unsigned char>(bytes[1]) == 0xFF))) {
-        result.diagnostics.push_back({Severity::Error, "暂不支持 UTF-16 编码的 BMS 文件: " + path, 0});
+    if (bytes.size() >= 2 && ((static_cast<unsigned char>(bytes[0]) == 0xFF &&
+                               static_cast<unsigned char>(bytes[1]) == 0xFE) ||
+                              (static_cast<unsigned char>(bytes[0]) == 0xFE &&
+                               static_cast<unsigned char>(bytes[1]) == 0xFF))) {
+        result.diagnostics.push_back(
+            {Severity::Error, "暂不支持 UTF-16 编码的 BMS 文件: " + path, 0});
         return result;
     }
 
@@ -731,8 +754,8 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         enc = detect_encoding(bytes) == DetectedEncoding::Utf8 ? BmsEncoding::Utf8
                                                                : BmsEncoding::ShiftJis;
     }
-    result.detected = enc == BmsEncoding::Utf8 ? DetectedEncoding::Utf8
-                                               : DetectedEncoding::ShiftJis;
+    result.detected =
+        enc == BmsEncoding::Utf8 ? DetectedEncoding::Utf8 : DetectedEncoding::ShiftJis;
 
     std::string_view view(bytes);
     if (enc == BmsEncoding::Utf8) {
@@ -749,8 +772,8 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
 
     result.diagnostics.push_back(
         {Severity::Info,
-         "encoding: " + std::string(enc == BmsEncoding::Utf8 ? "UTF-8" : "Shift_JIS") +
-             " (" + path + ")",
+         "encoding: " + std::string(enc == BmsEncoding::Utf8 ? "UTF-8" : "Shift_JIS") + " (" +
+             path + ")",
          0});
     return result;
 }

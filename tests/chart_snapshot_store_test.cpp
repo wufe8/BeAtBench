@@ -22,13 +22,14 @@ namespace {
 // 不编译依赖 local/；本机执行时由运行器将 BB_TEST_TMPDIR 指向工作区临时目录。
 // CI 可使用系统临时根；兼容早期 BEATBENCH_TEST_TMP_ROOT 配置。
 QString tempTemplate() {
-    const QString base = qEnvironmentVariable("BB_TEST_TMPDIR",
-        qEnvironmentVariable("BEATBENCH_TEST_TMP_ROOT", QDir::tempPath()));
+    const QString base = qEnvironmentVariable(
+        "BB_TEST_TMPDIR", qEnvironmentVariable("BEATBENCH_TEST_TMP_ROOT", QDir::tempPath()));
     // 创建失败仍保留显式模板，让 QTemporaryDir 明确失败，不能静默改用其他目录。
     if (!QDir(base).exists()) QDir().mkpath(base);
     // macOS /var temporary roots may be symlink aliases; test the physical root.
     const QString canonical = QFileInfo(base).canonicalFilePath();
-    return QDir(canonical.isEmpty() ? base : canonical).filePath(QStringLiteral("snapshot-test-XXXXXX"));
+    return QDir(canonical.isEmpty() ? base : canonical)
+        .filePath(QStringLiteral("snapshot-test-XXXXXX"));
 }
 
 bool writeBytes(const QString& path, const QByteArray& bytes) {
@@ -44,7 +45,7 @@ QByteArray readBytes(const QString& path) {
 }
 
 class ChartSnapshotStoreTest : public ::testing::Test {
-protected:
+   protected:
     QTemporaryDir temp{tempTemplate()};
     QString root;
     QString source;
@@ -73,14 +74,18 @@ protected:
 TEST_F(ChartSnapshotStoreTest, DefaultAndEmptyHistoryDoNotWrite) {
     ChartSnapshotStore defaultStore;
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    EXPECT_EQ(defaultStore.rootPath(), QDir::cleanPath(QDir(base).filePath(QStringLiteral("chart-history-v1"))));
+    EXPECT_EQ(defaultStore.rootPath(),
+              QDir::cleanPath(QDir(base).filePath(QStringLiteral("chart-history-v1"))));
     const bool existed = QFileInfo::exists(defaultStore.rootPath());
-    const auto before = QDir(defaultStore.rootPath()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+    const auto before = QDir(defaultStore.rootPath())
+                            .entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
     const auto defaultHistory = defaultStore.history(source);
     ASSERT_TRUE(defaultHistory.value("ok").toBool());
     EXPECT_TRUE(entries(defaultHistory).isEmpty());
     EXPECT_EQ(QFileInfo::exists(defaultStore.rootPath()), existed);
-    EXPECT_EQ(QDir(defaultStore.rootPath()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot), before);
+    EXPECT_EQ(QDir(defaultStore.rootPath())
+                  .entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot),
+              before);
     ChartSnapshotStore store(root);
     EXPECT_FALSE(QFileInfo::exists(root));
     EXPECT_TRUE(store.history(source).value("ok").toBool());
@@ -200,10 +205,14 @@ TEST_F(ChartSnapshotStoreTest, RejectsMaliciousAndUnknownIds) {
     const auto created = store.create(source);
     ASSERT_TRUE(created.value("ok").toBool());
     const auto before = QDir(QFileInfo(source).absolutePath()).entryList(QDir::Files);
-    const QStringList bad{QString{}, QStringLiteral(".."), QStringLiteral("../escape"),
-        source, created.value("id").toString() + QStringLiteral("/../../x"),
-        created.value("id").toString() + QLatin1Char('\n'),
-        QString(32, QLatin1Char('f')), QString(32, QLatin1Char('A'))};
+    const QStringList bad{QString{},
+                          QStringLiteral(".."),
+                          QStringLiteral("../escape"),
+                          source,
+                          created.value("id").toString() + QStringLiteral("/../../x"),
+                          created.value("id").toString() + QLatin1Char('\n'),
+                          QString(32, QLatin1Char('f')),
+                          QString(32, QLatin1Char('A'))};
     for (const auto& id : bad) {
         const auto restored = store.restoreCopy(source, id);
         EXPECT_FALSE(restored.value("ok").toBool());
@@ -224,11 +233,14 @@ TEST_F(ChartSnapshotStoreTest, RejectsChecksumAndMetadataDamage) {
         {QStringLiteral("sha256"), QString(64, QLatin1Char('0'))},
         {QStringLiteral("data"), QStringLiteral("!!!!")},
         {QStringLiteral("data"), QStringLiteral("eA==")},
-        {QStringLiteral("size"), -1}, {QStringLiteral("size"), 0},
-        {QStringLiteral("size"), 1.5}, {QStringLiteral("source"), QStringLiteral("other.bms")},
+        {QStringLiteral("size"), -1},
+        {QStringLiteral("size"), 0},
+        {QStringLiteral("size"), 1.5},
+        {QStringLiteral("source"), QStringLiteral("other.bms")},
         {QStringLiteral("id"), QString(32, QLatin1Char('f'))},
         {QStringLiteral("time"), QStringLiteral("not-a-date")},
-        {QStringLiteral("sequence"), 2}, {QStringLiteral("note"), 5},
+        {QStringLiteral("sequence"), 2},
+        {QStringLiteral("note"), 5},
         {QStringLiteral("version"), 2}};
     for (const auto& change : changes) {
         auto obj = original;
@@ -328,15 +340,17 @@ TEST_F(ChartSnapshotStoreTest, FullHistoryAllowsUnchangedButNeverDeletesOldFiles
     ASSERT_TRUE(writeBytes(source, "A"));
     const auto first = store.create(source);
     ASSERT_TRUE(first.value("ok").toBool());
-    const auto initial = QJsonDocument::fromJson(readBytes(snapshotPath(first.value("id").toString()))).object();
+    const auto initial =
+        QJsonDocument::fromJson(readBytes(snapshotPath(first.value("id").toString()))).object();
     QString latestId;
     for (int sequence = 2; sequence <= 1000; ++sequence) {
         auto obj = initial;
         latestId = QStringLiteral("%1").arg(sequence, 8, 16, QLatin1Char('0')) +
-            first.value("id").toString().right(24);
+                   first.value("id").toString().right(24);
         obj.insert(QStringLiteral("id"), latestId);
         obj.insert(QStringLiteral("sequence"), sequence);
-        ASSERT_TRUE(writeBytes(snapshotPath(latestId), QJsonDocument(obj).toJson(QJsonDocument::Compact)));
+        ASSERT_TRUE(
+            writeBytes(snapshotPath(latestId), QJsonDocument(obj).toJson(QJsonDocument::Compact)));
     }
     const auto unchanged = store.create(source);
     ASSERT_TRUE(unchanged.value("ok").toBool());
@@ -368,7 +382,8 @@ TEST_F(ChartSnapshotStoreTest, SourceSymlinkAliasSharesHistoryAndRestoresToActua
     EXPECT_EQ(entries(store.history(alias)).size(), 1);
     const auto restored = store.restoreCopy(alias, original.value("id").toString());
     ASSERT_TRUE(restored.value("ok").toBool());
-    EXPECT_EQ(QFileInfo(restored.value("path").toString()).absolutePath(), QFileInfo(source).absolutePath());
+    EXPECT_EQ(QFileInfo(restored.value("path").toString()).absolutePath(),
+              QFileInfo(source).absolutePath());
     EXPECT_EQ(readBytes(restored.value("path").toString()), readBytes(source));
 }
 
@@ -417,7 +432,7 @@ TEST_F(ChartSnapshotStoreTest, RejectsSymlinkedStorageDirectoryAndFiles) {
 }
 #endif
 
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);

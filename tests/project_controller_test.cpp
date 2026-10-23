@@ -1,28 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 项目扫描的取消/换根/销毁与打开路由；零窗口、零音频设备。
 #include <gtest/gtest.h>
+
 #include <QCoreApplication>
 #include <QDir>
-#include <QFile>
 #include <QEventLoop>
-#include <QTemporaryDir>
-#include <QSettings>
-#include <QTimer>
+#include <QFile>
 #include <QSemaphore>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 #include <atomic>
 #include <functional>
 #include <memory>
 #include <stdexcept>
 #include <vector>
-#include "bridge/ProjectController.hpp"
-#include "bridge/DocumentService.hpp"
+
 #include "beatbench/core/edit/EditCommand.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
+#include "bridge/DocumentService.hpp"
+#include "bridge/ProjectController.hpp"
 
 namespace {
 class ProjectControllerTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         static int argc = 1;
         static char name[] = "project-controller-test";
@@ -58,7 +60,9 @@ protected:
         QTimer timeout;
         check.setInterval(1);
         timeout.setSingleShot(true);
-        QObject::connect(&check, &QTimer::timeout, &loop, [&] { if (done()) loop.quit(); });
+        QObject::connect(&check, &QTimer::timeout, &loop, [&] {
+            if (done()) loop.quit();
+        });
         QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
         check.start();
         timeout.start(5000);
@@ -258,25 +262,26 @@ TEST_F(ProjectControllerTest, SlowIndexAndParseKeepHeartbeatAliveAndModelsOnGuiT
     std::atomic_bool indexOnWorker{false};
     std::atomic_bool parseOnWorker{false};
     QThread* const gui = QThread::currentThread();
-    Controller project(Controller::ScanFunctions{
-        [=, &indexOnWorker](const std::string& root, const auto&) {
-            indexOnWorker.store(QThread::currentThread() != gui);
-            index->block();
-            return indexedProject(root);
-        },
-        [=, &parseOnWorker](auto& value, const auto&) {
-            parseOnWorker.store(QThread::currentThread() != gui);
-            parse->block();
-            value.charts.front().parsed = true;
-        }});
+    Controller project(
+        Controller::ScanFunctions{[=, &indexOnWorker](const std::string& root, const auto&) {
+                                      indexOnWorker.store(QThread::currentThread() != gui);
+                                      index->block();
+                                      return indexedProject(root);
+                                  },
+                                  [=, &parseOnWorker](auto& value, const auto&) {
+                                      parseOnWorker.store(QThread::currentThread() != gui);
+                                      parse->block();
+                                      value.charts.front().parsed = true;
+                                  }});
     // These guards release before controller destruction even after ASSERT failure.
     ReleaseGate releaseIndex{index}, releaseParse{parse};
     bool allModelResetsOnGui = true;
-    for (auto* model : {project.chartModel(), project.resourceModel(), project.resourceUsesModel()}) {
+    for (auto* model :
+         {project.chartModel(), project.resourceModel(), project.resourceUsesModel()}) {
         EXPECT_EQ(model->thread(), gui);
-        QObject::connect(model, &QAbstractItemModel::modelReset, &project, [&] {
-            allModelResetsOnGui &= QThread::currentThread() == gui;
-        }, Qt::DirectConnection);
+        QObject::connect(
+            model, &QAbstractItemModel::modelReset, &project,
+            [&] { allModelResetsOnGui &= QThread::currentThread() == gui; }, Qt::DirectConnection);
     }
     int indexBeats = 0;
     int parseBeats = 0;
@@ -287,12 +292,18 @@ TEST_F(ProjectControllerTest, SlowIndexAndParseKeepHeartbeatAliveAndModelsOnGuiT
     QObject::connect(&heartbeat, &QTimer::timeout, &project, [&] {
         if (index->entered.load() && !indexReleased) {
             EXPECT_EQ(project.state(), "indexing");
-            if (++indexBeats == 3) { indexReleased = true; index->release.release(); }
+            if (++indexBeats == 3) {
+                indexReleased = true;
+                index->release.release();
+            }
         }
         if (parse->entered.load() && !parseReleased && project.state() == "parsing") {
-            EXPECT_EQ(project.chartCount(), 1); // early snapshot is usable while parse is held
+            EXPECT_EQ(project.chartCount(), 1);  // early snapshot is usable while parse is held
             EXPECT_FALSE(project.charts().front().toMap().value("parsed").toBool());
-            if (++parseBeats == 3) { parseReleased = true; parse->release.release(); }
+            if (++parseBeats == 3) {
+                parseReleased = true;
+                parse->release.release();
+            }
         }
     });
     heartbeat.start();
@@ -320,7 +331,8 @@ TEST_F(ProjectControllerTest, NewRootFinishesWhileOldIndexIsBlockedAndLateFailur
                 throw beatbench::project::ProjectError("old_failure", "obsolete failure");
             }
             return indexedProject(root, "B.bms");
-        }, [](auto& value, const auto&) { value.charts.front().parsed = true; }});
+        },
+        [](auto& value, const auto&) { value.charts.front().parsed = true; }});
     ReleaseGate release{gate};
     project.scan(oldRoot);
     ASSERT_TRUE(waitFor([&] { return gate->entered.load(); }));
@@ -352,10 +364,12 @@ TEST_F(ProjectControllerTest, QueuedOldEnumerationCannotPublishAfterRootReplacem
     QSemaphore oldParseEntered;
     Controller project(Controller::ScanFunctions{
         [=](const std::string& root, const auto&) {
-            return indexedProject(root, QString::fromStdString(root) == oldRoot ? "A.bms" : "B.bms");
-        }, [=, &oldParseEntered](auto& value, const auto&) {
+            return indexedProject(root,
+                                  QString::fromStdString(root) == oldRoot ? "A.bms" : "B.bms");
+        },
+        [=, &oldParseEntered](auto& value, const auto&) {
             if (QString::fromStdString(value.root) == oldRoot) {
-                oldParseEntered.release(); // early snapshot already queued; do not dispatch it yet
+                oldParseEntered.release();  // early snapshot already queued; do not dispatch it yet
                 gate->block();
             }
             value.charts.front().parsed = true;
@@ -364,17 +378,20 @@ TEST_F(ProjectControllerTest, QueuedOldEnumerationCannotPublishAfterRootReplacem
     project.scan(oldRoot);
     ASSERT_TRUE(oldParseEntered.tryAcquire(1, 5000));
     bool staleRowObserved = false;
-    QObject::connect(&project, &Controller::chartsChanged, &project, [&] {
-        staleRowObserved |= !project.chartDetails("A.bms").isEmpty();
-    });
+    QObject::connect(&project, &Controller::chartsChanged, &project,
+                     [&] { staleRowObserved |= !project.chartDetails("A.bms").isEmpty(); });
     ASSERT_TRUE(scanReady(project, newRoot));
     gate->release.release();
     ASSERT_TRUE(waitFor([&] { return gate->exited.load(); }));
     EXPECT_FALSE(staleRowObserved);
     EXPECT_EQ(project.root(), newRoot);
     EXPECT_EQ(project.chartCount(), 1);
-    EXPECT_EQ(project.chartModel()->data(project.chartModel()->index(0, 0), Qt::UserRole)
-                  .toMap().value("path").toString(), "B.bms");
+    EXPECT_EQ(project.chartModel()
+                  ->data(project.chartModel()->index(0, 0), Qt::UserRole)
+                  .toMap()
+                  .value("path")
+                  .toString(),
+              "B.bms");
     EXPECT_EQ(QSettings().value("project/lastFolder").toString(), newRoot);
 }
 
@@ -393,7 +410,10 @@ TEST_F(ProjectControllerTest, CancelAndClearRejectLateParseAndKeepCorrectSnapsho
         project.scan(temp->path());
         ASSERT_TRUE(waitFor([&] { return project.state() == "parsing" && gate->entered.load(); }));
         project.setAllSliceTargets(true);
-        if (clear) project.clear(); else project.cancel();
+        if (clear)
+            project.clear();
+        else
+            project.cancel();
         gate->release.release();
         ASSERT_TRUE(waitFor([&] { return gate->exited.load(); }));
         EXPECT_EQ(project.state(), clear ? "idle" : "cancelled");
@@ -438,7 +458,8 @@ TEST_F(ProjectControllerTest, ModelsFiltersAndResourceDetailsPreserveLegacyResul
             beatbench::project::ResourceRef used;
             used.path = "missing.wav";
             used.kind = "wav";
-            used.uses.push_back({"A.bms", beatbench::project::RefSource::Define, "wav", "01", "", 2});
+            used.uses.push_back(
+                {"A.bms", beatbench::project::RefSource::Define, "wav", "01", "", 2});
             used.total_refs = 2;
             value.resources.push_back(used);
             beatbench::project::ResourceRef unused;
@@ -447,30 +468,42 @@ TEST_F(ProjectControllerTest, ModelsFiltersAndResourceDetailsPreserveLegacyResul
             unused.on_disk = true;
             value.resources.push_back(unused);
             return value;
-        }, [](auto& value, const auto&) { value.charts.front().parsed = true; }});
+        },
+        [](auto& value, const auto&) { value.charts.front().parsed = true; }});
     ASSERT_TRUE(scanReady(project));
     EXPECT_EQ(project.resourceModel()->rowCount(), 2);
-    EXPECT_FALSE(project.resourceModel()->data(project.resourceModel()->index(0, 0), Qt::UserRole)
-                     .toMap().contains("uses"));
+    EXPECT_FALSE(project.resourceModel()
+                     ->data(project.resourceModel()->index(0, 0), Qt::UserRole)
+                     .toMap()
+                     .contains("uses"));
     EXPECT_EQ(project.missingCount(), 1);
     EXPECT_EQ(project.unreferencedCount(), 1);
     for (const auto& kind : {QString{}, QString{"wav"}, QString{"ogg"}}) {
         for (const bool missing : {false, true}) {
             for (const bool unused : {false, true}) {
                 project.setResourceFilter(kind, missing, unused, "");
-                EXPECT_EQ(project.resourceModel()->rowCount(), project.filterResources(kind, missing, unused, "").size());
+                EXPECT_EQ(project.resourceModel()->rowCount(),
+                          project.filterResources(kind, missing, unused, "").size());
             }
         }
     }
     project.setResourceFilter("", false, false, "  UNUSED  ");
     ASSERT_EQ(project.resourceModel()->rowCount(), 1);
-    EXPECT_EQ(project.resourceModel()->data(project.resourceModel()->index(0, 0), Qt::UserRole)
-                  .toMap().value("path").toString(), "unused.ogg");
+    EXPECT_EQ(project.resourceModel()
+                  ->data(project.resourceModel()->index(0, 0), Qt::UserRole)
+                  .toMap()
+                  .value("path")
+                  .toString(),
+              "unused.ogg");
     const auto detail = project.selectResource("missing.wav");
-    EXPECT_FALSE(detail.contains("uses")); // do not transfer the whole use list into JS
+    EXPECT_FALSE(detail.contains("uses"));  // do not transfer the whole use list into JS
     ASSERT_EQ(project.resourceUsesModel()->rowCount(), 1);
-    EXPECT_EQ(project.resourceUsesModel()->data(project.resourceUsesModel()->index(0, 0), Qt::UserRole)
-                  .toMap().value("chart").toString(), "A.bms");
+    EXPECT_EQ(project.resourceUsesModel()
+                  ->data(project.resourceUsesModel()->index(0, 0), Qt::UserRole)
+                  .toMap()
+                  .value("chart")
+                  .toString(),
+              "A.bms");
     EXPECT_TRUE(project.selectResource("not-a-resource").isEmpty());
     EXPECT_EQ(project.resourceUsesModel()->rowCount(), 0);
     project.setChartFilter(false, "a.BMS");
@@ -485,7 +518,7 @@ TEST_F(ProjectControllerTest, ModelsFiltersAndResourceDetailsPreserveLegacyResul
 
 // Save tests own only their three IDs; no scanning, audio, or user files.
 class ProjectSelectedSaveTest : public ProjectControllerTest {
-protected:
+   protected:
     void SetUp() override {
         ProjectControllerTest::SetUp();
         auto& reg = beatbench::edit::session_registry();
@@ -520,13 +553,15 @@ protected:
         if (!file.open(QIODevice::ReadOnly)) return {};
         return file.readAll();
     }
-    const std::vector<std::string> ids{"selected-save-a", "selected-save-b", "selected-save-unselected"};
+    const std::vector<std::string> ids{"selected-save-a", "selected-save-b",
+                                       "selected-save-unselected"};
     std::string original;
 };
 
 TEST_F(ProjectSelectedSaveTest, SnapshotFreezesOnlyExplicitDirtyIdsAndDetectsRevisions) {
     beatbench::app::ProjectController project;
-    const auto snapshot = project.saveSliceTargetSnapshot({path(0), path(0), path(1), temp->filePath("unopened.bms")});
+    const auto snapshot = project.saveSliceTargetSnapshot(
+        {path(0), path(0), path(1), temp->filePath("unopened.bms")});
     ASSERT_EQ(snapshot.size(), 2);
     EXPECT_EQ(snapshot[0].toMap().value("id").toString(), QString::fromStdString(ids[0]));
     EXPECT_EQ(snapshot[1].toMap().value("id").toString(), QString::fromStdString(ids[1]));

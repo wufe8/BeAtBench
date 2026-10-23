@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 事件统计 + 最小 lint（info/check 命令与 CLI 展示共用，避免两处逻辑漂移）。
-#include "beatbench/core/bms/ChartCheck.hpp"
-#include "beatbench/core/LnPairing.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <set>
 #include <tuple>
 #include <utility>
 
+#include "beatbench/core/LnPairing.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/bms/ChartCheck.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 namespace beatbench::bms {
@@ -21,16 +20,25 @@ namespace {
 std::string lane_text(const Lane& lane) {
     std::string s = lane.player == 1 ? "2P " : "";
     switch (lane.kind) {
-        case LaneKind::Key: s += "key" + std::to_string(lane.index); break;
-        case LaneKind::Scratch: s += "scratch"; break;
-        case LaneKind::Pedal: s += "pedal"; break;
-        case LaneKind::Bgm: s += "bgm"; break;
+        case LaneKind::Key:
+            s += "key" + std::to_string(lane.index);
+            break;
+        case LaneKind::Scratch:
+            s += "scratch";
+            break;
+        case LaneKind::Pedal:
+            s += "pedal";
+            break;
+        case LaneKind::Bgm:
+            s += "bgm";
+            break;
     }
     return s;
 }
 
 }  // namespace
 
+// NOLINTNEXTLINE(readability-function-size)——固有分支密度（解析/协议形状），有意保留
 EventStats collect_event_stats(const Chart& chart) {
     EventStats stats;
     stats.notes = chart.notes.size();
@@ -42,9 +50,10 @@ EventStats collect_event_stats(const Chart& chart) {
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         const auto& n = chart.notes[i].value;
         if (n.ln_pair && *n.ln_pair > i && *n.ln_pair < chart.notes.size() &&
-            chart.notes[*n.ln_pair].value.ln_pair == i) ++stats.ln_pairs;
-        const auto ch = bms_channel_for_mode(chart.mode_id.value_or("sp7k"), n.lane,
-                                             n.ln_channel, n.kind);
+            chart.notes[*n.ln_pair].value.ln_pair == i)
+            ++stats.ln_pairs;
+        const auto ch =
+            bms_channel_for_mode(chart.mode_id.value_or("sp7k"), n.lane, n.ln_channel, n.kind);
         if (!ch.empty()) ++stats.channels[ch];
     }
     return stats;
@@ -60,10 +69,18 @@ std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> collect_sample_usage
         if (u.first_measure == 0 || measure < u.first_measure) u.first_measure = measure;
         const bool p2 = lane_kind.player == 1;
         switch (lane_kind.kind) {
-            case LaneKind::Key: (p2 ? ++u.key2 : ++u.key1); break;
-            case LaneKind::Scratch: (p2 ? ++u.scratch2 : ++u.scratch1); break;
-            case LaneKind::Pedal: (p2 ? ++u.pedal2 : ++u.pedal1); break;
-            case LaneKind::Bgm: ++u.bgm; break;
+            case LaneKind::Key:
+                (p2 ? ++u.key2 : ++u.key1);
+                break;
+            case LaneKind::Scratch:
+                (p2 ? ++u.scratch2 : ++u.scratch1);
+                break;
+            case LaneKind::Pedal:
+                (p2 ? ++u.pedal2 : ++u.pedal1);
+                break;
+            case LaneKind::Bgm:
+                ++u.bgm;
+                break;
         }
         return u;
     };
@@ -86,6 +103,7 @@ inline std::string_view audio_ext_fallback(std::string_view ext) {
     return {};
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——谱面 lint 规则链（含普通 LNOBJ 静音尾豁免）
 std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::path& base_dir) {
     std::vector<LintIssue> issues;
     // 1) WAV 引用文件检查（相对谱面目录；扩展名回退见 audio_ext_fallback）
@@ -104,8 +122,9 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         mismatch.id = id_text(chart, key.second);
         mismatch.file = def.file;
         bool found_fallback = false;
-        std::string_view next = audio_ext_fallback(
-            ext.size() > 1 && ext.front() == '.' ? std::string_view(ext).substr(1) : std::string_view());
+        std::string_view next = audio_ext_fallback(ext.size() > 1 && ext.front() == '.'
+                                                       ? std::string_view(ext).substr(1)
+                                                       : std::string_view());
         while (!next.empty()) {
             if (std::filesystem::exists(base_dir / (resolved_noext + "." + std::string(next)))) {
                 mismatch.resolved = resolved_noext + "." + std::string(next);
@@ -115,8 +134,8 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
             next = audio_ext_fallback(next);
         }
         if (found_fallback) {
-            mismatch.message = "采样文件扩展名与引用不符（引用 " + def.file + "，存在 " +
-                               mismatch.resolved + "）";
+            mismatch.message =
+                "采样文件扩展名与引用不符（引用 " + def.file + "，存在 " + mismatch.resolved + "）";
             issues.push_back(std::move(mismatch));
             continue;
         }
@@ -137,11 +156,12 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
             (void)u;
             if (key.first != SampleKind::Wav) continue;
             if (lnobj_id && key.second == *lnobj_id) {
-                const bool has_audio_use = std::any_of(chart.notes.begin(), chart.notes.end(),
-                    [&](const auto& ev) {
+                const bool has_audio_use =
+                    std::any_of(chart.notes.begin(), chart.notes.end(), [&](const auto& ev) {
                         const auto& n = ev.value;
-                        return n.sample.id == key.second && (n.ln_channel ||
-                            n.kind != NoteKind::Normal || n.lane.kind == LaneKind::Bgm);
+                        return n.sample.id == key.second &&
+                               (n.ln_channel || n.kind != NoteKind::Normal ||
+                                n.lane.kind == LaneKind::Bgm);
                     });
                 if (!has_audio_use) continue;  // Only ordinary LNOBJ markers are silent.
             }
@@ -150,8 +170,8 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
             LintIssue issue;
             issue.code = "missing_wav";
             issue.severity = Severity::Warning;
-            issue.message = "缺失采样文件 #WAV" + id_text(chart, key.second) +
-                            "（引用未定义/未绑定文件）";
+            issue.message =
+                "缺失采样文件 #WAV" + id_text(chart, key.second) + "（引用未定义/未绑定文件）";
             issue.id = id_text(chart, key.second);
             issue.file = "";
             issues.push_back(std::move(issue));
@@ -169,8 +189,7 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
     // 3) 空谱面（无 note 无 BGA 无节奏事件）
     if (chart.notes.empty() && chart.bpm_events.empty() && chart.stop_events.empty() &&
         chart.measure_events.empty() && chart.bga_events.empty() && chart.raw_lines.empty()) {
-        issues.push_back(
-            {"empty_chart", "空谱面（未解析到任何内容）", Severity::Warning, 0});
+        issues.push_back({"empty_chart", "空谱面（未解析到任何内容）", Severity::Warning, 0});
     }
     // 4) 重叠 note（同 measure + pos + lane 多个；同 sample 也算——同值重叠也是问题）
     //    播放器行为不定（可能只响一个/相位抵消），谱师通常无意为之。
@@ -193,11 +212,9 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
                 issue.lane_player = ev.value.lane.player;
                 issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
                 issue.lane_index = ev.value.lane.index;
-                issue.message = "重叠 note（同位置同轨道 " +
-                                std::to_string(ev.measure) + " 小节 " +
-                                std::to_string(ev.pos.num) + "/" +
-                                std::to_string(ev.pos.den) + " 轨道 " +
-                                lane_text(ev.value.lane) + "）";
+                issue.message = "重叠 note（同位置同轨道 " + std::to_string(ev.measure) + " 小节 " +
+                                std::to_string(ev.pos.num) + "/" + std::to_string(ev.pos.den) +
+                                " 轨道 " + lane_text(ev.value.lane) + "）";
                 issues.push_back(std::move(issue));
             }
         }
@@ -226,8 +243,8 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         issue.lane_index = ev.value.lane.index;
         issue.sample = ev.value.sample.id;
         issue.message = "悬挂 LN（配对失效）: " + std::to_string(ev.measure) + " 小节 " +
-                        std::to_string(ev.pos.num) + "/" + std::to_string(ev.pos.den) +
-                        " 轨道 " + lane_text(ev.value.lane);
+                        std::to_string(ev.pos.num) + "/" + std::to_string(ev.pos.den) + " 轨道 " +
+                        lane_text(ev.value.lane);
         issues.push_back(std::move(issue));
     }
     if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end()) {
@@ -236,8 +253,10 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
             value.remove_prefix(1);
         while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
             value.remove_suffix(1);
-        if (value == "2") issues.push_back({"unsupported_lntype",
-            "LNTYPE 2 (MGQ) is unsupported; metadata and note data are preserved", Severity::Warning});
+        if (value == "2")
+            issues.push_back({"unsupported_lntype",
+                              "LNTYPE 2 (MGQ) is unsupported; metadata and note data are preserved",
+                              Severity::Warning});
     }
     const auto lnobj = lnobj_sample_id(chart);
     // 5b) LN 通道 note 未组成完整 LN（2026-09 用户：跨通道移出 LN 端后残留深色单点，
@@ -258,9 +277,10 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         issue.lane_kind = static_cast<std::uint8_t>(ev.value.lane.kind);
         issue.lane_index = ev.value.lane.index;
         issue.sample = ev.value.sample.id;
-        issue.message = std::string(orphan_lnobj ? "LNOBJ 尾缺少头: " : "LN 通道 note 未组成完整 LN: ") + std::to_string(ev.measure) +
-                        " 小节 " + std::to_string(ev.pos.num) + "/" +
-                        std::to_string(ev.pos.den) + " 轨道 " + lane_text(ev.value.lane);
+        issue.message =
+            std::string(orphan_lnobj ? "LNOBJ 尾缺少头: " : "LN 通道 note 未组成完整 LN: ") +
+            std::to_string(ev.measure) + " 小节 " + std::to_string(ev.pos.num) + "/" +
+            std::to_string(ev.pos.den) + " 轨道 " + lane_text(ev.value.lane);
         issues.push_back(std::move(issue));
     }
     // 6) 子行检查（2026-09 泛化）：不应有子行的通道（allow_sub_lines=false，如游玩轨）若出现
@@ -271,8 +291,8 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
         const std::string mode = chart.mode_id.value_or("sp7k");
         for (const auto& ev : chart.notes) {
             if (ev.value.sub_line == 0) continue;
-            const auto ch = bms_channel_for_mode(mode, ev.value.lane, ev.value.ln_channel,
-                                                 ev.value.kind);
+            const auto ch =
+                bms_channel_for_mode(mode, ev.value.lane, ev.value.ln_channel, ev.value.kind);
             if (ch.empty()) continue;
             const auto rule = bms_channel_rule_for(mode, ch);
             if (rule && rule->allow_sub_lines) continue;  // 允许子行的通道（ch01）不报
@@ -309,9 +329,8 @@ std::vector<LintIssue> lint_chart(const Chart& chart, const std::filesystem::pat
             issue.pos_num = key.second.num;
             issue.pos_den = key.second.den;
             issue.message = "同时播放采样可能过多: " + std::to_string(n) + " 路, " +
-                            std::to_string(key.first) + " 小节 " +
-                            std::to_string(key.second.num) + "/" +
-                            std::to_string(key.second.den);
+                            std::to_string(key.first) + " 小节 " + std::to_string(key.second.num) +
+                            "/" + std::to_string(key.second.den);
             issues.push_back(std::move(issue));
         }
     }

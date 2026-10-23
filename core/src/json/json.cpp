@@ -20,9 +20,7 @@ constexpr std::size_t kMaxDepth = 512;
 
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
-bool is_hex(char c) {
-    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
+bool is_hex(char c) { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 
 int hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -53,13 +51,27 @@ void dump_string(std::string& out, const std::string& s) {
     out.push_back('"');
     for (const unsigned char c : s) {
         switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\b':
+                out += "\\b";
+                break;
+            case '\f':
+                out += "\\f";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
             default:
                 if (c < 0x20) {
                     char buf[8];
@@ -97,35 +109,62 @@ struct Parser {
         if (i >= s.size()) fail("unexpected end of input", i);
         if (depth >= kMaxDepth) fail("nesting too deep", i);
         switch (s[i]) {
-            case '{': ++depth; { Json v = parse_object(); --depth; return v; }
-            case '[': ++depth; { Json v = parse_array(); --depth; return v; }
-            case '"': return Json(parse_string());
+            case '{':
+                ++depth;
+                {
+                    Json v = parse_object();
+                    --depth;
+                    return v;
+                }
+            case '[':
+                ++depth;
+                {
+                    Json v = parse_array();
+                    --depth;
+                    return v;
+                }
+            case '"':
+                return Json(parse_string());
             case 't': {
-                if (s.substr(i, 4) == "true" && !is_id_char(peek_at(i + 4))) { i += 4; return Json(true); }
+                if (s.substr(i, 4) == "true" && !is_id_char(peek_at(i + 4))) {
+                    i += 4;
+                    return Json(true);
+                }
                 fail("invalid literal", i);
             }
             case 'f': {
-                if (s.substr(i, 5) == "false" && !is_id_char(peek_at(i + 5))) { i += 5; return Json(false); }
+                if (s.substr(i, 5) == "false" && !is_id_char(peek_at(i + 5))) {
+                    i += 5;
+                    return Json(false);
+                }
                 fail("invalid literal", i);
             }
             case 'n': {
-                if (s.substr(i, 4) == "null" && !is_id_char(peek_at(i + 4))) { i += 4; return Json(); }
+                if (s.substr(i, 4) == "null" && !is_id_char(peek_at(i + 4))) {
+                    i += 4;
+                    return Json();
+                }
                 fail("invalid literal", i);
             }
-            default: return parse_number();
+            default:
+                return parse_number();
         }
     }
 
     char peek_at(std::size_t at) const { return at < s.size() ? s[at] : '\0'; }
     static bool is_id_char(char c) {
-        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               c == '_';
     }
 
     Json parse_object() {
         expect('{');
         Json obj = Json::object();
         ws();
-        if (peek() == '}') { ++i; return obj; }
+        if (peek() == '}') {
+            ++i;
+            return obj;
+        }
         for (;;) {
             ws();
             if (peek() != '"') fail("expected string key", i);
@@ -134,8 +173,14 @@ struct Parser {
             expect(':');
             obj.set(std::move(key), parse_value());
             ws();
-            if (peek() == ',') { ++i; continue; }
-            if (peek() == '}') { ++i; return obj; }
+            if (peek() == ',') {
+                ++i;
+                continue;
+            }
+            if (peek() == '}') {
+                ++i;
+                return obj;
+            }
             fail("expected ',' or '}'", i);
         }
     }
@@ -144,36 +189,65 @@ struct Parser {
         expect('[');
         Json arr = Json::array();
         ws();
-        if (peek() == ']') { ++i; return arr; }
+        if (peek() == ']') {
+            ++i;
+            return arr;
+        }
         for (;;) {
             arr.push_back(parse_value());
             ws();
-            if (peek() == ',') { ++i; continue; }
-            if (peek() == ']') { ++i; return arr; }
+            if (peek() == ',') {
+                ++i;
+                continue;
+            }
+            if (peek() == ']') {
+                ++i;
+                return arr;
+            }
             fail("expected ',' or ']'", i);
         }
     }
 
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——JSON 字符串转义状态机
     std::string parse_string() {
         expect('"');
         std::string out;
         while (true) {
             if (i >= s.size()) fail("unterminated string", i);
             const unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c == '"') { ++i; return out; }
+            if (c == '"') {
+                ++i;
+                return out;
+            }
             if (c == '\\') {
                 ++i;
                 if (i >= s.size()) fail("bad escape", i);
                 const char e = s[i++];
                 switch (e) {
-                    case '"': out.push_back('"'); break;
-                    case '\\': out.push_back('\\'); break;
-                    case '/': out.push_back('/'); break;
-                    case 'b': out.push_back('\b'); break;
-                    case 'f': out.push_back('\f'); break;
-                    case 'n': out.push_back('\n'); break;
-                    case 'r': out.push_back('\r'); break;
-                    case 't': out.push_back('\t'); break;
+                    case '"':
+                        out.push_back('"');
+                        break;
+                    case '\\':
+                        out.push_back('\\');
+                        break;
+                    case '/':
+                        out.push_back('/');
+                        break;
+                    case 'b':
+                        out.push_back('\b');
+                        break;
+                    case 'f':
+                        out.push_back('\f');
+                        break;
+                    case 'n':
+                        out.push_back('\n');
+                        break;
+                    case 'r':
+                        out.push_back('\r');
+                        break;
+                    case 't':
+                        out.push_back('\t');
+                        break;
                     case 'u': {
                         const std::uint32_t cp = parse_hex4();
                         if (cp >= 0xD800 && cp <= 0xDBFF) {
@@ -192,7 +266,8 @@ struct Parser {
                         }
                         break;
                     }
-                    default: fail("bad escape", i - 1);
+                    default:
+                        fail("bad escape", i - 1);
                 }
                 continue;
             }
@@ -214,6 +289,7 @@ struct Parser {
         return v;
     }
 
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——JSON 数字字面量状态机
     Json parse_number() {
         const std::size_t start = i;
         if (peek() == '-') ++i;
@@ -259,13 +335,20 @@ struct Parser {
 
 Type Json::type() const {
     switch (v_.index()) {
-        case 0: return Type::Null;
-        case 1: return Type::Bool;
-        case 2: return Type::Int;
-        case 3: return Type::Double;
-        case 4: return Type::String;
-        case 5: return Type::Array;
-        default: return Type::Object;
+        case 0:
+            return Type::Null;
+        case 1:
+            return Type::Bool;
+        case 2:
+            return Type::Int;
+        case 3:
+            return Type::Double;
+        case 4:
+            return Type::String;
+        case 5:
+            return Type::Array;
+        default:
+            return Type::Object;
     }
 }
 
@@ -359,8 +442,12 @@ std::size_t Json::size() const {
 std::string Json::dump() const {
     std::string out;
     switch (type()) {
-        case Type::Null: out += "null"; break;
-        case Type::Bool: out += std::get<bool>(v_) ? "true" : "false"; break;
+        case Type::Null:
+            out += "null";
+            break;
+        case Type::Bool:
+            out += std::get<bool>(v_) ? "true" : "false";
+            break;
         case Type::Int: {
             char buf[24];
             const auto [p, ec] = std::to_chars(buf, buf + sizeof buf, std::get<std::int64_t>(v_));
@@ -382,7 +469,9 @@ std::string Json::dump() const {
             }
             break;
         }
-        case Type::String: dump_string(out, std::get<std::string>(v_)); break;
+        case Type::String:
+            dump_string(out, std::get<std::string>(v_));
+            break;
         case Type::Array: {
             out.push_back('[');
             const auto& a = std::get<Array>(v_);

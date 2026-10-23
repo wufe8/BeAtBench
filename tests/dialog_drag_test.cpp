@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Qt Quick 鼠标注入回归：生产 QML 组件 + 真实主题，不打开声卡/用户设置。
-#include "bridge/ThemeManager.hpp"
+#include <QtQuickTest/quicktest.h>
+
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQmlPropertyMap>
 #include <QQuickStyle>
-#include <QtQuickTest/quicktest.h>
+
+#include "bridge/ThemeManager.hpp"
 
 class DialogTestActions : public QObject {
     Q_OBJECT
-public:
+   public:
     using QObject::QObject;
     Q_INVOKABLE QVariantMap userKeymapSnapshot() const { return {}; }
     Q_INVOKABLE void restoreUserKeymap(const QVariant&) {}
@@ -19,7 +21,7 @@ public:
 
 class DialogTestAudio : public QQmlPropertyMap {
     Q_OBJECT
-public:
+   public:
     DialogTestAudio() : QQmlPropertyMap(this, nullptr) {}
     Q_INVOKABLE QVariantMap deviceCapabilities(int) const {
         return {{QStringLiteral("asio"), false}, {QStringLiteral("error"), QString{}}};
@@ -35,7 +37,7 @@ public:
 
 class DialogTestSetup : public QObject {
     Q_OBJECT
-public:
+   public:
     DialogTestSetup() {
         audio.insert(QStringLiteral("errorText"), QString{});
         audio.insert(QStringLiteral("available"), false);
@@ -50,14 +52,15 @@ public:
         audio.insert(QStringLiteral("waitRenderSetting"), false);
         audio.insert(QStringLiteral("activeDeviceText"), QStringLiteral("test-only, no device"));
     }
-public slots:
+   public slots:
     void applicationAvailable() { QQuickStyle::setStyle(QStringLiteral("Fusion")); }
     void qmlEngineAvailable(QQmlEngine* engine) {
         engine->rootContext()->setContextProperty(QStringLiteral("Theme"), &theme);
         engine->rootContext()->setContextProperty(QStringLiteral("audioEngine"), &audio);
         engine->rootContext()->setContextProperty(QStringLiteral("uiActions"), &actions);
     }
-private:
+
+   private:
     beatbench::app::ThemeManager theme;
     DialogTestAudio audio;
     DialogTestActions actions;

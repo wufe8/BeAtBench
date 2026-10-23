@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,10 +10,10 @@
 namespace beatbench::bms {
 
 /// BMS 文本编码。传统 Shift-JIS；现代工具渐用 UTF-8（#ENCODING 注释）。读取建议 Auto。
-enum class BmsEncoding { Auto, ShiftJis, Utf8 };
+enum class BmsEncoding : std::uint8_t { Auto, ShiftJis, Utf8 };
 
 /// 编码检测结果（read_bms_file 填写；read_bms 输入约定已是 UTF-8）。
-enum class DetectedEncoding { Utf8, ShiftJis };
+enum class DetectedEncoding : std::uint8_t { Utf8, ShiftJis };
 
 struct BmsReadOptions {
     BmsEncoding encoding = BmsEncoding::Auto;
@@ -32,7 +33,7 @@ struct BmsWriteOptions {
     bool normalize = true;  ///< 槽位最小化 + 通道按行聚合
 };
 
-enum class Severity { Error, Warning, Info };
+enum class Severity : std::uint8_t { Error, Warning, Info };
 
 struct Diagnostic {
     Severity severity = Severity::Info;
@@ -48,7 +49,7 @@ struct BmsReadResult {
 
 /// 解析 BMS 文本。
 /// 实现计划（M1）：纯标准库手写 parser——大小写不敏感、// 与 /* */ 注释、
-/// #RANDOM/#IF/#SWITCH 预处理、36 进制 ID 映射、通道号→Lane 映射（对齐稿 02 §4）。
+/// #RANDOM/#IF/#SWITCH 预处理、36 进制 ID 映射、通道号→Lane 映射（doc/bms-format-notes.md）。
 BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts = {});
 
 /// 读取 .bms 文件（含编码检测：BOM / #ENCODING / SJIS 启发式）。
@@ -56,7 +57,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts = {});
 /// 宽字符 API 打开（修复日文/非 ASCII 目录打不开，2026-09）。
 BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts = {});
 
-/// 写出 BMS 文本（M1 实现；归一化策略见对齐稿 02 §4.3）。
+/// 写出 BMS 文本（M1 实现）。
 std::string write_bms(const Chart& chart, const BmsWriteOptions& opts = {});
 
 /// #RANDOM/#IF/#SWITCH/#SETRANDOM 选择块展开（文本层预处理，不解析块内容）。

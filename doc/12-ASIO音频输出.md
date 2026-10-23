@@ -27,7 +27,7 @@ ON 且未设置 `BEATBENCH_ASIO_SDK_ROOT` 时，FetchContent 下载以上固定 
 
 ### Windows MSVC（无 Qt 的最小验证）
 
-在 VS 开发者 PowerShell 中运行（C++20、CMake 3.24+、Ninja；其它通用依赖见 [开发手册](<04-开发手册.md>)）：
+在 VS 开发者 PowerShell 中运行（C++20、CMake 3.24+、Ninja；其它通用依赖见 [开发手册](<development.md>)）：
 
 ```powershell
 # 默认 OFF 基线；同一个目录切换选项也必须重新配置
@@ -60,7 +60,7 @@ GoogleTest（版本见 [测试 CMake](<../tests/CMakeLists.txt>)，通过 `FETCH
 ## 3. Windows 发布打包与许可材料
 
 [发布脚本](<../scripts/package-release.sh>) 在 Git Bash 中运行；必填工具路径和完整流程见
-[打包与发布](<11-打包与发布.md>)。工具环境相同，只有显式 ON 才改变音频能力：
+[打包与发布](<packaging.md>)。工具环境相同，只有显式 ON 才改变音频能力：
 
 ```bash
 export QT_ROOT=/c/Qt/6.11.2/mingw_64
@@ -81,7 +81,7 @@ BB_ENABLE_ASIO=ON BB_ASIO_SDK_ROOT=C:/SDK/ASIOSDK bash scripts/package-release.s
 ON→OFF 也会重建相关二进制，不把旧 SDK 材料混进 OFF 包。包内生成的 README 标明 ASIO=ON/OFF；
 现有包名不自动增加 ASIO 后缀，不要把两种产物当成同一份可互换的验收证据或覆盖后混发。
 
-CMake 将音频第三方材料汇集到构建树 `audio/third-party`；打包脚本复制到 staging 的
+CMake 将音频第三方材料汇集到构建树的 `<build>/audio/third-party`；打包脚本复制到 staging 的
 `third-party/`，并在缺少必须材料时失败。OFF 也带 PortAudio 源码/许可；ON 另带 ASIO SDK
 实际使用的 `common/`、`host/`、原始 LICENSE 和 README（包括文件内的版权/许可声明）。
 应用根 [GPL LICENSE](<../LICENSE>) 仍原样放进包中，不被 SDK 的许可文件替换。

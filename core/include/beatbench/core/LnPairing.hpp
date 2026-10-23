@@ -28,10 +28,14 @@ inline std::optional<std::uint32_t> lnobj_sample_id(const Chart& chart) {
     std::uint32_t id = 0;
     for (const char c : text) {
         std::uint32_t digit;
-        if (c >= '0' && c <= '9') digit = c - '0';
-        else if (c >= 'A' && c <= 'Z') digit = c - 'A' + 10;
-        else if (c >= 'a' && c <= 'z') digit = c - 'a' + (base == 62 ? 36 : 10);
-        else return std::nullopt;
+        if (c >= '0' && c <= '9')
+            digit = c - '0';
+        else if (c >= 'A' && c <= 'Z')
+            digit = c - 'A' + 10;
+        else if (c >= 'a' && c <= 'z')
+            digit = c - 'a' + (base == 62 ? 36 : 10);
+        else
+            return std::nullopt;
         id = id * base + digit;
     }
     return id == 0 ? std::nullopt : std::optional<std::uint32_t>{id};
@@ -44,9 +48,8 @@ inline void rebuild_note_ln_pairs(Chart& chart) {
     std::vector<std::uint32_t> order(chart.notes.size());
     std::iota(order.begin(), order.end(), 0u);
     for (auto& ev : chart.notes) ev.value.ln_pair.reset();
-    std::stable_sort(order.begin(), order.end(), [&](auto a, auto b) {
-        return chart.notes[a] < chart.notes[b];
-    });
+    std::stable_sort(order.begin(), order.end(),
+                     [&](auto a, auto b) { return chart.notes[a] < chart.notes[b]; });
     const auto lnobj = lnobj_sample_id(chart);
     std::map<Lane, std::optional<std::uint32_t>> ln_heads;
     std::map<Lane, std::optional<std::uint32_t>> ordinary_heads;
@@ -57,7 +60,7 @@ inline void rebuild_note_ln_pairs(Chart& chart) {
         if (note.ln_channel || (lnobj && note.sample.id == *lnobj)) {
             if (head) {
                 chart.notes[*head].value.ln_pair = i;
-                note.ln_pair = *head;
+                note.ln_pair = head;
                 head.reset();
             } else if (note.ln_channel) {
                 head = i;

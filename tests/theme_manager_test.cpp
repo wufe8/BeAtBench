@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// ThemeManager 单测（doc/08 §3.5 / doc/09）：theme.json 颜色 + 非颜色 token 覆写。
+// ThemeManager 单测（doc/skin-system.md 三、5. / doc/action-registry.md）：theme.json 颜色 + 非颜色 token 覆写。
 // 本目标链 Qt6::Gui（QColor）；在找到 Qt6 的构建配置中启用（见 tests/CMakeLists.txt）。
 // 2026-09：新增 L2 非颜色 token（radius/fs/font）覆写验证——皮肤布局改动幅度的根基。
 #include <gtest/gtest.h>
@@ -29,7 +29,7 @@ QString write_theme(QTemporaryDir& dir, const QString& contents) {
 }  // namespace
 
 TEST(ThemeManager, Defaults) {
-    // 内置默认骨架（doc/08 §3.4）：color token + 非颜色 token 初始值
+    // 内置默认骨架（doc/skin-system.md 三、4.）：color token + 非颜色 token 初始值
     ThemeManager th;
     EXPECT_EQ(th.bg(), QColor(QStringLiteral("#0b0d10")));
     EXPECT_EQ(th.primary(), QColor(QStringLiteral("#6366f1")));
@@ -114,7 +114,7 @@ TEST(ThemeManager, MissingFileReturnsMinusOne) {
 }
 
 TEST(ThemeManager, RuntimeApplyAndReset) {
-    // 运行时换肤（doc/08 §3.3）：applyTheme 覆写 + 发 tokensChanged + activeSkin；resetDefault 还原。
+    // 运行时换肤（doc/skin-system.md 三、3.）：applyTheme 覆写 + 发 tokensChanged + activeSkin；resetDefault 还原。
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
     const QString path = write_theme(dir, R"({"bg": "#222222", "primary": "#00ff00"})");
@@ -141,14 +141,14 @@ TEST(ThemeManager, RuntimeApplyAndReset) {
 }
 
 TEST(ThemeManager, BuiltinSkinCatalog) {
-    // 内置皮肤目录（doc/08 §3.3 菜单枚举）：skinNames 非空、skinDir 可解析、未知名返回空。
+    // 内置皮肤目录（doc/skin-system.md 三、3. 菜单枚举）：skinNames 非空、skinDir 可解析、未知名返回空。
     ThemeManager th;
     const QStringList names = th.skinNames();
     EXPECT_FALSE(names.isEmpty());
     EXPECT_TRUE(names.contains(QStringLiteral("Aurora")));
     EXPECT_TRUE(names.contains(QStringLiteral("Linear")));
     EXPECT_TRUE(names.contains(QStringLiteral("OsuLight")));  // 亮色内置皮肤
-    EXPECT_TRUE(names.contains(QStringLiteral("Win10")));      // 直角/扁平内置皮肤
+    EXPECT_TRUE(names.contains(QStringLiteral("Win10")));     // 直角/扁平内置皮肤
     EXPECT_EQ(th.skinDir(QStringLiteral("Aurora")), QStringLiteral("skins/Aurora"));
     EXPECT_EQ(th.skinDir(QStringLiteral("Linear")), QStringLiteral("skins/Linear"));
     EXPECT_EQ(th.skinDir(QStringLiteral("OsuLight")), QStringLiteral("skins/OsuLight"));
@@ -190,11 +190,11 @@ TEST(ThemeManager, SkinDirResolvedInSearchesBases) {
 TEST(ThemeManager, SkinSearchBasesPrefersCwdThenExeDir) {
     const QStringList bases = ThemeManager::skinSearchBases();
     ASSERT_FALSE(bases.isEmpty());
-    EXPECT_EQ(bases.first(), QStringLiteral("."));   // cwd 优先（常规启动/开发）
+    EXPECT_EQ(bases.first(), QStringLiteral("."));  // cwd 优先（常规启动/开发）
     EXPECT_TRUE(bases.contains(QStringLiteral("..")));
     EXPECT_TRUE(bases.contains(QStringLiteral("../..")));
     EXPECT_TRUE(bases.contains(QStringLiteral("../../..")));
-    if (QCoreApplication::instance()) {              // 有实例时注入 exe 目录（发布包布局）
+    if (QCoreApplication::instance()) {  // 有实例时注入 exe 目录（发布包布局）
         const QString appDir = QCoreApplication::applicationDirPath();
         EXPECT_FALSE(appDir.isEmpty());
         EXPECT_TRUE(bases.contains(appDir));
@@ -231,7 +231,7 @@ TEST(ThemeManager, SkinDirResolvedFromDataDir) {
 }
 
 TEST(ThemeManager, ResetDefaultRestoresAllTokens) {
-    // 内置默认皮肤骨架（doc/08 §3.4）：resetDefault 后全部 token = 默认常量。
+    // 内置默认皮肤骨架（doc/skin-system.md 三、4.）：resetDefault 后全部 token = 默认常量。
     ThemeManager th;
     th.resetDefault();
     EXPECT_EQ(th.surface(), QColor(QStringLiteral("#12151a")));
@@ -244,7 +244,7 @@ TEST(ThemeManager, ResetDefaultRestoresAllTokens) {
 }
 
 TEST(ThemeManager, IndependentShapeTokens) {
-    // L1 控件形状细分（doc/10 §2）：buttonRadius/boxRadius 独立于 radiusSm，可单独覆写/重置。
+    // L1 控件形状细分（doc/dev-workflow.md 二、）：buttonRadius/boxRadius 独立于 radiusSm，可单独覆写/重置。
     ThemeManager th;
     // 默认 = radiusSm（6）
     EXPECT_DOUBLE_EQ(th.buttonRadius(), 6.0);
@@ -255,7 +255,8 @@ TEST(ThemeManager, IndependentShapeTokens) {
     // radiusSm 不变
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString path = write_theme(dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6, "keyLaneTintAlpha": 0})");
+    const QString path = write_theme(
+        dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6, "keyLaneTintAlpha": 0})");
     ASSERT_FALSE(path.isEmpty());
     th.loadTheme(path);
     EXPECT_DOUBLE_EQ(th.buttonRadius(), 0.0);

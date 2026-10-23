@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // PortAudio v19.7 output backend. All control operations are caller-serialized.
 // The render callback performs no locking or allocation. ASIO is opt-in at build time.
-#include "beatbench/audio/AudioBackend.hpp"
-#include "beatbench/audio/AsioBufferSizes.hpp"
-
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <mutex>
 #include <string>
 #include <utility>
 
+#include "beatbench/audio/AsioBufferSizes.hpp"
+#include "beatbench/audio/AudioBackend.hpp"
 #include "portaudio.h"
 #ifndef BEATBENCH_HAS_ASIO
 #define BEATBENCH_HAS_ASIO 0
@@ -37,21 +37,23 @@ struct CallbackUser {
     AudioBackend::RenderCallback cb = nullptr;
     void* user = nullptr;
 };
-int paCallback(const void*, void* output, unsigned long frameCount,
-               const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void* userData) {
+int paCallback(const void*, void* output, unsigned long frameCount, const PaStreamCallbackTimeInfo*,
+               PaStreamCallbackFlags, void* userData) {
     auto* u = static_cast<CallbackUser*>(userData);
     auto* out = static_cast<float*>(output);
-    if (u->cb) u->cb(u->user, out, static_cast<int>(frameCount));
-    else std::memset(out, 0, frameCount * 2 * sizeof(float));
+    if (u->cb)
+        u->cb(u->user, out, static_cast<int>(frameCount));
+    else
+        std::memset(out, 0, static_cast<std::size_t>(frameCount) * 2 * sizeof(float));
     return paContinue;
 }
 AsioBufferSizes bufferSizes(const AudioDeviceCapabilities& caps) {
     return {caps.bufferMin, caps.bufferMax, caps.bufferPreferred, caps.bufferGranularity};
 }
-} // namespace
+}  // namespace
 
 class PortAudioBackend final : public AudioBackend {
-public:
+   public:
     ~PortAudioBackend() override { shutdown(); }
 
     bool init(std::string* errMsg) override {
@@ -62,24 +64,34 @@ public:
         if (err != paNoError)
             return fail(errMsg, std::string("PortAudio 初始化失败：") + Pa_GetErrorText(err));
         m_initialized = true;
-        return true; // No default-device requirement: an explicit ASIO device may work.
+        return true;  // No default-device requirement: an explicit ASIO device may work.
     }
 
     bool asioAvailable() const override { return BEATBENCH_HAS_ASIO != 0; }
 
     AudioDeviceCapabilities deviceCapabilities(int device) const override {
         AudioDeviceCapabilities caps;
-        if (!m_initialized) { caps.error = "音频后端未初始化"; return caps; }
+        if (!m_initialized) {
+            caps.error = "音频后端未初始化";
+            return caps;
+        }
         if (device < 0) device = Pa_GetDefaultOutputDevice();
         const auto* di = Pa_GetDeviceInfo(device);
-        if (!di) { caps.error = "设备不存在或不可用"; return caps; }
+        if (!di) {
+            caps.error = "设备不存在或不可用";
+            return caps;
+        }
         const auto* api = Pa_GetHostApiInfo(di->hostApi);
-        if (!api) { caps.error = "设备 API 信息不可用"; return caps; }
+        if (!api) {
+            caps.error = "设备 API 信息不可用";
+            return caps;
+        }
         caps.asio = api->type == paASIO;
         if (!caps.asio) return caps;
 #if BEATBENCH_HAS_ASIO
-        const PaError err = PaAsio_GetAvailableBufferSizes(device, &caps.bufferMin,
-            &caps.bufferMax, &caps.bufferPreferred, &caps.bufferGranularity);
+        const PaError err =
+            PaAsio_GetAvailableBufferSizes(device, &caps.bufferMin, &caps.bufferMax,
+                                           &caps.bufferPreferred, &caps.bufferGranularity);
         if (err != paNoError) {
             caps.bufferMin = caps.bufferMax = caps.bufferPreferred = caps.bufferGranularity = 0;
             caps.error = std::string("查询 ASIO 缓冲失败：") + Pa_GetErrorText(err);
@@ -113,7 +125,7 @@ public:
     bool start(RenderCallback cb, void* user, const AudioSettings& settings,
                std::string* errMsg) override {
         if (errMsg) errMsg->clear();
-        if (m_stream) return true; // Caller must stop before changing settings.
+        if (m_stream) return true;  // Caller must stop before changing settings.
         m_streamInfo = {};
         if (!m_initialized) return fail(errMsg, "音频后端未初始化");
         const int dev = settings.device < 0 ? Pa_GetDefaultOutputDevice() : settings.device;
@@ -133,7 +145,7 @@ public:
             const long resolved = resolveAsioBufferSize(bufferSizes(caps), requestedFrames);
             if (resolved == 0 || resolved > std::numeric_limits<int>::max())
                 return fail(errMsg, "请求的 ASIO 缓冲帧数不在驱动支持的固定值/步长/2 的幂范围内");
-            callbackFrames = static_cast<unsigned long>(resolved); // 0 requests preferred.
+            callbackFrames = static_cast<unsigned long>(resolved);  // 0 requests preferred.
         }
         PaStreamParameters params{};
         params.device = dev;
@@ -146,7 +158,7 @@ public:
             return fail(errMsg, std::string("输出格式不支持：") + Pa_GetErrorText(formatError));
         m_cbUser = {cb, user};
         const PaError openError = Pa_OpenStream(&m_stream, nullptr, &params, rate, callbackFrames,
-                                               paNoFlag, &paCallback, &m_cbUser);
+                                                paNoFlag, &paCallback, &m_cbUser);
         if (openError != paNoError) {
             m_stream = nullptr;
             m_cbUser = {};
@@ -209,7 +221,8 @@ public:
         }
         return out;
     }
-private:
+
+   private:
     PaStream* m_stream = nullptr;
     CallbackUser m_cbUser;
     StreamInfo m_streamInfo;
@@ -217,4 +230,4 @@ private:
 };
 
 AudioBackend* create_portaudio_backend() { return new PortAudioBackend(); }
-} // namespace beatbench::audio
+}  // namespace beatbench::audio

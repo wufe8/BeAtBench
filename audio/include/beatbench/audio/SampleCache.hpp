@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 采样解码缓存（M4.3a）：线程安全 LRU + 字节预算 + 并发命中合并。
 //
-// 解决的问题（doc/02 §8 + M4.3 立项）：BMS 谱面引用上千采样，wav/ogg 全量解码
+// 解决的问题（M4.3 立项）：BMS 谱面引用上千采样，wav/ogg 全量解码
 // ≈ 数百 MB 不可全载 → LRU 常驻预算（默认 128MiB）+ 后台解码线程池前置。
 // 本类 = 前缀「解码 → 缓存」；并发调用同一文件只解一次（in-flight 合并）。
 // 与「试听/模拟播放/波形/离线渲染」共用同一份缓存（同文件不重复解码）。
@@ -47,12 +47,13 @@ struct SampleCacheResult {
 };
 
 class SampleCache {
-public:
+   public:
     /// 解码器覆写（测试注入用；空 = 默认 decode_audio_file / decode_audio_file_w）。
     using DecodeFn = std::function<DecodeResult(const std::string&)>;
     using DecodeFnW = std::function<DecodeResult(const std::wstring&)>;
 
-    static constexpr std::size_t kDefaultBudgetBytes = 128u * 1024u * 1024u;
+    static constexpr std::size_t kDefaultBudgetBytes =
+        static_cast<const std::size_t>(128u * 1024u * 1024u);
 
     explicit SampleCache(std::size_t budgetBytes = kDefaultBudgetBytes);
     ~SampleCache();
@@ -86,29 +87,28 @@ public:
     /// 当前缓存条目数。
     std::size_t count() const;
 
-private:
+   private:
     struct Entry {
-        DecodedSample* sample = nullptr;      ///< 缓存持有 1 份引用（insert 时 ref）
-        std::list<std::string>::iterator lru; ///< m_lru 节点（touch/evict 用）
+        DecodedSample* sample = nullptr;       ///< 缓存持有 1 份引用（insert 时 ref）
+        std::list<std::string>::iterator lru;  ///< m_lru 节点（touch/evict 用）
         std::size_t bytes = 0;
         std::string key;
     };
     struct InFlight;  // 定义在 .cpp（shared_ptr 跨调用者共享）
 
-    SampleCacheResult getImpl(const std::string& key,
-                              const std::function<DecodeResult()>& decode);
+    SampleCacheResult getImpl(const std::string& key, const std::function<DecodeResult()>& decode);
     void insertLocked(const std::string& key, DecodedSample* s);  // 缓存 ref() 后持有
     void evictOne();
     void touch(Entry& e);
 
     std::size_t m_budget = kDefaultBudgetBytes;
-    std::size_t m_resident = 0;                 ///< 驻留字节数（PCM 数据）
+    std::size_t m_resident = 0;  ///< 驻留字节数（PCM 数据）
     mutable std::mutex m_mutex;
-    std::list<std::string> m_lru;               ///< front = LRU, back = MRU
+    std::list<std::string> m_lru;  ///< front = LRU, back = MRU
     std::unordered_map<std::string, Entry> m_cache;
     std::unordered_map<std::string, std::shared_ptr<InFlight>> m_inFlight;
-    DecodeFn m_fn;                              ///< 窄字符解码器（空 = 默认）
-    DecodeFnW m_fnW;                            ///< 宽字符解码器（空 = 默认）
+    DecodeFn m_fn;    ///< 窄字符解码器（空 = 默认）
+    DecodeFnW m_fnW;  ///< 宽字符解码器（空 = 默认）
 };
 
 }  // namespace beatbench::audio

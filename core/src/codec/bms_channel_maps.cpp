@@ -20,12 +20,13 @@
 //   探测只决定写回 profile，见 bms_parser.cpp 预扫描 0c。
 //   单面 PMS 的 22-25/62-65/E2-E5 已属于 1P；不能反写 2P 普通键或键2-5。
 //   读表遗留支持的 2P LN/地雷键1、6-9，仍可写回 61/66-69、E1/E6-E9。
-#include "beatbench/core/codec/BmsChannelMaps.hpp"
-
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <string>
 #include <string_view>
+
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 namespace beatbench::bms {
 namespace {
@@ -48,21 +49,20 @@ struct Rule {
 //   末位 1-5 恒为键1-5（两套通用）。
 constexpr std::uint8_t kKeyIndex7[9] = {1, 2, 3, 4, 5, 0, 0, 6, 7};
 constexpr LaneKind kLaneKinds7[9] = {
-    LaneKind::Key, LaneKind::Key, LaneKind::Key, LaneKind::Key, LaneKind::Key,
+    LaneKind::Key,     LaneKind::Key,   LaneKind::Key, LaneKind::Key, LaneKind::Key,
     LaneKind::Scratch, LaneKind::Pedal, LaneKind::Key, LaneKind::Key,
 };
 constexpr std::uint8_t kBmespKeyOrder[9] = {1, 2, 3, 4, 5, 8, 9, 6, 7};
 
-constexpr std::size_t kSpecialCount = 14;  // "01".."0E"
-constexpr std::size_t kGroupCount = 6 * 9;  // 11/21/51/61/D/E 六组
+constexpr std::size_t kSpecialCount = 14;                                   // "01".."0E"
+constexpr std::size_t kGroupCount = static_cast<const std::size_t>(6 * 9);  // 11/21/51/61/D/E 六组
 constexpr std::size_t kTotal = kSpecialCount + kGroupCount;
 
 // 特殊通道 "01".."0E"（两表共用）。
 constexpr Rule kSpecials[kSpecialCount] = {
     // ch01 = 背景音/BGM：到达即自动播放，游戏不可见（BMS 笔记「通道」节）。
     // allow_sub_lines=true：同小节多行 = 多个背景音子行（sub_line 泛化，2026-09）。
-    {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm, 0, NoteKind::Normal,
-     false, 0, 0, true},
+    {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm, 0, NoteKind::Normal, false, 0, 0, true},
     {{'0', '2'}, ChannelSemantics::MeasureLen},
     {{'0', '3'}, ChannelSemantics::BpmInline},
     {{'0', '4'}, ChannelSemantics::Bga},
@@ -91,12 +91,12 @@ struct Table {
     // 7key 表（sp7k/dp/battle 共用）。
     constexpr Table(const std::uint8_t (&key_index)[9], const LaneKind (&kinds)[9]) {
         for (const auto& r : kSpecials) rules[count++] = r;
-        add_group('1', 0, false, NoteKind::Normal, key_index, kinds);   // 11-19（1P 游玩轨）
-        add_group('2', 1, false, NoteKind::Normal, key_index, kinds);   // 21-29（2P 游玩轨）
-        add_group('5', 0, true, NoteKind::Normal, key_index, kinds);    // 51-59（1P LN 通道）
-        add_group('6', 1, true, NoteKind::Normal, key_index, kinds);    // 61-69（2P LN 通道）
-        add_group('D', 0, false, NoteKind::Landmine, key_index, kinds); // D1-D9 地雷（1P）
-        add_group('E', 1, false, NoteKind::Landmine, key_index, kinds); // E1-E9 地雷（2P）
+        add_group('1', 0, false, NoteKind::Normal, key_index, kinds);    // 11-19（1P 游玩轨）
+        add_group('2', 1, false, NoteKind::Normal, key_index, kinds);    // 21-29（2P 游玩轨）
+        add_group('5', 0, true, NoteKind::Normal, key_index, kinds);     // 51-59（1P LN 通道）
+        add_group('6', 1, true, NoteKind::Normal, key_index, kinds);     // 61-69（2P LN 通道）
+        add_group('D', 0, false, NoteKind::Landmine, key_index, kinds);  // D1-D9 地雷（1P）
+        add_group('E', 1, false, NoteKind::Landmine, key_index, kinds);  // E1-E9 地雷（2P）
     }
 
     // 9key（PMS）统一读侧表：标准与 BME-SP 别名并存，物理键固定（文件头注释）。
@@ -109,8 +109,8 @@ struct Table {
         }
         // 22-25=键6-9（标准别名）；21/26-29 不注册（9key 单面不用，读取即未知通道）
         for (int i = 0; i < 4; ++i) {
-            push('2', static_cast<char>('2' + i), LaneKind::Key,
-                 static_cast<std::uint8_t>(6 + i), NoteKind::Normal, false, 0);
+            push('2', static_cast<char>('2' + i), LaneKind::Key, static_cast<std::uint8_t>(6 + i),
+                 NoteKind::Normal, false, 0);
         }
         // '5' 组：51-55=键1-5 LN；56-59=键8/9/6/7 LN（BME-SP 别名）
         for (int i = 0; i < 9; ++i) {
@@ -120,10 +120,10 @@ struct Table {
         // '6' 组：61=2P键1 LN；62-65=1P键6-9 LN（标准别名）；66-69=2P键6-9 LN
         push('6', '1', LaneKind::Key, 1, NoteKind::Normal, true, 1);
         for (int i = 0; i < 4; ++i) {
-            push('6', static_cast<char>('2' + i), LaneKind::Key,
-                 static_cast<std::uint8_t>(6 + i), NoteKind::Normal, true, 0);
-            push('6', static_cast<char>('6' + i), LaneKind::Key,
-                 static_cast<std::uint8_t>(6 + i), NoteKind::Normal, true, 1);
+            push('6', static_cast<char>('2' + i), LaneKind::Key, static_cast<std::uint8_t>(6 + i),
+                 NoteKind::Normal, true, 0);
+            push('6', static_cast<char>('6' + i), LaneKind::Key, static_cast<std::uint8_t>(6 + i),
+                 NoteKind::Normal, true, 1);
         }
         // 'D' 组：D1-D9=1P 地雷；末位 6-9 按键8/9/6/7（BME-SP 别名）
         for (int i = 0; i < 9; ++i) {
@@ -133,10 +133,10 @@ struct Table {
         // 'E' 组：E1=2P键1 地雷；E2-E5=1P键6-9 地雷（标准别名）；E6-E9=2P键6-9 地雷
         push('E', '1', LaneKind::Key, 1, NoteKind::Landmine, false, 1);
         for (int i = 0; i < 4; ++i) {
-            push('E', static_cast<char>('2' + i), LaneKind::Key,
-                 static_cast<std::uint8_t>(6 + i), NoteKind::Landmine, false, 0);
-            push('E', static_cast<char>('6' + i), LaneKind::Key,
-                 static_cast<std::uint8_t>(6 + i), NoteKind::Landmine, false, 1);
+            push('E', static_cast<char>('2' + i), LaneKind::Key, static_cast<std::uint8_t>(6 + i),
+                 NoteKind::Landmine, false, 0);
+            push('E', static_cast<char>('6' + i), LaneKind::Key, static_cast<std::uint8_t>(6 + i),
+                 NoteKind::Landmine, false, 1);
         }
     }
 
@@ -155,11 +155,9 @@ struct Table {
     }
 
     constexpr void add_group(char ten, std::uint8_t player, bool ln_channel, NoteKind nk,
-                             const std::uint8_t (&key_index)[9],
-                             const LaneKind (&kinds)[9]) {
+                             const std::uint8_t (&key_index)[9], const LaneKind (&kinds)[9]) {
         for (int i = 0; i < 9; ++i) {
-            push(ten, static_cast<char>('1' + i), kinds[i], key_index[i], nk, ln_channel,
-                 player);
+            push(ten, static_cast<char>('1' + i), kinds[i], key_index[i], nk, ln_channel, player);
         }
     }
 };
@@ -174,9 +172,7 @@ const Table& table9() {
 }
 
 // "pms9k" 前缀匹配（pms9k / pms9k-bmesp）；其余 mode 走 7key 表。
-inline bool is_pms9k_mode(std::string_view mode) {
-    return mode.rfind("pms9k", 0) == 0;
-}
+inline bool is_pms9k_mode(std::string_view mode) { return mode.rfind("pms9k", 0) == 0; }
 
 // Lane 属性 → 槽位（0-8）；不匹配返回 -1。仅用于 7key 表写侧
 // （扫描 11-19 组规则；9key 写侧已公式化，不依赖 11-19 组布局）。
@@ -210,9 +206,9 @@ std::optional<BmsChannelRule> bms_channel_rule_for(std::string_view mode,
         const auto& r = t.rules[i];
         if (r.ch[0] == up[0] && r.ch[1] == up[1]) {
             if (r.sem == ChannelSemantics::Note) {
-                return BmsChannelRule{ChannelSemantics::Note,
-                                      Lane{r.player, r.kind, r.index}, r.nk,
-                                      r.ln_channel, 0, r.allow_sub_lines};
+                return BmsChannelRule{
+                    ChannelSemantics::Note, Lane{r.player, r.kind, r.index}, r.nk, r.ln_channel, 0,
+                    r.allow_sub_lines};
             }
             return BmsChannelRule{r.sem, {}, NoteKind::Normal, false, r.bga_layer};
         }
@@ -220,8 +216,8 @@ std::optional<BmsChannelRule> bms_channel_rule_for(std::string_view mode,
     return std::nullopt;
 }
 
-std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool ln,
-                                 NoteKind kind) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——模式到通道的映射查表链，映射表即数据
+std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool ln, NoteKind kind) {
     // 模型可由协议/插件直接构造，不能依赖读侧保证玩家与数组下标合法。
     if (lane.player > 1) return {};
     // 背景音轨（ch01）：不参与 LN/地雷位序，恒为 "01"

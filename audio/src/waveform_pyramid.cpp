@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // WaveformPyramid 实现（见头文件注释）。
-#include "beatbench/audio/WaveformPyramid.hpp"
-
 #include <algorithm>
 #include <limits>
 
+#include "beatbench/audio/WaveformPyramid.hpp"
+
 namespace beatbench::audio {
 
-void WaveformPyramid::build(const float* interleaved, std::size_t frameCount,
-                            std::size_t channels, double sampleRate) {
+void WaveformPyramid::build(const float* interleaved, std::size_t frameCount, std::size_t channels,
+                            double sampleRate) {
     m_pcmSelf.reset();
     m_pcmFrames = frameCount;
     m_pcmChannels = channels ? channels : 1;

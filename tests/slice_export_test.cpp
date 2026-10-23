@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // M6.3 分片导出布局单测：id 分配 + 拍位换算 + 可复制 BMS raw（纯计算，无音频/无 Qt）。
+#include <gtest/gtest.h>
+
 #include <string>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "beatbench/core/slice/SliceExport.hpp"
 
 namespace {
 
-using beatbench::slice::SliceExportItem;
-using beatbench::slice::Slice;
-using beatbench::slice::ExportConflictPolicy;
 using beatbench::slice::allocate_continue_file_indexes;
 using beatbench::slice::allocate_wav_ids;
 using beatbench::slice::apply_export_file_policy;
 using beatbench::slice::build_export_layout;
 using beatbench::slice::build_placement_raw;
+using beatbench::slice::ExportConflictPolicy;
 using beatbench::slice::next_continue_file_index;
 using beatbench::slice::parse_export_file_index;
+using beatbench::slice::Slice;
+using beatbench::slice::SliceExportItem;
 
 std::vector<Slice> make_slices(std::vector<double> starts, std::vector<double> ends) {
     std::vector<Slice> out;
@@ -55,9 +55,8 @@ TEST(SliceExportTest, Base62AllocatesPastBase36AndWritesCaseSensitiveRaw) {
     EXPECT_EQ(ids[2], 1298u);
 
     const auto slices = make_slices({0.0}, {0.125});
-    const auto items = build_export_layout(slices, {true}, {}, 3843,
-                                           "slice", 120.0, 4, 4, 0.0, 1, 3,
-                                           beatbench::IdBase::Base62);
+    const auto items = build_export_layout(slices, {true}, {}, 3843, "slice", 120.0, 4, 4, 0.0, 1,
+                                           3, beatbench::IdBase::Base62);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_EQ(items[0].wavId, 3843u);
     const auto raw = build_placement_raw(items, 120.0, 4, beatbench::IdBase::Base62);
@@ -102,14 +101,13 @@ TEST(SliceExportTest, LayoutShiftsByStartMeasure) {
     // 起始小节 = 5（1-based）→ 文件小节整体 +4：startSec=0 → #00401:
     const auto slices = make_slices({0.0, 0.5, 2.0}, {0.125, 0.625, 2.125});
     const std::vector<bool> enabled = {true, true, true};
-    const auto items = build_export_layout(slices, enabled, {}, 1, "slice",
-                                           120.0, 4, 4, 0.0, 5);
+    const auto items = build_export_layout(slices, enabled, {}, 1, "slice", 120.0, 4, 4, 0.0, 5);
     ASSERT_EQ(items.size(), 3u);
-    EXPECT_EQ(items[0].measure, 4);   // beat0 → derived 0 + 4
+    EXPECT_EQ(items[0].measure, 4);  // beat0 → derived 0 + 4
     EXPECT_EQ(items[0].pos, beatbench::Rational(0, 1));
-    EXPECT_EQ(items[1].measure, 4);   // beat1 → derived 0 + 4
+    EXPECT_EQ(items[1].measure, 4);  // beat1 → derived 0 + 4
     EXPECT_EQ(items[1].pos, beatbench::Rational(1, 4));
-    EXPECT_EQ(items[2].measure, 5);   // beat4 → derived 1 + 4
+    EXPECT_EQ(items[2].measure, 5);  // beat4 → derived 1 + 4
     // raw 的 ch01 行落在 #00401:
     const auto raw = build_placement_raw(items, 120.0, 4);
     EXPECT_NE(raw.find("#00401:"), std::string::npos);
@@ -166,8 +164,8 @@ TEST(SliceExportTest, ApplyContinueRenamesOnlyEnabledAndKeepsWavIds) {
     const std::uint32_t wav0 = items[0].wavId;
     const std::uint32_t wav2 = items[2].wavId;
 
-    ASSERT_TRUE(apply_export_file_policy(items, "slice", {0, 1},
-                                         {"slice_000.wav"}, ExportConflictPolicy::Continue));
+    ASSERT_TRUE(apply_export_file_policy(items, "slice", {0, 1}, {"slice_000.wav"},
+                                         ExportConflictPolicy::Continue));
     EXPECT_EQ(items[0].fileName, "slice_002.wav");
     EXPECT_EQ(items[0].fileIndex, 2);
     EXPECT_EQ(items[0].wavId, wav0);
@@ -178,8 +176,7 @@ TEST(SliceExportTest, ApplyContinueRenamesOnlyEnabledAndKeepsWavIds) {
 }
 
 TEST(SliceExportTest, DisabledSlicesDoNotOccupyFileIndexes) {
-    const auto slices = make_slices({0.0, 0.5, 1.0, 1.5, 2.0},
-                                    {0.125, 0.625, 1.125, 1.625, 2.125});
+    const auto slices = make_slices({0.0, 0.5, 1.0, 1.5, 2.0}, {0.125, 0.625, 1.125, 1.625, 2.125});
     const std::vector<bool> enabled = {false, false, false, true, false};
     const auto items = build_export_layout(slices, enabled, {}, 1, "slice", 120.0, 4, 4, 0.0, 1);
     ASSERT_EQ(items.size(), 5u);
@@ -211,8 +208,8 @@ TEST(SliceExportTest, ContinueUsesSubdirectoryPrefix) {
     auto items = build_export_layout(slices, {true}, {}, 1, "slices/slice", 120.0, 4, 4, 0.0, 1);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_EQ(items[0].fileName, "slices/slice_000.wav");
-    ASSERT_TRUE(apply_export_file_policy(items, "slices/slice", {0},
-                                         {"slices/slice_000.wav"}, ExportConflictPolicy::Continue));
+    ASSERT_TRUE(apply_export_file_policy(items, "slices/slice", {0}, {"slices/slice_000.wav"},
+                                         ExportConflictPolicy::Continue));
     EXPECT_EQ(items[0].fileName, "slices/slice_001.wav");
     EXPECT_EQ(items[0].fileIndex, 1);
 }

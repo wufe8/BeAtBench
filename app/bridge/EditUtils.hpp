@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SessionController.qml 纯函数回抽（2026-09；doc/08 §2 双语言纪律、
-// local/doc/13-大文件拆分规划 §2.5「纯函数先搬」第一刀）：
+// SessionController.qml 纯函数回抽（doc/skin-system.md 二、 双语言纪律，「纯函数先搬」回抽路线）：
 //   gcd / refEquals / addPosDelta —— 编辑几何纯计算（可单测，无 QML 依赖）；
 //   looksLikeBmsText / textUsesBase62Ids —— 剪贴板文本判定（Base62 粘贴警告前置）。
 // 只依赖 Qt6::Core（无 GUI / 无 core 模型）；QML 经上下文属性 editUtils 调用。
@@ -15,7 +14,7 @@ namespace beatbench::app {
 
 class EditUtils : public QObject {
     Q_OBJECT
-public:
+   public:
     explicit EditUtils(QObject* parent = nullptr);
 
     /// 最大公约数（负数取绝对值；0 → 1，避免除零——与旧 JS 版一致）。

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 编辑页（M2 核心）：三栏模板 = 空模板的默认布局（doc/05 §4.3）。
+// 编辑页（M2 核心）：三栏模板 = 空模板的默认布局（doc/ui-design.md 四、.3）。
 // 左 Dock（面板容器：元信息/采样/lint/BGA）+ 中央视口占位 + 右 Dock（属性）。
-// 分栏 = QML 原生 SplitView（可拖拽调宽；不用 QDockWidget，doc/07 §3）。
+// 分栏 = QML 原生 SplitView（可拖拽调宽；不用 QDockWidget，doc/project-workflow.md 三、）。
 // ⚠️ Qt 6.11 SplitView 附属性是 SplitView.*（preferredWidth/fillWidth/minimumWidth），不是 Layout.*。
 // 面板内容由本页装配；页面只做布局与展示，编辑命令接入归 M3。
 import QtQuick

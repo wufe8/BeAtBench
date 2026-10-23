@@ -22,21 +22,20 @@ namespace beatbench::audio {
 /// 单个 note 的播放计划项。
 struct PlaybackNote {
     std::uint32_t measure = 0;
-    double pos = 0.0;             ///< 小节内位置（0..1；Rational → double）
-    std::uint32_t sampleId = 0;   ///< 引用的 #WAV id（0 = 空音）
-    double triggerSec = 0.0;      ///< 绝对触发秒（TimingEngine 口径）
-    std::string file;             ///< 采样文件相对路径（samples.file；空 = 未定义）
-    std::string resolvedPath;     ///< 解析后的绝对路径（扩展名回退后；空 = 文件缺失）
+    double pos = 0.0;            ///< 小节内位置（0..1；Rational → double）
+    std::uint32_t sampleId = 0;  ///< 引用的 #WAV id（0 = 空音）
+    double triggerSec = 0.0;     ///< 绝对触发秒（TimingEngine 口径）
+    std::string file;            ///< 采样文件相对路径（samples.file；空 = 未定义）
+    std::string resolvedPath;    ///< 解析后的绝对路径（扩展名回退后；空 = 文件缺失）
 };
 
 /// 播放计划（有序按触发秒升序；+ triggerSec 单调）。
 class PlaybackPlan {
-public:
+   public:
     /// 构建：chart + timing（外部持有）→ 全部 note 的播放计划。
     /// sourceDir = 谱面目录（相对路径解析基准；空 = 路径原样 → 当作绝对）。
     /// return = 计划（可能为空 = 无 note / 出错——调用方按空处理）。
-    static PlaybackPlan build(const beatbench::Chart& chart,
-                              const beatbench::TimingEngine& timing,
+    static PlaybackPlan build(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
                               const std::string& sourceDir = "");
 
     /// 构建（宽字符目录版；Windows 日文路径用）。
@@ -55,7 +54,7 @@ public:
     std::size_t size() const { return m_notes.size(); }
     bool empty() const { return m_notes.empty(); }
 
-private:
+   private:
     std::vector<PlaybackNote> m_notes;
 };
 

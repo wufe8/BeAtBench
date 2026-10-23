@@ -5,7 +5,7 @@ by Wufe8
 [http://bm98.yaneu.com/bm98/bmsformat.html](http://bm98.yaneu.com/bm98/bmsformat.html)  
 举例 `Doppelganger[Eb]`
 
-注意不是所有播放器均支持该笔记内的所有功能
+注意不是所有播放器均支持该笔记内的所有功能；本文是格式笔记，不是 BeAtBench 已支持能力清单。BeAtBench 的 LN 源身份、连接/放置规则及未实现的 MGQ 边界见[长音](#长音)，其它已知边界见根 [README](<../README.md#已知问题>)。
 指令大小写不敏感
 可使用`//` `/**/`注释语句 使用方法类似C语言注释
 
@@ -43,8 +43,8 @@ x=2: 双人各单玩(Couple Play) 游玩相同歌曲不同谱面 目前弃用 �
 x=3: 单人双玩(Double Play)  
 x=4: 双人对战(Battle Play) 游玩相同歌曲相同谱面 目前弃用 由播放器自行实现调整
 
-2. `#GENRE xxx` 曲风 通常显示在曲名上方 如"EINSAMKEIT"
-3. `#TITLE xxx` 标题(曲名) 一般还包含差分名 如"Doppelganger[Eb]" 后带空格与中括号内接差分名的情况可能会自动识别成差分名并分行
+2. `#GENRE xxx` 曲风 通常显示在曲名上方 如“EINSAMKEIT”
+3. `#TITLE xxx` 标题(曲名) 一般还包含差分名 如“Doppelganger[Eb]” 后带空格与中括号内接差分名的情况可能会自动识别成差分名并分行
 4. `#ARTIST xxx` 创作者 一般还包含歌手(feat:xxx) BGI/BGA制作者(bgi:xxx bga:xxx) 差分谱师(obj:xxx)
 5. `#BPM xxx` 歌曲初始bpm 若全曲bpm轨无物件 则全程使用此bpm为单位 默认130 可以也为0或小数
 6. `#PLAYLEVEL x` 难度标级 建议使用零或正整数 一般依照本家(iidx)的标级 标定为1-12  
@@ -112,15 +112,15 @@ x=2（MGQ）：已废弃的连续占位记法，**不是 LNOBJ**；BeAtBench 未
 远古播放器的引用取值范围多为`00-FF` 十六进制 最大共`16x16=256`个采样  
 较新播放器支持引用取值范围多为`00-ZZ` 三十六进制 最大共`36x36=1296`个采样 (注: `00` `FF` `ZZ` 绝大多数情况应留空 作占用标记)
 
-> **音频扩展名回退（生态事实，2026-08 lint 对齐）**：谱面引用 `xxx.wav` 而磁盘只有同名
+> **音频扩展名回退（生态事实）**：谱面引用 `xxx.wav` 而磁盘只有同名
 > `xxx.ogg`（压缩转换后未改引用，Doppelganger 谱面集即此情况）时，beatoraja/LR2 按
 > `wav→ogg→mp3→flac→wma` 顺序回退播放。lint 相应处理：精确文件缺失时按回退表查找，
-> 命中 → `wav_ext_mismatch`（信息级"扩展名与引用不符"，文件可用）；完全找不到才报
+> 命中 → `wav_ext_mismatch`（信息级“扩展名与引用不符”，文件可用）；完全找不到才报
 > `missing_wav`（缺失）。
 
 ### #BASE 62：大小写敏感 base62 id（新扩展）
 
-> **parser 实现说明（2026-08 已支持）**：`#BASE 62` 头部指令启用「id 大小写敏感」模式——
+> **parser 实现说明（已支持）**：`#BASE 62` 头部指令启用“id 大小写敏感”模式——
 > `#WAVxx`/`#BMPxx`/`#BPMxx`/`#STOPxx`（含 `#EXWAVxx`/`#BGAxx` 等扩展表）的 2 位 id 使用
 > base62 字母表 `0-9A-Za-z`（A=10…Z=35，a=36…z=61），容量 **62×62=3844**。
 > 引用来源：[lunaticvibesf #201](https://github.com/chown2/lunaticvibesf/issues/201)（BOFTT 谱面用例；
@@ -134,7 +134,7 @@ x=2（MGQ）：已废弃的连续占位记法，**不是 LNOBJ**；BeAtBench 未
 > - model 层：`Chart.id_base`（默认 Base36）；数值 id 按 base62 编码（0..3843 容纳 2 位），
 >   文本 ↔ 数值编解码见 `BmsUtil c62_to_u32/u32_to_c62` 与 `id_text`。
 > - 测试：合成用例覆盖（`BmsUtil.C62*` / `BmsRead.Base62*` / `BmsRoundTrip.Base62Stable`）；
->   真实谱面样本暂无（用户确认无现成 BOFTT 谱面），解析真实谱面后补。
+>   尚无真实 BOFTT 谱面验证，不能用合成用例外推真实谱面兼容性。
 
 2. `#BMPxx yyy` 同上 只不过为定义图片(bgi/bga/miss)引用 也可以是视频 通常为.bmp/.png/.wmv/.mp4格式 注意对于视频 需要有对应的视频解码器才能播放
 3. `#BPMxx yyy` | `#EXBPMxx` 同上 只不过为指代bpm值 可以为小数 可以是负数(但实际上负数bpm并不是硬性规范 实现效果可能不一致)  
@@ -161,9 +161,9 @@ x=2（MGQ）：已废弃的连续占位记法，**不是 LNOBJ**；BeAtBench 未
 ### 通道编号
 
 `01`: 背景音/BGM (`#WAVxx`) 同一小节允许并存 在谱面编辑器中会分开显示以便谱师设计音轨  
-> **parser 实现说明（2026-08 已结构化）**：此前 ch01 按 KeepRaw 保留在 raw_lines；
+> **parser 实现说明（已结构化）**：此前 ch01 按 KeepRaw 保留在 raw_lines；
 > 现映射为 LaneKind::Bgm（背景轨）：note 事件入 `chart.notes`（不参与判定，到达即自动播放），
-> 写回重建 ch01 数据行；采样面板据此统计「背景」分组。语义要点：LN/地雷不适用于 BGM 轨。
+> 写回重建 ch01 数据行；采样面板据此统计“背景”分组。语义要点：LN/地雷不适用于 BGM 轨。
 `02`: 节拍 十进制数值 可以为小数 表示该小节的拍子数 默认1(4/4拍 4分音符为一拍 每小节4拍) 具体见[补充](#补充)  
 `03`: BPM (`00-FF`) 十六进制数值 转十进制 最大255bpm 其他范围需使用08通道
 `04`: BGI/BGA Base  (`#BMPxx`) BGA Base层 位于Layer层的下方  
@@ -207,8 +207,8 @@ x=2（MGQ）：已废弃的连续占位记法，**不是 LNOBJ**；BeAtBench 未
 
 ### 9key PMS模式游玩轨
 
-9KEYS 单面存在两套真实通道约定（hitkey「9KEYS BMS-DP」/「BME-SP 型」，LR2 2009+ 对
-.pms 按 BME-SP 解释）。读侧两套别名并存、物理键固定（读写分离，2026-10 复核修正）：
+9KEYS 单面存在两套真实通道约定（hitkey“9KEYS BMS-DP”/“BME-SP 型”，LR2 2009+ 对
+.pms 按 BME-SP 解释）。读侧两套别名并存、物理键固定（读写分离）：
 `11-15`/`51-55`/`D1-D5` 恒为键1-5；键6-9 两套别名见下表。写回约定由 mode_id 决定：
 仅 BME-SP 别名证据（16-19/56-59/D6-D9）→ `pms9k-bmesp`（写出采用 BME-SP 通道）；其余 →
 `pms9k`（写出采用标准 PMS 通道）。这是**写出 profile 探测，不是读侧切表**：
@@ -274,7 +274,7 @@ LN/地雷也不能写到属于1P的62-65/E2-E5。读表既有的61/66-69、E1/E6
 
 乐谱以音符为基本单位 音符可细分为全音符 2分音符 4分音符等 拍子决定了节奏 分强弱拍 另定义每拍对应几分音符 以及每小节(measure)有几拍 即为节拍 组成了乐谱中的时间单位
 
-bpm(beat per secend)即每分钟节拍数 一般使用1个4分音符为1拍的单位 bpm越大则速度越快 但注意高bpm(实际演奏中的快)与快节奏(乐谱中的快)并无关联 而是高bpm与快节奏共同决定了歌曲的"快慢"  
+bpm(beat per secend)即每分钟节拍数 一般使用1个4分音符为1拍的单位 bpm越大则速度越快 但注意高bpm(实际演奏中的快)与快节奏(乐谱中的快)并无关联 而是高bpm与快节奏共同决定了歌曲的“快慢”
 
 3. bpm, 节拍, 小节, 与现实时间的关系  
 

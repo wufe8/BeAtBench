@@ -22,7 +22,7 @@
 namespace beatbench::audio {
 
 class ReferenceTrack {
-public:
+   public:
     /// Windows 宽字符（UTF-16）路径装载：解码（audio/ 全套格式）→ 全量 PCM +
     /// 波形金字塔 + 时长/采样率统计。返回 false → error() 有原因；失败时原内容保留
     /// （load 失败不会清掉已装载的参考音轨，工作台语义友好）。
@@ -51,15 +51,14 @@ public:
 
     /// 对交错 stereo PCM 应用首/末端线性 fade（fadeSec 秒；防爆音）。
     /// 窗口短于 2×fadeSec 时两端不重叠地按比例衰减。纯函数（M6.3 分片导出用）。
-    static void apply_slice_fade(std::vector<float>& pcm, double sampleRate,
-                                 double fadeSec);
+    static void apply_slice_fade(std::vector<float>& pcm, double sampleRate, double fadeSec);
 
-private:
+   private:
     bool finish_load(const DecodeResult& r, const std::string& displayPath);
 
     std::shared_ptr<const std::vector<float>> m_pcm;  ///< 全量 PCM（金字塔构建时共享保活）
     double m_sampleRate = 0.0;
-    int m_channels = 2;      ///< 解码器向下混音为 stereo（音频层约定）
+    int m_channels = 2;  ///< 解码器向下混音为 stereo（音频层约定）
     double m_durationSec = 0.0;
     WaveformPyramid m_waveform;
     std::string m_path;

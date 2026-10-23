@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 左 Dock 标签（对照 doc/beatbench-ui-preview.html .dock-tab）：
 // 未选中 muted 文字；选中文字变亮 + 底部 2px 主色下划线。
-// active = 外部激活（互斥单选组，样式不依赖控件自身 checked——避免断绑残留，doc/04 §5）。
+// active = 外部激活（互斥单选组，样式不依赖控件自身 checked——避免断绑残留，doc/development.md 五、）。
 import QtQuick
 import QtQuick.Controls
 

@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -59,8 +59,8 @@ Chart make_chart() {
 TEST(ToggleLn, SingleToLnTogglesOwnChannel) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<ToggleLnCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // n2（pos1/2）ln_channel=true 但无伙伴（n1 未标）→ 无配对；n1/n3 普通
     bool n2_ln = false, n2_paired = false;
@@ -74,15 +74,13 @@ TEST(ToggleLn, SingleToLnTogglesOwnChannel) {
     EXPECT_TRUE(n2_ln);
     EXPECT_FALSE(n2_paired);
     // 再 toggle pos0（同为 s1 key1）→ 两个都 ln_channel → rebuild 配成 LN
-    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<ToggleLnCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     bool n1_paired = false, n2_paired2 = false;
     for (const auto& e : s.chart().notes) {
-        if (e.measure == 1 && e.pos == Rational(0, 1) &&
-            e.value.lane == Lane{0, LaneKind::Key, 1})
+        if (e.measure == 1 && e.pos == Rational(0, 1) && e.value.lane == Lane{0, LaneKind::Key, 1})
             n1_paired = e.value.ln_pair.has_value();
-        if (e.measure == 1 && e.pos == Rational(1, 2) &&
-            e.value.lane == Lane{0, LaneKind::Key, 1})
+        if (e.measure == 1 && e.pos == Rational(1, 2) && e.value.lane == Lane{0, LaneKind::Key, 1})
             n2_paired2 = e.value.ln_pair.has_value();
     }
     EXPECT_TRUE(n1_paired);
@@ -95,21 +93,20 @@ TEST(ToggleLn, LnToSingleBreaksBoth) {
     EditorSession s;
     s.load(make_chart());
     // 两个同轨同采样都切 ln_channel → rebuild 配成 LN
-    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1)));
-    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<ToggleLnCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<ToggleLnCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     bool paired1 = false;
     for (const auto& e : s.chart().notes)
         if (e.value.ln_pair) paired1 = true;
     EXPECT_TRUE(paired1);
     // 再切 pos0 → 它 ln_channel=false → 只剩 pos1/2 一个 ln_channel → 断开
-    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<ToggleLnCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
-    for (const auto& e : s.chart().notes)
-        EXPECT_FALSE(e.value.ln_pair.has_value());
+    for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.ln_pair.has_value());
     // undo 三次 → 恢复到「两 ln_channel 配对」状态
     ASSERT_TRUE(s.undo());
     bool paired2 = false;
@@ -123,10 +120,9 @@ TEST(ToggleLn, LnToSingleBreaksBoth) {
 TEST(ToggleLn, NoPartnerNoOp) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<ToggleLnCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
-    for (const auto& e : s.chart().notes)
-        EXPECT_FALSE(e.value.ln_pair.has_value());
+    ASSERT_TRUE(
+        s.exec(std::make_unique<ToggleLnCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 2}, 2)));
+    for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.ln_pair.has_value());
 }
 
 // —— 协议 dispatch 批量一个 undo 步 ——
@@ -140,8 +136,8 @@ TEST(ToggleLn, ProtocolBatchOneUndo) {
     req.set("command", "note.toggleLn");
     Json args = Json::object();
     Json sel = Json::array();
-    auto push = [&](std::uint32_t measure, std::int64_t pn, std::int64_t pd,
-                    std::uint32_t sample, const char* kind, std::uint32_t index) {
+    auto push = [&](std::uint32_t measure, std::int64_t pn, std::int64_t pd, std::uint32_t sample,
+                    const char* kind, std::uint32_t index) {
         Json item = Json::object();
         item.set("measure", static_cast<std::int64_t>(measure));
         Json pos = Json::object();

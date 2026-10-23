@@ -2,8 +2,6 @@
 // 切片命令（M6.2）：slice.detect —— 位置源（网格/MIDI）→ 切片表 JSON。
 // 逻辑与 CLI/测试共用 core 的 plan_from_grid/plan_from_midi；JSON 层只做参数校验。
 // headless 可测：不碰 Qt/音频；GUI 工作台走同一命令（进程内 dispatch）。
-#include "beatbench/core/command/Slice.hpp"
-
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -11,6 +9,7 @@
 #include <vector>
 
 #include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/command/Slice.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/midi/MidiFile.hpp"
 #include "beatbench/core/slice/Slice.hpp"
@@ -58,12 +57,11 @@ Json slice_json(const slice::Slice& s) {
 }
 
 class SliceDetectCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "slice.detect"; }
 
     Json run(const Json& args) const override {
-        if (!args.is_object())
-            throw CommandError("bad_args", "args 必须是对象");
+        if (!args.is_object()) throw CommandError("bad_args", "args 必须是对象");
         const Json* src = args.find("source");
         if (!src || !src->is_string())
             throw CommandError("bad_args", "缺少参数: source（grid|midi）");
@@ -92,14 +90,12 @@ public:
                 throw CommandError("bad_args", "缺少参数: file（MIDI 文件路径字符串）");
             const std::string& path = fp->as_str();
             std::ifstream in(path, std::ios::binary);
-            if (!in)
-                throw CommandError("bad_midi", "无法读取 MIDI 文件: " + path);
+            if (!in) throw CommandError("bad_midi", "无法读取 MIDI 文件: " + path);
             std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
                                             std::istreambuf_iterator<char>());
             try {
                 const auto midi = midi::parse_midi_bytes(bytes);
-                plan = slice::plan_from_midi(midi, offsetSec, durationSec,
-                                             extendToNextOnset);
+                plan = slice::plan_from_midi(midi, offsetSec, durationSec, extendToNextOnset);
             } catch (const midi::MidiError& e) {
                 throw CommandError("bad_midi", e.what());
             }

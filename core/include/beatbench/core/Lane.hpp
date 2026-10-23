@@ -17,7 +17,7 @@ enum class LaneKind : std::uint8_t {
 struct Lane {
     std::uint8_t player = 0;  // 0=1P, 1=2P, 未来可扩展
     LaneKind kind = LaneKind::Key;
-    std::uint8_t index = 1;   // kind==Key 时有效（1..9），其余为 0
+    std::uint8_t index = 1;  // kind==Key 时有效（1..9），其余为 0
 
     friend bool operator==(const Lane&, const Lane&) = default;
     // 排序（map 键 / 分组用）：player → kind → index

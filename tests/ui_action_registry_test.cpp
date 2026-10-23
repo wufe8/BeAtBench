@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// UiActionRegistry 单测（doc/09 §7 验收 4：注册/重复 id 守卫/状态查询/触发/枚举/keymap 覆写）。
+// UiActionRegistry 单测（doc/action-registry.md 九、验收 4：注册/重复 id 守卫/状态查询/触发/枚举/keymap 覆写）。
 // 本目标只链 Qt6::Core（注册表不依赖 GUI）：在找到 Qt6 的构建配置中启用
 //（tests/CMakeLists.txt；MSVC 的 build/ 无 Qt → 跳过，Qt 版 build-uitest 配置可编跑）。
 // 2026-09：补 AUTOMOC（UiActionRegistry 是 Q_OBJECT）后此目标可正常链接运行。
@@ -7,9 +7,9 @@
 
 #include <QFile>
 #include <QString>
-#include <Qt>
 #include <QTemporaryDir>
 #include <QVariantMap>
+#include <Qt>
 
 #include "bridge/UiActionRegistry.hpp"
 
@@ -98,13 +98,13 @@ TEST(UiActionRegistry, DuplicateIdGuardReplacesWholeDef) {
 }
 
 TEST(UiActionRegistry, SeparatorEnumeration) {
-    // 分隔线建模（doc/09 §7 验收 2 前置）：addSeparator + isSeparator + idsByCategory 含分隔线、
+    // 分隔线建模（doc/action-registry.md 九、验收 2 前置）：addSeparator + isSeparator + idsByCategory 含分隔线、
     // 且分隔线不可触发/不可启用（菜单 Repeater 据此渲染 MenuSeparator）。
     UiActionRegistry r;
     r.add(make_def(QStringLiteral("file.open")));
     r.add(make_def(QStringLiteral("file.save")));
     r.add(make_def(QStringLiteral("file.saveAs")));
-    r.addSeparator(QStringLiteral("file"));      // 位于 saveAs 与 exit 之间
+    r.addSeparator(QStringLiteral("file"));  // 位于 saveAs 与 exit 之间
     r.add(make_def(QStringLiteral("file.exit")));
 
     // idsByCategory("file") 含分隔线 id，且顺序正确（open, save, saveAs, :sep, exit）
@@ -196,7 +196,7 @@ TEST(UiActionRegistry, CheckableAndSetChecked) {
 }
 
 TEST(UiActionRegistry, KeymapOverrideShortcut) {
-    // keymap.json 覆写（doc/09 §9）：setShortcut 覆写单个、applyKeymap 批量；未知 id 跳过。
+    // keymap.json 覆写（doc/action-registry.md 七、）：setShortcut 覆写单个、applyKeymap 批量；未知 id 跳过。
     UiActionRegistry r;
     int state = 0;
     QObject::connect(&r, &UiActionRegistry::stateChanged, [&] { ++state; });
@@ -235,7 +235,7 @@ TEST(UiActionRegistry, KeymapOverrideShortcut) {
 }
 
 TEST(UiActionRegistry, KeymapFileApplyAndClear) {
-    // 运行时换肤 keymap（doc/10 §4）：applyKeymapFile 从文件应用；clearKeymap 清除覆写恢复内置默认。
+    // 运行时换肤 keymap（doc/dev-workflow.md 四、）：applyKeymapFile 从文件应用；clearKeymap 清除覆写恢复内置默认。
     UiActionRegistry r;
     UiActionDef d = make_def(QStringLiteral("file.save"));
     d.shortcut = QStringLiteral("Ctrl+S");
@@ -248,8 +248,11 @@ TEST(UiActionRegistry, KeymapFileApplyAndClear) {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("keymap.json"));
-    { QFile f(path); ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Text));
-      f.write("{\"file.save\":\"Ctrl+Alt+S\"}"); }
+    {
+        QFile f(path);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("{\"file.save\":\"Ctrl+Alt+S\"}");
+    }
     const int n = r.applyKeymapFile(path);
     EXPECT_EQ(n, 1);
     EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+Alt+S"));
@@ -283,7 +286,7 @@ TEST(UiActionRegistry, DefaultShortcutAndConflictId) {
 }
 
 TEST(UiActionRegistry, ScopeIsolatesConflicts) {
-    // 快捷键作用域（doc/09 §11，2026-09 收尾）：编辑页与切音页可各占同一键位；
+    // 快捷键作用域（doc/action-registry.md 九、，2026-09 收尾）：编辑页与切音页可各占同一键位；
     // 全局动作（scope 空）与一切作用域重叠 → 仍判冲突。
     UiActionRegistry r;
     UiActionDef editPlay = make_def(QStringLiteral("edit.playPause"));
@@ -375,7 +378,7 @@ TEST(UiActionRegistry, SequenceFromKey) {
 }
 
 TEST(UiActionRegistry, ToolbarGroupMetadata) {
-    // 工具条注册化（doc/09 §11）：toolbar/control/tooltip/value/prefix 元数据 + idsByToolbar 枚举。
+    // 工具条注册化（doc/action-registry.md 九、）：toolbar/control/tooltip/value/prefix 元数据 + idsByToolbar 枚举。
     // 目标是新变换/工具动作只需注册进组，工具条 Repeater 自动渲染（无需改 QML）。
     UiActionRegistry r;
     // 工具选择（toolbar="tool"；prefix=快捷键前缀，value=互斥 active 判定）
@@ -395,7 +398,8 @@ TEST(UiActionRegistry, ToolbarGroupMetadata) {
 
     // idsByToolbar 分组
     EXPECT_TRUE(r.idsByToolbar(QStringLiteral("tool")).contains(QStringLiteral("tool.pan")));
-    EXPECT_TRUE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.quantize")));
+    EXPECT_TRUE(
+        r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.quantize")));
     EXPECT_FALSE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.pan")));
     EXPECT_FALSE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("file.save")));
     EXPECT_EQ(r.idsByToolbar(QStringLiteral("transform")).size(), 1u);

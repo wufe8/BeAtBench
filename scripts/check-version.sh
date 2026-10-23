@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 # 版本一致性检查：打 tag / 发布前，把「版本号散落各处」的漏改挡在本地。
-# 背景：过去出现过「先发布、回头再补 commit 改 README/文档」的情况（见 doc/10）。
+# 背景：过去出现过「先发布、回头再补 commit 改 README/文档」的情况（见 doc/dev-workflow.md）。
 #
 # 用法:
 #   scripts/check-version.sh v0.3.2                  # 检查某个 tag/版本

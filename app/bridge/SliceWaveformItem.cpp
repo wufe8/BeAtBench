@@ -8,7 +8,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -132,9 +131,7 @@ SliceWorkspace* SliceWaveformItem::workspaceObj() const {
     return qobject_cast<SliceWorkspace*>(m_workspace);
 }
 
-ThemeManager* SliceWaveformItem::themeObj() const {
-    return qobject_cast<ThemeManager*>(m_theme);
-}
+ThemeManager* SliceWaveformItem::themeObj() const { return qobject_cast<ThemeManager*>(m_theme); }
 
 void SliceWaveformItem::requestSeek(qreal x, qreal y) {
     const SliceWorkspace* ws = workspaceObj();
@@ -158,8 +155,7 @@ double SliceWaveformItem::snapToGrid(double t) const {
     const SliceWorkspace* ws = workspaceObj();
     if (!ws || !ws->hasAudio() || m_gridBpm <= 0.0) return t;
     const int sub = std::max(1, m_gridSubdivision);
-    const double cell = 60.0 / static_cast<double>(m_gridBpm) /
-                        static_cast<double>(sub);
+    const double cell = 60.0 / static_cast<double>(m_gridBpm) / static_cast<double>(sub);
     if (!std::isfinite(cell) || cell <= 0.0) return t;
     const double offset = ws->offsetSecD();
     const double k = std::round((t - offset) / cell);
@@ -177,9 +173,9 @@ void SliceWaveformItem::mousePressEvent(QMouseEvent* event) {
         const double t = manualPointAt(event->position().x(), event->position().y());
         if (t >= 0.0) {
             if (m_selectedBeatSec >= 0.0 && std::abs(t - m_selectedBeatSec) <= 1e-4) {
-                emit manualToggleRequested(t);   // 同一拍子再击 → toggle
+                emit manualToggleRequested(t);  // 同一拍子再击 → toggle
             } else {
-                setSelectedBeatSec(t);           // 选中（或换选）
+                setSelectedBeatSec(t);  // 选中（或换选）
             }
         }
         requestSeek(event->position().x(), event->position().y());
@@ -226,11 +222,14 @@ void SliceWaveformItem::mouseReleaseEvent(QMouseEvent* event) {
 
 void SliceWaveformItem::wheelEvent(QWheelEvent* event) {
     const int dy = event->angleDelta().y();
-    if (dy == 0) { event->ignore(); return; }
+    if (dy == 0) {
+        event->ignore();
+        return;
+    }
     if (event->modifiers() & Qt::ControlModifier) {
-        emit zoomRequested(dy > 0 ? 1 : -1);   // Ctrl+滚轮 = 缩放（QML 换档）
+        emit zoomRequested(dy > 0 ? 1 : -1);  // Ctrl+滚轮 = 缩放（QML 换档）
     } else {
-        emit scrollRequested(dy > 0 ? -1 : 1); // 滚轮 = 整行滚动（QML 改 scrollRow）
+        emit scrollRequested(dy > 0 ? -1 : 1);  // 滚轮 = 整行滚动（QML 改 scrollRow）
     }
     event->accept();
 }
@@ -249,8 +248,7 @@ void SliceWaveformItem::paint(QPainter* p) {
     const auto pyr = ws ? ws->waveformPyramid() : nullptr;
     if (!ws || !pyr || !pyr->valid()) {
         p->setPen(th ? th->textFaint() : QColor(QStringLiteral("#6b7484")));
-        p->drawText(QRectF(0, 0, w, h), Qt::AlignCenter,
-                    QStringLiteral("导入参考音频后显示波形"));
+        p->drawText(QRectF(0, 0, w, h), Qt::AlignCenter, QStringLiteral("导入参考音频后显示波形"));
         return;
     }
 
@@ -284,8 +282,8 @@ void SliceWaveformItem::paint(QPainter* p) {
         const qreal top = i * rowH;
         const QRectF plot(kGutterW, top, plotW, rowH);
         if (rowIdx < total)
-            drawRow(p, plot, rowIdx * rs, (rowIdx + 1) * rs, ws, pyr,
-                    pcmData, pcmFrames, pxPerSec, amp, srRate);
+            drawRow(p, plot, rowIdx * rs, (rowIdx + 1) * rs, ws, pyr, pcmData, pcmFrames, pxPerSec,
+                    amp, srRate);
         // 行分隔线
         p->fillRect(QRectF(0, top + rowH - 1.0, w, 1.0), rowSep);
         // 行标签（左侧 gutter；行内容在右侧）
@@ -295,9 +293,9 @@ void SliceWaveformItem::paint(QPainter* p) {
 }
 
 void SliceWaveformItem::drawRow(QPainter* p, const QRectF& plot, double t0, double t1,
-                                const SliceWorkspace* ws, const beatbench::audio::WaveformPyramid* pyr,
-                                const float* pcm, std::size_t pcmFrames,
-                                qreal pxPerSec, qreal amp, double sr) const {
+                                const SliceWorkspace* ws,
+                                const beatbench::audio::WaveformPyramid* pyr, const float* pcm,
+                                std::size_t pcmFrames, qreal pxPerSec, qreal amp, double sr) const {
     const ThemeManager* th = themeObj();
     const qreal w = plot.width();
     const qreal h = plot.height();
@@ -336,12 +334,10 @@ void SliceWaveformItem::drawRow(QPainter* p, const QRectF& plot, double t0, doub
             r = pyr ? pyr->range(f0, std::max(f0 + 1, f1)) : r;
         }
         if (amp > 1e-6 && (r.max != 0.0f || r.min != 0.0f)) {
-            const qreal yTop = centerY -
-                static_cast<qreal>(r.max) / amp * (h / 2.0 - 1.0);
-            const qreal yBot = centerY -
-                static_cast<qreal>(r.min) / amp * (h / 2.0 - 1.0);
-            p->fillRect(QRectF(plot.x() + i, yTop, 1.0,
-                               std::max<qreal>(1.0, yBot - yTop)), waveCol);
+            const qreal yTop = centerY - static_cast<qreal>(r.max) / amp * (h / 2.0 - 1.0);
+            const qreal yBot = centerY - static_cast<qreal>(r.min) / amp * (h / 2.0 - 1.0);
+            p->fillRect(QRectF(plot.x() + i, yTop, 1.0, std::max<qreal>(1.0, yBot - yTop)),
+                        waveCol);
         }
     }
     // ---- 中央轴（行内） ----
@@ -440,8 +436,7 @@ void SliceWaveformItem::drawGridLines(QPainter* p, const QRectF& plot, double t0
     if (m_gridBpm <= 0.0) return;
     const int sub = std::max(1, m_gridSubdivision);
     const int bpmCount = std::max(1, m_gridBeatsPerMeasure);
-    const double cell = 60.0 / static_cast<double>(m_gridBpm) /
-                        static_cast<double>(sub);
+    const double cell = 60.0 / static_cast<double>(m_gridBpm) / static_cast<double>(sub);
     if (!std::isfinite(cell) || cell <= 0.0) return;
 
     const double offset = ws->offsetSecD();
@@ -464,7 +459,7 @@ void SliceWaveformItem::drawGridLines(QPainter* p, const QRectF& plot, double t0
     if (k0 < 0) k0 = 0;
     constexpr int kMaxLines = 20000;
     int drawn = 0;
-    for (int k = k0; ; ++k, ++drawn) {
+    for (int k = k0;; ++k, ++drawn) {
         if (drawn > kMaxLines) break;
         const double t = offset + static_cast<double>(k) * cell;
         if (t > t1) break;
@@ -494,15 +489,14 @@ void SliceWaveformItem::drawGridLines(QPainter* p, const QRectF& plot, double t0
     }
 }
 
-void SliceWaveformItem::drawOriginMarker(QPainter* p, qreal x,
-                                         const ThemeManager* th, double t,
+void SliceWaveformItem::drawOriginMarker(QPainter* p, qreal x, const ThemeManager* th, double t,
                                          const QRectF& plot) const {
     // 顶部 tab（起点标记）：一条亮色短横 + 秒数标签（mono），clamp 在行内。
     const QColor col = th ? th->accent() : QColor(QStringLiteral("#22d3ee"));
     const qreal tabW = 10.0;
     const qreal tabH = 8.0;
-    const qreal tabLeft = std::clamp(x - tabW / 2.0, plot.x(),
-                                     plot.x() + std::max(0.0, plot.width() - tabW));
+    const qreal tabLeft =
+        std::clamp(x - tabW / 2.0, plot.x(), plot.x() + std::max(0.0, plot.width() - tabW));
     p->fillRect(QRectF(tabLeft, plot.y(), tabW, tabH), col);
     const QString label = QStringLiteral("%1s").arg(t, 0, 'f', 3);
     QFont f = p->font();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 解码产物：PCM 常驻格式（音频层内部约定，doc/02 §5.1/§8「回调内只做整数插值」）。
+// 解码产物：PCM 常驻格式（音频层内部约定：回调内只做整数插值）。
 // 解码器负责把任意源格式（wav/ogg/mp3/flac，任意声道数/采样率/位深）
 // 统一转换成此格式：float32 交错、stereo、源采样率。
 // 重采样不在解码期做——混音回调内按目标设备采样率整数插值（源率/设备率解耦，
@@ -43,12 +43,8 @@ struct DecodedSample {
     std::string path;
 
     /// 实际 PCM 视图（自持 or 共享）。
-    const std::vector<float>& pcm() const {
-        return sharedPcm ? *sharedPcm : interleavedStereo;
-    }
-    std::size_t frameCount() const {
-        return pcm().size() / 2;
-    }
+    const std::vector<float>& pcm() const { return sharedPcm ? *sharedPcm : interleavedStereo; }
+    std::size_t frameCount() const { return pcm().size() / 2; }
     /// 总时长（秒；空采样 → 0）。
     double durationSeconds() const {
         return sampleRate > 0.0 ? static_cast<double>(frameCount()) / sampleRate : 0.0;
@@ -59,32 +55,44 @@ struct DecodedSample {
     /// 释放一份持有；true = 计数归零（调用者承担析构职责，见文件头协议）。
     bool unref() { return m_refs.fetch_sub(1, std::memory_order_acq_rel) == 1; }
 
-private:
+   private:
     std::atomic<std::uint32_t> m_refs{1};  ///< 初始 1 = 创建者持有
 };
 
 /// 引用句柄（RAII）：析构 = unref（归零即 delete）。
 /// ⚠️ 只能用在 UI 线程 / 解码线程；回调线程（render）绝不持有 SampleRef。
 class SampleRef {
-public:
+   public:
     SampleRef() = default;
-    explicit SampleRef(DecodedSample* s) : m_s(s) { if (m_s) m_s->ref(); }
-    SampleRef(const SampleRef& o) : m_s(o.m_s) { if (m_s) m_s->ref(); }
+    explicit SampleRef(DecodedSample* s) : m_s(s) {
+        if (m_s) m_s->ref();
+    }
+    SampleRef(const SampleRef& o) : m_s(o.m_s) {
+        if (m_s) m_s->ref();
+    }
     SampleRef(SampleRef&& o) noexcept : m_s(o.m_s) { o.m_s = nullptr; }
     ~SampleRef() { release(); }
     SampleRef& operator=(const SampleRef& o) {
-        if (this != &o) { release(); m_s = o.m_s; if (m_s) m_s->ref(); }
+        if (this != &o) {
+            release();
+            m_s = o.m_s;
+            if (m_s) m_s->ref();
+        }
         return *this;
     }
     SampleRef& operator=(SampleRef&& o) noexcept {
-        if (this != &o) { release(); m_s = o.m_s; o.m_s = nullptr; }
+        if (this != &o) {
+            release();
+            m_s = o.m_s;
+            o.m_s = nullptr;
+        }
         return *this;
     }
     void reset() { release(); }
     DecodedSample* get() const { return m_s; }
     explicit operator bool() const { return m_s != nullptr; }
 
-private:
+   private:
     void release() {
         if (!m_s) return;
         DecodedSample* p = m_s;

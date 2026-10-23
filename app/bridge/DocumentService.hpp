@@ -19,7 +19,7 @@ class DocumentService : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList instances READ instances NOTIFY instancesChanged)
     Q_PROPERTY(ChartSession* currentSession READ currentSession NOTIFY currentSessionChanged)
-public:
+   public:
     explicit DocumentService(QObject* parent = nullptr);
     ~DocumentService() override;
     /// 单开/多开共用一组文档；每项 {id,path,label,dirty,active,session}。
@@ -55,11 +55,11 @@ public:
     static QString normalizedPath(const QString& path);
     static QString findSessionId(const QString& path);
 
-signals:
+   signals:
     void instancesChanged();
     void currentSessionChanged();
 
-private:
+   private:
     QVariantMap openDocument(const QString& path, bool activateDocument);
     std::map<std::string, std::unique_ptr<ChartSession>> m_sessions;
     QString m_currentId;

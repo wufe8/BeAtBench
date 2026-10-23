@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 首选项对话框（M4.2 音频设置页 + 显示页占位；Ableton Live 式左导航 + 右侧分区）。
-// 结构（doc/04 §M4.2）：
+// 结构（doc/development.md 六、）：
 //   左导航（Display/Audio/Editor/Shortcuts 骨架）+ 右侧内容（StackLayout）。
 //   本轮实现 = 音频分区（设备/API/采样率/缓冲/主音量/测试音/延迟实况）；
 //   显示分区 = 皮肤切换器（视图→皮肤 迁入；菜单「视图→皮肤」入口保留）。
 // 数据源 = audioEngine（context property；M4.2 设置方法 Q_INVOKABLE）。
-// 双语言纪律（doc/08 §2）：C++ 提供数据/逻辑，本文件只做表现与信号转发。
+// 双语言纪律（doc/skin-system.md 二、）：C++ 提供数据/逻辑，本文件只做表现与信号转发。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts

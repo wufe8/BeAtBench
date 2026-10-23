@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -11,7 +12,7 @@ namespace beatbench::codec {
 
 /// 格式无关诊断（协议/CLI 展示共用；提升自 bms::Diagnostic 的通用版）。
 /// 各 codec 内部的专有诊断类型由 adapter 转换到本类型。
-enum class Severity { Error, Warning, Info };
+enum class Severity : std::uint8_t { Error, Warning, Info };
 
 struct Diagnostic {
     Severity severity = Severity::Info;
@@ -40,11 +41,11 @@ struct WriteOptions {
     bool overwrite = false;
 };
 
-/// 格式编解码器接口（doc/06 规划、M3 落地）：
+/// 格式编解码器接口（doc/command-protocol.md 规划、M3 落地）：
 /// 「换格式 = 换映射表」的核心兑现点。每个格式注册一个 Codec，
 /// 声明扩展名、支持的模式集合、读写入口；GUI/CLI/命令共用同一注册表。
 class Codec {
-public:
+   public:
     virtual ~Codec() = default;
 
     /// 格式稳定 id（协议用，如 "bms"）。大小写敏感，注册表全局唯一。

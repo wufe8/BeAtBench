@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 最小 JSON 模块测试：解析严格性 / 转义 / 代理对 / 序列化往返 / 错误路径。
-#include <cmath>
+#include "beatbench/core/json/Json.hpp"
 
 #include <gtest/gtest.h>
 
-#include "beatbench/core/json/Json.hpp"
+#include <cmath>
 
 using beatbench::json::Json;
 using beatbench::json::JsonError;
 
 namespace {
 
-Json parse_ok(const char* text) {
-    return Json::parse(text);
-}
+Json parse_ok(const char* text) { return Json::parse(text); }
 
 }  // namespace
 

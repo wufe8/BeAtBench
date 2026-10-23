@@ -2,14 +2,15 @@
 // #RANDOM/#IF/#SWITCH/#SETRANDOM 选择块展开（文本层预处理）。
 // 语义：单次播放内固定——选中分支替换进文本流，未选分支丢弃。
 // 编辑器保持 raw 保真（read_bms 不展开）；播放/时序链路先 expand_variants 再 read_bms。
-#include "beatbench/core/bms/BmsCodec.hpp"
-
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "beatbench/core/bms/BmsCodec.hpp"
 
 namespace beatbench::bms {
 namespace {
@@ -69,21 +70,18 @@ ExprResult eval_operand(std::string_view s, std::uint32_t random_var) {
 }
 
 // #IF 条件求值：支持 "A == B" / "A != B"（A/B 为数值或 RANDOM）；否则非 0 为真
-bool eval_if(std::string_view expr, std::uint32_t random_var,
-             std::vector<Diagnostic>* diags, int line) {
+bool eval_if(std::string_view expr, std::uint32_t random_var, std::vector<Diagnostic>* diags,
+             int line) {
     const auto eq = expr.find("==");
     const auto ne = expr.find("!=");
-    const auto op = (ne != std::string_view::npos &&
-                     (eq == std::string_view::npos || ne < eq))
-                        ? ne
-                        : eq;
+    const auto op =
+        (ne != std::string_view::npos && (eq == std::string_view::npos || ne < eq)) ? ne : eq;
     if (op == std::string_view::npos) {
         const auto r = eval_operand(expr, random_var);
         if (!r.ok) {
             if (diags) {
-                diags->push_back(
-                    {Severity::Warning,
-                     "无法求值的 #IF 条件（按真处理）: " + std::string(expr), line});
+                diags->push_back({Severity::Warning,
+                                  "无法求值的 #IF 条件（按真处理）: " + std::string(expr), line});
             }
             return true;
         }
@@ -94,8 +92,7 @@ bool eval_if(std::string_view expr, std::uint32_t random_var,
     if (!a.ok || !b.ok) {
         if (diags) {
             diags->push_back(
-                {Severity::Warning,
-                 "无法求值的 #IF 条件（按真处理）: " + std::string(expr), line});
+                {Severity::Warning, "无法求值的 #IF 条件（按真处理）: " + std::string(expr), line});
         }
         return true;
     }
@@ -104,6 +101,7 @@ bool eval_if(std::string_view expr, std::uint32_t random_var,
 
 }  // namespace
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——#RANDOM/#IF 块展开状态机
 std::string expand_variants(std::string_view text, std::uint32_t random_value,
                             std::vector<Diagnostic>* diags) {
     // ---- 拆行 ----
@@ -135,13 +133,13 @@ std::string expand_variants(std::string_view text, std::uint32_t random_value,
     out.reserve(text.size());
 
     // 选择块状态
-    enum class BlockKind { Random, If, Switch };
+    enum class BlockKind : std::uint8_t { Random, If, Switch };
     struct Block {
         BlockKind kind = BlockKind::Random;
-        double arg = 0;                        // RANDOM: 段数；SWITCH: 选择值
-        std::vector<std::string> conds;        // IF: 分支条件；SWITCH: CASE 值
+        double arg = 0;                                  // RANDOM: 段数；SWITCH: 选择值
+        std::vector<std::string> conds;                  // IF: 分支条件；SWITCH: CASE 值
         std::vector<std::vector<std::string>> branches;  // 各分支行（已拆行）
-        std::vector<std::string> current;      // 正在收集的分支
+        std::vector<std::string> current;                // 正在收集的分支
         bool has_else = false;
         int start_line = 0;
     };

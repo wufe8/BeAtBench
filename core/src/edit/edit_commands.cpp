@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 编辑命令实现：note.put / note.move / note.delete + EditorSession（undo/redo 栈）。
-// 设计（02 §6.1 / 01 §5.6）：命令 = 文档变更唯一操作面，apply/invert 精确互逆，
+// 设计（doc/core-model.md 二、）：命令 = 文档变更唯一操作面，apply/invert 精确互逆，
 // merge_with 合并连续操作；Selection/Viewport 不入栈（调用方自持）。
 //
 // LN 配对一致性策略（下标易错，改为值级重定位）：
@@ -8,13 +8,6 @@
 //     「伙伴的 (measure,pos,lane,sample) 值」重新定位下标。
 //   - 配对关系本身（谁和谁是一对）由命令快照携带：apply 记录被操作 note
 //     的完整状态（含 ln_pair 指向的伙伴快照），invert 用快照精确恢复。
-#include "beatbench/core/edit/EditorSession.hpp"
-#include "beatbench/core/edit/Selection.hpp"
-#include "beatbench/core/ChartMode.hpp"
-#include "beatbench/core/LnPairing.hpp"
-#include "beatbench/core/codec/BmsChannelMaps.hpp"
-#include "beatbench/core/bms/BmsUtil.hpp"  // c36/c62 id 转换（LNOBJ 文本 → 数值 id）
-
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -28,15 +21,25 @@
 #include <utility>
 #include <vector>
 
+#include "beatbench/core/ChartMode.hpp"
+#include "beatbench/core/LnPairing.hpp"
+#include "beatbench/core/bms/BmsUtil.hpp"  // c36/c62 id 转换（LNOBJ 文本 → 数值 id）
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
+#include "beatbench/core/edit/EditorSession.hpp"
+#include "beatbench/core/edit/Selection.hpp"
+
 namespace beatbench::edit {
 
 // ---------- TimingKind ----------
 
 std::string_view timing_kind_name(TimingKind kind) {
     switch (kind) {
-        case TimingKind::Bpm: return "bpm";
-        case TimingKind::Stop: return "stop";
-        case TimingKind::Measure: return "measure";
+        case TimingKind::Bpm:
+            return "bpm";
+        case TimingKind::Stop:
+            return "stop";
+        case TimingKind::Measure:
+            return "measure";
     }
     return "";
 }
@@ -67,14 +70,13 @@ std::size_t lower_bound_pos(const std::vector<Event<Note>>& notes, std::uint32_t
 
 // 找 (measure, pos, lane, sample) 匹配的 note 下标（首个命中）
 // ⚠️ 不做 (measure,pos) 二分：parser 按通道行序 push，notes 在同一 measure 内不保证
-// pos 升序（doc/04 §6 的「事件按 (measure,pos) 升序」约定未落实；2026-09 实测 Del 失效：
+// pos 升序（doc/development.md 六、 的「事件按 (measure,pos) 升序」约定未落实；2026-09 实测 Del 失效：
 // lower_bound 定位错位导致 1/4 之类 note 永远匹配不上）。改为 measure 段线性扫描
 // （行序 measure 单调递增 → 同 measure 连续段；命中率与代价可控）。
 // sub_line：BGM 行序号消歧（同 (measure,pos,lane,sample) 的 Bgm note 靠它区分；
 // 非 Bgm 传 0 且不参与匹配）。
-std::optional<std::size_t> find_note(const std::vector<Event<Note>>& notes,
-                                     std::uint32_t measure, const Rational& pos,
-                                     const Lane& lane, std::uint32_t sample,
+std::optional<std::size_t> find_note(const std::vector<Event<Note>>& notes, std::uint32_t measure,
+                                     const Rational& pos, const Lane& lane, std::uint32_t sample,
                                      std::uint32_t sub_line = 0,
                                      std::optional<bool> ln_channel = std::nullopt,
                                      std::optional<NoteKind> kind = std::nullopt) {
@@ -88,8 +90,10 @@ std::optional<std::size_t> find_note(const std::vector<Event<Note>>& notes,
             if (found) {
                 const auto& first = notes[*found].value;
                 if (first.ln_channel != n.ln_channel || first.kind != n.kind)
-                    throw std::invalid_argument("Ambiguous note reference: specify ln_channel and note_kind");
-            } else found = static_cast<std::size_t>(it - notes.begin());
+                    throw std::invalid_argument(
+                        "Ambiguous note reference: specify ln_channel and note_kind");
+            } else
+                found = static_cast<std::size_t>(it - notes.begin());
         }
     }
     return found;
@@ -113,9 +117,7 @@ std::optional<std::size_t> find_partner(const std::vector<Event<Note>>& notes,
 
 // Shared parser/editor derivation: LN-channel chronology and ordinary LNOBJ
 // are independent of LNTYPE and never change source note identity.
-void rebuild_ln_pairs(Chart& chart) {
-    rebuild_note_ln_pairs(chart);
-}
+void rebuild_ln_pairs(Chart& chart) { rebuild_note_ln_pairs(chart); }
 
 // 互指一致性检查（测试辅助）
 bool ln_consistent(const std::vector<Event<Note>>& notes) {
@@ -145,9 +147,7 @@ void shift_pairs_after(std::vector<Event<Note>>& notes, std::size_t at, int delt
 
 // 值读取（按种类取 value/count/beats）
 double timing_value(const Event<Bpm>& e) { return e.value.value; }
-double timing_value(const Event<Stop>& e) {
-    return static_cast<double>(e.value.count);
-}
+double timing_value(const Event<Stop>& e) { return static_cast<double>(e.value.count); }
 double timing_value(const Event<MeasureLen>& e) { return e.value.beats; }
 
 // 在按 (measure,pos) 升序的容器中找首个 >= (measure,pos) 的位置（插入点）
@@ -155,20 +155,19 @@ template <typename T>
 std::size_t lower_bound_event(const std::vector<Event<T>>& evs, std::uint32_t measure,
                               const Rational& pos) {
     const Event<T> probe{measure, pos, {}};
-    return static_cast<std::size_t>(
-        std::lower_bound(evs.begin(), evs.end(), probe,
-                         [](const Event<T>& a, const Event<T>& b) {
-                             if (a.measure != b.measure) return a.measure < b.measure;
-                             return a.pos < b.pos;
-                         }) -
-        evs.begin());
+    return static_cast<std::size_t>(std::lower_bound(evs.begin(), evs.end(), probe,
+                                                     [](const Event<T>& a, const Event<T>& b) {
+                                                         if (a.measure != b.measure)
+                                                             return a.measure < b.measure;
+                                                         return a.pos < b.pos;
+                                                     }) -
+                                    evs.begin());
 }
 
 // 找 (measure, pos) 处事件区间 [begin, end)（容器有序）
 template <typename T>
 std::pair<std::size_t, std::size_t> find_event_range(const std::vector<Event<T>>& evs,
-                                                     std::uint32_t measure,
-                                                     const Rational& pos) {
+                                                     std::uint32_t measure, const Rational& pos) {
     const std::size_t lo = lower_bound_event(evs, measure, pos);
     std::size_t hi = lo;
     while (hi < evs.size() && evs[hi].measure == measure && evs[hi].pos == pos) ++hi;
@@ -197,7 +196,7 @@ std::uint64_t next_document_revision() {
     static std::atomic<std::uint64_t> next{1};
     return next.fetch_add(1, std::memory_order_relaxed);
 }
-}
+}  // namespace
 
 EditorSession::EditorSession() = default;
 
@@ -236,8 +235,7 @@ bool EditorSession::exec(std::unique_ptr<EditCommand> cmd) {
     // 否则无法撤回到保存点，且代际号会与清洁点撞车（保存→撤销→再改被误判干净）。
     const bool can_merge = m_redo.empty() && !m_undo.empty() &&
                            m_undo_generation.back() == m_generation &&
-                           m_generation != m_clean_generation &&
-                           m_undo.back()->merge_with(*cmd);
+                           m_generation != m_clean_generation && m_undo.back()->merge_with(*cmd);
     m_generation = m_next_generation++;
     m_revision = next_document_revision();
     if (can_merge) {
@@ -296,7 +294,8 @@ void EditorSession::maybe_persist() {
         }
     }
     if (m_autosave) {
-        (void)m_persist_hook(*m_chart, m_path, nullptr);  // 自动保存失败下次再试；不覆盖 backup 错误
+        (void)m_persist_hook(*m_chart, m_path,
+                             nullptr);  // 自动保存失败下次再试；不覆盖 backup 错误
     }
 }
 
@@ -310,11 +309,15 @@ std::string EditorSession::redo_label() const {
 
 // ---------- PutNoteCommand ----------
 
-PutNoteCommand::PutNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
-                               std::uint32_t sample, bool ln_kind, NoteKind kind,
-                               std::uint32_t sub_line)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_ln_kind(ln_kind),
-      m_kind(kind), m_sub_line(sub_line) {}
+PutNoteCommand::PutNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
+                               bool ln_kind, NoteKind kind, std::uint32_t sub_line)
+    : m_measure(measure),
+      m_pos(pos),
+      m_lane(lane),
+      m_sample(sample),
+      m_ln_kind(ln_kind),
+      m_kind(kind),
+      m_sub_line(sub_line) {}
 
 void PutNoteCommand::apply(Chart& chart) {
     const std::size_t at = lower_bound_pos(chart.notes, m_measure, m_pos);
@@ -347,24 +350,32 @@ void PutNoteCommand::invert(Chart& chart) {
 }
 
 std::string PutNoteCommand::describe() const {
-    std::string s = "放置 note (m" + std::to_string(m_measure) + " @" +
-                    std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
-    if (m_kind == NoteKind::Landmine) s += " 地雷";
-    else if (m_ln_kind) s += " LN";
+    std::string s = "放置 note (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) +
+                    "/" + std::to_string(m_pos.den) + ")";
+    if (m_kind == NoteKind::Landmine)
+        s += " 地雷";
+    else if (m_ln_kind)
+        s += " LN";
     return s;
 }
 
 // ---------- MoveNoteCommand ----------
 
 MoveNoteCommand::MoveNoteCommand(std::uint32_t from_measure, Rational from_pos, Lane lane,
-                                 std::uint32_t sample, std::uint32_t to_measure,
-                                 Rational to_pos, bool move_ln_pair,
-                                 std::optional<Lane> to_lane,
+                                 std::uint32_t sample, std::uint32_t to_measure, Rational to_pos,
+                                 bool move_ln_pair, std::optional<Lane> to_lane,
                                  std::uint32_t from_sub_line,
                                  std::optional<std::uint32_t> to_sub_line)
-    : m_from_measure(from_measure), m_from_pos(from_pos), m_lane(lane), m_sample(sample),
-      m_to_measure(to_measure), m_to_pos(to_pos), m_move_ln_pair(move_ln_pair),
-      m_to_lane(to_lane), m_from_sub_line(from_sub_line), m_to_sub_line(to_sub_line) {}
+    : m_from_measure(from_measure),
+      m_from_pos(from_pos),
+      m_lane(lane),
+      m_sample(sample),
+      m_to_measure(to_measure),
+      m_to_pos(to_pos),
+      m_move_ln_pair(move_ln_pair),
+      m_to_lane(to_lane),
+      m_from_sub_line(from_sub_line),
+      m_to_sub_line(to_sub_line) {}
 
 // Bind all move sources before a batch writes any target. This prevents an earlier
 // target (same lane/sample/time) from being mistaken for a later source.
@@ -379,8 +390,10 @@ void MoveNoteCommand::bind_source(const Chart& chart, std::unordered_set<std::si
     const auto& source = chart.notes[*idx];
     const Lane target_lane = m_to_lane.value_or(source.value.lane);
     if (bms::bms_channel_for_mode(chart.mode_id.value_or("sp7k"), target_lane,
-                                  source.value.ln_channel, source.value.kind).empty())
-        throw std::invalid_argument("Move target cannot preserve this note's source channel; convert explicitly first");
+                                  source.value.ln_channel, source.value.kind)
+            .empty())
+        throw std::invalid_argument(
+            "Move target cannot preserve this note's source channel; convert explicitly first");
     m_index = idx;
     m_original_index = idx;
     m_moved = source;
@@ -395,18 +408,21 @@ void MoveNoteCommand::apply_bound(Chart& chart) {
     // Only the selected note moves. Source channel, sample and kind never depend
     // on its old/new partner; an orphan is retained for lint, not converted.
     if (target.value.lane.kind == LaneKind::Bgm) {
-        if (m_to_sub_line) target.value.sub_line = *m_to_sub_line;
+        if (m_to_sub_line)
+            target.value.sub_line = *m_to_sub_line;
         else {
             std::set<std::uint32_t> used;
             for (std::size_t i = 0; i < chart.notes.size(); ++i) {
                 const auto& n = chart.notes[i];
                 if (i != *m_index && n.measure == target.measure && n.pos == target.pos &&
-                    n.value.lane == target.value.lane) used.insert(n.value.sub_line);
+                    n.value.lane == target.value.lane)
+                    used.insert(n.value.sub_line);
             }
             target.value.sub_line = 0;
             while (used.contains(target.value.sub_line)) ++target.value.sub_line;
         }
-    } else target.value.sub_line = 0;
+    } else
+        target.value.sub_line = 0;
     chart.notes[*m_index] = target;
     m_target = target;
 }
@@ -421,7 +437,8 @@ void MoveNoteCommand::bind_target(const Chart& chart, std::unordered_set<std::si
         if (claimed.contains(i) || e.measure != t.measure || e.pos != t.pos ||
             n.lane != t.value.lane || n.sample != t.value.sample ||
             n.ln_channel != t.value.ln_channel || n.kind != t.value.kind ||
-            n.sub_line != t.value.sub_line) continue;
+            n.sub_line != t.value.sub_line)
+            continue;
         m_index = i;
         claimed.insert(i);
         break;
@@ -434,15 +451,23 @@ void MoveNoteCommand::invert_bound(Chart& chart) {
     chart.notes[*m_index] = *m_moved;
 }
 
-void MoveNoteCommand::reposition(Chart& chart, const std::vector<MoveNoteCommand*>& batch, bool undo) {
+void MoveNoteCommand::reposition(Chart& chart, const std::vector<MoveNoteCommand*>& batch,
+                                 bool undo) {
     std::vector<MoveNoteCommand*> applied;
-    for (auto* c : batch) if (c->m_index && c->m_moved && c->m_target) applied.push_back(c);
+    for (auto* c : batch)
+        if (c->m_index && c->m_moved && c->m_target) applied.push_back(c);
     // Erase selected objects only; never reorder unselected same-position objects.
-    std::sort(applied.begin(), applied.end(), [](auto* a, auto* b) { return a->m_index > b->m_index; });
-    for (auto* c : applied)
-        chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(*c->m_index));
-    std::sort(applied.begin(), applied.end(), [](auto* a, auto* b) { return a->m_original_index < b->m_original_index; });
+    std::sort(applied.begin(), applied.end(),
+              [](auto* a, auto* b) { return a->m_index > b->m_index; });
     for (auto* c : applied) {
+        if (!c->m_index) throw std::logic_error("Bound move index missing during reposition");
+        chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(*c->m_index));
+    }
+    std::sort(applied.begin(), applied.end(),
+              [](auto* a, auto* b) { return a->m_original_index < b->m_original_index; });
+    for (auto* c : applied) {
+        if (!c->m_moved || !c->m_target || !c->m_original_index)
+            throw std::logic_error("Bound move snapshot missing during reposition");
         const auto& e = undo ? *c->m_moved : *c->m_target;
         const auto at = undo ? std::min(*c->m_original_index, chart.notes.size())
                              : lower_bound_pos(chart.notes, e.measure, e.pos);
@@ -460,6 +485,7 @@ void MoveNoteCommand::apply(Chart& chart) {
     reposition(chart, {this}, false);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——逆操作精确回滚分支
 void MoveNoteCommand::invert(Chart& chart) {
     std::unordered_set<std::size_t> claimed;
     bind_target(chart, claimed);
@@ -475,7 +501,8 @@ bool MoveNoteCommand::merge_with(const EditCommand& next) {
     if (end.measure != start.measure || end.pos != start.pos ||
         end.value.lane != start.value.lane || end.value.sample != start.value.sample ||
         end.value.ln_channel != start.value.ln_channel || end.value.kind != start.value.kind ||
-        end.value.sub_line != start.value.sub_line) return false;
+        end.value.sub_line != start.value.sub_line)
+        return false;
     m_to_measure = mv->m_to_measure;
     m_to_pos = mv->m_to_pos;
     m_to_lane = mv->m_to_lane;
@@ -498,7 +525,8 @@ ToggleLnCommand::ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane,
     : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line) {}
 
 void ToggleLnCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line, m_source_ln_channel, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
+                               m_source_ln_channel, m_source_kind);
     if (!idx) return;
     // Explicit conversion of this selected source channel only; no partner
     // lookup, sample replacement or LNTYPE-dependent implicit conversion.
@@ -510,7 +538,8 @@ void ToggleLnCommand::apply(Chart& chart) {
 
 void ToggleLnCommand::invert(Chart& chart) {
     if (!m_did_change) return;
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line, !m_was_ln, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
+                               !m_was_ln, m_source_kind);
     if (!idx) return;
     // 反向：只翻回本 note 的 ln_channel（原伙伴标记逻辑已去——与 apply 对称）
     chart.notes[*idx].value.ln_channel = m_was_ln;
@@ -529,21 +558,30 @@ ConvertNoteCommand::ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane
                                        std::uint32_t sample, std::uint32_t sub_line,
                                        ConvertTarget target, std::uint32_t to_measure,
                                        Rational to_pos)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line),
-      m_target(target), m_to_measure(to_measure), m_to_pos(to_pos) {}
+    : m_measure(measure),
+      m_pos(pos),
+      m_lane(lane),
+      m_sample(sample),
+      m_sub_line(sub_line),
+      m_target(target),
+      m_to_measure(to_measure),
+      m_to_pos(to_pos) {}
 
 void ConvertNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line, m_source_ln_channel, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
+                               m_source_ln_channel, m_source_kind);
     if (!idx) return;  // 找不到 → 无操作
     m_removed = chart.notes[*idx];
     m_removed_index = *idx;
     m_partner.reset();
     // 移除 note（LN 配对若存在：断开伙伴 ln_pair，快照保存供 invert 恢复）
     if (const auto p = m_removed->value.ln_pair) {
-        if (*p < chart.notes.size() && chart.notes[*p].value.ln_pair &&
-            *chart.notes[*p].value.ln_pair == *idx) {
-            m_partner = chart.notes[*p];
-            chart.notes[*p].value.ln_pair.reset();
+        if (*p < chart.notes.size()) {  // 先验范围，再解引用（悬挂 ln_pair 不得越界读）
+            const auto pp = chart.notes[*p].value.ln_pair;
+            if (pp && *pp == *idx) {
+                m_partner = chart.notes[*p];
+                chart.notes[*p].value.ln_pair.reset();
+            }
         }
     }
     chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(*idx));
@@ -654,15 +692,27 @@ void ConvertNoteCommand::invert(Chart& chart) {
 }
 
 std::string ConvertNoteCommand::describe() const {
-    std::string s = "转换 note (m" + std::to_string(m_measure) + " @" +
-                    std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    std::string s = "转换 note (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) +
+                    "/" + std::to_string(m_pos.den) + ")";
     switch (m_target) {
-        case ConvertTarget::BgaBase: s += " → BGA"; break;
-        case ConvertTarget::BgaPoor: s += " → POOR"; break;
-        case ConvertTarget::BgaLayer: s += " → LAYER"; break;
-        case ConvertTarget::BgaLayer2: s += " → LAYER2"; break;
-        case ConvertTarget::Bpm: s += " → BPM"; break;
-        case ConvertTarget::Stop: s += " → STOP"; break;
+        case ConvertTarget::BgaBase:
+            s += " → BGA";
+            break;
+        case ConvertTarget::BgaPoor:
+            s += " → POOR";
+            break;
+        case ConvertTarget::BgaLayer:
+            s += " → LAYER";
+            break;
+        case ConvertTarget::BgaLayer2:
+            s += " → LAYER2";
+            break;
+        case ConvertTarget::Bpm:
+            s += " → BPM";
+            break;
+        case ConvertTarget::Stop:
+            s += " → STOP";
+            break;
     }
     return s;
 }
@@ -674,7 +724,8 @@ DeleteNoteCommand::DeleteNoteCommand(std::uint32_t measure, Rational pos, Lane l
     : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line) {}
 
 void DeleteNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line, m_source_ln_channel, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
+                               m_source_ln_channel, m_source_kind);
     if (!idx) return;
     m_removed = chart.notes[*idx];
     m_removed_index = *idx;
@@ -704,8 +755,8 @@ void DeleteNoteCommand::invert(Chart& chart) {
 }
 
 std::string DeleteNoteCommand::describe() const {
-    return "删除 note (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) +
-           "/" + std::to_string(m_pos.den) + ")";
+    return "删除 note (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) + "/" +
+           std::to_string(m_pos.den) + ")";
 }
 
 // ---------- CompositeCommand ----------
@@ -805,6 +856,7 @@ std::string CompositeCommand::describe() const {
 
 // ---------- Selection ----------
 
+// NOLINTNEXTLINE(readability-function-size)——固有分支密度（解析/协议形状），有意保留
 void Selection::add_rect(std::uint32_t measure_lo, std::uint32_t measure_hi,
                          const std::vector<Lane>& lanes, Rational pos_lo, Rational pos_hi,
                          const std::vector<NoteRef>& candidates) {
@@ -837,8 +889,7 @@ PutTimingCommand::PutTimingCommand(TimingKind kind, std::uint32_t measure, Ratio
 // 只对「有 ref_id 字段」的事件类型生效；via 传入指针辅助 lambda。
 template <typename T>
 void set_ref_if_supported(Event<T>& ev, std::optional<std::uint32_t> ref) {
-    if constexpr (std::is_same_v<T, Bpm>) ev.value.ref_id = ref;
-    else if constexpr (std::is_same_v<T, Stop>) ev.value.ref_id = ref;
+    if constexpr (std::is_same_v<T, Bpm> || std::is_same_v<T, Stop>) ev.value.ref_id = ref;
 }
 
 /// 数值 → 紧凑文本（与 bms_writer::format_num 同规：整数无小数点，小数 17 位有效数字）。
@@ -855,6 +906,7 @@ inline std::string format_number(double v) {
     return s;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
 void PutTimingCommand::apply(Chart& chart) {
     m_existed = false;
     m_applied_index.reset();
@@ -886,9 +938,15 @@ void PutTimingCommand::apply(Chart& chart) {
         m_applied_index = lo;
     };
     switch (m_kind) {
-        case TimingKind::Bpm: do_apply(chart.bpm_events); break;
-        case TimingKind::Stop: do_apply(chart.stop_events); break;
-        case TimingKind::Measure: do_apply(chart.measure_events); break;
+        case TimingKind::Bpm:
+            do_apply(chart.bpm_events);
+            break;
+        case TimingKind::Stop:
+            do_apply(chart.stop_events);
+            break;
+        case TimingKind::Measure:
+            do_apply(chart.measure_events);
+            break;
     }
     // 交叉同步（共享 id 语义，2026-09 用户）：替换的是 ref 绑定事件（含显式新 ref）→
     // **该 #BPMxx/#STOPxx 的定义值 = 新事件值**，所有引用该 id 的事件同步刷新。
@@ -909,7 +967,7 @@ void PutTimingCommand::apply(Chart& chart) {
         val = static_cast<double>(chart.stop_events[hi - 1].value.count);
     }
     const std::string text = (m_kind == TimingKind::Stop)
-                                 ? format_number(std::llround(val))
+                                 ? format_number(static_cast<double>(std::llround(val)))
                                  : format_number(val);
     const SampleKind sk = (m_kind == TimingKind::Bpm) ? SampleKind::Bpm : SampleKind::Stop;
     const auto key = std::make_pair(sk, *sync_ref);
@@ -945,6 +1003,7 @@ void PutTimingCommand::apply(Chart& chart) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——逆操作精确回滚分支
 void PutTimingCommand::invert(Chart& chart) {
     const auto do_invert = [&](auto& evs) {
         if (m_existed) {
@@ -965,9 +1024,15 @@ void PutTimingCommand::invert(Chart& chart) {
         m_applied_index.reset();
     };
     switch (m_kind) {
-        case TimingKind::Bpm: do_invert(chart.bpm_events); break;
-        case TimingKind::Stop: do_invert(chart.stop_events); break;
-        case TimingKind::Measure: do_invert(chart.measure_events); break;
+        case TimingKind::Bpm:
+            do_invert(chart.bpm_events);
+            break;
+        case TimingKind::Stop:
+            do_invert(chart.stop_events);
+            break;
+        case TimingKind::Measure:
+            do_invert(chart.measure_events);
+            break;
     }
     // 交叉同步 invert：恢复定义 + 各引用者旧值
     if (m_sync_ref) {
@@ -990,8 +1055,8 @@ void PutTimingCommand::invert(Chart& chart) {
 
 std::string PutTimingCommand::describe() const {
     std::string name(timing_kind_name(m_kind));
-    return "设置 " + name + " (m" + std::to_string(m_measure) + " @" +
-           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    return "设置 " + name + " (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) +
+           "/" + std::to_string(m_pos.den) + ")";
 }
 
 // ---------- DeleteTimingCommand ----------
@@ -1015,9 +1080,15 @@ void DeleteTimingCommand::apply(Chart& chart) {
                   evs.begin() + static_cast<std::ptrdiff_t>(hi));
     };
     switch (m_kind) {
-        case TimingKind::Bpm: do_apply(chart.bpm_events, m_bpm); break;
-        case TimingKind::Stop: do_apply(chart.stop_events, m_stop); break;
-        case TimingKind::Measure: do_apply(chart.measure_events, m_measure_evs); break;
+        case TimingKind::Bpm:
+            do_apply(chart.bpm_events, m_bpm);
+            break;
+        case TimingKind::Stop:
+            do_apply(chart.stop_events, m_stop);
+            break;
+        case TimingKind::Measure:
+            do_apply(chart.measure_events, m_measure_evs);
+            break;
     }
 }
 
@@ -1031,9 +1102,15 @@ void DeleteTimingCommand::invert(Chart& chart) {
         }
     };
     switch (m_kind) {
-        case TimingKind::Bpm: do_invert(chart.bpm_events, m_bpm); break;
-        case TimingKind::Stop: do_invert(chart.stop_events, m_stop); break;
-        case TimingKind::Measure: do_invert(chart.measure_events, m_measure_evs); break;
+        case TimingKind::Bpm:
+            do_invert(chart.bpm_events, m_bpm);
+            break;
+        case TimingKind::Stop:
+            do_invert(chart.stop_events, m_stop);
+            break;
+        case TimingKind::Measure:
+            do_invert(chart.measure_events, m_measure_evs);
+            break;
     }
     m_bpm.clear();
     m_stop.clear();
@@ -1043,8 +1120,8 @@ void DeleteTimingCommand::invert(Chart& chart) {
 
 std::string DeleteTimingCommand::describe() const {
     std::string name(timing_kind_name(m_kind));
-    return "删除 " + name + " (m" + std::to_string(m_measure) + " @" +
-           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    return "删除 " + name + " (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) +
+           "/" + std::to_string(m_pos.den) + ")";
 }
 
 // ---------- BGA 事件命令（bga.put / bga.delete） ----------
@@ -1054,11 +1131,10 @@ std::string DeleteTimingCommand::describe() const {
 
 namespace {
 
-std::optional<std::size_t> find_bga(const std::vector<Event<Bga>>& evs,
-                                    std::uint32_t measure, const Rational& pos, int layer) {
+std::optional<std::size_t> find_bga(const std::vector<Event<Bga>>& evs, std::uint32_t measure,
+                                    const Rational& pos, int layer) {
     for (std::size_t i = 0; i < evs.size(); ++i)
-        if (evs[i].measure == measure && evs[i].pos == pos && evs[i].value.layer == layer)
-            return i;
+        if (evs[i].measure == measure && evs[i].pos == pos && evs[i].value.layer == layer) return i;
     return std::nullopt;
 }
 
@@ -1081,7 +1157,7 @@ void BgaPutCommand::apply(Chart& chart) {
     ev.pos = m_pos;
     ev.value.layer = m_layer;
     ev.value.image.id = m_sample;
-    chart.bga_events.push_back(std::move(ev));
+    chart.bga_events.push_back(ev);
     m_applied_index = chart.bga_events.size() - 1;
 }
 
@@ -1092,13 +1168,14 @@ void BgaPutCommand::invert(Chart& chart) {
         return;
     }
     if (m_applied_index && *m_applied_index < chart.bga_events.size())
-        chart.bga_events.erase(chart.bga_events.begin() + static_cast<std::ptrdiff_t>(*m_applied_index));
+        chart.bga_events.erase(chart.bga_events.begin() +
+                               static_cast<std::ptrdiff_t>(*m_applied_index));
     m_applied_index.reset();
 }
 
 std::string BgaPutCommand::describe() const {
-    return "设置 BGA (m" + std::to_string(m_measure) + " @" +
-           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    return "设置 BGA (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) + "/" +
+           std::to_string(m_pos.den) + ")";
 }
 
 BgaDeleteCommand::BgaDeleteCommand(std::uint32_t measure, Rational pos, int layer)
@@ -1122,8 +1199,8 @@ void BgaDeleteCommand::invert(Chart& chart) {
 }
 
 std::string BgaDeleteCommand::describe() const {
-    return "删除 BGA (m" + std::to_string(m_measure) + " @" +
-           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    return "删除 BGA (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) + "/" +
+           std::to_string(m_pos.den) + ")";
 }
 
 // ---------- ConvertMetaToNoteCommand（BGA/BPM/STOP → note 反转换） ----------
@@ -1131,12 +1208,20 @@ std::string BgaDeleteCommand::describe() const {
 ConvertMetaToNoteCommand::ConvertMetaToNoteCommand(std::string kind, std::uint32_t measure,
                                                    Rational pos, int layer, Lane to_lane,
                                                    std::uint32_t to_measure, Rational to_pos)
-    : m_kind(std::move(kind)), m_measure(measure), m_pos(pos), m_layer(layer),
-      m_to_lane(to_lane), m_to_measure(to_measure), m_to_pos(to_pos) {}
+    : m_kind(std::move(kind)),
+      m_measure(measure),
+      m_pos(pos),
+      m_layer(layer),
+      m_to_lane(to_lane),
+      m_to_measure(to_measure),
+      m_to_pos(to_pos) {}
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
 void ConvertMetaToNoteCommand::apply(Chart& chart) {
     m_did = false;
-    m_bga.reset(); m_bpm.reset(); m_stop.reset();
+    m_bga.reset();
+    m_bpm.reset();
+    m_stop.reset();
     m_note_index.reset();
     // 定位并删除元事件（bga 按 layer；bpm/stop 无 layer，只按 (measure,pos)）
     if (m_kind == "bga") {
@@ -1198,15 +1283,15 @@ void ConvertMetaToNoteCommand::invert(Chart& chart) {
     std::optional<std::size_t> ni = m_note_index;
     if (ni && *ni < chart.notes.size()) {
         const auto& e = chart.notes[*ni];
-        if (e.measure == m_to_measure && e.pos == m_to_pos &&
-            e.value.lane == m_to_lane && e.value.sample.id == m_sample) {
+        if (e.measure == m_to_measure && e.pos == m_to_pos && e.value.lane == m_to_lane &&
+            e.value.sample.id == m_sample) {
             chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(*ni));
         }
     } else {
         for (std::size_t i = 0; i < chart.notes.size(); ++i) {
             const auto& e = chart.notes[i];
-            if (e.measure == m_to_measure && e.pos == m_to_pos &&
-                e.value.lane == m_to_lane && e.value.sample.id == m_sample) {
+            if (e.measure == m_to_measure && e.pos == m_to_pos && e.value.lane == m_to_lane &&
+                e.value.sample.id == m_sample) {
                 chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(i));
                 break;
             }
@@ -1215,19 +1300,24 @@ void ConvertMetaToNoteCommand::invert(Chart& chart) {
     m_note_index.reset();
     // 恢复原元事件（在原容器位置；容器已变则追加到尾部）
     if (m_bga) {
-        std::size_t pos = m_meta_index <= chart.bga_events.size() ? m_meta_index
-                                                                  : chart.bga_events.size();
-        chart.bga_events.insert(chart.bga_events.begin() + static_cast<std::ptrdiff_t>(pos), *m_bga);
+        std::size_t pos =
+            m_meta_index <= chart.bga_events.size() ? m_meta_index : chart.bga_events.size();
+        chart.bga_events.insert(chart.bga_events.begin() + static_cast<std::ptrdiff_t>(pos),
+                                *m_bga);
     } else if (m_bpm) {
-        std::size_t pos = m_meta_index <= chart.bpm_events.size() ? m_meta_index
-                                                                  : chart.bpm_events.size();
-        chart.bpm_events.insert(chart.bpm_events.begin() + static_cast<std::ptrdiff_t>(pos), *m_bpm);
+        std::size_t pos =
+            m_meta_index <= chart.bpm_events.size() ? m_meta_index : chart.bpm_events.size();
+        chart.bpm_events.insert(chart.bpm_events.begin() + static_cast<std::ptrdiff_t>(pos),
+                                *m_bpm);
     } else if (m_stop) {
-        std::size_t pos = m_meta_index <= chart.stop_events.size() ? m_meta_index
-                                                                   : chart.stop_events.size();
-        chart.stop_events.insert(chart.stop_events.begin() + static_cast<std::ptrdiff_t>(pos), *m_stop);
+        std::size_t pos =
+            m_meta_index <= chart.stop_events.size() ? m_meta_index : chart.stop_events.size();
+        chart.stop_events.insert(chart.stop_events.begin() + static_cast<std::ptrdiff_t>(pos),
+                                 *m_stop);
     }
-    m_bga.reset(); m_bpm.reset(); m_stop.reset();
+    m_bga.reset();
+    m_bpm.reset();
+    m_stop.reset();
     m_did = false;
 }
 
@@ -1241,19 +1331,24 @@ std::string ConvertMetaToNoteCommand::describe() const {
 QuantizeNoteCommand::QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
                                          std::uint32_t sample, std::int64_t snap_num,
                                          std::int64_t snap_den)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_snap_num(snap_num),
+    : m_measure(measure),
+      m_pos(pos),
+      m_lane(lane),
+      m_sample(sample),
+      m_snap_num(snap_num),
       m_snap_den(snap_den) {
     if (m_snap_num <= 0) m_snap_num = 1;
     if (m_snap_den <= 0) m_snap_den = 1;
 }
 
 void QuantizeNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, 0, m_source_ln_channel, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, 0,
+                               m_source_ln_channel, m_source_kind);
     if (!idx) return;  // 找不到 → 无操作
     // 量化：k = round(pos * snapDen / snapNum)，目标 pos = k*snapNum/snapDen
     // （Rational 构造自动约分，如 2/4 → 1/2；网格上 pos 本身不变）
-    const double k = std::round(static_cast<double>(m_pos.num) * m_snap_den /
-                                (static_cast<double>(m_pos.den) * m_snap_num));
+    const double k = std::round(static_cast<double>(m_pos.num) * static_cast<double>(m_snap_den) /
+                                (static_cast<double>(m_pos.den) * static_cast<double>(m_snap_num)));
     const Rational target(static_cast<std::int64_t>(k) * m_snap_num, m_snap_den);
     m_changed = (target != m_pos);
     m_new_pos = target;
@@ -1262,14 +1357,15 @@ void QuantizeNoteCommand::apply(Chart& chart) {
 
 void QuantizeNoteCommand::invert(Chart& chart) {
     if (!m_changed) return;  // 未改变 → 无操作
-    const auto idx = find_note(chart.notes, m_measure, m_new_pos, m_lane, m_sample, 0, m_source_ln_channel, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_new_pos, m_lane, m_sample, 0,
+                               m_source_ln_channel, m_source_kind);
     if (idx) chart.notes[*idx].pos = m_pos;  // 恢复原 pos
     m_changed = false;
 }
 
 std::string QuantizeNoteCommand::describe() const {
-    return "量化 note (m" + std::to_string(m_measure) + " @" +
-           std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    return "量化 note (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) + "/" +
+           std::to_string(m_pos.den) + ")";
 }
 
 // ---------- TransformNoteCommand ----------
@@ -1297,10 +1393,16 @@ Lane transform_lane(const Lane& lane, bool mirror, int rotate, int max_key) {
 TransformNoteCommand::TransformNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
                                            std::uint32_t sample, bool mirror, int rotate,
                                            std::uint32_t sub_line)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_mirror(mirror),
-      m_rotate(rotate), m_sub_line(sub_line) {}
+    : m_measure(measure),
+      m_pos(pos),
+      m_lane(lane),
+      m_sample(sample),
+      m_mirror(mirror),
+      m_rotate(rotate),
+      m_sub_line(sub_line) {}
 
-void TransformNoteCommand::bind_source(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+void TransformNoteCommand::bind_source(const Chart& chart,
+                                       std::unordered_set<std::size_t>& claimed) {
     m_index.reset();
     m_new_lane.reset();
     m_source.reset();
@@ -1310,16 +1412,18 @@ void TransformNoteCommand::bind_source(const Chart& chart, std::unordered_set<st
         if (e.measure != m_measure || e.pos != m_pos || e.value.lane != m_lane ||
             e.value.sample.id != m_sample || e.value.sub_line != m_sub_line ||
             (m_source_ln_channel && e.value.ln_channel != *m_source_ln_channel) ||
-            (m_source_kind && e.value.kind != *m_source_kind) || claimed.contains(i)) continue;
+            (m_source_kind && e.value.kind != *m_source_kind) || claimed.contains(i))
+            continue;
         if (m_source) {
             if (m_source->ln_channel != e.value.ln_channel || m_source->kind != e.value.kind)
-                throw std::invalid_argument("Ambiguous note reference: specify ln_channel and note_kind");
+                throw std::invalid_argument(
+                    "Ambiguous note reference: specify ln_channel and note_kind");
             continue;
         }
         m_index = i;
         m_source = e.value;
     }
-    if (!m_index) return;
+    if (!m_index || !m_source) return;
     // Validate before any lane in a transform batch is written, including orphan LN.
     const auto mode = chart.mode_id.value_or("sp7k");
     const auto target = transform_lane(m_lane, m_mirror, m_rotate, chart_mode_key_count(mode));
@@ -1329,7 +1433,8 @@ void TransformNoteCommand::bind_source(const Chart& chart, std::unordered_set<st
     claimed.insert(*m_index);
 }
 
-void TransformNoteCommand::bind_target(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+void TransformNoteCommand::bind_target(const Chart& chart,
+                                       std::unordered_set<std::size_t>& claimed) {
     m_index.reset();
     if (!m_new_lane || !m_source) return;
     for (auto it = chart.notes.begin(); it != chart.notes.end(); ++it) {
@@ -1337,11 +1442,10 @@ void TransformNoteCommand::bind_target(const Chart& chart, std::unordered_set<st
         const auto& e = *it;
         const auto i = static_cast<std::size_t>(it - chart.notes.begin());
         // ln_pair 是重建的派生索引，不参与身份；其余物件特征必须完全一致。
-        if (e.pos != m_pos || e.value.lane != *m_new_lane ||
-            e.value.sample != m_source->sample || e.value.kind != m_source->kind ||
-            e.value.ln_channel != m_source->ln_channel ||
-            e.value.sub_line != m_source->sub_line ||
-            claimed.contains(i)) continue;
+        if (e.pos != m_pos || e.value.lane != *m_new_lane || e.value.sample != m_source->sample ||
+            e.value.kind != m_source->kind || e.value.ln_channel != m_source->ln_channel ||
+            e.value.sub_line != m_source->sub_line || claimed.contains(i))
+            continue;
         m_index = i;
         claimed.insert(i);
         break;
@@ -1357,8 +1461,7 @@ void TransformNoteCommand::apply(Chart& chart) {
 void TransformNoteCommand::apply_bound(Chart& chart) {
     if (!m_index) return;
     // 键号上限按谱面模式（apply 时刻的 chart.mode_id；undo 侧恢复原 lane 不重算）
-    const int max_key =
-        chart_mode_key_count(chart.mode_id.value_or("sp7k"));
+    const int max_key = chart_mode_key_count(chart.mode_id.value_or("sp7k"));
     m_new_lane = transform_lane(m_lane, m_mirror, m_rotate, max_key);
     if (*m_new_lane == m_lane) {
         m_new_lane.reset();  // 无变化 → invert 无操作
@@ -1382,8 +1485,8 @@ void TransformNoteCommand::invert_bound(Chart& chart) {
 }
 
 std::string TransformNoteCommand::describe() const {
-    std::string s = "变换 note (m" + std::to_string(m_measure) + " @" +
-                    std::to_string(m_pos.num) + "/" + std::to_string(m_pos.den) + ")";
+    std::string s = "变换 note (m" + std::to_string(m_measure) + " @" + std::to_string(m_pos.num) +
+                    "/" + std::to_string(m_pos.den) + ")";
     if (m_mirror) s += " 镜像";
     if (m_rotate != 0) s += " 旋转" + std::to_string(m_rotate);
     return s;
@@ -1404,7 +1507,7 @@ std::string upper_ascii(std::string_view s) {
 
 }  // namespace
 
-MetaEditCommand::MetaEditCommand(std::string key, std::string value)
+MetaEditCommand::MetaEditCommand(const std::string& key, std::string value)
     : m_key(upper_ascii(key)), m_value(std::move(value)) {}
 
 void MetaEditCommand::apply(Chart& chart) {
@@ -1466,15 +1569,15 @@ RawLinesEditCommand::RawLinesEditCommand(std::vector<std::string> lines)
     : m_lines(std::move(lines)) {}
 
 void RawLinesEditCommand::apply(Chart& chart) {
-    m_old = chart.raw_lines;             // 快照旧原始行
-    m_changed = m_old != m_lines;        // 无变化 → invert 无操作
+    m_old = chart.raw_lines;       // 快照旧原始行
+    m_changed = m_old != m_lines;  // 无变化 → invert 无操作
     if (!m_changed) return;
-    chart.raw_lines = m_lines;           // 整组替换（格式兜底）
+    chart.raw_lines = m_lines;  // 整组替换（格式兜底）
 }
 
 void RawLinesEditCommand::invert(Chart& chart) {
     if (!m_changed) return;
-    chart.raw_lines = m_old;             // 恢复旧原始行
+    chart.raw_lines = m_old;  // 恢复旧原始行
     m_changed = false;
 }
 
@@ -1486,6 +1589,7 @@ RenameSampleCommand::RenameSampleCommand(SampleKind kind, std::uint32_t from_id,
                                          std::uint32_t to_id)
     : m_kind(kind), m_from_id(from_id), m_to_id(to_id) {}
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
 void RenameSampleCommand::apply(Chart& chart) {
     const auto key_from = std::make_pair(m_kind, m_from_id);
     const auto key_to = std::make_pair(m_kind, m_to_id);
@@ -1497,7 +1601,10 @@ void RenameSampleCommand::apply(Chart& chart) {
     if (m_had_to) m_old_to_def = it_to->second;
 
     // 收集引用 from_id 的对象下标（按 kind 只用对应容器）
-    m_note_idx.clear(); m_bga_idx.clear(); m_bpm_idx.clear(); m_stop_idx.clear();
+    m_note_idx.clear();
+    m_bga_idx.clear();
+    m_bpm_idx.clear();
+    m_stop_idx.clear();
     switch (m_kind) {
         case SampleKind::Wav:
             for (std::size_t i = 0; i < chart.notes.size(); ++i)
@@ -1509,19 +1616,17 @@ void RenameSampleCommand::apply(Chart& chart) {
             break;
         case SampleKind::Bpm:
             for (std::size_t i = 0; i < chart.bpm_events.size(); ++i)
-                if (chart.bpm_events[i].value.ref_id &&
-                    *chart.bpm_events[i].value.ref_id == m_from_id)
+                if (const auto rid = chart.bpm_events[i].value.ref_id; rid && *rid == m_from_id)
                     m_bpm_idx.push_back(i);
             break;
         case SampleKind::Stop:
             for (std::size_t i = 0; i < chart.stop_events.size(); ++i)
-                if (chart.stop_events[i].value.ref_id &&
-                    *chart.stop_events[i].value.ref_id == m_from_id)
+                if (const auto rid = chart.stop_events[i].value.ref_id; rid && *rid == m_from_id)
                     m_stop_idx.push_back(i);
             break;
     }
-    m_changed = m_had_from || !m_note_idx.empty() || !m_bga_idx.empty() ||
-                !m_bpm_idx.empty() || !m_stop_idx.empty();
+    m_changed = m_had_from || !m_note_idx.empty() || !m_bga_idx.empty() || !m_bpm_idx.empty() ||
+                !m_stop_idx.empty();
     if (!m_changed) return;
 
     // 定义表：移除旧键、设置新键（覆盖碰撞）
@@ -1576,13 +1681,12 @@ void SetSampleFileCommand::invert(Chart& chart) {
     m_changed = false;
 }
 
-std::string SetSampleFileCommand::describe() const {
-    return "设置采样文件（#" + m_file + "）";
-}
+std::string SetSampleFileCommand::describe() const { return "设置采样文件（#" + m_file + "）"; }
 
 SetSampleValueCommand::SetSampleValueCommand(SampleKind kind, std::uint32_t id, std::string value)
     : m_kind(kind), m_id(id), m_value(std::move(value)) {}
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——编辑命令语义分支（配对/地雷/BGM 行）
 void SetSampleValueCommand::apply(Chart& chart) {
     m_bpm_evs.clear();
     m_stop_evs.clear();
@@ -1641,9 +1745,7 @@ void SetSampleValueCommand::invert(Chart& chart) {
     m_changed = false;
 }
 
-std::string SetSampleValueCommand::describe() const {
-    return "设置定义值（#" + m_value + "）";
-}
+std::string SetSampleValueCommand::describe() const { return "设置定义值（#" + m_value + "）"; }
 
 DeleteSampleCommand::DeleteSampleCommand(SampleKind kind, std::uint32_t id)
     : m_kind(kind), m_id(id) {}
@@ -1652,7 +1754,10 @@ void DeleteSampleCommand::apply(Chart& chart) {
     const auto key = std::make_pair(m_kind, m_id);
     const auto it = chart.samples.find(key);
     m_existed = it != chart.samples.end();
-    if (!m_existed) { m_changed = false; return; }
+    if (!m_existed) {
+        m_changed = false;
+        return;
+    }
     m_old_def = it->second;
     chart.samples.erase(key);
     m_changed = true;
@@ -1671,11 +1776,16 @@ std::string DeleteSampleCommand::describe() const {
 SetNoteSampleCommand::SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane,
                                            std::uint32_t sample, std::uint32_t sub_line,
                                            std::uint32_t to)
-    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line),
+    : m_measure(measure),
+      m_pos(pos),
+      m_lane(lane),
+      m_sample(sample),
+      m_sub_line(sub_line),
       m_to(to) {}
 
 void SetNoteSampleCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line, m_source_ln_channel, m_source_kind);
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
+                               m_source_ln_channel, m_source_kind);
     if (!idx) return;
     m_applied_index = idx;
     m_did_change = chart.notes[*idx].value.sample.id != m_to;
@@ -1688,8 +1798,6 @@ void SetNoteSampleCommand::invert(Chart& chart) {
     m_did_change = false;
 }
 
-std::string SetNoteSampleCommand::describe() const {
-    return "修改 note 引用采样 id";
-}
+std::string SetNoteSampleCommand::describe() const { return "修改 note 引用采样 id"; }
 
 }  // namespace beatbench::edit

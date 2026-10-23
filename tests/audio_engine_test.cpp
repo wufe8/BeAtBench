@@ -8,10 +8,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSemaphore>
-#include <QThread>
 #include <QSettings>
 #include <QTemporaryDir>
-
+#include <QThread>
 #include <algorithm>
 #include <deque>
 #include <limits>
@@ -54,8 +53,7 @@ struct AudioEngineTestAccess {
     static int voices(const AudioEngine& engine) { return engine.m_player.activeCount(); }
 
     static void queueWait(AudioEngine& engine) { engine.m_waitRender = true; }
-    static bool playMain(AudioEngine& engine,
-                         std::shared_ptr<const std::vector<float>> pcm) {
+    static bool playMain(AudioEngine& engine, std::shared_ptr<const std::vector<float>> pcm) {
         engine.m_playback.load(std::move(pcm), 48000.0);
         return engine.m_playback.play();
     }
@@ -69,7 +67,7 @@ using beatbench::audio::AudioBackend;
 using beatbench::audio::AudioSettings;
 
 class FakeBackend final : public AudioBackend {
-public:
+   public:
     // Each start consumes an actual rate; zero means failure.
     std::deque<int> outcomes{48000};
     std::vector<AudioSettings> starts;
@@ -92,7 +90,8 @@ public:
     bool asioAvailable() const override { return compiledAsio; }
     beatbench::audio::AudioDeviceCapabilities deviceCapabilities(int device) const override {
         const auto found = capabilities.find(device);
-        return found == capabilities.end() ? beatbench::audio::AudioDeviceCapabilities{} : found->second;
+        return found == capabilities.end() ? beatbench::audio::AudioDeviceCapabilities{}
+                                           : found->second;
     }
     bool showDeviceControlPanel(int device, void*, std::string* error) override {
         EXPECT_FALSE(running);
@@ -132,23 +131,27 @@ public:
         EXPECT_TRUE(std::all_of(early.begin(), early.end(), [](float v) { return v == 0.0f; }));
         return true;
     }
-    void stop() override { ++stopCalls; running = false; }
+    void stop() override {
+        ++stopCalls;
+        running = false;
+    }
     void shutdown() override {}
-    StreamInfo streamInfo() const override { return info_; } // Deliberately stale after stop.
+    StreamInfo streamInfo() const override { return info_; }  // Deliberately stale after stop.
     std::vector<float> render(int frames) {
         EXPECT_TRUE(running);
         std::vector<float> output(static_cast<std::size_t>(frames) * 2);
         if (running) callback_(user_, output.data(), frames);
         return output;
     }
-private:
+
+   private:
     RenderCallback callback_ = nullptr;
     void* user_ = nullptr;
     StreamInfo info_;
 };
 
 class AudioEngineTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         QSettings settings;
         settings.setFallbacksEnabled(false);
@@ -162,8 +165,9 @@ protected:
         settings.sync();
         ASSERT_EQ(settings.status(), QSettings::NoError);
     }
-    std::unique_ptr<AudioEngine> makeEngine(std::deque<int> outcomes = {48000},
-            std::vector<beatbench::audio::AudioDeviceInfo> devices = FakeBackend::defaultDevices()) {
+    std::unique_ptr<AudioEngine> makeEngine(
+        std::deque<int> outcomes = {48000},
+        std::vector<beatbench::audio::AudioDeviceInfo> devices = FakeBackend::defaultDevices()) {
         auto backend = std::make_unique<FakeBackend>();
         backend->outcomes = std::move(outcomes);
         backend->deviceList = std::move(devices);
@@ -187,7 +191,8 @@ protected:
         return std::make_shared<const std::vector<float>>(48000 * 4, 0.25f);
     }
     static QString previewBase() {
-        const auto base = QFileInfo(QString::fromUtf8(__FILE__)).absoluteDir()
+        const auto base = QFileInfo(QString::fromUtf8(__FILE__))
+                              .absoluteDir()
                               .absoluteFilePath(QStringLiteral("../local/tmp"));
         QDir().mkpath(base);
         return base;
@@ -199,8 +204,8 @@ protected:
         file.write("injected decoder input");
         return path;
     }
-    static beatbench::audio::DecodeResult decoded(float amplitude,
-            std::weak_ptr<const std::vector<float>>* weak = nullptr) {
+    static beatbench::audio::DecodeResult decoded(
+        float amplitude, std::weak_ptr<const std::vector<float>>* weak = nullptr) {
         auto* guiThread = QCoreApplication::instance()->thread();
         auto data = std::shared_ptr<const std::vector<float>>(
             new const std::vector<float>(96000, amplitude), [guiThread](const auto* p) {
@@ -213,12 +218,12 @@ protected:
         sample->sharedPcm = std::move(data);
         return {true, sample, {}};
     }
-    FakeBackend* fake = nullptr; // Borrowed; engine owns it.
+    FakeBackend* fake = nullptr;  // Borrowed; engine owns it.
 };
 
 TEST_F(AudioEngineTest, RejectedSettingsActuallyRestartOldStreamAndRestoreVolume) {
     auto engine = makeEngine({48000, 0, 32000});
-    EXPECT_NEAR(engine->masterVolume(), 35.0, 0.001); // Startup must not multiply by 100 twice.
+    EXPECT_NEAR(engine->masterVolume(), 35.0, 0.001);  // Startup must not multiply by 100 twice.
     EXPECT_FALSE(engine->applySettings(7, 96000, 64, 85));
     ASSERT_EQ(fake->starts.size(), 3u);
     EXPECT_EQ(fake->starts[1].device, 7);
@@ -244,8 +249,7 @@ TEST_F(AudioEngineTest, RejectedSettingsActuallyRestartOldStreamAndRestoreVolume
 TEST_F(AudioEngineTest, DoubleFailureIsUnavailableAndSameSettingsRetryReopens) {
     auto engine = makeEngine({48000, 0, 0, 88200});
     int availabilityChanges = 0;
-    QObject::connect(engine.get(), &AudioEngine::availableChanged,
-                     [&] { ++availabilityChanges; });
+    QObject::connect(engine.get(), &AudioEngine::availableChanged, [&] { ++availabilityChanges; });
     EXPECT_FALSE(engine->applySettings(7, 96000, 64, 85));
     expectOld(fake->starts.back());
     EXPECT_FALSE(engine->available());
@@ -263,7 +267,7 @@ TEST_F(AudioEngineTest, DoubleFailureIsUnavailableAndSameSettingsRetryReopens) {
     expectOld(fake->starts.back());
     EXPECT_TRUE(engine->available());
     EXPECT_EQ(engine->actualRate(), 88200);
-    EXPECT_EQ(fake->initCalls, 1); // Missing stream != missing backend initialization.
+    EXPECT_EQ(fake->initCalls, 1);  // Missing stream != missing backend initialization.
     EXPECT_EQ(availabilityChanges, 2);
     EXPECT_TRUE(engine->errorText().isEmpty());
     EXPECT_TRUE(engine->statusText().isEmpty());
@@ -327,7 +331,7 @@ TEST_F(AudioEngineTest, BothClocksUseActualRateAfterSuccessAndRestoration) {
     for (const bool reject : {false, true}) {
         for (const bool reference : {false, true}) {
             SCOPED_TRACE(::testing::Message() << "reject=" << reject << " reference=" << reference);
-            SetUp(); // Each branch starts from the same isolated persisted settings.
+            SetUp();  // Each branch starts from the same isolated persisted settings.
             auto engine = makeEngine(reject ? std::deque<int>{48000, 0, 32000}
                                             : std::deque<int>{48000, 32000});
             EXPECT_EQ(engine->applySettings(7, 96000, 64, 35), !reject);
@@ -342,15 +346,14 @@ TEST_F(AudioEngineTest, BothClocksUseActualRateAfterSuccessAndRestoration) {
             EXPECT_NEAR(reference ? engine->refPositionSec() : engine->positionSec(), 0.1, 1e-9);
             // At output frame 80: source frame 120 / 240-frame attack = half gain.
             // This also catches a stale device rate in the render callback/resampler.
-            EXPECT_NEAR(output[160], 0.25f * 0.5f * 0.35f * (reference ? 0.35f : 1.0f),
-                        0.00001f);
+            EXPECT_NEAR(output[160], 0.25f * 0.5f * 0.35f * (reference ? 0.35f : 1.0f), 0.00001f);
         }
     }
 }
 TEST_F(AudioEngineTest, IdentityResolvesReorderedIndexBeforeFirstStart) {
     auto devices = FakeBackend::defaultDevices();
     devices[0].index = 42;
-    devices[1].index = 2; // Old index now names a different output: must not be used.
+    devices[1].index = 2;  // Old index now names a different output: must not be used.
     auto engine = makeEngine({48000}, devices);
     ASSERT_EQ(fake->starts.size(), 1u);
     EXPECT_EQ(fake->starts[0].device, 42);
@@ -368,8 +371,8 @@ TEST_F(AudioEngineTest, MissingAmbiguousOrUnverifiedIdentityUsesSystemDefaultWit
         SCOPED_TRACE(scenario);
         SetUp();
         auto devices = FakeBackend::defaultDevices();
-        if (scenario == 0) devices.erase(devices.begin()); // Disappeared.
-        if (scenario == 1) { // Duplicate exact identities cannot be disambiguated by old index.
+        if (scenario == 0) devices.erase(devices.begin());  // Disappeared.
+        if (scenario == 1) {  // Duplicate exact identities cannot be disambiguated by old index.
             auto duplicate = devices[0];
             duplicate.index = 9;
             devices.push_back(duplicate);
@@ -379,7 +382,7 @@ TEST_F(AudioEngineTest, MissingAmbiguousOrUnverifiedIdentityUsesSystemDefaultWit
             settings.remove("audio/deviceName");
             settings.remove("audio/deviceApiType");
         }
-        if (scenario == 3) devices[0].apiType = 99; // Same name on another API is not same device.
+        if (scenario == 3) devices[0].apiType = 99;  // Same name on another API is not same device.
         auto engine = makeEngine({48000}, devices);
         ASSERT_EQ(fake->starts.size(), 1u);
         EXPECT_EQ(fake->starts[0].device, -1);
@@ -392,7 +395,7 @@ TEST_F(AudioEngineTest, MissingAmbiguousOrUnverifiedIdentityUsesSystemDefaultWit
 TEST_F(AudioEngineTest, SystemDefaultRemainsSemanticDefaultAndRemovesIdentityOnSave) {
     {
         QSettings settings;
-        settings.setValue("audio/deviceIndex", -1); // Ignore even a valid obsolete identity.
+        settings.setValue("audio/deviceIndex", -1);  // Ignore even a valid obsolete identity.
     }
     auto engine = makeEngine();
     EXPECT_EQ(fake->starts[0].device, -1);
@@ -443,7 +446,7 @@ TEST_F(AudioEngineTest, BufferModelsStayBoundedAndOnlyOfferLegalSizes) {
     fake->capabilities[2] = {true, 192, 192, 192, 0, ""};
     EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0, 192}));
     fake->capabilities[2] = {true, 1, std::numeric_limits<int>::max(), 257, 1, ""};
-    EXPECT_LE(engine->bufferOptions(2).size(), 9); // Never enumerate billions of sizes.
+    EXPECT_LE(engine->bufferOptions(2).size(), 9);  // Never enumerate billions of sizes.
     fake->capabilities[2].error = "query failed";
     EXPECT_EQ(values(engine->bufferOptions(2)), (std::vector<int>{0}));
 }
@@ -509,11 +512,14 @@ TEST_F(AudioEngineTest, PanelStopsStreamPausesPlaybackAndAlwaysReopensEvenWhenPa
         EXPECT_FALSE(engine->playing());
         EXPECT_NEAR(engine->positionSec(), 0.1, 1e-9);
         const auto afterPanel = fake->render(256);
-        EXPECT_TRUE(std::all_of(afterPanel.begin(), afterPanel.end(), [](float v) { return v == 0.0f; }));
+        EXPECT_TRUE(
+            std::all_of(afterPanel.begin(), afterPanel.end(), [](float v) { return v == 0.0f; }));
         EXPECT_FALSE(engine->waitRender());
         EXPECT_NEAR(engine->refPositionSec(), 0.1, 1e-9);
-        if (!panelOk) EXPECT_TRUE(engine->errorText().contains(QStringLiteral("打开失败")));
-        else EXPECT_TRUE(engine->statusText().contains(QStringLiteral("重启")));
+        if (!panelOk)
+            EXPECT_TRUE(engine->errorText().contains(QStringLiteral("打开失败")));
+        else
+            EXPECT_TRUE(engine->statusText().contains(QStringLiteral("重启")));
     }
 }
 
@@ -638,7 +644,7 @@ TEST_F(AudioEngineTest, DeferredOldDecodeCompletionCannotReplaceNewPreview) {
     std::weak_ptr<const std::vector<float>> oldRef, newRef;
     AudioEngineTestAccess::decoder(*engine, [&](const std::string& path) {
         return path.find("old.wav") != std::string::npos ? decoded(0.8f, &oldRef)
-                                                      : decoded(0.2f, &newRef);
+                                                         : decoded(0.2f, &newRef);
     });
     ASSERT_TRUE(engine->playPreview(oldFile));
     ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
@@ -663,8 +669,8 @@ TEST_F(AudioEngineTest, DeferredOldDecodeCompletionCannotReplaceNewPreview) {
 
 TEST_F(AudioEngineTest, StopAllStreamChangeAndTestToneInvalidatePendingDecodes) {
     for (int action = 0; action < 3; ++action) {
-        auto engine = makeEngine(action == 1 ? std::deque<int>{48000, 48000}
-                                            : std::deque<int>{48000});
+        auto engine =
+            makeEngine(action == 1 ? std::deque<int>{48000, 48000} : std::deque<int>{48000});
         QTemporaryDir dir(QDir(previewBase()).filePath("preview-XXXXXX"));
         ASSERT_TRUE(dir.isValid());
         const auto file = previewFile(dir, "pending.wav");

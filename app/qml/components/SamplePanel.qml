@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 采样面板（左 Dock「采样」标签，M2 第 4 步）：检索 + 动态分组 + 排序 + 选中即「当前采样」。
-// 检索/分组/排序逻辑在 C++（SampleListModel，双语言纪律 doc/08 §2）；
+// 检索/分组/排序逻辑在 C++（SampleListModel，双语言纪律 doc/skin-system.md 二、）；
 // 本组件只做表现：搜索确认框（下拉已舍弃）+ 可横滚分组条 + 列表（索引条快跳）+ 排序切换。
 // M3 起：当前采样 = 放置 note/部件的默认采样（note.put 的 sample 落点）。
 import QtQuick

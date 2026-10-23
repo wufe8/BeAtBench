@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // audio ↔ Qt GUI 桥：单发试听（M4.1）+ 音频设置（M4.2）。
-// 职责（双语言纪律 doc/08 §2：逻辑在 C++，QML 只消费信号/方法）：
+// 职责（双语言纪律 doc/skin-system.md 二、：逻辑在 C++，QML 只消费信号/方法）：
 // - 持有 SamplePlayer（内核）+ PortAudio 后端 + 后台解码线程池；
 // - playPreview(path)：相对路径按谱面目录解析 → 异步解码 → 回主线程 playPreview(voice)；
 // - 设置（M4.2）：设备/采样率/缓冲/主音量，QSettings 持久化，启动时应用；
@@ -47,7 +47,8 @@ class AudioEngine : public QObject {
     Q_PROPERTY(bool waitRenderSetting READ waitRenderSetting NOTIFY waitRenderSettingChanged)
 
     // ---- 设置页可读项（M4.2；写走 Q_INVOKABLE applySettings，改后 NOTIFY） ----
-    Q_PROPERTY(QVariantList devices READ devices NOTIFY devicesChanged)  // [{index,name,api,sampleRate}]
+    Q_PROPERTY(
+        QVariantList devices READ devices NOTIFY devicesChanged)  // [{index,name,api,sampleRate}]
     Q_PROPERTY(int deviceIndex READ deviceIndex NOTIFY settingsChanged)
     Q_PROPERTY(int sampleRate READ sampleRate NOTIFY settingsChanged)
     Q_PROPERTY(int framesPerBuffer READ framesPerBuffer NOTIFY settingsChanged)
@@ -58,7 +59,7 @@ class AudioEngine : public QObject {
     /// 设置错误提示（音频页顶部错误条显示；成功应用后清空）。
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 
-public:
+   public:
     explicit AudioEngine(QObject* parent = nullptr);
     /// Injected backend uses the same initialization/settings path as production.
     explicit AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend,
@@ -169,17 +170,16 @@ public:
     int sampleRate() const { return m_settings.sampleRate; }
     int framesPerBuffer() const { return m_settings.framesPerBuffer; }
     /// 主音量（0-100 百分比；QML 滑杆直接绑定）。
-    qreal masterVolume() const {
-        return static_cast<qreal>(m_player.masterVolume()) * 100.0;
-    }
+    qreal masterVolume() const { return static_cast<qreal>(m_player.masterVolume()) * 100.0; }
     /// 实际流采样率（设备可能调整；显示真实值）。
     int actualRate() const {
         return m_backend && m_initialized ? m_backend->streamInfo().sampleRate : 0;
     }
     /// 实际延迟（ms；设置页显示）。
     qreal latencyMs() const {
-        return m_backend && m_initialized ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
-                         : 0.0;
+        return m_backend && m_initialized
+                   ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
+                   : 0.0;
     }
     /// 当前活动设备描述（"设备名（API）"；空 = 无）。
     QString activeDeviceText() const;
@@ -193,7 +193,7 @@ public:
     /// 设备信息（诊断/状态栏）。
     Q_INVOKABLE QString deviceDescription() const;
 
-signals:
+   signals:
     void busyChanged();
     void statusTextChanged();
     void availableChanged();
@@ -211,7 +211,7 @@ signals:
     /// M5 waitRenderSetting 变化（设置面板）。
     void waitRenderSettingChanged();
 
-private:
+   private:
     friend struct AudioEngineTestAccess;  // Deterministic synthetic PCM clock tests.
     /// 音频路径解析 + **扩展名回退**：原路径存在 → 用它；否则按相同 basename
     /// 试其它音频扩展名；全无 → 空串。BMS 播放器惯例（beatoraja 同款）。
@@ -257,7 +257,7 @@ private:
     std::uint64_t m_previewGeneration = 0;
     bool m_previewDecoding = false;
     RenderCtx m_renderCtx;
-    QString m_sourceDir;         ///< 谱面目录（绝对路径；空 = 未打开）
+    QString m_sourceDir;  ///< 谱面目录（绝对路径；空 = 未打开）
     std::atomic<bool> m_busy{false};
     std::atomic<bool> m_initialized{false};
     QString m_statusText;
@@ -265,12 +265,12 @@ private:
     QVariantList m_devices;                      ///< 设备快照（[{index,name,api,sampleRate}]）
     QString m_errorText;                         ///< 设置错误（音频页显示；成功清空）
     // ---- M5 播放 ----
-    beatbench::audio::PcmPlayback m_playback;    ///< PCM 播放状态机（UI 线程；设备率随流更新）
+    beatbench::audio::PcmPlayback m_playback;  ///< PCM 播放状态机（UI 线程；设备率随流更新）
     // ---- M6.1 参考音频 ----
     beatbench::audio::PcmPlayback m_refPlayback;  ///< 参考音频（stem）预览状态机（独立于谱面播放）
-    ChartSession* m_chartSession = nullptr;      ///< 渲染 PCM 来源（ChartSession；不拥有）
-    bool m_waitRender = false;                   ///< 等待渲染中（renderFinished 后续播）
-    bool m_waitRenderSetting = false;            ///< 设置：Space 等待渲染完成（默认关）
+    ChartSession* m_chartSession = nullptr;       ///< 渲染 PCM 来源（ChartSession；不拥有）
+    bool m_waitRender = false;                    ///< 等待渲染中（renderFinished 后续播）
+    bool m_waitRenderSetting = false;             ///< 设置：Space 等待渲染完成（默认关）
 };
 
 }  // namespace beatbench::app

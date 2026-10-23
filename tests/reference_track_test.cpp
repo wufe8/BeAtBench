@@ -2,12 +2,12 @@
 // ReferenceTrack 测试（M6.1 参考音轨）：合成 wav 解码 → 统计/金字塔/窗口截取。
 // 无设备/无 Qt：解码（miniaudio）+ 金字塔纯逻辑可独立测试（同 audio_test）。
 #define _USE_MATH_DEFINES
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <string>
-
-#include <gtest/gtest.h>
 
 #include "beatbench/audio/ReferenceTrack.hpp"
 
@@ -44,7 +44,7 @@ std::string writeTestWav(const std::string& dir, const std::string& name, int sa
 }
 
 class ReferenceTrackTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         m_tmp = std::filesystem::temp_directory_path() / "beatbench_ref_test";
         std::filesystem::create_directories(m_tmp);
@@ -115,10 +115,10 @@ TEST_F(ReferenceTrackTest, SliceFadeAttenuatesEnds) {
     std::vector<float> pcm(frames * 2, 0.5f);
     beatbench::audio::ReferenceTrack::apply_slice_fade(pcm, 44100.0, 0.02);
     const std::size_t fadeFrames = static_cast<std::size_t>(std::ceil(44100.0 * 0.02));
-    EXPECT_NEAR(pcm[0], 0.0f, 1e-3);                                  // 首帧 ≈ 0
-    EXPECT_NEAR(pcm[fadeFrames * 2], 0.5f, 1e-3);                    // 衰减后满幅
-    EXPECT_NEAR(pcm[(frames / 2) * 2], 0.5f, 1e-3);                  // 中段不变
-    EXPECT_NEAR(pcm[(frames - 1) * 2], 0.0f, 1e-2);                  // 末帧 ≈ 0
+    EXPECT_NEAR(pcm[0], 0.0f, 1e-3);                 // 首帧 ≈ 0
+    EXPECT_NEAR(pcm[fadeFrames * 2], 0.5f, 1e-3);    // 衰减后满幅
+    EXPECT_NEAR(pcm[(frames / 2) * 2], 0.5f, 1e-3);  // 中段不变
+    EXPECT_NEAR(pcm[(frames - 1) * 2], 0.0f, 1e-2);  // 末帧 ≈ 0
 }
 
 }  // namespace

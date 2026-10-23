@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // This test deliberately never initializes PortAudio or enumerates real devices.
-#include "beatbench/audio/AudioBackend.hpp"
 #include <gtest/gtest.h>
+
 #include <memory>
+
+#include "beatbench/audio/AudioBackend.hpp"
 
 #ifndef BEATBENCH_TEST_EXPECT_ASIO
 #error "Parent test target must define BEATBENCH_TEST_EXPECT_ASIO=0 or 1"

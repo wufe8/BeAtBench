@@ -8,7 +8,7 @@ struct AsioBufferSizes {
     long min = 0;
     long max = 0;
     long preferred = 0;
-    long granularity = 0; ///< 0: fixed; -1: powers of two; >0: steps from min.
+    long granularity = 0;  ///< 0: fixed; -1: powers of two; >0: steps from min.
 };
 
 namespace detail {
@@ -22,14 +22,12 @@ constexpr bool asioSizeInRange(const AsioBufferSizes& sizes, long value) noexcep
     // Both operands are positive and ordered: subtraction cannot overflow.
     return (value - sizes.min) % sizes.granularity == 0;
 }
-} // namespace detail
+}  // namespace detail
 
 /// Reject malformed driver limits; no rounding, shifts, allocation or device access.
 constexpr bool validAsioBufferSizes(const AsioBufferSizes& sizes) noexcept {
-    if (sizes.min <= 0 || sizes.max < sizes.min || sizes.granularity < -1)
-        return false;
-    if (sizes.granularity == 0)
-        return sizes.min == sizes.max && sizes.preferred == sizes.min;
+    if (sizes.min <= 0 || sizes.max < sizes.min || sizes.granularity < -1) return false;
+    if (sizes.granularity == 0) return sizes.min == sizes.max && sizes.preferred == sizes.min;
     if (sizes.granularity == -1 &&
         (!detail::asioPowerOfTwo(sizes.min) || !detail::asioPowerOfTwo(sizes.max)))
         return false;
@@ -44,4 +42,4 @@ constexpr long resolveAsioBufferSize(const AsioBufferSizes& sizes, long requeste
     return detail::asioSizeInRange(sizes, value) ? value : 0;
 }
 
-} // namespace beatbench::audio
+}  // namespace beatbench::audio

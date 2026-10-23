@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 多文档会话注册表实现（2026-08，M3 多标签页前瞻）。
-#include "beatbench/core/edit/SessionRegistry.hpp"
-
 #include <stdexcept>
+
+#include "beatbench/core/edit/SessionRegistry.hpp"
 
 namespace beatbench::edit {
 

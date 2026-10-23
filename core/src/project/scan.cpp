@@ -8,8 +8,6 @@
 // 遍历无条件（子目录属于这首歌，doc/07 §1/§2）；目录排除只作用于"枚举"，
 // **已解析引用优先**——被引用的文件一定出现在资源表里（切音导出目录的成品切片
 // 正是资源更新的操作对象）。
-#include "beatbench/core/project/Project.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -26,6 +24,7 @@
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChartCheck.hpp"
 #include "beatbench/core/codec/CodecRegistry.hpp"
+#include "beatbench/core/project/Project.hpp"
 #include "beatbench/core/timing/TimingEngine.hpp"
 
 namespace beatbench::project {
@@ -61,8 +60,8 @@ std::string ext_lower_utf8(const fs::path& p) {
 }
 
 bool is_audio_ext(const std::string& e) {
-    return e == "wav" || e == "ogg" || e == "mp3" || e == "flac" || e == "oga" ||
-           e == "m4a" || e == "opus" || e == "aiff" || e == "aif";
+    return e == "wav" || e == "ogg" || e == "mp3" || e == "flac" || e == "oga" || e == "m4a" ||
+           e == "opus" || e == "aiff" || e == "aif";
 }
 
 bool is_image_ext(const std::string& e) {
@@ -150,7 +149,10 @@ ResolvedFile resolve_resource(const fs::path& root, const fs::path& chart_dir,
         const std::string stem = path_utf8(rel_fs.stem());
         const fs::path parent = rel_fs.parent_path();
         for (const auto& e : audio_exts()) {
-            candidates.push_back(parent / fs::u8path(stem + "." + e));
+            std::string filename = stem;
+            filename += '.';
+            filename += e;
+            candidates.push_back(parent / fs::u8path(filename));
         }
     }
 
@@ -213,7 +215,7 @@ std::optional<Position> last_position(const Chart& chart) {
 /// 含 #RANDOM/#IF 等分支块（parser 把控制指令原样放进 raw_lines）。
 /// 项目页据此显示徽标、lint 提示"该谱不要做保存操作"（doc/07 §9.7）。
 bool has_random_blocks(const Chart& chart) {
-    static const std::set<std::string> kDirectives = {"RANDOM", "IF",     "ELSEIF", "ELSE",
+    static const std::set<std::string> kDirectives = {"RANDOM", "IF",        "ELSEIF", "ELSE",
                                                       "ENDIF",  "SETRANDOM", "SWITCH"};
     for (const auto& line : chart.raw_lines) {
         std::size_t i = 0;
@@ -257,8 +259,8 @@ void measure_file(const fs::path& path, std::size_t& size_bytes, std::int64_t& m
 
 }  // namespace
 
-ProjectError::ProjectError(std::string code, std::string message)
-    : std::runtime_error(std::move(message)), code_(std::move(code)) {}
+ProjectError::ProjectError(std::string code, const std::string& message)
+    : std::runtime_error(message), code_(std::move(code)) {}
 
 std::size_t Project::missing_resources() const {
     std::size_t n = 0;
@@ -290,6 +292,7 @@ const ResourceRef* Project::find_resource(std::string_view path) const {
     return nullptr;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——项目枚举保留限额、隐藏项与错误恢复的同一遍历流程
 Project scan(const std::string& root, const ScanOptions& opts) {
     Project proj;
 
@@ -374,10 +377,12 @@ Project scan(const std::string& root, const ScanOptions& opts) {
     return proj;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——谱面解析与资源引用归并状态链，保留逐谱失败隔离
 void scan_parse(Project& proj, const ScanOptions& opts) {
     const fs::path root = fs::u8path(proj.root);
     std::map<std::string, std::size_t> index;  // 资源 path → proj.resources 下标
-    for (std::size_t i = 0; i < proj.resources.size(); ++i) index.emplace(proj.resources[i].path, i);
+    for (std::size_t i = 0; i < proj.resources.size(); ++i)
+        index.emplace(proj.resources[i].path, i);
     std::map<std::string, DirListing> listing_cache;
     const codec::CodecRegistry& codecs = codec::global_codec_registry();
 
@@ -422,8 +427,10 @@ void scan_parse(Project& proj, const ScanOptions& opts) {
             if (n.value.kind == NoteKind::Landmine) ++ref.mines;
         }
         for (const auto& d : result.diagnostics) {
-            if (d.severity == codec::Severity::Error) ++ref.errors;
-            else if (d.severity == codec::Severity::Warning) ++ref.warnings;
+            if (d.severity == codec::Severity::Error)
+                ++ref.errors;
+            else if (d.severity == codec::Severity::Warning)
+                ++ref.warnings;
         }
 
         // BPM 范围（#BPM 初值 + ch03/ch08 事件）
