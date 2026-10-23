@@ -35,7 +35,8 @@ scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测
   本地复跑需 clang-tidy 23（大版本差异会引入新告警）+ `compile_commands.json`：
   `cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=OFF
   -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。存量已清零；新增超标
-  一律修复，或 `NOLINT(检查项)——理由` 显式标注（现有标注全部携带理由）。
+  一律修复，或 `NOLINTNEXTLINE(检查项)——理由` 显式标注（**必须写在声明上一行**：行尾 NOLINT
+  会被 clang-format 折行搬离诊断行而失效；现有标注全部携带理由）。
 - 模块边界由 CMake target 可见性结构化强制（core 只暴露 `include/`，模块间 PRIVATE 链接），
   越界即编译错误，无需额外工具；规则见各模块 AGENTS.md。
 - qmllint：`qt_add_qml_module` 自带 `all_qmllint` 目标（构建目录内
