@@ -4,9 +4,9 @@
 // flatStyle=true：.tool-btn 样式（透明底，激活时主色底 + 主色边框）——编辑工具/工具选择。
 // 激活态两种来源：
 //   active = 外部驱动的激活（互斥单选组用——分组/工具，样式不依赖控件自身 checked，
-//            避免 checkable 点击断绑导致的「多选残留」，见 doc/05 §4.3）；
+//            避免 checkable 点击断绑导致的「多选残留」，见 doc/ui-design.md 四、.3）；
 //   checkable+checked = 控件自管（独立开关类按钮）。
-// 颜色一律走 Theme token（doc/07 §4），本组件是「内置默认皮肤」控件样式基线。
+// 颜色一律走 Theme token（doc/project-workflow.md 四、），本组件是「内置默认皮肤」控件样式基线。
 import QtQuick
 import QtQuick.Controls
 

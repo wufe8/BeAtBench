@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SliceExport 实现（见 hpp 注释）。纯计算：不含音频解码/文件 IO（那些在 audio/ 层，
 // 由 GUI 工作台组合）。build_placement_raw 复用 bms::write_bms 保证输出正确性。
-#include "beatbench/core/slice/SliceExport.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -12,10 +10,11 @@
 #include <string>
 #include <vector>
 
-#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/Event.hpp"
 #include "beatbench/core/Lane.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
+#include "beatbench/core/slice/SliceExport.hpp"
 
 namespace beatbench::slice {
 
@@ -25,9 +24,8 @@ constexpr std::uint32_t kMaxWavId36 = 1295;
 constexpr std::uint32_t kMaxWavId62 = 3843;
 }  // namespace
 
-std::vector<std::uint32_t> allocate_wav_ids(
-    const std::vector<std::uint32_t>& occupied, std::uint32_t start_id,
-    int count, IdBase idBase) {
+std::vector<std::uint32_t> allocate_wav_ids(const std::vector<std::uint32_t>& occupied,
+                                            std::uint32_t start_id, int count, IdBase idBase) {
     std::vector<std::uint32_t> out;
     if (count <= 0) return out;
     std::set<std::uint32_t> taken(occupied.begin(), occupied.end());
@@ -43,9 +41,9 @@ std::vector<std::uint32_t> allocate_wav_ids(
 
 std::vector<SliceExportItem> build_export_layout(
     const std::vector<Slice>& slices, const std::vector<bool>& enabled,
-    const std::vector<std::uint32_t>& occupied, std::uint32_t start_id,
-    const std::string& baseName, double bpm, int beatsPerMeasure,
-    int subdivision, double offset, int startMeasure, int width, IdBase idBase) {
+    const std::vector<std::uint32_t>& occupied, std::uint32_t start_id, const std::string& baseName,
+    double bpm, int beatsPerMeasure, int subdivision, double offset, int startMeasure, int width,
+    IdBase idBase) {
     std::vector<SliceExportItem> items;
     // 启用切片数 → 分配 #WAV id（只分配给「放置开关=开」的切片；未启用仍列出但 wavId=0）
     int need = 0;
@@ -68,7 +66,8 @@ std::vector<SliceExportItem> build_export_layout(
         it.sliceIndex = static_cast<int>(i);
         it.enabled = en;
         if (en) {
-            it.wavId = (id_i < static_cast<int>(ids.size())) ? ids[static_cast<std::size_t>(id_i)] : 0;
+            it.wavId =
+                (id_i < static_cast<int>(ids.size())) ? ids[static_cast<std::size_t>(id_i)] : 0;
             ++id_i;
             it.fileIndex = file_i++;
             char nameBuf[512];
@@ -83,7 +82,8 @@ std::vector<SliceExportItem> build_export_layout(
         // 拍位换算：beat = (startSec - offset) * bpm / 60；吸附到细分网格
         double beat = (s.startSec - offset) * bpm / 60.0;
         if (beat < 0.0) beat = 0.0;
-        std::int64_t measure = shift + static_cast<std::int64_t>(std::floor(beat / beatsPerMeas + 1e-9));
+        std::int64_t measure =
+            shift + static_cast<std::int64_t>(std::floor(beat / beatsPerMeas + 1e-9));
         double fracBeat = beat - static_cast<double>(measure - shift) * beatsPerMeas;
         if (fracBeat < 0.0) fracBeat = 0.0;
         std::int64_t num = static_cast<std::int64_t>(std::llround(fracBeat * sub));
@@ -98,8 +98,8 @@ std::vector<SliceExportItem> build_export_layout(
     return items;
 }
 
-std::string build_placement_raw(const std::vector<SliceExportItem>& items,
-                                double bpm, int beatsPerMeasure, IdBase idBase) {
+std::string build_placement_raw(const std::vector<SliceExportItem>& items, double bpm,
+                                int beatsPerMeasure, IdBase idBase) {
     Chart c;
     c.id_base = idBase;
     char bpmBuf[32];
@@ -154,8 +154,7 @@ std::string build_placement_raw(const std::vector<SliceExportItem>& items,
         // parser 告警为不支持的值）。
         const bool is_base_decl = line.rfind("#BASE 62", 0) == 0;
         // ch01 数据行：`#NNN01:`；ch02 小节长：`#NNN02:`
-        const bool is_data = line[4] == '0' && (line[5] == '1' || line[5] == '2') &&
-                             line[6] == ':';
+        const bool is_data = line[4] == '0' && (line[5] == '1' || line[5] == '2') && line[6] == ':';
         if (is_wav_def || is_data || is_base_decl) {
             out += line;
             out.push_back('\n');
@@ -164,8 +163,7 @@ std::string build_placement_raw(const std::vector<SliceExportItem>& items,
     return out;
 }
 
-int parse_export_file_index(const std::string& fileName, const std::string& baseName,
-                            int width) {
+int parse_export_file_index(const std::string& fileName, const std::string& baseName, int width) {
     // `{base}_{NNN}.wav` 最短 = base + '_' + width 位 + ".wav"
     if (baseName.empty() ||
         fileName.size() < baseName.size() + 1 + static_cast<std::size_t>(std::max(1, width)) + 4)
@@ -177,8 +175,7 @@ int parse_export_file_index(const std::string& fileName, const std::string& base
         fileName.compare(fileName.size() - suffix.size(), suffix.size(), suffix) != 0)
         return -1;
     const std::string digits =
-        fileName.substr(baseName.size() + 1,
-                        fileName.size() - baseName.size() - 1 - suffix.size());
+        fileName.substr(baseName.size() + 1, fileName.size() - baseName.size() - 1 - suffix.size());
     if (digits.empty()) return -1;
     const int minWidth = std::max(1, width);
     if (static_cast<int>(digits.size()) < minWidth) return -1;
@@ -213,8 +210,8 @@ std::vector<int> allocate_continue_file_indexes(const std::vector<int>& occupied
 namespace {
 std::string format_export_file_name(const std::string& baseName, int index, int width) {
     char nameBuf[512];
-    std::snprintf(nameBuf, sizeof(nameBuf), "%s_%0*d.wav", baseName.c_str(),
-                  std::max(1, width), std::max(0, index));
+    std::snprintf(nameBuf, sizeof(nameBuf), "%s_%0*d.wav", baseName.c_str(), std::max(1, width),
+                  std::max(0, index));
     return nameBuf;
 }
 }  // namespace

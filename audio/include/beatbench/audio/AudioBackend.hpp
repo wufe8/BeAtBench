@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 音频后端薄抽象（doc/02 §5.1）：枚举设备/开关流/回调/缓冲参数。
+// 音频后端薄抽象：枚举设备/开关流/回调/缓冲参数。
 // 实现 = PortAudio；系统默认输出不自动切换到 ASIO。
 // 注意：本接口零 Qt；回调线程为 PortAudio 创建，回调内必须无锁无分配
 // （voice 混音见 SamplePlayer，用短临界区/无锁结构）。
@@ -17,12 +17,12 @@ namespace beatbench::audio {
 
 /// 输出设备信息（设定页/状态栏显示）。
 struct AudioDeviceInfo {
-    std::string name;            ///< 设备名（如 "扬声器 (Realtek High Definition Audio)"）
-    int index = -1;              ///< 后端设备序号（AudioSettings.device 传回）
-    int defaultSampleRate = 0;   ///< 设备默认采样率
+    std::string name;           ///< 设备名（如 "扬声器 (Realtek High Definition Audio)"）
+    int index = -1;             ///< 后端设备序号（AudioSettings.device 传回）
+    int defaultSampleRate = 0;  ///< 设备默认采样率
     int maxOutputChannels = 0;
-    std::string apiName;         ///< "WASAPI" / "ASIO" / "DirectSound" 等
-    int apiType = 0;             ///< 数值 PaHostApiTypeId，不依赖 PortAudio 头文件
+    std::string apiName;  ///< "WASAPI" / "ASIO" / "DirectSound" 等
+    int apiType = 0;      ///< 数值 PaHostApiTypeId，不依赖 PortAudio 头文件
     bool isAsio = false;
 };
 
@@ -38,15 +38,15 @@ struct AudioDeviceCapabilities {
 
 /// 输出流参数（设置页可编辑项；0/负 = 用设备默认值）。
 struct AudioSettings {
-    int device = -1;         ///< 设备序号（AudioDeviceInfo.index；-1 = 系统默认）
-    int sampleRate = 0;      ///< 目标采样率（0 = 设备默认；常用 44100/48000）
-    int framesPerBuffer = 0; ///< 请求回调帧数（0 默认/ASIO preferred；-1 = 0 别名）
+    int device = -1;          ///< 设备序号（AudioDeviceInfo.index；-1 = 系统默认）
+    int sampleRate = 0;       ///< 目标采样率（0 = 设备默认；常用 44100/48000）
+    int framesPerBuffer = 0;  ///< 请求回调帧数（0 默认/ASIO preferred；-1 = 0 别名）
 };
 
 /// 输出后端（init 不要求默认输出存在；start 打开立体声输出并启动回调）。
 /// 非回调方法由调用方串行调用；设备索引仅在本次 PortAudio 初始化内有效。
 class AudioBackend {
-public:
+   public:
     virtual ~AudioBackend() = default;
 
     /// 回调：向 out 缓冲写 [frames] 帧立体声（float32 交错，0..frames-1 每帧 2 样本）。
@@ -88,8 +88,8 @@ public:
     /// 当前活动流信息；停止/失败后全零/空字符串。
     struct StreamInfo {
         int sampleRate = 0;
-        int framesPerBuffer = 0;    ///< 请求的回调帧数（0 未指定），不是原生缓冲大小
-        double latencySeconds = 0.0; ///< Pa_GetStreamInfo 的实际 outputLatency
+        int framesPerBuffer = 0;      ///< 请求的回调帧数（0 未指定），不是原生缓冲大小
+        double latencySeconds = 0.0;  ///< Pa_GetStreamInfo 的实际 outputLatency
         std::string deviceName;
         std::string apiName;
     };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// GUI 入口 JSON 协议契约：QML 实际调用的 CommandDispatcher（doc/06 §3）。
+// GUI 入口 JSON 协议契约：QML 实际调用的 CommandDispatcher（doc/command-protocol.md 三、）。
 // 覆盖 core 之外 GUI 独有的「请求 JSON 非法 → bad_request 信封」解析路径，
 // 保证 CLI/GUI 两条入口对同一协议的行为一致。
 #include <gtest/gtest.h>
@@ -13,22 +13,21 @@
 #include "bridge/CommandDispatcher.hpp"
 
 using beatbench::app::CommandDispatcher;
-using beatbench::cmd::Registry;
 using beatbench::cmd::register_builtin_commands;
+using beatbench::cmd::Registry;
 using beatbench::json::Json;
 
 namespace {
 
-Json parse_response(const QString& text) {
-    return Json::parse(text.toStdString());
-}
+Json parse_response(const QString& text) { return Json::parse(text.toStdString()); }
 
 }  // namespace
 
 // GUI 入口：合法 version 请求 → 与 CLI 相同的成功信封。
 TEST(CommandDispatcher, VersionEnvelopeMatchesProtocol) {
     CommandDispatcher dispatcher;
-    const Json resp = parse_response(dispatcher.dispatch(QStringLiteral(R"({"command":"version"})")));
+    const Json resp =
+        parse_response(dispatcher.dispatch(QStringLiteral(R"({"command":"version"})")));
     ASSERT_TRUE(resp.is_object());
     EXPECT_TRUE(resp.at("ok").as_bool());
     const auto& result = resp.at("result");
@@ -78,7 +77,7 @@ TEST(CommandDispatcher, VersionStringSingleSource) {
     EXPECT_EQ(resp.at("result").at("version").as_str(), std::string(beatbench::kVersion));
 }
 
-// CLI↔GUI 一致性（doc/06 §3；发布前 review 契约项）：同一请求分别走 GUI 的
+// CLI↔GUI 一致性（doc/command-protocol.md 三、；发布前 review 契约项）：同一请求分别走 GUI 的
 // CommandDispatcher（QString → parse → global_registry）与 CLI 的进程内路径
 // （parse → registry.dispatch），响应信封必须逐字节一致。
 TEST(CommandDispatcher, CliAndGuiEnvelopesMatch) {
@@ -91,10 +90,10 @@ TEST(CommandDispatcher, CliAndGuiEnvelopesMatch) {
         R"({"command":"version","id":7})",
         R"({"command":"version","id":"req-1"})",
         R"({"command":"capabilities"})",
-        R"({"command":"frobnicate"})",   // unknown_command
-        R"({})",                         // 缺 command → bad_request
-        R"({"command":42})",             // command 类型错误 → bad_request
-        R"({"command":"info"})",         // args 缺省 → bad_args
+        R"({"command":"frobnicate"})",     // unknown_command
+        R"({})",                           // 缺 command → bad_request
+        R"({"command":42})",               // command 类型错误 → bad_request
+        R"({"command":"info"})",           // args 缺省 → bad_args
         R"({"command":"info","args":{}})"  // 缺 path → bad_args
     };
     for (const char* text : requests) {

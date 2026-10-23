@@ -2,7 +2,7 @@
 // 时间轴管理面板（右 Dock「时间轴」标签页，M2/M3 边界）：BPM / STOP 事件列表。
 // 数据源 = Main.timingBpm/timingStop（timing.list 结果：[{measure, pos:{num,den}, value}]，升序）。
 // 编辑经信号 → Main 包 timing.put/delete（一个 undo 步），成功后 Main 重取 timing.list 回填。
-// 双语言纪律（doc/08 §2）：本组件纯展示 + 事件分发，不直接 dispatch。
+// 双语言纪律（doc/skin-system.md 二、）：本组件纯展示 + 事件分发，不直接 dispatch。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts

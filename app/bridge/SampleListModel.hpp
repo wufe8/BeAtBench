@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // core↔QML 桥接：采样列表模型（采样面板数据源，M2 第 4 步）。
 // 数据 = info 命令返回的 samples.wav + check 命令的 missing_wav（缺失标记）。
-// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/08 §2），QML 只绑定 ListView 与信号。
-// 设计（doc/05 §4.3）：
-// - 点击选中 = 会话状态「当前采样」，**不重排视图**（选中保持原位，避免列表漂移）；
+// 检索/分组/排序逻辑全在 C++（双语言纪律 doc/skin-system.md 二、），QML 只绑定 ListView 与信号。
+// 交互设计（权威；doc/ui-design.md 只留指针）：
+// - 纯搜索确认框：文件名/ID 实时过滤（ID 大小写敏感，兼容 base62 1a/1A；文件名不敏感；
+//   输入兼容 #WAV 前缀）；输入时 ↑↓ 导航、Enter 确认 = 设为当前采样。
+// - 点击选中 = 会话状态“当前采样”，不重排视图（选中保持原位，避免列表漂移）；
 //   排序由显式 sortMode 控制（智能/id/文件名/引用数/最近使用）。
 // - 分组动态生成（模型按轨道类别 + player 统计；DP/2P 谱面自动出现 2P 组，不写死）。
-// - MRU 仅作「最近使用」排序模式的依据；会话状态不入谱面/undo（doc/06 §3）。
+// - MRU 仅作“最近使用”排序模式的依据；会话状态不入谱面/undo（doc/command-protocol.md 三、）。
 #pragma once
 
 #include <QAbstractListModel>
@@ -29,7 +31,7 @@ class SampleListModel : public QAbstractListModel {
     Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
     Q_PROPERTY(bool isBase62 READ isBase62 NOTIFY isBase62Changed)
 
-public:
+   public:
     explicit SampleListModel(QObject* parent = nullptr);
 
     enum Roles {
@@ -41,7 +43,7 @@ public:
         MissingRole,
         ExtMismatchRole,
     };
-    // 排序模式（QML 侧传 0..4；0 为默认「智能」——稳定排序，MRU 不参与）
+    // 排序模式（QML 侧传 0..4；0 为默认“智能”——稳定排序，MRU 不参与）
     enum SortMode { SortSmart = 0, SortId, SortFile, SortRefs, SortRecent };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -62,7 +64,7 @@ public:
     int sortMode() const { return m_sortMode; }
     void setSortMode(int mode);
 
-    /// 设为当前采样（会话状态；**不重排视图**，MRU 供「最近使用」排序模式）。
+    /// 设为当前采样（会话状态；**不重排视图**，MRU 供“最近使用”排序模式）。
     Q_INVOKABLE void selectId(const QString& id);
     QString currentSample() const;
 
@@ -85,7 +87,7 @@ public:
     bool isBase62() const { return m_isBase62; }
     void setIsBase62(bool v);
 
-signals:
+   signals:
     void currentSampleChanged(const QString& id);
     void countChanged(int count);
     void filterTextChanged();
@@ -94,7 +96,7 @@ signals:
     void groupsChanged();
     void isBase62Changed();
 
-private:
+   private:
     struct Entry {
         QString id;
         QString file;
@@ -107,7 +109,7 @@ private:
         int key2 = 0;
         int scratch2 = 0;
         int pedal2 = 0;
-        int bgm = 0;             // 背景音轨（ch01）引用数
+        int bgm = 0;  // 背景音轨（ch01）引用数
         bool missing = false;
         bool extMismatch = false;  // 扩展名不符（wav_ext_mismatch，lint 信息级）
     };
@@ -115,14 +117,14 @@ private:
     void rebuild();
     void track_counts(const Entry& e);
 
-    QVector<Entry> m_all;    // 全量
-    QVector<Entry> m_rows;   // 过滤+排序后的视图
-    QStringList m_mru;       // 最近使用（前 = 最新；仅 SortRecent 生效）
+    QVector<Entry> m_all;   // 全量
+    QVector<Entry> m_rows;  // 过滤+排序后的视图
+    QStringList m_mru;      // 最近使用（前 = 最新；仅 SortRecent 生效）
     QString m_filterText;
     QString m_group = QStringLiteral("all");
     int m_sortMode = SortSmart;
-    QVariantList m_groups;   // 动态分组 [{id,label,count}]（文本过滤后统计）
-    bool m_isBase62 = false; // 当前谱面是否为 base62 模式
+    QVariantList m_groups;    // 动态分组 [{id,label,count}]（文本过滤后统计）
+    bool m_isBase62 = false;  // 当前谱面是否为 base62 模式
 };
 
 }  // namespace beatbench::app

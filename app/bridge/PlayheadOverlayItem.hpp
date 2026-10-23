@@ -13,8 +13,9 @@
 // scrollY/contentHeight/topHigh），QML 绑定 ChartView 的 view 状态。
 #pragma once
 
-#include <QQuickPaintedItem>
 #include <QtQml/qqmlregistration.h>
+
+#include <QQuickPaintedItem>
 
 namespace beatbench::app {
 
@@ -29,9 +30,11 @@ class PlayheadOverlayItem : public QQuickPaintedItem {
     /// 2026-09 变拍高修复：换算源改走 ChartViewItem（yOf 按小节高度累计）；
     /// 设置后 yForSec 不自行用均匀小节高（x2/x0.5 小节处红线错位根因）。
     Q_PROPERTY(QObject* chartView READ chartView WRITE setChartView NOTIFY chartViewChanged)
-    Q_PROPERTY(qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
+    Q_PROPERTY(
+        qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollYChanged)
-    Q_PROPERTY(qreal contentHeight READ contentHeight WRITE setContentHeight NOTIFY contentHeightChanged)
+    Q_PROPERTY(
+        qreal contentHeight READ contentHeight WRITE setContentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
     /// A/B 循环标记（秒；-1 = 未设）。绿 A / 橙 B 虚线 + 左侧标签（**内容锚定**，随滚动）。
     Q_PROPERTY(double loopASec READ loopASec WRITE setLoopASec NOTIFY loopASecChanged)
@@ -39,13 +42,14 @@ class PlayheadOverlayItem : public QQuickPaintedItem {
     Q_PROPERTY(qreal rulerWidth READ rulerWidth WRITE setRulerWidth NOTIFY rulerWidthChanged)
     /// 开头纯留白小节数（与 ChartView 数据同源）：A/B 标记换算 y 时须扣留白，
     /// 否则标记比实际值早 1-2 小节（2026-09 用户）。
-    Q_PROPERTY(qreal leadMeasures READ leadMeasures WRITE setLeadMeasures NOTIFY leadMeasuresChanged)
+    Q_PROPERTY(
+        qreal leadMeasures READ leadMeasures WRITE setLeadMeasures NOTIFY leadMeasuresChanged)
     /// 播放头秒（M5 收尾 2026-09）：红线画在内容位置（=播放头），随播放推进、暂停停在原位
     /// （无论是否开启跟随）；-1 = 未渲染/未播放 → 红线退化为视口光标（固定底部 10%）。
     /// 无已加载谱面（session 无 chart+timing）时**不画红线**（2026-09 用户：修复无谱面仍显示红线）。
     Q_PROPERTY(double playheadSec READ playheadSec WRITE setPlayheadSec NOTIFY playheadSecChanged)
 
-public:
+   public:
     explicit PlayheadOverlayItem(QQuickItem* parent = nullptr);
 
     void paint(QPainter* painter) override;
@@ -73,7 +77,7 @@ public:
     double playheadSec() const { return m_playheadSec; }
     void setPlayheadSec(double v);
 
-signals:
+   signals:
     void sessionChanged();
     void chartViewChanged();
     void measureHeightChanged();
@@ -86,7 +90,7 @@ signals:
     void leadMeasuresChanged();
     void playheadSecChanged();
 
-private:
+   private:
     ChartSession* sessionObj() const;
     /// 秒 → 屏幕 y（timing position_at + yOf 语义；A/B 标记用；无 timing/无效 → -1e9）。
     qreal yForSec(double sec) const;

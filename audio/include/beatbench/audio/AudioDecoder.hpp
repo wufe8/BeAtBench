@@ -7,7 +7,7 @@
 // ⚠️ Windows 宽字符路径（2026-09 用户实测）：**含非 ASCII 的路径**（日文谱面目录等）
 // 用窄字符 `ma_decoder_init_file` 会走 fopen ANSI 代码页（GBK）→ 打开失败无声。
 // MINIAudio 提供 `ma_decoder_init_file_w`（UTF-16）；Windows 侧一律用宽字符重载，
-// 非 Windows（POSIX 原生 UTF-8）用窄字符即够（跨平台见 doc/04 §音频）。
+// 非 Windows（POSIX 原生 UTF-8）用窄字符即够（跨平台见 doc/development.md 四、）。
 #pragma once
 
 #include <string>
@@ -18,8 +18,8 @@ namespace beatbench::audio {
 
 struct DecodeResult {
     bool ok = false;
-    DecodedSample* sample = nullptr;   ///< ok 时有效；**裸指针，引用计数 = 1（调用方持有）**
-    std::string message;               ///< 失败原因（中文，面向 UI）
+    DecodedSample* sample = nullptr;  ///< ok 时有效；**裸指针，引用计数 = 1（调用方持有）**
+    std::string message;              ///< 失败原因（中文，面向 UI）
 };
 
 /// 解码单个音频文件为 stereo float32（按源采样率；重采样留到混音回调）。

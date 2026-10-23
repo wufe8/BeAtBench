@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// UI 动作注册表实现（doc/09 操作注册规范化）。
+// UI 动作注册表实现（doc/action-registry.md 操作注册规范化）。
 #include "UiActionRegistry.hpp"
 
 #include <QDebug>
@@ -12,15 +12,13 @@
 #include <QStringConverter>
 #include <QTextStream>
 #include <Qt>
-
 #include <algorithm>
 
 #include "beatbench/core/json/Json.hpp"
 
 namespace beatbench::app {
 
-UiActionRegistry::UiActionRegistry(QObject* parent)
-    : QObject(parent) {}
+UiActionRegistry::UiActionRegistry(QObject* parent) : QObject(parent) {}
 
 // ---- 注册 ----
 
@@ -83,9 +81,7 @@ const UiActionDef* UiActionRegistry::findConst(const QString& id) const {
     return it != m_actions.end() ? &(*it) : nullptr;
 }
 
-bool UiActionRegistry::exists(const QString& id) const {
-    return findConst(id) != nullptr;
-}
+bool UiActionRegistry::exists(const QString& id) const { return findConst(id) != nullptr; }
 
 bool UiActionRegistry::enabled(const QString& id) const {
     auto* def = findConst(id);
@@ -269,14 +265,12 @@ int UiActionRegistry::applyKeymapFile(const QString& path) {
         return -1;
     }
     try {
-        const auto req = beatbench::json::Json::parse(
-            QTextStream(&f).readAll().toStdString());
+        const auto req = beatbench::json::Json::parse(QTextStream(&f).readAll().toStdString());
         QVariantMap map;
         if (req.is_object()) {
             for (const auto& [k, v] : req.as_object()) {
                 if (v.is_string())
-                    map.insert(QString::fromUtf8(k.c_str()),
-                               QString::fromUtf8(v.as_str().c_str()));
+                    map.insert(QString::fromUtf8(k.c_str()), QString::fromUtf8(v.as_str().c_str()));
             }
         }
         const int n = applyKeymap(map);
@@ -323,8 +317,7 @@ void UiActionRegistry::saveUserKeymap() const {
     QSettings s;
     s.beginGroup(QStringLiteral("keymap"));
     s.remove(QString());
-    for (const auto& [id, seq] : m_userKeymap)
-        s.setValue(id, seq);
+    for (const auto& [id, seq] : m_userKeymap) s.setValue(id, seq);
     s.endGroup();
 }
 
@@ -337,8 +330,7 @@ void UiActionRegistry::clearUserKeymap() {
 
 QVariantMap UiActionRegistry::userKeymapSnapshot() const {
     QVariantMap m;
-    for (const auto& [id, seq] : m_userKeymap)
-        m.insert(id, seq);
+    for (const auto& [id, seq] : m_userKeymap) m.insert(id, seq);
     return m;
 }
 
@@ -361,7 +353,7 @@ QString UiActionRegistry::conflictId(const QString& id, const QString& seq) cons
     if (seq.isEmpty()) return {};
     auto* self = findConst(id);
     const QString selfScope = self ? self->scope : QString();
-    // 作用域隔离（doc/09 §11）：空 = 全局，与一切重叠；不同页面作用域互不冲突
+    // 作用域隔离（doc/action-registry.md 九、）：空 = 全局，与一切重叠；不同页面作用域互不冲突
     //（编辑页 Space 与切音页 Space 各绑一次，不算冲突）。
     const auto overlaps = [](const QString& a, const QString& b) {
         return a.isEmpty() || b.isEmpty() || a == b;
@@ -380,34 +372,88 @@ QString UiActionRegistry::sequenceFromKey(int key, int modifiers, const QString&
         return {};
     QString name;
     switch (key) {
-        case Qt::Key_Escape: name = QStringLiteral("Esc"); break;
-        case Qt::Key_Backspace: name = QStringLiteral("Backspace"); break;
-        case Qt::Key_Return: name = QStringLiteral("Return"); break;
-        case Qt::Key_Enter: name = QStringLiteral("Enter"); break;
-        case Qt::Key_Insert: name = QStringLiteral("Ins"); break;
-        case Qt::Key_Delete: name = QStringLiteral("Del"); break;
-        case Qt::Key_Home: name = QStringLiteral("Home"); break;
-        case Qt::Key_End: name = QStringLiteral("End"); break;
-        case Qt::Key_Left: name = QStringLiteral("Left"); break;
-        case Qt::Key_Up: name = QStringLiteral("Up"); break;
-        case Qt::Key_Right: name = QStringLiteral("Right"); break;
-        case Qt::Key_Down: name = QStringLiteral("Down"); break;
-        case Qt::Key_PageUp: name = QStringLiteral("PageUp"); break;
-        case Qt::Key_PageDown: name = QStringLiteral("PageDown"); break;
-        case Qt::Key_Space: name = QStringLiteral("Space"); break;
-        case Qt::Key_Plus: name = QLatin1String("+"); break;
-        case Qt::Key_Minus: name = QLatin1String("-"); break;
-        case Qt::Key_Equal: name = QLatin1String("="); break;
+        case Qt::Key_Escape:
+            name = QStringLiteral("Esc");
+            break;
+        case Qt::Key_Backspace:
+            name = QStringLiteral("Backspace");
+            break;
+        case Qt::Key_Return:
+            name = QStringLiteral("Return");
+            break;
+        case Qt::Key_Enter:
+            name = QStringLiteral("Enter");
+            break;
+        case Qt::Key_Insert:
+            name = QStringLiteral("Ins");
+            break;
+        case Qt::Key_Delete:
+            name = QStringLiteral("Del");
+            break;
+        case Qt::Key_Home:
+            name = QStringLiteral("Home");
+            break;
+        case Qt::Key_End:
+            name = QStringLiteral("End");
+            break;
+        case Qt::Key_Left:
+            name = QStringLiteral("Left");
+            break;
+        case Qt::Key_Up:
+            name = QStringLiteral("Up");
+            break;
+        case Qt::Key_Right:
+            name = QStringLiteral("Right");
+            break;
+        case Qt::Key_Down:
+            name = QStringLiteral("Down");
+            break;
+        case Qt::Key_PageUp:
+            name = QStringLiteral("PageUp");
+            break;
+        case Qt::Key_PageDown:
+            name = QStringLiteral("PageDown");
+            break;
+        case Qt::Key_Space:
+            name = QStringLiteral("Space");
+            break;
+        case Qt::Key_Plus:
+            name = QLatin1String("+");
+            break;
+        case Qt::Key_Minus:
+            name = QLatin1String("-");
+            break;
+        case Qt::Key_Equal:
+            name = QLatin1String("=");
+            break;
         // 标点：设置页录键（如 Ctrl+, 首选项）与 keymap 文本互转（2026-09 快捷键收尾）。
-        case Qt::Key_Comma: name = QLatin1String(","); break;
-        case Qt::Key_Period: name = QLatin1String("."); break;
-        case Qt::Key_Slash: name = QLatin1String("/"); break;
-        case Qt::Key_Semicolon: name = QLatin1String(";"); break;
-        case Qt::Key_Apostrophe: name = QLatin1String("'"); break;
-        case Qt::Key_BracketLeft: name = QLatin1String("["); break;
-        case Qt::Key_BracketRight: name = QLatin1String("]"); break;
-        case Qt::Key_Backslash: name = QLatin1String("\\"); break;
-        case Qt::Key_QuoteLeft: name = QLatin1String("`"); break;
+        case Qt::Key_Comma:
+            name = QLatin1String(",");
+            break;
+        case Qt::Key_Period:
+            name = QLatin1String(".");
+            break;
+        case Qt::Key_Slash:
+            name = QLatin1String("/");
+            break;
+        case Qt::Key_Semicolon:
+            name = QLatin1String(";");
+            break;
+        case Qt::Key_Apostrophe:
+            name = QLatin1String("'");
+            break;
+        case Qt::Key_BracketLeft:
+            name = QLatin1String("[");
+            break;
+        case Qt::Key_BracketRight:
+            name = QLatin1String("]");
+            break;
+        case Qt::Key_Backslash:
+            name = QLatin1String("\\");
+            break;
+        case Qt::Key_QuoteLeft:
+            name = QLatin1String("`");
+            break;
         default:
             if (key >= Qt::Key_F1 && key <= Qt::Key_F12)
                 name = QStringLiteral("F%1").arg(key - Qt::Key_F1 + 1);
@@ -451,8 +497,7 @@ bool UiActionRegistry::revealSettingsLocation() const {
     QDir().mkpath(dir);
     const QString path = QDir(dir).filePath(QStringLiteral("BeAtBench-keymap.reg"));
     QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
-        return false;
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return false;
     QTextStream ts(&f);
     ts.setEncoding(QStringConverter::Utf8);
     QString org = s.organizationName();

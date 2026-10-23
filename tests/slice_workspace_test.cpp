@@ -2,27 +2,23 @@
 // Query tests use in-memory sessions only; export conflict tests write a temp dir
 // and decode a short synthetic wav. AudioEngine is linked but never opened.
 #define _USE_MATH_DEFINES
-#include <algorithm>
-#include <cmath>
-#include <map>
-#include <memory>
+#include <gtest/gtest.h>
 
 #include <QDir>
 #include <QTemporaryDir>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include "bridge/ChartSession.hpp"
-#include "bridge/DocumentService.hpp"
-#include "bridge/SliceWorkspace.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/command/Command.hpp"
@@ -30,11 +26,14 @@
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/slice/Slice.hpp"
+#include "bridge/ChartSession.hpp"
+#include "bridge/DocumentService.hpp"
+#include "bridge/SliceWorkspace.hpp"
 
 namespace {
 
 class SliceWorkspaceTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         auto& registry = beatbench::edit::session_registry();
         previousSession_ = registry.active_id();
@@ -63,8 +62,7 @@ protected:
 
     static std::string readFile(const std::filesystem::path& path) {
         std::ifstream in(path, std::ios::binary);
-        return std::string((std::istreambuf_iterator<char>(in)),
-                           std::istreambuf_iterator<char>());
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
 
     /// 2s 44100Hz 单声道 16-bit；0.5/1.0/1.5s 处 50ms 指数衰减 880Hz burst
@@ -99,7 +97,8 @@ protected:
             }
         }
         for (int i = 0; i < frames; ++i) {
-            const double v = std::max(-1.0, std::min(1.0, static_cast<double>(buf[static_cast<std::size_t>(i)])));
+            const double v = std::max(
+                -1.0, std::min(1.0, static_cast<double>(buf[static_cast<std::size_t>(i)])));
             const auto s = static_cast<std::int16_t>(std::lround(v * 32000.0));
             std::fwrite(&s, 2, 1, f);
         }
@@ -129,8 +128,8 @@ protected:
         std::fwrite("data", 1, 4, f);
         write32(static_cast<std::uint32_t>(frames * channels * 2));
         for (int i = 0; i < frames; ++i) {
-            const auto s = static_cast<std::int16_t>(
-                std::lround(12000 * std::sin(2.0 * 3.14159265358979323846 * 440.0 * i / sampleRate)));
+            const auto s = static_cast<std::int16_t>(std::lround(
+                12000 * std::sin(2.0 * 3.14159265358979323846 * 440.0 * i / sampleRate)));
             std::fwrite(&s, 2, 1, f);
         }
         std::fclose(f);
@@ -138,8 +137,8 @@ protected:
     }
 
     std::filesystem::path makeTempDir(const std::string& tag) {
-        auto temporary = std::make_unique<QTemporaryDir>(QDir(temporaryBase_).filePath(
-            QString::fromStdString("bb-slice-" + tag + "-XXXXXX")));
+        auto temporary = std::make_unique<QTemporaryDir>(
+            QDir(temporaryBase_).filePath(QString::fromStdString("bb-slice-" + tag + "-XXXXXX")));
         EXPECT_TRUE(temporary->isValid());
         if (!temporary->isValid()) return {};
         const auto dir = std::filesystem::u8path(temporary->path().toUtf8().toStdString());
@@ -174,8 +173,8 @@ protected:
     }
 
     beatbench::edit::EditorSession* namedSession(const std::string& id,
-                                                const std::filesystem::path& path,
-                                                beatbench::Chart chart = {}) {
+                                                 const std::filesystem::path& path,
+                                                 beatbench::Chart chart = {}) {
         auto& registry = beatbench::edit::session_registry();
         if (!registry.create(id)) return nullptr;
         auto* session = registry.by_id(id);
@@ -194,15 +193,16 @@ protected:
         std::map<std::string, std::string> snapshot;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
             if (entry.is_regular_file())
-                snapshot.emplace(utf8Path(entry.path().lexically_relative(dir)), readFile(entry.path()));
+                snapshot.emplace(utf8Path(entry.path().lexically_relative(dir)),
+                                 readFile(entry.path()));
         }
         return snapshot;
     }
 
-    QVariantMap prepare(const std::filesystem::path& output, bool place = true,
-                        int base = 0, bool independent = false) {
-        return workspace_.prepareExport(120, 4, 4, 1, 1, qpath(output),
-                                        QStringLiteral("slice"), 0.0, place, base, independent);
+    QVariantMap prepare(const std::filesystem::path& output, bool place = true, int base = 0,
+                        bool independent = false) {
+        return workspace_.prepareExport(120, 4, 4, 1, 1, qpath(output), QStringLiteral("slice"),
+                                        0.0, place, base, independent);
     }
 
     void TearDown() override {
@@ -354,16 +354,17 @@ TEST_F(SliceWorkspaceTest, ExportErrorCancelOverwriteAndContinue) {
     touchFile(dir / "slice_000.wav", "OLD000");
     touchFile(dir / "slice_001.wav", "OLD001");
 
-    auto denied = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                          0.0, false, QStringLiteral("error"));
+    auto denied = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                          false, QStringLiteral("error"));
     EXPECT_FALSE(denied.value(QStringLiteral("ok")).toBool());
     EXPECT_EQ(readFile(dir / "slice_000.wav"), "OLD000");
     EXPECT_EQ(readFile(dir / "slice_001.wav"), "OLD001");
     EXPECT_FALSE(std::filesystem::exists(dir / "slice_002.wav"));
 
-    auto continued = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                             0.0, false, QStringLiteral("continue"));
-    ASSERT_TRUE(continued.value(QStringLiteral("ok")).toBool()) << continued.value("error").toString().toStdString();
+    auto continued = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                             false, QStringLiteral("continue"));
+    ASSERT_TRUE(continued.value(QStringLiteral("ok")).toBool())
+        << continued.value("error").toString().toStdString();
     EXPECT_EQ(readFile(dir / "slice_000.wav"), "OLD000");
     EXPECT_EQ(readFile(dir / "slice_001.wav"), "OLD001");
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_002.wav"));
@@ -371,11 +372,14 @@ TEST_F(SliceWorkspaceTest, ExportErrorCancelOverwriteAndContinue) {
     const auto files = continued.value(QStringLiteral("files")).toStringList();
     EXPECT_TRUE(files.contains(QStringLiteral("slice_002.wav")));
     EXPECT_TRUE(files.contains(QStringLiteral("slice_003.wav")));
-    EXPECT_NE(continued.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("slice_002.wav")), -1);
+    EXPECT_NE(
+        continued.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("slice_002.wav")),
+        -1);
 
     auto overwritten = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
                                                0.0, false, QStringLiteral("overwrite"));
-    ASSERT_TRUE(overwritten.value(QStringLiteral("ok")).toBool()) << overwritten.value("error").toString().toStdString();
+    ASSERT_TRUE(overwritten.value(QStringLiteral("ok")).toBool())
+        << overwritten.value("error").toString().toStdString();
     EXPECT_NE(readFile(dir / "slice_000.wav"), "OLD000");
     EXPECT_NE(readFile(dir / "slice_001.wav"), "OLD001");
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_002.wav"));
@@ -396,15 +400,17 @@ TEST_F(SliceWorkspaceTest, ExportFileNumbersStayIndependentFromWavIds) {
     a.kind = "grid";
     workspace_.setSlicesForTest({a}, {true});
     const QString outDir = QString::fromStdString(dir.string());
-    auto first = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                         0.0, false, QStringLiteral("overwrite"));
-    ASSERT_TRUE(first.value(QStringLiteral("ok")).toBool()) << first.value("error").toString().toStdString();
+    auto first = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                         false, QStringLiteral("overwrite"));
+    ASSERT_TRUE(first.value(QStringLiteral("ok")).toBool())
+        << first.value("error").toString().toStdString();
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_000.wav"));
     EXPECT_NE(first.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("#WAV03")), -1);
 
-    auto second = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                          0.0, false, QStringLiteral("continue"));
-    ASSERT_TRUE(second.value(QStringLiteral("ok")).toBool()) << second.value("error").toString().toStdString();
+    auto second = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                          false, QStringLiteral("continue"));
+    ASSERT_TRUE(second.value(QStringLiteral("ok")).toBool())
+        << second.value("error").toString().toStdString();
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_000.wav"));
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_001.wav"));
     EXPECT_NE(second.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("#WAV03")), -1);
@@ -463,8 +469,8 @@ TEST_F(SliceWorkspaceTest, PlaceIntoChartAppliesAndReportsNotes) {
     a.kind = "grid";
     workspace_.setSlicesForTest({a}, {true});
     const QString outDir = QString::fromStdString(dir.string());
-    const auto r = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                           0.0, true, QStringLiteral("overwrite"));
+    const auto r = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                           true, QStringLiteral("overwrite"));
     ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
         << r.value(QStringLiteral("error")).toString().toStdString();
     EXPECT_TRUE(r.value(QStringLiteral("placed")).toBool())
@@ -819,7 +825,8 @@ TEST_F(SliceWorkspaceTest, MultiTargetPathsResolveSameWavAndPreserveDirtySession
         const auto sample = session->chart().samples.find({beatbench::SampleKind::Wav, 1});
         ASSERT_NE(sample, session->chart().samples.end());
         EXPECT_EQ(std::filesystem::canonical(pair.second.parent_path() /
-                      std::filesystem::u8path(sample->second.file)), wav);
+                                             std::filesystem::u8path(sample->second.file)),
+                  wav);
         EXPECT_EQ(session->undo_depth(), 2u);  // 已有dirty一步 + 本次铺放一步
         ASSERT_TRUE(session->undo());
         EXPECT_TRUE(session->chart().notes.empty());
@@ -869,9 +876,9 @@ TEST_F(SliceWorkspaceTest, MissingTargetPreventsAllFileAndDocumentWrites) {
         EXPECT_EQ(b->undo_depth(), 0u);
     }
     // 兼容入口也必须先加载全部目标，不能先输出WAV再报告部分铺放失败。
-    const auto result = workspace_.exportSlices(120, 4, 4, 1, 1, qpath(dir / "not-created"),
-                                               QStringLiteral("slice"), 0.0, true,
-                                               QStringLiteral("overwrite"));
+    const auto result =
+        workspace_.exportSlices(120, 4, 4, 1, 1, qpath(dir / "not-created"),
+                                QStringLiteral("slice"), 0.0, true, QStringLiteral("overwrite"));
     EXPECT_FALSE(result.value("ok").toBool());
     EXPECT_EQ(diskSnapshot(dir), before);
     EXPECT_FALSE(std::filesystem::exists(dir / "not-created"));
@@ -918,8 +925,8 @@ TEST_F(SliceWorkspaceTest, PreparedPlanRejectsTargetEditUndoReloadOrPathChange) 
         const auto before = diskSnapshot(dir);
         const auto depth = b->undo_depth();
         const auto revision = b->revision();
-        const auto result = workspace_.commitExport(plan.value("planId").toString(),
-                                                    QStringLiteral("overwrite"));
+        const auto result =
+            workspace_.commitExport(plan.value("planId").toString(), QStringLiteral("overwrite"));
         EXPECT_FALSE(result.value("ok").toBool());
         EXPECT_FALSE(result.value("error").toString().isEmpty());
         EXPECT_EQ(diskSnapshot(dir), before);
@@ -1003,7 +1010,8 @@ TEST_F(SliceWorkspaceTest, PreparedPlanRejectsChangedCollisionAddedFileOrContinu
             touchFile(output / "slice_001.wav", "NEW-CONTINUE-DESTINATION");
         }
         const auto before = diskSnapshot(dir);
-        const auto result = workspace_.commitExport(plan.value("planId").toString(),
+        const auto result = workspace_.commitExport(
+            plan.value("planId").toString(),
             mutation == "continue" ? QStringLiteral("continue") : QStringLiteral("overwrite"));
         EXPECT_FALSE(result.value("ok").toBool());
         EXPECT_EQ(diskSnapshot(dir), before);
@@ -1060,8 +1068,8 @@ TEST_F(SliceWorkspaceTest, ContinueReservesCaseInsensitiveWindowsFileIndexes) {
     const auto plan = prepare(output, false);
     ASSERT_TRUE(plan.value("ok").toBool()) << plan.value("error").toString().toStdString();
     EXPECT_EQ(plan.value("nextContinueIndex").toInt(), 1);
-    const auto result = workspace_.commitExport(plan.value("planId").toString(),
-                                                 QStringLiteral("continue"));
+    const auto result =
+        workspace_.commitExport(plan.value("planId").toString(), QStringLiteral("continue"));
     ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
     EXPECT_EQ(readFile(output / "SLICE_000.WAV"), "KEEP-UPPERCASE-ORIGINAL");
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "slice_001.wav"));
@@ -1088,8 +1096,8 @@ TEST_F(SliceWorkspaceTest, DirectoryAtPlannedOutputCannotBeOverwritten) {
             EXPECT_FALSE(plan.value("ok").toBool());
         }
         const auto before = diskSnapshot(dir);
-        const auto result = workspace_.commitExport(plan.value("planId").toString(),
-                                                     QStringLiteral("overwrite"));
+        const auto result =
+            workspace_.commitExport(plan.value("planId").toString(), QStringLiteral("overwrite"));
         EXPECT_FALSE(result.value("ok").toBool());
         EXPECT_TRUE(std::filesystem::is_directory(output / "slice_000.wav"));
         EXPECT_EQ(diskSnapshot(dir), before);
@@ -1110,8 +1118,8 @@ TEST_F(SliceWorkspaceTest, SymlinkAtPlannedOutputCannotReplaceLinkedAudio) {
     const auto before = diskSnapshot(dir);
     const auto plan = prepare(output, false);
     EXPECT_FALSE(plan.value("ok").toBool());
-    const auto result = workspace_.commitExport(plan.value("planId").toString(),
-                                                 QStringLiteral("overwrite"));
+    const auto result =
+        workspace_.commitExport(plan.value("planId").toString(), QStringLiteral("overwrite"));
     EXPECT_FALSE(result.value("ok").toBool());
     EXPECT_TRUE(std::filesystem::is_symlink(output / "slice_000.wav"));
     EXPECT_EQ(diskSnapshot(dir), before);
@@ -1179,8 +1187,8 @@ TEST_F(SliceWorkspaceTest, ReferenceAudioAtPlannedOutputIsNeverOverwritten) {
     const auto plan = prepare(dir, false);
     EXPECT_FALSE(plan.value("ok").toBool());
     EXPECT_FALSE(plan.value("error").toString().isEmpty());
-    const auto result = workspace_.commitExport(plan.value("planId").toString(),
-                                                 QStringLiteral("overwrite"));
+    const auto result =
+        workspace_.commitExport(plan.value("planId").toString(), QStringLiteral("overwrite"));
     EXPECT_FALSE(result.value("ok").toBool());
     EXPECT_EQ(diskSnapshot(dir), before);
 }
@@ -1197,15 +1205,16 @@ TEST_F(SliceWorkspaceTest, InputAlphabetMustMatchResolvedTargetBeforeAnyWrite) {
     ASSERT_TRUE(beatbench::edit::session_registry().activate(sessionId_));
     workspace_.setExportTargets({qpath(targetPath)});
     const auto output = dir / "not-created";
-    const auto mismatch = workspace_.prepareExport(120, 4, 4, 36, 1, qpath(output),
-        QStringLiteral("slice"), 0.0, true, 0, false, 36);
+    const auto mismatch = workspace_.prepareExport(
+        120, 4, 4, 36, 1, qpath(output), QStringLiteral("slice"), 0.0, true, 0, false, 36);
     EXPECT_FALSE(mismatch.value("ok").toBool());
     EXPECT_TRUE(mismatch.value("error").toString().contains(QStringLiteral("Base62")));
     EXPECT_FALSE(std::filesystem::exists(output));
     // 用户明确选择Base62并重新确认“10”（数值62），不能静默把原36解释成0a。
-    const auto explicitBase = workspace_.prepareExport(120, 4, 4, 62, 1, qpath(output),
-        QStringLiteral("slice"), 0.0, true, 2, false, 62);
-    ASSERT_TRUE(explicitBase.value("ok").toBool()) << explicitBase.value("error").toString().toStdString();
+    const auto explicitBase = workspace_.prepareExport(
+        120, 4, 4, 62, 1, qpath(output), QStringLiteral("slice"), 0.0, true, 2, false, 62);
+    ASSERT_TRUE(explicitBase.value("ok").toBool())
+        << explicitBase.value("error").toString().toStdString();
     const auto result = workspace_.commitExport(explicitBase.value("planId").toString());
     ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
     EXPECT_TRUE(result.value("raw").toString().contains(QStringLiteral("#WAV10")));
@@ -1228,12 +1237,16 @@ TEST_F(SliceWorkspaceTest, IdConflictOffersSkipOverwriteAndReadOnlyCancel) {
     const auto before = diskSnapshot(dir);
     const auto revision = session->revision();
     workspace_.discardExportPlan();
-    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite").value("ok").toBool());
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite")
+                     .value("ok")
+                     .toBool());
     EXPECT_EQ(diskSnapshot(dir), before);
     EXPECT_EQ(session->revision(), revision);
 
     plan = prepare(dir / "output");
-    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "error").value("ok").toBool());
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "error")
+                     .value("ok")
+                     .toBool());
     EXPECT_EQ(diskSnapshot(dir), before);
     plan = prepare(dir / "output");
     const auto skipped = workspace_.commitExport(plan.value("planId").toString(), "error", "skip");
@@ -1245,13 +1258,17 @@ TEST_F(SliceWorkspaceTest, IdConflictOffersSkipOverwriteAndReadOnlyCancel) {
 
     plan = prepare(dir / "output");
     // ID 覆盖不能自动授权磁盘覆盖。
-    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite").value("ok").toBool());
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite")
+                     .value("ok")
+                     .toBool());
     EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "old.wav");
     const auto oldAudio = readFile(dir / "output" / "slice_000.wav");
     plan = prepare(dir / "output");
-    const auto replaced = workspace_.commitExport(plan.value("planId").toString(), "continue", "overwrite");
+    const auto replaced =
+        workspace_.commitExport(plan.value("planId").toString(), "continue", "overwrite");
     ASSERT_TRUE(replaced.value("ok").toBool()) << replaced.value("error").toString().toStdString();
-    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "output/slice_001.wav");
+    EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file,
+              "output/slice_001.wav");
     EXPECT_EQ(replaced.value("nextStartId").toInt(), 2);
     EXPECT_EQ(readFile(dir / "output" / "slice_000.wav"), oldAudio);
     EXPECT_EQ(session->undo_depth(), 1u);
@@ -1271,10 +1288,13 @@ TEST_F(SliceWorkspaceTest, FullIdTableAllowsExplicitOverwriteButRejectsSkip) {
     ASSERT_TRUE(plan.value("ok").toBool()) << plan.value("error").toString().toStdString();
     EXPECT_FALSE(plan.value("skipAvailable").toBool());
     EXPECT_TRUE(plan.value("overwriteAvailable").toBool());
-    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "skip").value("ok").toBool());
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "error", "skip")
+                     .value("ok")
+                     .toBool());
     EXPECT_FALSE(std::filesystem::exists(dir / "output"));
     plan = prepare(dir / "output");
-    const auto result = workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite");
+    const auto result =
+        workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite");
     ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
     EXPECT_TRUE(result.value("raw").toString().contains("#WAV01"));
     auto* session = beatbench::edit::session_registry().by_id(sessionId_);
@@ -1307,11 +1327,12 @@ TEST_F(SliceWorkspaceTest, IdConflictUsesActualBase62UnionAndPreservesUnselected
     ASSERT_NE(targetC, nullptr);
     ASSERT_TRUE(beatbench::edit::session_registry().activate(sessionId_));
     workspace_.setExportTargets({qpath(pathB), qpath(pathC)});
-    const auto plan = workspace_.prepareExport(120, 4, 4, 36, 1, qpath(dir / "output"),
-        "slice", 0.0, true, 2, false, 62);
+    const auto plan = workspace_.prepareExport(120, 4, 4, 36, 1, qpath(dir / "output"), "slice",
+                                               0.0, true, 2, false, 62);
     ASSERT_TRUE(plan.value("ok").toBool());
     EXPECT_EQ(plan.value("idCollisions").toStringList(), (QStringList{"0a", "0b"}));
-    const auto result = workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite");
+    const auto result =
+        workspace_.commitExport(plan.value("planId").toString(), "error", "overwrite");
     ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
     EXPECT_EQ(result.value("count").toInt(), 2);
     EXPECT_EQ(result.value("nextStartId").toInt(), 38);
@@ -1319,8 +1340,10 @@ TEST_F(SliceWorkspaceTest, IdConflictUsesActualBase62UnionAndPreservesUnselected
     EXPECT_FALSE(std::filesystem::exists(dir / "output" / "slice_002.wav"));
     for (auto* target : {targetB, targetC}) {
         EXPECT_EQ(target->undo_depth(), 1u);
-        EXPECT_EQ(target->chart().samples.at({beatbench::SampleKind::Wav, 36}).file, "output/slice_000.wav");
-        EXPECT_EQ(target->chart().samples.at({beatbench::SampleKind::Wav, 37}).file, "output/slice_001.wav");
+        EXPECT_EQ(target->chart().samples.at({beatbench::SampleKind::Wav, 36}).file,
+                  "output/slice_000.wav");
+        EXPECT_EQ(target->chart().samples.at({beatbench::SampleKind::Wav, 37}).file,
+                  "output/slice_001.wav");
         ASSERT_TRUE(target->undo());
     }
     EXPECT_EQ(targetC->chart().meta.at("LNOBJ"), "0b");
@@ -1343,7 +1366,9 @@ TEST_F(SliceWorkspaceTest, IdOverwriteRejectsStalePlanBeforeWriting) {
     ASSERT_TRUE(editTitle(*session, "changed"));
     ASSERT_TRUE(session->undo());
     const auto before = diskSnapshot(dir);
-    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "overwrite", "overwrite").value("ok").toBool());
+    EXPECT_FALSE(workspace_.commitExport(plan.value("planId").toString(), "overwrite", "overwrite")
+                     .value("ok")
+                     .toBool());
     EXPECT_EQ(diskSnapshot(dir), before);
     EXPECT_EQ(session->chart().samples.at({beatbench::SampleKind::Wav, 1}).file, "old.wav");
 }

@@ -16,22 +16,22 @@ using namespace beatbench::bms;
 namespace {
 std::size_t issue_count(const Chart& chart, const std::string& code) {
     const auto issues = lint_chart(chart, {});
-    return static_cast<std::size_t>(std::count_if(issues.begin(), issues.end(),
-        [&](const auto& issue) { return issue.code == code; }));
+    return static_cast<std::size_t>(std::count_if(
+        issues.begin(), issues.end(), [&](const auto& issue) { return issue.code == code; }));
 }
-using Identity = std::tuple<std::uint32_t, Rational, std::uint8_t, LaneKind,
-                            std::uint8_t, NoteKind, bool, std::uint32_t>;
+using Identity = std::tuple<std::uint32_t, Rational, std::uint8_t, LaneKind, std::uint8_t, NoteKind,
+                            bool, std::uint32_t>;
 std::vector<Identity> identities(const Chart& chart) {
     std::vector<Identity> out;
     for (const auto& ev : chart.notes) {
         const auto& n = ev.value;
-        out.emplace_back(ev.measure, ev.pos, n.lane.player, n.lane.kind, n.lane.index,
-                         n.kind, n.ln_channel, n.sample.id);
+        out.emplace_back(ev.measure, ev.pos, n.lane.player, n.lane.kind, n.lane.index, n.kind,
+                         n.ln_channel, n.sample.id);
     }
     std::sort(out.begin(), out.end());
     return out;
 }
-}
+}  // namespace
 
 TEST(LnCodec, LnChannelsPairChronologicallyRegardlessOfSampleAndLntype) {
     for (const std::string meta : {"", "#LNTYPE 1\n", "#LNTYPE 2\n"}) {
@@ -43,7 +43,7 @@ TEST(LnCodec, LnChannelsPairChronologicallyRegardlessOfSampleAndLntype) {
         EXPECT_EQ(notes[2].value.ln_pair, 1u);
         EXPECT_EQ(notes[3].value.ln_pair, 0u);
         EXPECT_FALSE(notes[4].value.ln_pair);
-        EXPECT_EQ(notes[0].measure, 4u); // Do not reorder the notes vector.
+        EXPECT_EQ(notes[0].measure, 4u);  // Do not reorder the notes vector.
         EXPECT_EQ(issue_count(result.chart, "unpaired_ln_note"), 1u);
         const auto output = write_bms(result.chart);
         EXPECT_NE(output.find("#00551:06"), std::string::npos);
@@ -53,7 +53,8 @@ TEST(LnCodec, LnChannelsPairChronologicallyRegardlessOfSampleAndLntype) {
 
 TEST(LnCodec, LnobjWorksWithoutLntypeAndCoexistsWithLnChannels) {
     for (const std::string meta : {"", "#LNTYPE 1\n", "#LNTYPE 2\n"}) {
-        const auto result = read_bms(meta + "#00311:ZZ\n#00111:01\n#00251:02\n#00451:03\n#LNOBJ ZZ\n");
+        const auto result =
+            read_bms(meta + "#00311:ZZ\n#00111:01\n#00251:02\n#00451:03\n#LNOBJ ZZ\n");
         ASSERT_EQ(result.chart.notes.size(), 4u);
         EXPECT_EQ(result.chart.notes[0].value.ln_pair, 1u);
         EXPECT_EQ(result.chart.notes[1].value.ln_pair, 0u);
@@ -81,7 +82,8 @@ TEST(LnCodec, ConsecutiveLnobjTailsDoNotConsumeOlderHeads) {
 }
 
 TEST(LnCodec, MinesAndBgmNeverParticipateInLnobj) {
-    const auto result = read_bms("#LNOBJ ZZ\n#00111:01\n#002D1:ZZ\n#00311:ZZ\n#00101:01ZZ\n#004D2:01ZZ\n");
+    const auto result =
+        read_bms("#LNOBJ ZZ\n#00111:01\n#002D1:ZZ\n#00311:ZZ\n#00101:01ZZ\n#004D2:01ZZ\n");
     const auto& n = result.chart.notes;
     ASSERT_EQ(n.size(), 7u);
     EXPECT_EQ(n[0].value.ln_pair, 2u);

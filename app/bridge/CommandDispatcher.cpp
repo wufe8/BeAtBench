@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bridge/CommandDispatcher.hpp"
 
+#include <QString>
+
 #include "beatbench/core/Version.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/json/Json.hpp"
-
-#include <QString>
 
 namespace beatbench::app {
 
@@ -19,7 +19,7 @@ QString CommandDispatcher::dispatch(const QString& request) const {
     try {
         req = Json::parse(request.toStdString());
     } catch (const JsonError& e) {
-        // 请求 JSON 非法：给一个 bad_request 信封（与 CLI 退出码 2 场景一致，doc/06 §3.4）
+        // 请求 JSON 非法：给一个 bad_request 信封（与 CLI 退出码 2 场景一致，doc/command-protocol.md 三、4.）
         Json err = Json::object();
         err.set("ok", false);
         Json eo = Json::object();
@@ -29,7 +29,7 @@ QString CommandDispatcher::dispatch(const QString& request) const {
         return QString::fromUtf8(err.dump().c_str());
     }
 
-    // dispatch 自身不抛：信封/参数/命令错误全部收编为 ok:false 响应（doc/06 §3.2）
+    // dispatch 自身不抛：信封/参数/命令错误全部收编为 ok:false 响应（doc/command-protocol.md 三、2.）
     const Json res = beatbench::cmd::global_registry().dispatch(req);
     return QString::fromUtf8(res.dump().c_str());
 }

@@ -17,7 +17,8 @@ class DocumentService;
 class ChartHistoryController : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
-    Q_PROPERTY(bool createOnClose READ createOnClose WRITE setCreateOnClose NOTIFY createOnCloseChanged)
+    Q_PROPERTY(
+        bool createOnClose READ createOnClose WRITE setCreateOnClose NOTIFY createOnCloseChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QVariantList entries READ entries NOTIFY entriesChanged)
     Q_PROPERTY(QString documentLabel READ documentLabel NOTIFY documentLabelChanged)
@@ -25,7 +26,7 @@ class ChartHistoryController : public QObject {
     Q_PROPERTY(QString sourcePath READ sourcePath NOTIFY sourcePathChanged)
     Q_PROPERTY(QString documentId READ documentId NOTIFY sourcePathChanged)
     Q_PROPERTY(QString storagePath READ storagePath CONSTANT)
-public:
+   public:
     explicit ChartHistoryController(DocumentService* documents, QObject* parent = nullptr,
                                     QString root = {});
     ~ChartHistoryController() override;
@@ -51,7 +52,7 @@ public:
     Q_INVOKABLE void restoreCopy(const QString& snapshotId);
     /// 同步退出钩子：false 表示不可关闭；未开启退出快照时不访问存储并返回 true。
     Q_INVOKABLE bool snapshotAllSaved();
-signals:
+   signals:
     void enabledChanged();
     void createOnCloseChanged();
     void busyChanged();
@@ -65,7 +66,8 @@ signals:
     /// 每个已接受的异步操作/保存请求完成后发出一次。
     /// 同步退出批次执行后也发出；空操作和被拒绝的调用不发出。
     void operationFinished(bool ok);
-private:
+
+   private:
     enum class Operation { History, Create, Restore };
     QVariantMap document(const QString& id) const;
     bool validateDocument(const QString& id, const QString& path, bool requireClean);
@@ -87,4 +89,4 @@ private:
     QString m_pendingId, m_pendingPath, m_pendingNote;
     QString m_exitSnapshotError;
 };
-} // namespace beatbench::app
+}  // namespace beatbench::app

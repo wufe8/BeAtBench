@@ -12,7 +12,7 @@ namespace beatbench::app {
 /// External opening never saves, reloads, or changes the active chart/undo stack.
 class ChartFileActions : public QObject {
     Q_OBJECT
-public:
+   public:
     enum class Action { Reveal, EditText };
     enum class Platform { Windows, MacOS, Other };
     struct LaunchRequest {
@@ -32,14 +32,16 @@ public:
 
     static Platform hostPlatform();
     /// Pure policy builder: Windows editor is a fixed system Notepad, never file association.
-    static LaunchRequest launchRequest(Action action, Platform platform, const QString& absolutePath,
+    static LaunchRequest launchRequest(Action action, Platform platform,
+                                       const QString& absolutePath,
                                        const QString& windowsSystemDirectory = {},
                                        const QString& linuxTextEditor = {});
-signals:
+   signals:
     void statusMessage(QString message);
-private:
+
+   private:
     bool openActive(Action action);
     static QString launch(const LaunchRequest& request);
     Launcher m_launcher;
 };
-} // namespace beatbench::app
+}  // namespace beatbench::app

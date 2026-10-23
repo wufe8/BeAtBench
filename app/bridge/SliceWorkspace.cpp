@@ -6,32 +6,31 @@
 // - offset 仅数据（画 note 刻度/列表显示时 +offsetSec）；切片边界推导（M6.2）再消费。
 #include "bridge/SliceWorkspace.hpp"
 
-#include <QDir>
 #include <QCryptographicHash>
 #include <QDateTime>
-#include <QUuid>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QSet>
 #include <QThreadPool>
+#include <QUuid>
 #include <QVariantMap>
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <set>
 
-#include "bridge/AudioEngine.hpp"
-#include "bridge/ChartSession.hpp"
-#include "bridge/DocumentService.hpp"
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/OnsetDetector.hpp"
-#include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
+#include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/slice/SliceExport.hpp"
+#include "bridge/AudioEngine.hpp"
+#include "bridge/ChartSession.hpp"
+#include "bridge/DocumentService.hpp"
 
 namespace beatbench::app {
 
@@ -58,7 +57,7 @@ void reserve_chart_wav_ids(const Chart& chart, std::set<std::uint32_t>& ids) {
     const auto lnobj = chart.meta.find("LNOBJ");
     if (lnobj != chart.meta.end() && !lnobj->second.empty())
         ids.insert(chart.id_base == IdBase::Base62 ? bms::c62_to_u32(lnobj->second, 2)
-                                                  : bms::c36_to_u32(lnobj->second, 2));
+                                                   : bms::c36_to_u32(lnobj->second, 2));
 }
 
 constexpr int kExportNameWidth = 3;
@@ -98,23 +97,24 @@ ExportDiskScan scan_export_disk(const QString& outDir, const QString& baseName,
         if (info.exists() || info.isSymLink()) scan.collisions << name;
     }
 
-    const int lastSlash = std::max(baseName.lastIndexOf(QLatin1Char('/')),
-                                   baseName.lastIndexOf(QLatin1Char('\\')));
+    const int lastSlash =
+        std::max(baseName.lastIndexOf(QLatin1Char('/')), baseName.lastIndexOf(QLatin1Char('\\')));
     const QString prefixDir = (lastSlash >= 0) ? baseName.left(lastSlash) : QString();
     const QString leaf = (lastSlash >= 0) ? baseName.mid(lastSlash + 1) : baseName;
     QDir scanDir = dir;
     if (!prefixDir.isEmpty()) scanDir = QDir(dir.filePath(prefixDir));
-    const QStringList names =
-        scanDir.entryList({leaf + QStringLiteral("_*.wav")},
-                          QDir::Files | QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot, QDir::Name);
+    const QStringList names = scanDir.entryList(
+        {leaf + QStringLiteral("_*.wav")},
+        QDir::Files | QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot, QDir::Name);
     for (const QString& name : names) {
         const QString rel = prefixDir.isEmpty() ? name : (prefixDir + QLatin1Char('/') + name);
 #ifdef _WIN32
         // Windows 文件路径不区分大小写，序号占用也必须采用同一规则。
-        const int idx = slice::parse_export_file_index(rel.toLower().toStdString(),
-                                                       baseName.toLower().toStdString(), kExportNameWidth);
+        const int idx = slice::parse_export_file_index(
+            rel.toLower().toStdString(), baseName.toLower().toStdString(), kExportNameWidth);
 #else
-        const int idx = slice::parse_export_file_index(rel.toStdString(), baseName.toStdString(), kExportNameWidth);
+        const int idx = slice::parse_export_file_index(rel.toStdString(), baseName.toStdString(),
+                                                       kExportNameWidth);
 #endif
         if (idx < 0) continue;
         if (idx >= std::numeric_limits<int>::max() - static_cast<int>(items.size()) - 1) {
@@ -142,7 +142,8 @@ ExportDiskScan scan_export_disk(const QString& outDir, const QString& baseName,
         }
         QFile file(info.absoluteFilePath());
         if (!file.open(QIODevice::ReadOnly) || !hash.addData(&file)) {
-            scan.error = QStringLiteral("无法读取已有文件以核对覆盖：%1").arg(info.absoluteFilePath());
+            scan.error =
+                QStringLiteral("无法读取已有文件以核对覆盖：%1").arg(info.absoluteFilePath());
             break;
         }
     }
@@ -159,11 +160,11 @@ std::vector<std::string> to_std_names(const QStringList& names) {
 
 slice::ExportConflictPolicy parse_conflict_policy(const QString& text, QString* error) {
     const QString t = text.trimmed().toLower();
-    if (t.isEmpty() || t == QLatin1String("error"))
-        return slice::ExportConflictPolicy::Error;
+    if (t.isEmpty() || t == QLatin1String("error")) return slice::ExportConflictPolicy::Error;
     if (t == QLatin1String("overwrite")) return slice::ExportConflictPolicy::Overwrite;
     if (t == QLatin1String("continue")) return slice::ExportConflictPolicy::Continue;
-    if (error) *error = QStringLiteral("未知冲突策略: %1（overwrite / continue / error）").arg(text);
+    if (error)
+        *error = QStringLiteral("未知冲突策略: %1（overwrite / continue / error）").arg(text);
     return slice::ExportConflictPolicy::Error;
 }
 
@@ -174,11 +175,9 @@ QVariantMap pyramid_info(const beatbench::audio::WaveformPyramid* p) {
         return m;
     }
     m.insert(QStringLiteral("valid"), true);
-    m.insert(QStringLiteral("frames"),
-             static_cast<qlonglong>(p->frameCount()));
+    m.insert(QStringLiteral("frames"), static_cast<qlonglong>(p->frameCount()));
     m.insert(QStringLiteral("sampleRate"), p->sampleRate());
-    m.insert(QStringLiteral("durationSec"),
-             static_cast<double>(p->frameCount()) / p->sampleRate());
+    m.insert(QStringLiteral("durationSec"), static_cast<double>(p->frameCount()) / p->sampleRate());
     return m;
 }
 
@@ -204,9 +203,7 @@ QVariantList SliceWorkspace::occupiedWavIds() const {
     return out;
 }
 
-int SliceWorkspace::nextFreeWavId() const {
-    return nextFreeWavIdForBase(0, false);
-}
+int SliceWorkspace::nextFreeWavId() const { return nextFreeWavIdForBase(0, false); }
 
 int SliceWorkspace::effectiveWavIdBase(int idBaseMode) const {
     if (idBaseMode == 1) return 36;
@@ -223,8 +220,8 @@ int SliceWorkspace::nextFreeWavIdForBase(int idBaseMode, bool independentExport)
                                : beatbench::IdBase::Base36;
     const auto idBase = idBaseMode == 2 ? beatbench::IdBase::Base62
                                         : (idBaseMode == 1 ? beatbench::IdBase::Base36 : chartBase);
-    const auto occupied = independentExport ? std::vector<std::uint32_t>{}
-                                            : occupied_wav_ids(m_chartSession);
+    const auto occupied =
+        independentExport ? std::vector<std::uint32_t>{} : occupied_wav_ids(m_chartSession);
     const std::set<std::uint32_t> taken(occupied.begin(), occupied.end());
     const std::uint32_t maxId = idBase == beatbench::IdBase::Base62 ? 3843u : 1295u;
     std::uint32_t cand = 1;
@@ -252,9 +249,8 @@ QVariantMap SliceWorkspace::previewExportFiles(const QString& outDir, const QStr
                                  ? m_chartSession->chart()->id_base
                                  : beatbench::IdBase::Base36;
     const auto items = slice::build_export_layout(
-        m_slices, m_sliceEnabled, occupied_wav_ids(m_chartSession), 1,
-        baseName.toStdString(), 120.0, 4, 4, m_offsetSec, 1, kExportNameWidth,
-        previewBase);
+        m_slices, m_sliceEnabled, occupied_wav_ids(m_chartSession), 1, baseName.toStdString(),
+        120.0, 4, 4, m_offsetSec, 1, kExportNameWidth, previewBase);
     const auto scan = scan_export_disk(outDir, baseName, items);
     res.insert(QStringLiteral("ok"), true);
     res.insert(QStringLiteral("outDir"), outDir);
@@ -285,17 +281,14 @@ void SliceWorkspace::setSlicesForTest(std::vector<beatbench::slice::Slice> slice
                                       std::vector<bool> enabled) {
     m_slices = std::move(slices);
     m_sliceEnabled = std::move(enabled);
-    if (m_sliceEnabled.size() != m_slices.size())
-        m_sliceEnabled.assign(m_slices.size(), true);
+    if (m_sliceEnabled.size() != m_slices.size()) m_sliceEnabled.assign(m_slices.size(), true);
     emit slicesChanged();
 }
 
-QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
-                                         int beatsPerMeasure, int startId,
-                                         int startMeasure,
-                                         const QString& outDir, const QString& prefix,
-                                         qreal fadeMs, bool placeIntoChart,
-                                         int idBaseMode, bool independentExport, int inputIdBase) {
+QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision, int beatsPerMeasure,
+                                          int startId, int startMeasure, const QString& outDir,
+                                          const QString& prefix, qreal fadeMs, bool placeIntoChart,
+                                          int idBaseMode, bool independentExport, int inputIdBase) {
     discardExportPlan();
     QVariantMap res;
     res.insert(QStringLiteral("ok"), false);
@@ -311,11 +304,15 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
         res.insert(QStringLiteral("error"), QStringLiteral("输出目录为空"));
         return res;
     }
-    auto fail = [&](const QString& error) { res.insert(QStringLiteral("error"), error); return res; };
+    auto fail = [&](const QString& error) {
+        res.insert(QStringLiteral("error"), error);
+        return res;
+    };
     if (busy()) return fail(QStringLiteral("工作台正忙，请稍后重新预览"));
-    if (!std::isfinite(bpm) || bpm <= 0 || !std::isfinite(m_offsetSec) || !std::isfinite(fadeMs) || fadeMs < 0 ||
-        subdivision <= 0 || subdivision > 192 || beatsPerMeasure < 1 || beatsPerMeasure > 32 ||
-        startMeasure < 1 || startMeasure > 999 || idBaseMode < 0 || idBaseMode > 2)
+    if (!std::isfinite(bpm) || bpm <= 0 || !std::isfinite(m_offsetSec) || !std::isfinite(fadeMs) ||
+        fadeMs < 0 || subdivision <= 0 || subdivision > 192 || beatsPerMeasure < 1 ||
+        beatsPerMeasure > 32 || startMeasure < 1 || startMeasure > 999 || idBaseMode < 0 ||
+        idBaseMode > 2)
         return fail(QStringLiteral("导出参数不合法"));
     if (independentExport && placeIntoChart)
         return fail(QStringLiteral("独立导出不能同时铺入谱面"));
@@ -323,7 +320,8 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
     if (QDir::isAbsolutePath(baseName) || baseName.contains(QLatin1Char(':')) ||
         baseName.contains(QLatin1Char('\n')) || baseName.contains(QLatin1Char('\r')) ||
         baseName.contains(QLatin1Char('*')) || baseName.contains(QLatin1Char('?')) ||
-        baseName.contains(QLatin1Char('[')) || baseName.split(QLatin1Char('/')).contains(QStringLiteral("..")))
+        baseName.contains(QLatin1Char('[')) ||
+        baseName.split(QLatin1Char('/')).contains(QStringLiteral("..")))
         return fail(QStringLiteral("前缀必须是输出目录内的相对路径，不能包含通配符或换行"));
     ExportPlan plan;
     plan.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -339,14 +337,16 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
     QVariantList targetInfo;
     std::set<std::uint32_t> reserved;
     IdBase automaticBase = m_chartSession && m_chartSession->chart()
-                               ? m_chartSession->chart()->id_base : IdBase::Base36;
+                               ? m_chartSession->chart()->id_base
+                               : IdBase::Base36;
     if (placeIntoChart) {
         std::vector<std::string> ids;
         if (!m_exportTargets.isEmpty()) {
             for (const QString& path : m_exportTargets) {
                 QString error;
                 const std::string id = sessionIdForPath(path, &error);
-                if (id.empty()) return fail(QStringLiteral("目标加载失败：%1：%2").arg(path, error));
+                if (id.empty())
+                    return fail(QStringLiteral("目标加载失败：%1：%2").arg(path, error));
                 if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
             }
         } else if (m_chartSession && m_chartSession->hasChart()) {
@@ -356,8 +356,12 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
         bool first = true;
         for (const std::string& id : ids) {
             const auto* session = reg.by_id(id);
-            if (!session || !session->has_chart()) return fail(QStringLiteral("目标文档不可用，请重新选择"));
-            if (first) { automaticBase = session->chart().id_base; first = false; }
+            if (!session || !session->has_chart())
+                return fail(QStringLiteral("目标文档不可用，请重新选择"));
+            if (first) {
+                automaticBase = session->chart().id_base;
+                first = false;
+            }
             if (session->chart().id_base != automaticBase)
                 return fail(QStringLiteral("目标谱面混用 Base36/Base62，请按进制分批导出"));
             reserve_chart_wav_ids(session->chart(), reserved);
@@ -367,19 +371,22 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
             target.label = target.path.isEmpty() ? QStringLiteral("未命名谱面") : target.path;
             target.revision = session->revision();
             targetInfo.append(QVariantMap{{QStringLiteral("id"), QString::fromStdString(id)},
-                                         {QStringLiteral("path"), target.path},
-                                         {QStringLiteral("label"), target.label}});
+                                          {QStringLiteral("path"), target.path},
+                                          {QStringLiteral("label"), target.label}});
             plan.targets.push_back(std::move(target));
         }
     } else if (!independentExport && m_chartSession && m_chartSession->chart()) {
         reserve_chart_wav_ids(*m_chartSession->chart(), reserved);
     }
-    const auto idBase = idBaseMode == 2 ? IdBase::Base62 : (idBaseMode == 1 ? IdBase::Base36 : automaticBase);
+    const auto idBase =
+        idBaseMode == 2 ? IdBase::Base62 : (idBaseMode == 1 ? IdBase::Base36 : automaticBase);
     if (placeIntoChart && idBase != automaticBase)
         return fail(QStringLiteral("导出进制必须与所有目标谱面的 #BASE 一致"));
     const int resolvedBase = idBase == IdBase::Base62 ? 62 : 36;
     if (inputIdBase != 0 && inputIdBase != resolvedBase)
-        return fail(QStringLiteral("目标使用 Base%1，与当前 ID 输入进制不同。请明确选择 Base%1，再确认起始 ID 后重新导出。").arg(resolvedBase));
+        return fail(QStringLiteral("目标使用 Base%1，与当前 ID 输入进制不同。请明确选择 "
+                                   "Base%1，再确认起始 ID 后重新导出。")
+                        .arg(resolvedBase));
     const int maxId = idBase == IdBase::Base62 ? 3843 : 1295;
     if (startId < 1 || startId > maxId) return fail(QStringLiteral("起始 WAV ID 超出目标进制范围"));
     const int safeStartId = startId;
@@ -397,15 +404,14 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
             return fail(QStringLiteral("切片拍位超出 BMS 小节范围"));
     }
     auto items = slice::build_export_layout(
-        m_slices, m_sliceEnabled, plan.occupied,
-        static_cast<std::uint32_t>(safeStartId), baseName.toStdString(), bpm,
-        beatsPerMeasure, subdivision, m_offsetSec, safeStartMeasure, kExportNameWidth,
-        idBase);
+        m_slices, m_sliceEnabled, plan.occupied, static_cast<std::uint32_t>(safeStartId),
+        baseName.toStdString(), bpm, beatsPerMeasure, subdivision, m_offsetSec, safeStartMeasure,
+        kExportNameWidth, idBase);
     // 同一固定计划保存两种 ID 分配；覆盖定义与覆盖磁盘文件是独立授权。
     plan.overwriteItems = slice::build_export_layout(
         m_slices, m_sliceEnabled, {}, static_cast<std::uint32_t>(safeStartId),
-        baseName.toStdString(), bpm, beatsPerMeasure, subdivision, m_offsetSec,
-        safeStartMeasure, kExportNameWidth, idBase);
+        baseName.toStdString(), bpm, beatsPerMeasure, subdivision, m_offsetSec, safeStartMeasure,
+        kExportNameWidth, idBase);
     int requestedIds = 0;
     int allocatedIds = 0;
     int overwriteAllocated = 0;
@@ -413,7 +419,8 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
         if (!item.enabled || item.wavId == 0) continue;
         ++overwriteAllocated;
         if (reserved.contains(item.wavId)) {
-            const auto alphabet = QStringLiteral("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+            const auto alphabet =
+                QStringLiteral("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
             plan.idCollisions.append(QString(alphabet.at(item.wavId / resolvedBase)) +
                                      alphabet.at(item.wavId % resolvedBase));
         }
@@ -427,7 +434,9 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
     if (allocatedIds < requestedIds && overwriteAllocated < requestedIds) {
         res.insert(QStringLiteral("error"),
                    QStringLiteral("可用 WAV ID 不足：需要 %1 个，仅分配到 %2 个（起始 ID %3）")
-                       .arg(requestedIds).arg(allocatedIds).arg(safeStartId));
+                       .arg(requestedIds)
+                       .arg(allocatedIds)
+                       .arg(safeStartId));
         res.insert(QStringLiteral("requestedIds"), requestedIds);
         res.insert(QStringLiteral("allocatedIds"), allocatedIds);
         return res;
@@ -442,7 +451,8 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
         if (item.measure < 0 || item.measure > 999)
             return fail(QStringLiteral("铺放小节超出 BMS 三位小节号范围"));
         const QString name = QString::fromStdString(item.fileName);
-        if (uniqueNames.contains(name) || !name.startsWith(baseName + QLatin1Char('_')) || !name.endsWith(QStringLiteral(".wav")))
+        if (uniqueNames.contains(name) || !name.startsWith(baseName + QLatin1Char('_')) ||
+            !name.endsWith(QStringLiteral(".wav")))
             return fail(QStringLiteral("导出文件名过长或重复，请缩短前缀"));
         uniqueNames.insert(name);
         const QString output = QDir(plan.outDir).filePath(name);
@@ -472,10 +482,12 @@ QVariantMap SliceWorkspace::prepareExport(qreal bpm, int subdivision,
 QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision, int beatsPerMeasure,
                                          int startId, int startMeasure, const QString& outDir,
                                          const QString& prefix, qreal fadeMs, bool placeIntoChart,
-                                         const QString& conflictPolicy, int idBaseMode, bool independentExport) {
+                                         const QString& conflictPolicy, int idBaseMode,
+                                         bool independentExport) {
     // 兼容测试/命令调用；GUI 使用显式 prepare/commit，授权不重新读取 UI 参数。
-    const auto preview = prepareExport(bpm, subdivision, beatsPerMeasure, startId, startMeasure,
-                                       outDir, prefix, fadeMs, placeIntoChart, idBaseMode, independentExport);
+    const auto preview =
+        prepareExport(bpm, subdivision, beatsPerMeasure, startId, startMeasure, outDir, prefix,
+                      fadeMs, placeIntoChart, idBaseMode, independentExport);
     if (!preview.value(QStringLiteral("ok")).toBool()) return preview;
     return commitExport(preview.value(QStringLiteral("planId")).toString(), conflictPolicy);
 }
@@ -483,7 +495,10 @@ QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision, int beatsPe
 QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& conflictPolicy,
                                          const QString& wavIdPolicy) {
     QVariantMap res{{QStringLiteral("ok"), false}};
-    auto fail = [&](const QString& error) { res.insert(QStringLiteral("error"), error); return res; };
+    auto fail = [&](const QString& error) {
+        res.insert(QStringLiteral("error"), error);
+        return res;
+    };
     if (!m_exportPlan || m_exportPlan->id != planId || busy())
         return fail(QStringLiteral("导出计划已失效，请重新预览并确认"));
     ExportPlan plan = std::move(*m_exportPlan);
@@ -501,7 +516,8 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
         const auto* session = reg.by_id(target.id);
         if (!session || !session->has_chart() || session->revision() != target.revision ||
             QString::fromStdString(session->path()) != target.path)
-            return fail(QStringLiteral("目标文档已修改、重载或另存为，请重新预览：%1").arg(target.label));
+            return fail(
+                QStringLiteral("目标文档已修改、重载或另存为，请重新预览：%1").arg(target.label));
     }
     if (wavIdPolicy != QStringLiteral("skip") && wavIdPolicy != QStringLiteral("overwrite") &&
         wavIdPolicy != QStringLiteral("error"))
@@ -522,8 +538,9 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
         return fail(QStringLiteral("输出目录在预览后已变化，请重新检查覆盖或续号"));
     res.insert(QStringLiteral("collisions"), scan.collisions);
     if (!slice::apply_export_file_policy(items, plan.prefix.toStdString(), scan.occupiedIndexes,
-                                          to_std_names(scan.collisions), policy, kExportNameWidth))
-        return fail(QStringLiteral("输出文件已存在（覆盖 / 续号 / 取消）：%1").arg(scan.collisions.join(QStringLiteral(", "))));
+                                         to_std_names(scan.collisions), policy, kExportNameWidth))
+        return fail(QStringLiteral("输出文件已存在（覆盖 / 续号 / 取消）：%1")
+                        .arg(scan.collisions.join(QStringLiteral(", "))));
     const QString outDir = plan.outDir, baseName = plan.prefix;
     const auto idBase = plan.idBase;
     const qreal bpm = plan.bpm, fadeMs = plan.fadeMs;
@@ -540,7 +557,8 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
             return fail(QStringLiteral("最终输出与参考音频相同，请更改前缀"));
         const QFileInfo info(output);
         if (policy != slice::ExportConflictPolicy::Overwrite && (info.exists() || info.isSymLink()))
-            return fail(QStringLiteral("最终输出已存在，未覆盖任何文件，请重新预览：%1").arg(output));
+            return fail(
+                QStringLiteral("最终输出已存在，未覆盖任何文件，请重新预览：%1").arg(output));
     }
     qWarning("slice export: confirmed layout (%zu items)", items.size());
 
@@ -557,8 +575,7 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
     QStringList writtenFiles;
     for (const auto& it : items) {
         if (!it.enabled || it.wavId == 0) continue;
-        if (it.sliceIndex < 0 || it.sliceIndex >= static_cast<int>(plan.slices.size()))
-            continue;
+        if (it.sliceIndex < 0 || it.sliceIndex >= static_cast<int>(plan.slices.size())) continue;
         const auto& s = plan.slices[static_cast<std::size_t>(it.sliceIndex)];
         const QString relName = QString::fromStdString(it.fileName);
         const QString outPath = QDir(outDir).filePath(relName);
@@ -586,14 +603,13 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
         writtenFiles << relName;
     }
 
-    const std::string rawStr = slice::build_placement_raw(
-        items, bpm, beatsPerMeasure,
-        idBase);
+    const std::string rawStr = slice::build_placement_raw(items, bpm, beatsPerMeasure, idBase);
     qWarning("slice export: wrote=%d raw_chars=%zu", written, rawStr.size());
     res.insert(QStringLiteral("ok"), errors.isEmpty());
     res.insert(QStringLiteral("count"), written);
     res.insert(QStringLiteral("files"), writtenFiles);
-    res.insert(QStringLiteral("raw"), errors.isEmpty() ? QString::fromStdString(rawStr) : QString());
+    res.insert(QStringLiteral("raw"),
+               errors.isEmpty() ? QString::fromStdString(rawStr) : QString());
     res.insert(QStringLiteral("failedFiles"), errors.size());
     // 铺放起点信息（用户问「自动铺放知道从第几小节开始吗」）：启用切片的 measure 范围
     // （文件 0-based；对外显示 1-based「第 N 小节」= 文件小节号 + 1）
@@ -622,12 +638,14 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
     if (maxAllocId >= 0) {
         const auto occ = exportOccupied;
         int cand = maxAllocId + 1;
-        while (cand <= maxId && std::find(occ.begin(), occ.end(),
-                                         static_cast<std::uint32_t>(cand)) != occ.end())
+        while (cand <= maxId &&
+               std::find(occ.begin(), occ.end(), static_cast<std::uint32_t>(cand)) != occ.end())
             ++cand;
         if (cand > maxId) {
             cand = 1;
-            while (cand <= maxId && std::find(occ.begin(), occ.end(), static_cast<std::uint32_t>(cand)) != occ.end()) ++cand;
+            while (cand <= maxId &&
+                   std::find(occ.begin(), occ.end(), static_cast<std::uint32_t>(cand)) != occ.end())
+                ++cand;
         }
         nextStartId = cand;
     }
@@ -651,14 +669,19 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
         auto targetItems = items;
         // 未命名谱面没有基准目录：采用绝对路径，另存为后仍能解析到同一输出。
         for (auto& item : targetItems) {
-            const QString absolute = QDir(outDir).absoluteFilePath(QString::fromStdString(item.fileName));
-            const QString relative = target.path.isEmpty() ? absolute
-                : QFileInfo(target.path).absoluteDir().relativeFilePath(absolute);
+            const QString absolute =
+                QDir(outDir).absoluteFilePath(QString::fromStdString(item.fileName));
+            const QString relative =
+                target.path.isEmpty()
+                    ? absolute
+                    : QFileInfo(target.path).absoluteDir().relativeFilePath(absolute);
             item.fileName = relative.toUtf8().toStdString();
         }
-        const std::string targetRaw = slice::build_placement_raw(targetItems, bpm, beatsPerMeasure, idBase);
+        const std::string targetRaw =
+            slice::build_placement_raw(targetItems, bpm, beatsPerMeasure, idBase);
         QVariantMap targetResult{{QStringLiteral("id"), QString::fromStdString(sid)},
-                                 {QStringLiteral("label"), label}, {QStringLiteral("ok"), false}};
+                                 {QStringLiteral("label"), label},
+                                 {QStringLiteral("ok"), false}};
         using beatbench::json::Json;
         Json req = Json::object();
         req.set("command", "clipboard.paste");
@@ -712,15 +735,16 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
              placedTargets, placedNotes, placeError.toUtf8().constData());
     res.insert(QStringLiteral("targets"), targetResults);
     res.insert(QStringLiteral("placementRequested"), plan.place);
-    res.insert(QStringLiteral("placementOk"), !plan.place || (errors.isEmpty() && placedTargets == static_cast<int>(plan.targets.size())));
-    res.insert(QStringLiteral("partial"), plan.place && placedTargets != static_cast<int>(plan.targets.size()));
+    res.insert(QStringLiteral("placementOk"),
+               !plan.place ||
+                   (errors.isEmpty() && placedTargets == static_cast<int>(plan.targets.size())));
+    res.insert(QStringLiteral("partial"),
+               plan.place && placedTargets != static_cast<int>(plan.targets.size()));
     res.insert(QStringLiteral("placed"), placed);
     res.insert(QStringLiteral("placedTargets"), placedTargets);
     res.insert(QStringLiteral("placedNotes"), placedNotes);
-    if (!placeError.isEmpty())
-        res.insert(QStringLiteral("placeError"), placeError);
-    if (!errors.isEmpty())
-        res.insert(QStringLiteral("error"), errors.join(QStringLiteral("; ")));
+    if (!placeError.isEmpty()) res.insert(QStringLiteral("placeError"), placeError);
+    if (!errors.isEmpty()) res.insert(QStringLiteral("error"), errors.join(QStringLiteral("; ")));
     return res;
 }
 
@@ -785,8 +809,7 @@ bool SliceWorkspace::loadAudioFile(const QString& path) {
         const bool ok = track->load(root.toStdString());
 #endif
         QMetaObject::invokeMethod(
-            this, [this, track, ok, root] { audioDecoded(ok, track, root); },
-            Qt::QueuedConnection);
+            this, [this, track, ok, root] { audioDecoded(ok, track, root); }, Qt::QueuedConnection);
     });
     return true;
 }
@@ -808,8 +831,8 @@ void SliceWorkspace::audioDecoded(bool ok, beatbench::audio::ReferenceTrack* tra
     m_audioPath = path;
     if (m_engine) m_engine->setReferencePcm(m_track.pcm(), m_track.sampleRate());
     emit audioChanged();
-    setStatus(QStringLiteral("参考音频已载入：%1 秒").arg(
-        QString::number(audioDurationSec(), 'f', 2)));
+    setStatus(
+        QStringLiteral("参考音频已载入：%1 秒").arg(QString::number(audioDurationSec(), 'f', 2)));
 }
 
 bool SliceWorkspace::loadMidiFile(const QString& path) {
@@ -834,8 +857,7 @@ bool SliceWorkspace::loadMidiFile(const QString& path) {
                       .arg(m_midi.ntrks));
         return true;
     } catch (const midi::MidiError& e) {
-        setStatus(QStringLiteral("MIDI 解析失败：%1").arg(
-            QString::fromUtf8(e.what())));
+        setStatus(QStringLiteral("MIDI 解析失败：%1").arg(QString::fromUtf8(e.what())));
         return false;
     }
 }
@@ -923,8 +945,8 @@ bool SliceWorkspace::detectSlices(const QString& source, qreal bpm, int subdivis
             setStatus(QStringLiteral("尚无 MIDI（请先导入 notes.mid）"));
             return false;
         }
-        plan = beatbench::slice::plan_from_midi(m_midi, m_offsetSec, durationSec,
-                                                extendToNextOnset);
+        plan =
+            beatbench::slice::plan_from_midi(m_midi, m_offsetSec, durationSec, extendToNextOnset);
     } else {
         setStatus(QStringLiteral("未知切片源: %1").arg(source));
         return false;
@@ -974,9 +996,8 @@ int SliceWorkspace::applyOnsetPoints(std::vector<double> onsets, bool append) {
             continue;  // 曲首/曲尾不设点（与手动点同规则）
         if (append) {
             // 去重：与现有手动点距 ≤ kOnsetAppendEps 的跳过
-            const auto it = std::lower_bound(m_manualPoints.begin(),
-                                             m_manualPoints.end(),
-                                             t - kOnsetAppendEps);
+            const auto it =
+                std::lower_bound(m_manualPoints.begin(), m_manualPoints.end(), t - kOnsetAppendEps);
             if (it != m_manualPoints.end() && *it <= t + kOnsetAppendEps) continue;
         }
         // 拆分式插入（不 toggle——避免命中边界被合并）；恰与现有边界重合 → 记入集合
@@ -1007,42 +1028,38 @@ bool SliceWorkspace::detectOnsetSlices(qreal sensitivity, qreal minGapSec, bool 
     const double sr = m_track.sampleRate();
     m_busy = true;
     emit busyChanged();
-    QThreadPool::globalInstance()->start(
-        [this, pcm, pcmPtr, sr, channels, sensitivity, minGapSec, append] {
-            beatbench::audio::OnsetConfig cfg;
-            cfg.sensitivity = static_cast<double>(sensitivity);
-            cfg.minGapSec = static_cast<double>(minGapSec);
-            auto onsets = beatbench::audio::detect_onsets(
-                pcm->data(), pcm->size() / static_cast<std::size_t>(channels), channels,
-                sr, cfg);
-            QMetaObject::invokeMethod(
-                this,
-                [this, onsets = std::move(onsets), pcmPtr, append] {
-                    m_busy = false;
-                    emit busyChanged();
-                    if (m_track.pcm().get() != pcmPtr) {
-                        setStatus(QStringLiteral("检测完成，但参考音频已更换，结果已丢弃"));
-                        return;
-                    }
-                    const std::size_t total = onsets.size();
-                    const int n = applyOnsetPoints(std::move(onsets), append);
-                    setStatus(n > 0
-                                  ? QStringLiteral("瞬态检测：%1 点 → %2 片（%3）")
-                                        .arg(n)
-                                        .arg(m_slices.size())
-                                        .arg(append ? QStringLiteral("追加")
-                                                    : QStringLiteral("替换"))
-                                  : QStringLiteral("瞬态检测：未检出瞬态（共 %1 候选；"
-                                                    "可调高敏感度或减小最小间隔）")
-                                        .arg(total));
-                },
-                Qt::QueuedConnection);
-        });
+    QThreadPool::globalInstance()->start([this, pcm, pcmPtr, sr, channels, sensitivity, minGapSec,
+                                          append] {
+        beatbench::audio::OnsetConfig cfg;
+        cfg.sensitivity = static_cast<double>(sensitivity);
+        cfg.minGapSec = static_cast<double>(minGapSec);
+        auto onsets = beatbench::audio::detect_onsets(
+            pcm->data(), pcm->size() / static_cast<std::size_t>(channels), channels, sr, cfg);
+        QMetaObject::invokeMethod(
+            this,
+            [this, onsets = std::move(onsets), pcmPtr, append] {
+                m_busy = false;
+                emit busyChanged();
+                if (m_track.pcm().get() != pcmPtr) {
+                    setStatus(QStringLiteral("检测完成，但参考音频已更换，结果已丢弃"));
+                    return;
+                }
+                const std::size_t total = onsets.size();
+                const int n = applyOnsetPoints(std::move(onsets), append);
+                setStatus(n > 0 ? QStringLiteral("瞬态检测：%1 点 → %2 片（%3）")
+                                      .arg(n)
+                                      .arg(m_slices.size())
+                                      .arg(append ? QStringLiteral("追加") : QStringLiteral("替换"))
+                                : QStringLiteral("瞬态检测：未检出瞬态（共 %1 候选；"
+                                                 "可调高敏感度或减小最小间隔）")
+                                      .arg(total));
+            },
+            Qt::QueuedConnection);
+    });
     return true;
 }
 
-bool SliceWorkspace::detectOnsetSlicesSyncForTest(qreal sensitivity, qreal minGapSec,
-                                                  bool append) {
+bool SliceWorkspace::detectOnsetSlicesSyncForTest(qreal sensitivity, qreal minGapSec, bool append) {
     if (!m_track.valid() || m_track.pcm() == nullptr) {
         setStatus(QStringLiteral("尚无参考音频（请先导入音频）"));
         return false;
@@ -1052,8 +1069,8 @@ bool SliceWorkspace::detectOnsetSlicesSyncForTest(qreal sensitivity, qreal minGa
     cfg.sensitivity = static_cast<double>(sensitivity);
     cfg.minGapSec = static_cast<double>(minGapSec);
     auto onsets = beatbench::audio::detect_onsets(
-        pcm->data(), pcm->size() / static_cast<std::size_t>(m_track.channels()),
-        m_track.channels(), m_track.sampleRate(), cfg);
+        pcm->data(), pcm->size() / static_cast<std::size_t>(m_track.channels()), m_track.channels(),
+        m_track.sampleRate(), cfg);
     applyOnsetPoints(std::move(onsets), append);
     return true;
 }
@@ -1109,10 +1126,9 @@ bool SliceWorkspace::setSliceBounds(int index, double startSec, double durationS
     zipped.reserve(m_slices.size());
     for (std::size_t k = 0; k < m_slices.size(); ++k)
         zipped.emplace_back(m_slices[k], m_sliceEnabled[k]);
-    std::stable_sort(zipped.begin(), zipped.end(),
-                     [](const auto& a, const auto& b) {
-                         return a.first.startSec < b.first.startSec;
-                     });
+    std::stable_sort(zipped.begin(), zipped.end(), [](const auto& a, const auto& b) {
+        return a.first.startSec < b.first.startSec;
+    });
     m_slices.clear();
     m_sliceEnabled.clear();
     for (std::size_t k = 0; k < zipped.size(); ++k) {
@@ -1133,15 +1149,13 @@ bool SliceWorkspace::setSliceBounds(int index, double startSec, double durationS
 /// 命中内部边界的切片序号（startSec ≈ t 且 i >= 1；靠后优先——负数容差对称无所谓）。
 int SliceWorkspace::findBoundaryIndex(double t) const {
     for (std::size_t i = 1; i < m_slices.size(); ++i) {
-        if (std::abs(m_slices[i].startSec - t) <= kPointEps)
-            return static_cast<int>(i);
+        if (std::abs(m_slices[i].startSec - t) <= kPointEps) return static_cast<int>(i);
     }
     return -1;
 }
 
 void SliceWorkspace::renumberSlices() {
-    for (std::size_t i = 0; i < m_slices.size(); ++i)
-        m_slices[i].index = static_cast<int>(i);
+    for (std::size_t i = 0; i < m_slices.size(); ++i) m_slices[i].index = static_cast<int>(i);
 }
 
 void SliceWorkspace::pushSliceUndo() {
@@ -1159,8 +1173,7 @@ void SliceWorkspace::restoreSliceSnapshot(const SliceSnapshot& snap) {
     m_slices = snap.slices;
     m_sliceEnabled = snap.enabled;
     m_manualPoints = snap.manualPoints;
-    if (m_sliceEnabled.size() != m_slices.size())
-        m_sliceEnabled.assign(m_slices.size(), true);
+    if (m_sliceEnabled.size() != m_slices.size()) m_sliceEnabled.assign(m_slices.size(), true);
     renumberSlices();
     emit slicesChanged();
 }
@@ -1224,9 +1237,15 @@ bool SliceWorkspace::splitSliceAt(double t, bool recordUndo) {
             return false;
         }
         beatbench::slice::Slice a;
-        a.index = 0; a.startSec = 0.0; a.endSec = t; a.kind = "manual";
+        a.index = 0;
+        a.startSec = 0.0;
+        a.endSec = t;
+        a.kind = "manual";
         beatbench::slice::Slice b;
-        b.index = 1; b.startSec = t; b.endSec = dur; b.kind = "manual";
+        b.index = 1;
+        b.startSec = t;
+        b.endSec = dur;
+        b.kind = "manual";
         if (recordUndo) pushSliceUndo();
         m_slices = {a, b};
         m_sliceEnabled = {true, true};
@@ -1239,8 +1258,12 @@ bool SliceWorkspace::splitSliceAt(double t, bool recordUndo) {
         const auto& s = m_slices[i];
         if (t > s.startSec + kPointEps && t < s.endSec - kPointEps) {
             const bool en = m_sliceEnabled[i];
-            beatbench::slice::Slice a = s; a.endSec = t; a.kind = "manual";
-            beatbench::slice::Slice b = s; b.startSec = t; b.kind = "manual";
+            beatbench::slice::Slice a = s;
+            a.endSec = t;
+            a.kind = "manual";
+            beatbench::slice::Slice b = s;
+            b.startSec = t;
+            b.kind = "manual";
             if (recordUndo) pushSliceUndo();
             m_slices.insert(m_slices.begin() + static_cast<std::ptrdiff_t>(i + 1), b);
             m_slices[i] = a;
@@ -1248,7 +1271,9 @@ bool SliceWorkspace::splitSliceAt(double t, bool recordUndo) {
             renumberSlices();
             emit slicesChanged();
             setStatus(QStringLiteral("手动切分点：+1（第 %1 片拆为 %2/%3）")
-                          .arg(i + 1).arg(i + 1).arg(i + 2));
+                          .arg(i + 1)
+                          .arg(i + 1)
+                          .arg(i + 2));
             return true;
         }
     }
@@ -1278,10 +1303,9 @@ bool SliceWorkspace::removeManualPointAt(std::size_t i, bool recordUndo) {
     emit slicesChanged();
     setStatus(QStringLiteral("手动切分点：-1（第 %1/%2 片合并）").arg(i).arg(i + 1));
     // 集合同步（可能因表重排已过期 → 找不到就跳过；setSliceBounds 后集合为尽力而为）
-    m_manualPoints.erase(
-        std::remove_if(m_manualPoints.begin(), m_manualPoints.end(),
-                       [t](double p) { return std::abs(p - t) <= kPointEps; }),
-        m_manualPoints.end());
+    m_manualPoints.erase(std::remove_if(m_manualPoints.begin(), m_manualPoints.end(),
+                                        [t](double p) { return std::abs(p - t) <= kPointEps; }),
+                         m_manualPoints.end());
     return true;
 }
 
@@ -1301,9 +1325,9 @@ int SliceWorkspace::clearManualPoints() {
             ++n;
         }
     }
-    setStatus(n > 0 ? QStringLiteral("已清除 %1 个手动切分点（剩余 %2 片）")
-                          .arg(n).arg(m_slices.size())
-                    : QStringLiteral("没有手动切分点可清除"));
+    setStatus(
+        n > 0 ? QStringLiteral("已清除 %1 个手动切分点（剩余 %2 片）").arg(n).arg(m_slices.size())
+              : QStringLiteral("没有手动切分点可清除"));
     return n;
 }
 
@@ -1372,8 +1396,7 @@ QVariantList SliceWorkspace::slices() const {
         e.insert(QStringLiteral("kind"), QString::fromStdString(s.kind));
         e.insert(QStringLiteral("note"), s.note);
         e.insert(QStringLiteral("noteCount"), s.noteCount);
-        e.insert(QStringLiteral("enabled"),
-                 i < m_sliceEnabled.size() && m_sliceEnabled[i]);
+        e.insert(QStringLiteral("enabled"), i < m_sliceEnabled.size() && m_sliceEnabled[i]);
         out.append(e);
     }
     return out;

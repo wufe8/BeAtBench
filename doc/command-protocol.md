@@ -1,13 +1,13 @@
-# BeAtBench 插件体系与时间单位设计（06）
+# BeAtBench 插件体系与时间单位设计
 
 > 本文件回答两个架构问题：
-> 1. **插件/扩展预留怎么搭**（CLI 作为「非 API 接口」的定位与分层）；
+> 1. **插件/扩展预留怎么搭**（CLI 作为“非 API 接口”的定位与分层）；
 > 2. **时间单位统一在哪里**（小节拍子 ↔ 时间轴 ↔ 采样率的换算边界，1/3 拍无损）。
-> 配套：协议规范见 §3（命令 JSON 协议已随 M1 落地，本文是它的正式规格）。
+> 配套：协议规范见 三、（命令 JSON 协议已随 M1 落地，本文是它的正式规格）。
 
 ---
 
-## 1. 插件体系：三层接口漏斗（摘要）
+## 一、插件体系：三层接口漏斗（摘要）
 
 同一能力从里到外三层口径，不搞两套逻辑：
 
@@ -19,18 +19,16 @@
 
 要点：
 
-- **注册表是唯一入口**：所有能力（内建或插件）平等注册；`CodecRegistry` 是「换格式 = 换映射表」的兑现点；
+- **注册表是唯一入口**：所有能力（内建或插件）平等注册；`CodecRegistry` 是“换格式 = 换映射表”的兑现点；
 - **GUI 也是协议客户端**：界面不直接翻模型结构体，而调 `global_registry().dispatch(...)`——插件加的命令 GUI 天然可用，避免两套逻辑漂移；
 - **协议版本化**：`version` 返回 `api` 版本号，`capabilities` 宣告能力清单（客户端启动先问一遍，即外部插件发现内建能力的握手）；
 - **不为插件在 core 开旁路**：插件只能通过注册表接口交互，core 保持零依赖（JSON 自写）；
 - **安全/权限（将来）**：插件清单声明所需能力（读谱/写文件/执行命令），GUI 审批后放行；命令是权限的最小粒度。
-
-详细设计原文（含三层图与 M1–M3 落地钩子）→ `local/doc/06-插件分层设计.md`（gitignore）。
 ---
 
-## 2. 时间单位：换算边界与 1/3 拍无损
+## 二、时间单位：换算边界与 1/3 拍无损
 
-### 2.1 问题
+### 1. 问题
 
 - BMS 以**小节拍子**为时间单位（`(measure, pos)`，pos 为有理数）；
 - 有的音游以**时间轴**（秒/毫秒/采样帧）为单位；
@@ -38,7 +36,7 @@
 - 疑虑：`1/3`、`1/6` 拍（BMS 一行奇数组采样，如 `#00111:0102000300`）
   若先换算成时间，就**无法 100% 精确换算回来**。
 
-### 2.2 决策：身份坐标与换算边界分离
+### 2. 决策：身份坐标与换算边界分离
 
 ```
 谱面身份坐标（唯一，永不变换）
@@ -55,7 +53,7 @@
 ```
 
 1. **身份永远是音乐坐标**：`Event<T>.pos` 是事件唯一的标识性坐标，
-   存的就是 (measure, Rational)。**任何地方都不存「先换算好的时间」作为身份**。
+   存的就是 (measure, Rational)。**任何地方都不存“先换算好的时间”作为身份**。
    → 这就是 1/3 拍无损的答案：正因为从不先转时间，往返写回时
    `Rational(1,3)` 原样回到槽位 `#…3`（LCM 槽位重建，M1 已实现），
    时间换算 `1/3 拍 = 拍数 × 60/BPM ÷ 3` 也是精确有理数。
@@ -70,14 +68,14 @@
    （timing points → BPM 分段）把原生坐标换算成规范音乐坐标 (measure, pos)；
    写回时再换算回去。换算全程有理数（毫秒与 BPM 都按有理数处理），
    往返精确。**格式差异收敛在 codec 的映射表里，核心模型不动**
-   ——这正是「换格式 = 换映射表」原则在时间域上的兑现。
-5. **结论：不需要「灵活的多模式位置结构体」**。一个规范坐标
+   ——这正是“换格式 = 换映射表”原则在时间域上的兑现。
+5. **结论：不需要“灵活的多模式位置结构体”**。一个规范坐标
    (measure, Rational pos) + 一个 TimingEngine 接口就够。若将来出现
    真正无法表达为 (小节, 拍位置) 的格式（完全自由时间轴），
    需要扩展的只有 `Event<T>.pos` 一个坐标类型 + TimingEngine 一个缝，
    设计上已隔离到最小面。
 
-### 2.3 ch02 与「拍子」惯例（补充确认）
+### 3. ch02 与“拍子”惯例（补充确认）
 
 - ch02 = **每小节拍数**（4/4 = 4，可小数如 2.5）；小节时长 = 拍数 × 60/BPM；
 - 拍 = 四分音符、16 分音符只是槽位粒度（`Rational(i, N)` 的分母），
@@ -86,14 +84,14 @@
 
 ---
 
-## 3. 命令 JSON 协议规范（正式规格，M1 落地）
+## 三、命令 JSON 协议规范（正式规格，M1 落地）
 
-### 3.1 传输
+### 1. 传输
 
 `beatbench-cli --json '<请求>'`（内联）或 `beatbench-cli --json < req.json`（stdin）。
 内容 UTF-8。每调用一个请求一个响应。
 
-### 3.2 请求/响应信封
+### 2. 请求/响应信封
 
 ```
 请求  { "id"?: 任意, "command": "名称", "args"?: 对象 }
@@ -105,7 +103,7 @@
 - `args` 缺省 = 空对象；`command` 必须为字符串；
 - **dispatch 自身不抛异常**：信封/参数/命令错误全部收编为 `ok:false` 响应。
 
-### 3.3 错误码表（稳定，客户端按 code 分支，不按 message）
+### 3. 错误码表（稳定，客户端按 code 分支，不按 message）
 
 | code | 含义 |
 |---|---|
@@ -118,94 +116,30 @@
 | `write_failed` | 无法写入输出文件 |
 | `internal` | 不可预期异常（CLI 层兜底） |
 
-### 3.4 退出码约定（CLI --json）
+### 4. 退出码约定（CLI --json）
 
 - `0` = 已产出信封（命令语义**只看信封 ok 字段**）；
 - `2` = 无法产出信封（请求 JSON 非法 / 空输入），stdout 上仍给一个
   `bad_request` 信封；
 - `1` = 内部异常（不应发生）。
 
-### 3.5 内建命令（M1 起步，M3 大幅扩充）
+### 5. 内建命令（分类摘要）
 
-**基础查询/转换**：
-
-| 命令 | args | result 要点 |
+| 类别 | 命令 | 说明 |
 |---|---|---|
-| `version` | — | name / version / **api**（协议版本）/ license |
-| `capabilities` | — | commands / formats / modes（各格式支持的游玩模式） |
-| `info` | path, encoding?, format?, mode? | meta / samples{wav,bmp,bpm,stop} / events / channels / diagnostics / format / mode |
-| `check` | path, encoding?, format?, mode? | errors / warnings / lint{missing_wav,missing_rank,missing_total,empty,overlapping_notes,dangling_ln} / ok |
-| `convert` | input, output, encoding?, overwrite?, format? | written / bytes / from_encoding / to_encoding / diagnostics |
+| 基础查询/转换 | `version` / `capabilities` / `info` / `check` / `convert` | 协议版本、能力清单、元信息、lint、编码转换与往返 |
+| 编辑会话 | `session.create` / `load` / `save` / `close` / `activate` / `undo` / `redo` / `autosave` / `lint` / `samples` | 多文档会话、undo/redo、自动保存 |
+| Note 编辑 | `note.put` / `move` / `delete` / `quantize` / `transform` / `setSample` / `moveRegion` / `toggleLn` / `convert` / `convertBack` | 放置/移动/选区批量/LN/类型转换 |
+| 时间轴 / BGA | `timing.list` / `put` / `delete` / `move`；`bga.list` / `put` / `delete` / `move` | BPM/STOP/小节长事件、BGA 图层 |
+| 剪贴板 | `clipboard.copy` / `paste` | BMS 数据行文本出入 |
+| 元数据 / 采样 | `meta.list` / `edit` / `rawEdit`；`sample.rename` / `setFile` / `delete` | 头部字段、`#WAV`/`#BMP` 绑定管理 |
+| 切音 / MIDI | `slice.detect` / `midi.parse` | 网格/MIDI 切片规划、MIDI 解析（headless，不拖 PortAudio） |
 
-**编辑会话**：
+`slice.detect` 的 `source` 仅接受 `grid` 或 `midi`（见 `core/src/command/slice_commands.cpp`）；
+GUI 音频源的瞬态检测通过 `SliceWorkspace` 与音频层 `OnsetDetector` 执行，不是该 JSON 命令的第三种源。
 
-| 命令 | args | result 要点 |
-|---|---|---|
-| `session.create` | — | session_id |
-| `session.load` | path, encoding?, format?, mode?, session_id? | meta / samples / mode |
-| `session.save` | path?, encoding?, session_id? | written / bytes |
-| `session.close` | session_id? | — |
-| `session.activate` | session_id | — |
-| `session.undo` | session_id? | undo_label / redo_label |
-| `session.redo` | session_id? | undo_label / redo_label |
-| `session.autosave` | autosave?, backup?, session_id? | autosave / backup |
-| `session.lint` | session_id? | `issues` 列表；`lint.missing_wav` / `lint.wav_ext_mismatch`（内存绑定的资源可用性，条目含 id/file/resolved，兼容 check 的采样面板数据形状） |
-| `session.samples` | session_id? | samples（含 refs/usage） |
-
-**Note 编辑**：
-
-| 命令 | args | result 要点 |
-|---|---|---|
-| `note.put` | measure, pos, lane, sample, kind?:normal/ln/mine, sub_line?, session_id? | 放置结果 |
-| `note.move` | moves:[{from:NoteRef,to:{measure,pos,lane?,sub_line?}}]；兼容单项 from/to；session_id? | moved / undo_depth |
-| `note.delete` | measure, pos, lane, sample, sub_line?, session_id? | — |
-| `note.quantize` | selection, snap:{num,den}, session_id? | 变化数 |
-| `note.transform` | selection, mirror?, rotate?, session_id? | 变化数 |
-| `note.setSample` | measure, pos, lane, sample, sub_line, to, session_id? | — |
-| `note.moveRegion` | selection, delta_measure, delta_pos?, session_id? | — |
-| `note.toggleLn` | selection:[NoteRef], session_id? | 变化数 |
-| `note.convert` | selection:[NoteRef], target, to_measure?, to_pos?, session_id? | — |
-| `note.convertBack` | kind, measure, pos, layer, to_lane, to_measure, to_pos, session_id? | — |
-
-`NoteRef` 包含 `measure / pos / lane / sample / sub_line?`，并支持源身份 `ln_channel?:bool`、`note_kind?:"normal"|"mine"`。GUI 总是提供源身份，避免同位置/同采样的普通、LN、地雷 note 混淆；旧调用可省略，但跨身份歧义必须拒绝，不能猜第一条。该身份同样用于删除、改采样、量化、变换、转换和剪贴板；返回的新选择保留它。
-
-`ln_channel` 是待保存的通道身份，`ln_pair` 仅为派生显示/选取。移动只改显式选择的物件位置/轨道，不改伙伴、采样或源通道；目标无法保留该身份（如 LN → BGM）时拒绝，须先显式转换。头尾一起移动须显式选择两端，旧 `move_ln_pair` 不再自动扩张选择。解析/编辑重建统一按 LN 通道时序及普通通道 LNOBJ 各自推导，不由 LNTYPE 决定。
-
-**时间轴事件**：
-
-| 命令 | args | result 要点 |
-|---|---|---|
-| `timing.list` | kind, session_id? | events[{measure,pos,value,ref}] |
-| `timing.put` | kind, measure, pos, value, ref?, session_id? | — |
-| `timing.delete` | kind, measure, pos, session_id? | — |
-| `timing.move` | kind, from_measure, from_pos, to_measure, to_pos, session_id? | — |
-
-**BGA 编辑**：
-
-| 命令 | args | result 要点 |
-|---|---|---|
-| `bga.list` | layer?, session_id? | events[{measure,pos,layer,sample}] |
-| `bga.put` | layer, measure, pos, sample, session_id? | — |
-| `bga.delete` | layer, measure, pos, session_id? | — |
-| `bga.move` | from_layer, from_measure, from_pos, to_layer, to_measure, to_pos, session_id? | — |
-
-**剪贴板**：
-
-| 命令 | args | result 要点 |
-|---|---|---|
-| `clipboard.copy` | selection, session_id? | lines[]（BMS 数据行文本） |
-| `clipboard.paste` | lines, target_measure, session_id? | 变化数；selection[]（粘贴后的 note 身份，供 GUI 选中） |
-
-**元数据 / 采样管理**：
-
-| 命令 | args | result 要点 |
-|---|---|---|
-| `meta.list` | session_id? | meta 对象 |
-| `meta.edit` | edits[{key,value}], session_id? | — |
-| `meta.rawEdit` | lines, session_id? | — |
-| `sample.rename` | kind?, from_id, to_id, session_id? | — |
-| `sample.setFile` | kind?, id, file, session_id? | — |
-| `sample.delete` | kind, id, session_id? | — |
+完整命令清单与 args/result 语义的**权威**：`core/src/command/`（每个命令一个 `Command` 类，
+`name()` 自述）；机器可读清单：`beatbench-cli --json '{"command":"capabilities"}'`。
 
 `encoding`：读取侧 `auto`（默认）/`utf8`/`sjis`；convert 的 `encoding` 兼作写出编码（不支持 auto）。
 `format`：按 CodecRegistry 动态查找（当前 `"bms"`；省略 = 按扩展名推断）。
@@ -214,14 +148,20 @@
 升级为变体；探测只决定写回约定，读侧键位按统一别名表固定）。
 所有编辑命令支持可选 `session_id`（缺省 = 活动会话）。
 
+`NoteRef` 包含 `measure / pos / lane / sample / sub_line?`，并支持源身份 `ln_channel?:bool`、`note_kind?:"normal"|"mine"`。GUI 总是提供源身份，避免同位置/同采样的普通、LN、地雷 note 混淆；旧调用可省略，但跨身份歧义必须拒绝，不能猜第一条。该身份同样用于删除、改采样、量化、变换、转换和剪贴板；返回的新选择保留它。
+
+`ln_channel` 是待保存的通道身份，`ln_pair` 仅为派生显示/选取。移动只改显式选择的物件位置/轨道，不改伙伴、采样或源通道；目标无法保留该身份（如 LN → BGM）时拒绝，须先显式转换。头尾一起移动须显式选择两端，旧 `move_ln_pair` 不再自动扩张选择。解析/编辑重建统一按 LN 通道时序及普通通道 LNOBJ 各自推导，不由 LNTYPE 决定。
+
+`session.lint` 的 `issues` 包括 `lint.missing_wav` / `lint.wav_ext_mismatch`，按内存绑定检查资源可用性；条目含 id/file/resolved，与采样面板查询形状兼容。
+
 示例：
 
 ```
-$ beatbench-cli --json '{"id":1,"command":"info","args":{"path":"local/chart/x.bms"}}'
+$ beatbench-cli --json '{"id":1,"command":"info","args":{"path":"/path/to/chart.bms"}}'
 {"id":1,"ok":true,"result":{"path":"...","format":"bms","mode":"sp7k","meta":{"TITLE":"..."},...}}
 ```
 
-### 3.6 与人类 CLI 的关系
+### 6. 与人类 CLI 的关系
 
 人类子命令（info/check/convert/version）与 JSON 命令共用同一批 core 函数，
 经 CodecRegistry 统一分派（格式 → Codec → read/write），只差在展示层。

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // M7 项目命令：project.scan（文件夹 → 谱面索引 + 资源索引 + 引用出处）。
 // core 层只读文本、不加载音频（doc/07 §2/§5）；JSON 形状供 GUI 项目页与 CLI --json 共用。
-#include "beatbench/core/command/Project.hpp"
-
 #include <cstdint>
 #include <string>
 #include <utility>
 
+#include "beatbench/core/command/Project.hpp"
 #include "beatbench/core/project/Project.hpp"
 
 namespace beatbench::cmd {
@@ -92,7 +91,7 @@ Json resource_json(const project::ResourceRef& r) {
 }
 
 class ProjectScanCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "project.scan"; }
     Json run(const Json& args) const override {
         const std::string& path = arg_str(args, "path");

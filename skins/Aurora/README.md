@@ -1,7 +1,7 @@
 # Aurora 样例皮肤（L1）
 
 最低可用的 L1 皮肤样例：只覆写 **theme.json**（颜色 token）+ **keymap.json**（快捷键）。
-对应 doc/08 §3 分层皮肤系统的 L1（token 覆写）层；L2（layout.json）/ L3（QML 壳）未做。
+对应 doc/skin-system.md 三、 分层皮肤系统的 L1（token 覆写）层；L2（layout.json）/ L3（QML 壳）未做。
 
 ## 效果
 
@@ -28,6 +28,6 @@ beatbench.exe --skin skins/Aurora
 
 ## 已知边界
 
-- L1 只覆写**颜色** token；非颜色（radius/fs/fonts）与 L2 layout/L3 QML 壳后置（doc/08 §6）；
+- L1 只覆写**颜色** token；非颜色（radius/fs/fonts）与 L2 layout/L3 QML 壳后置（doc/skin-system.md 五、）；
 - Theme token 已是 NOTIFY（运行时换肤会重算）；启动 `--skin` 仍在 `loadFromModule` 前 `loadTheme`；
-- 皮肤**只影响表现层**；core/命令接口不受影响（doc/08 §3.3：功能永远在引擎+默认皮肤兜底）。
+- 皮肤**只影响表现层**；core/命令接口不受影响（doc/skin-system.md 三、3.：功能永远在引擎+默认皮肤兜底）。

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "beatbench/core/codec/CodecRegistry.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
+
+#include "beatbench/core/codec/CodecRegistry.hpp"
 
 namespace beatbench::codec {
 
@@ -20,6 +20,7 @@ std::string norm_ext(std::string_view ext) {
 
 }  // namespace
 
+// NOLINTNEXTLINE(readability-function-size)——固有分支密度（解析/协议形状），有意保留
 void CodecRegistry::add(std::unique_ptr<Codec> codec) {
     if (!codec) return;
     const std::string id(codec->id());
@@ -35,8 +36,14 @@ void CodecRegistry::add(std::unique_ptr<Codec> codec) {
         for (const auto& c : codecs_) {
             for (const auto e : c->extensions()) {
                 if (norm_ext(e) == ne) {
-                    throw std::invalid_argument("扩展名冲突: ." + ne + "（" + id + " 与 " +
-                                                std::string(c->id()) + "）");
+                    std::string msg = "扩展名冲突: .";
+                    msg += ne;
+                    msg += "（";
+                    msg += id;
+                    msg += " 与 ";
+                    msg += c->id();
+                    msg += "）";
+                    throw std::invalid_argument(msg);
                 }
             }
         }

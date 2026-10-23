@@ -2,8 +2,28 @@
 // Full production Main/SessionController, real document/command/model bridges.
 // Only audio is replaced. AudioEngine.cpp is linked for SliceWorkspace's symbols,
 // but no AudioEngine is constructed (nor connected to the workspace).
-#include "bridge/ChartSession.hpp"
+#include <QtQuickTest/quicktest.h>
+
+#include <QDataStream>
+#include <QDir>
+#include <QFile>
+#include <QPointer>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickStyle>
+#include <QQuickWindow>
+#include <QSemaphore>
+#include <QSettings>
+#include <QStringList>
+#include <QTemporaryDir>
+#include <QThreadPool>
+#include <memory>
+
+#include "beatbench/core/edit/EditorSession.hpp"
+#include "beatbench/core/edit/SessionRegistry.hpp"
 #include "bridge/ChartHistoryController.hpp"
+#include "bridge/ChartSession.hpp"
 #include "bridge/ChartViewItem.hpp"
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
@@ -20,24 +40,6 @@
 #include "bridge/ThemeManager.hpp"
 #include "bridge/UiActionRegistry.hpp"
 #include "bridge/WaveformOverviewItem.hpp"
-#include "beatbench/core/edit/SessionRegistry.hpp"
-#include "beatbench/core/edit/EditorSession.hpp"
-#include <QQuickWindow>
-#include <QDir>
-#include <QDataStream>
-#include <QFile>
-#include <QPointer>
-#include <QQmlComponent>
-#include <QQmlContext>
-#include <QQmlEngine>
-#include <QQuickStyle>
-#include <QTemporaryDir>
-#include <QThreadPool>
-#include <QSemaphore>
-#include <QSettings>
-#include <QStringList>
-#include <QtQuickTest/quicktest.h>
-#include <memory>
 
 using namespace beatbench::app;
 namespace {
@@ -55,11 +57,11 @@ beatbench::Chart chart(bool second) {
     c.notes.push_back(n);
     return c;
 }
-}
+}  // namespace
 
 class MainIntegrationSetup : public QObject {
     Q_OBJECT
-public:
+   public:
     Q_INVOKABLE void bind(QObject* window) { root = window; }
     Q_INVOKABLE bool screenshot() const {
         const auto path = qEnvironmentVariable("BB_MAIN_SCREENSHOT");
@@ -101,26 +103,29 @@ public:
     }
     Q_INVOKABLE QObject* dialog(QObject* parent, const QString& title) const {
         for (auto* o : descendants(parent))
-            if (o->property("title").toString() == title && o->property("visible").toBool()) return o;
+            if (o->property("title").toString() == title && o->property("visible").toBool())
+                return o;
         return nullptr;
     }
     Q_INVOKABLE QObject* button(QObject* parent, const QString& text) const {
         if (!parent) return nullptr;
         for (auto* o : descendants(parent))
-            if (o->property("text").toString() == text && o->property("visible").toBool()
-                && o->metaObject()->indexOfSignal("clicked()") >= 0)
+            if (o->property("text").toString() == text && o->property("visible").toBool() &&
+                o->metaObject()->indexOfSignal("clicked()") >= 0)
                 return o;
         return nullptr;
     }
     Q_INVOKABLE QObject* textEditor(QObject* parent, const QString& text) const {
         for (auto* o : descendants(parent))
-            if (o->property("text").toString() == text && o->property("visible").toBool()
-                && o->property("selectByMouse").isValid()) return o;
+            if (o->property("text").toString() == text && o->property("visible").toBool() &&
+                o->property("selectByMouse").isValid())
+                return o;
         return nullptr;
     }
     Q_INVOKABLE QObject* primaryView(QObject* parent) const {
         for (auto* o : descendants(parent))
-            if (o->property("editable").toBool() && o->property("documentSession").isValid()) return o;
+            if (o->property("editable").toBool() && o->property("documentSession").isValid())
+                return o;
         return nullptr;
     }
     Q_INVOKABLE void reset(bool named) {
@@ -141,13 +146,15 @@ public:
             s->load(chart(id == bId));
             s->set_backup_enabled(false);
             if (named) {
-                const auto saved = documents.save(QString::fromLatin1(id), temp->filePath(QString::fromLatin1(id) + ".bms"));
+                const auto saved = documents.save(QString::fromLatin1(id),
+                                                  temp->filePath(QString::fromLatin1(id) + ".bms"));
                 if (!saved.value("ok").toBool()) qFatal("Cannot save Main integration fixture");
             }
             // Both undo and redo are nonempty: accidental resets/commands cannot hide.
-            if (!s->exec(std::make_unique<beatbench::edit::MetaEditCommand>("GENRE", "history"))
-                || !s->exec(std::make_unique<beatbench::edit::MetaEditCommand>("ARTIST", "redo"))
-                || !s->undo()) qFatal("Cannot seed Main integration history");
+            if (!s->exec(std::make_unique<beatbench::edit::MetaEditCommand>("GENRE", "history")) ||
+                !s->exec(std::make_unique<beatbench::edit::MetaEditCommand>("ARTIST", "redo")) ||
+                !s->undo())
+                qFatal("Cannot seed Main integration history");
         }
         documents.activate(QString::fromLatin1(aId));
         documents.refresh();
@@ -166,8 +173,9 @@ public:
     Q_INVOKABLE int liveModelDelegates(QObject* list) const {
         auto* content = list ? qvariant_cast<QQuickItem*>(list->property("contentItem")) : nullptr;
         int count = 0;
-        if (content) for (auto* item : content->childItems())
-            if (item->property("modelData").isValid()) ++count;
+        if (content)
+            for (auto* item : content->childItems())
+                if (item->property("modelData").isValid()) ++count;
         return count;
     }
     Q_INVOKABLE QVariantMap prepareSliceExport(bool includeA) {
@@ -177,17 +185,23 @@ public:
         if (!source.open(QIODevice::WriteOnly)) qFatal("Cannot create slice source");
         QDataStream wav(&source);
         wav.setByteOrder(QDataStream::LittleEndian);
-        wav.writeRawData("RIFF", 4); wav << quint32(36 + 1600);
-        wav.writeRawData("WAVEfmt ", 8); wav << quint32(16) << quint16(1) << quint16(1);
+        wav.writeRawData("RIFF", 4);
+        wav << quint32(36 + 1600);
+        wav.writeRawData("WAVEfmt ", 8);
+        wav << quint32(16) << quint16(1) << quint16(1);
         wav << quint32(8000) << quint32(16000) << quint16(2) << quint16(16);
-        wav.writeRawData("data", 4); wav << quint32(1600);
+        wav.writeRawData("data", 4);
+        wav << quint32(1600);
         const QByteArray silence(1600, '\0');
         wav.writeRawData(silence.constData(), silence.size());
         if (wav.status() != QDataStream::Ok) qFatal("Cannot write slice source");
         source.close();
         if (!workspace.loadAudioFileSyncForTest(sourcePath)) qFatal("Cannot decode slice source");
         beatbench::slice::Slice slice;
-        slice.index = 0; slice.startSec = 0; slice.endSec = 0.04; slice.kind = "grid";
+        slice.index = 0;
+        slice.startSec = 0;
+        slice.endSec = 0.04;
+        slice.kind = "grid";
         workspace.setSlicesForTest({slice}, {true});
         QStringList targets;
         if (includeA) targets.append(snapshot(QString::fromLatin1(aId)).value("path").toString());
@@ -205,7 +219,8 @@ public:
         const auto* c = bridge ? bridge->chart() : nullptr;
         const auto* timing = bridge ? bridge->timing() : nullptr;
         const beatbench::Position tail{6, beatbench::Rational(0, 1)};
-        return {{"chart", c != nullptr}, {"timing", timing != nullptr},
+        return {{"chart", c != nullptr},
+                {"timing", timing != nullptr},
                 {"notes", c ? int(c->notes.size()) : -1},
                 {"samples", c ? int(c->samples.size()) : -1},
                 {"measureCount", bridge ? bridge->measureCount() : -1},
@@ -218,42 +233,58 @@ public:
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return {};
         const QByteArray body = QByteArray("#TITLE PMS integration\n#BPM 130\n") +
-            (bmesp ? "#00118:01\n#00119:01\n#00116:01\n#00117:01\n"
-                   : "#00122:01\n#00123:01\n#00124:01\n#00125:01\n");
+                                (bmesp ? "#00118:01\n#00119:01\n#00116:01\n#00117:01\n"
+                                       : "#00122:01\n#00123:01\n#00124:01\n#00125:01\n");
         if (file.write(body) != body.size()) return {};
         return path;
     }
     Q_INVOKABLE void prepareOverlayExample() {
         auto& registry = beatbench::edit::session_registry();
         const auto put = [&](const char* id, unsigned measure, int num, int den, int lane,
-                             bool ln = false, beatbench::NoteKind kind = beatbench::NoteKind::Normal) {
+                             bool ln = false,
+                             beatbench::NoteKind kind = beatbench::NoteKind::Normal) {
             auto* s = registry.by_id(id);
-            if (!s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(measure,
-                beatbench::Rational(num, den), beatbench::Lane{0, beatbench::LaneKind::Key,
-                    static_cast<std::uint8_t>(lane)}, id == aId ? 1u : 2u, ln, kind, 0)))
+            if (!s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
+                    measure, beatbench::Rational(num, den),
+                    beatbench::Lane{0, beatbench::LaneKind::Key, static_cast<std::uint8_t>(lane)},
+                    id == aId ? 1u : 2u, ln, kind, 0)))
                 qFatal("Cannot prepare overlay fixture");
         };
-        put(aId, 0, 0, 1, 3); put(aId, 1, 1, 2, 4); put(aId, 3, 0, 1, 1);
-        put(bId, 0, 1, 2, 2); put(bId, 1, 1, 4, 4); put(bId, 3, 1, 2, 7);
-        put(bId, 1, 1, 2, 5, true); put(bId, 2, 1, 2, 5, true);
+        put(aId, 0, 0, 1, 3);
+        put(aId, 1, 1, 2, 4);
+        put(aId, 3, 0, 1, 1);
+        put(bId, 0, 1, 2, 2);
+        put(bId, 1, 1, 4, 4);
+        put(bId, 3, 1, 2, 7);
+        put(bId, 1, 1, 2, 5, true);
+        put(bId, 2, 1, 2, 5, true);
         put(bId, 2, 1, 4, 6, false, beatbench::NoteKind::Landmine);
         documents.refresh();
     }
     Q_INVOKABLE QVariantMap snapshot(const QString& id) const {
         const auto* s = beatbench::edit::session_registry().by_id(id.toStdString());
         QVariantMap meta;
-        for (const auto& [k, v] : s->chart().meta) meta.insert(QString::fromStdString(k), QString::fromStdString(v));
+        for (const auto& [k, v] : s->chart().meta)
+            meta.insert(QString::fromStdString(k), QString::fromStdString(v));
         QVariantList notes;
-        for (const auto& n : s->chart().notes) notes.append(QVariantMap{
-            {"measure", n.measure}, {"num", n.pos.num}, {"den", n.pos.den},
-            {"lane", n.value.lane.index}, {"sample", n.value.sample.id}});
+        for (const auto& n : s->chart().notes)
+            notes.append(QVariantMap{{"measure", n.measure},
+                                     {"num", n.pos.num},
+                                     {"den", n.pos.den},
+                                     {"lane", n.value.lane.index},
+                                     {"sample", n.value.sample.id}});
         QVariantMap definitions;
         for (const auto& [key, def] : s->chart().samples)
             definitions.insert(QString::number(int(key.first)) + ":" + QString::number(key.second),
                                QString::fromStdString(def.file));
-        return {{"definitions", definitions}, {"meta", meta}, {"notes", notes}, {"dirty", s->is_dirty()},
-            {"undo", int(s->undo_depth())}, {"redo", int(s->redo_depth())},
-            {"revision", QString::number(s->revision())}, {"path", QString::fromStdString(s->path())}};
+        return {{"definitions", definitions},
+                {"meta", meta},
+                {"notes", notes},
+                {"dirty", s->is_dirty()},
+                {"undo", int(s->undo_depth())},
+                {"redo", int(s->redo_depth())},
+                {"revision", QString::number(s->revision())},
+                {"path", QString::fromStdString(s->path())}};
     }
     Q_INVOKABLE QString disk(const QString& id) const {
         auto* s = beatbench::edit::session_registry().by_id(id.toStdString());
@@ -274,7 +305,7 @@ public:
         QFile file(copies.first());
         return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString{};
     }
-public slots:
+   public slots:
     void applicationAvailable() {
         QQuickStyle::setStyle(QStringLiteral("Fusion"));
         qmlRegisterType<ChartViewItem>("BeatBench", 1, 0, "ChartViewItem");
@@ -285,7 +316,8 @@ public slots:
         const QDir components(QStringLiteral(BEATBENCH_SOURCE_DIR "/app/qml/components"));
         for (const auto& file : components.entryList({"*.qml"}, QDir::Files)) {
             const auto name = QFileInfo(file).baseName().toUtf8();
-            qmlRegisterType(QUrl::fromLocalFile(components.filePath(file)), "BeatBench", 1, 0, name.constData());
+            qmlRegisterType(QUrl::fromLocalFile(components.filePath(file)), "BeatBench", 1, 0,
+                            name.constData());
         }
         auto& r = beatbench::edit::session_registry();
         if (!r.create(aId) || !r.create(bId)) qFatal("Cannot create fixture sessions");
@@ -293,15 +325,19 @@ public slots:
         // 历史服务使用独立生命周期的测试目录，不随每例谱面reset销毁。
         const QString scratch = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
         const QString canonicalScratch = QFileInfo(scratch).canonicalFilePath();
-        historyTemp = std::make_unique<QTemporaryDir>(QDir(canonicalScratch.isEmpty() ? scratch : canonicalScratch)
-            .filePath("main-history-XXXXXX"));
+        historyTemp = std::make_unique<QTemporaryDir>(
+            QDir(canonicalScratch.isEmpty() ? scratch : canonicalScratch)
+                .filePath("main-history-XXXXXX"));
         if (!historyTemp->isValid()) qFatal("Cannot create history integration scratch directory");
         QCoreApplication::setOrganizationName(QStringLiteral("BeAtBenchIntegrationTests"));
         QCoreApplication::setApplicationName(QStringLiteral("MainHistory"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
-        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, historyTemp->filePath("settings-user"));
-        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, historyTemp->filePath("settings-system"));
-        history = std::make_unique<ChartHistoryController>(&documents, nullptr, historyTemp->filePath("store"));
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           historyTemp->filePath("settings-user"));
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope,
+                           historyTemp->filePath("settings-system"));
+        history = std::make_unique<ChartHistoryController>(&documents, nullptr,
+                                                           historyTemp->filePath("store"));
         // External launch is deliberately not performed by the integration fixture.
         for (const auto* id : {"file.revealInFileManager", "file.openInTextEditor"}) {
             UiActionDef def;
@@ -312,10 +348,14 @@ public slots:
         }
         // Same id -> QML handler wiring as app/main.cpp; never reimplement swap or gates.
         const std::pair<const char*, const char*> actions[] = {
-            {"edit.undo", "undoEdit"}, {"edit.redo", "redoEdit"},
-            {"edit.copy", "copySelection"}, {"edit.paste", "pasteClipboard"},
-            {"edit.delete", "uiActionDelete"}, {"tool.quantize", "quantizeSelection"},
-            {"tool.mirror", "uiActionMirror"}, {"tool.rotate", "uiActionRotate"},
+            {"edit.undo", "undoEdit"},
+            {"edit.redo", "redoEdit"},
+            {"edit.copy", "copySelection"},
+            {"edit.paste", "pasteClipboard"},
+            {"edit.delete", "uiActionDelete"},
+            {"tool.quantize", "quantizeSelection"},
+            {"tool.mirror", "uiActionMirror"},
+            {"tool.rotate", "uiActionRotate"},
             {"tool.toggleLn", "toggleLnSelection"}};
         for (const auto& [id, method] : actions) {
             UiActionDef def;
@@ -328,7 +368,9 @@ public slots:
         }
     }
     void qmlEngineAvailable(QQmlEngine* engine) {
-        QQmlComponent audioComponent(engine, QUrl::fromLocalFile(QStringLiteral(QUICK_TEST_SOURCE_DIR "/AudioStateSpy.qml")));
+        QQmlComponent audioComponent(
+            engine,
+            QUrl::fromLocalFile(QStringLiteral(QUICK_TEST_SOURCE_DIR "/AudioStateSpy.qml")));
         audio = audioComponent.create();
         if (!audio) qFatal("Cannot create audio state spy");
         audio->setParent(engine);
@@ -363,7 +405,8 @@ public slots:
         releaseProjectScan();
         QThreadPool::globalInstance()->waitForDone();
     }
-private:
+
+   private:
     ProjectController::ScanFunctions projectScanFunctions() {
         ProjectController::ScanFunctions functions;
         functions.index = [](const std::string& root, const beatbench::project::ScanOptions& opts) {
@@ -380,8 +423,10 @@ private:
             for (int i = 0; i < 2000; ++i) {
                 beatbench::project::ResourceRef r;
                 r.kind = i % 2 == 0 ? "wav" : "bmp";
-                r.path = QString("resource_%1.%2").arg(i, 4, 10, QLatin1Char('0'))
-                    .arg(QString::fromStdString(r.kind)).toStdString();
+                r.path = QString("resource_%1.%2")
+                             .arg(i, 4, 10, QLatin1Char('0'))
+                             .arg(QString::fromStdString(r.kind))
+                             .toStdString();
                 r.on_disk = i % 3 != 0 || i % 5 == 0;
                 result.resources.push_back(std::move(r));
             }
@@ -399,16 +444,20 @@ private:
             for (int i = 0; i < int(result.charts.size()); ++i) {
                 auto& c = result.charts[static_cast<std::size_t>(i)];
                 c.title = "Stress Chart " + std::to_string(i);
-                c.artist = "Synthetic artist"; c.mode = "sp7k";
-                c.notes = 100 + i; c.parsed = true;
+                c.artist = "Synthetic artist";
+                c.mode = "sp7k";
+                c.notes = 100 + i;
+                c.parsed = true;
             }
             for (int i = 0; i < int(result.resources.size()); ++i) {
-                if (i % 5 == 0) continue; // 400 on-disk, unreferenced resources.
+                if (i % 5 == 0) continue;  // 400 on-disk, unreferenced resources.
                 auto& r = result.resources[static_cast<std::size_t>(i)];
                 for (int j = 0; j < 16; ++j) {
                     beatbench::project::ResourceUse use;
                     use.chart = result.charts[static_cast<std::size_t>(j)].path;
-                    use.kind = r.kind; use.id = "0A"; use.refs = 1;
+                    use.kind = r.kind;
+                    use.id = "0A";
+                    use.refs = 1;
                     r.uses.push_back(std::move(use));
                 }
                 r.total_refs = r.uses.size();

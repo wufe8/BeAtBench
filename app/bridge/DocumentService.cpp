@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "DocumentService.hpp"
-#include "EditUtils.hpp"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QUuid>
-
 #include <exception>
 #include <string>
 #include <utility>
 
+#include "EditUtils.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
@@ -17,12 +16,16 @@ namespace beatbench::app {
 namespace {
 using beatbench::json::Json;
 
-QString qs(const std::string& value) { return QString::fromUtf8(value.data(), static_cast<int>(value.size())); }
+QString qs(const std::string& value) {
+    return QString::fromUtf8(value.data(), static_cast<int>(value.size()));
+}
 std::string utf8(const QString& value) { return value.toUtf8().toStdString(); }
 
 QVariantMap result(bool ok, const QString& id, const QString& path, const QString& error = {}) {
-    return {{QStringLiteral("ok"), ok}, {QStringLiteral("id"), id},
-            {QStringLiteral("path"), path}, {QStringLiteral("error"), error}};
+    return {{QStringLiteral("ok"), ok},
+            {QStringLiteral("id"), id},
+            {QStringLiteral("path"), path},
+            {QStringLiteral("error"), error}};
 }
 
 bool responseOk(const Json& response) {
@@ -70,8 +73,10 @@ ChartSession* DocumentService::session(const QString& id) {
         instance = std::make_unique<ChartSession>();
         instance->setParent(this);  // QML 仅借用；文档集合持有实例。
         instance->setSessionId(id);
-        connect(instance.get(), &ChartSession::dirtyChanged, this, &DocumentService::instancesChanged);
-        connect(instance.get(), &ChartSession::documentChanged, this, &DocumentService::instancesChanged);
+        connect(instance.get(), &ChartSession::dirtyChanged, this,
+                &DocumentService::instancesChanged);
+        connect(instance.get(), &ChartSession::documentChanged, this,
+                &DocumentService::instancesChanged);
     }
     return instance.get();
 }
@@ -85,10 +90,15 @@ QVariantList DocumentService::instances() {
         const auto* document = reg.by_id(id);
         if (!document || !document->has_chart()) continue;
         const QString path = qs(document->path());
-        out.append(QVariantMap{{QStringLiteral("id"), qs(id)}, {QStringLiteral("path"), path},
-            {QStringLiteral("label"), path.isEmpty() ? QStringLiteral("未命名谱面") : QFileInfo(path).fileName()},
-            {QStringLiteral("dirty"), document->is_dirty()}, {QStringLiteral("active"), id == reg.active_id()},
-            {QStringLiteral("session"), QVariant::fromValue(static_cast<QObject*>(session(qs(id))))}});
+        out.append(
+            QVariantMap{{QStringLiteral("id"), qs(id)},
+                        {QStringLiteral("path"), path},
+                        {QStringLiteral("label"), path.isEmpty() ? QStringLiteral("未命名谱面")
+                                                                 : QFileInfo(path).fileName()},
+                        {QStringLiteral("dirty"), document->is_dirty()},
+                        {QStringLiteral("active"), id == reg.active_id()},
+                        {QStringLiteral("session"),
+                         QVariant::fromValue(static_cast<QObject*>(session(qs(id))))}});
     }
     return out;
 }
@@ -151,7 +161,9 @@ QString DocumentService::findSessionId(const QString& path) {
 
 QVariantMap DocumentService::open(const QString& path) { return openDocument(path, true); }
 
-QVariantMap DocumentService::openReference(const QString& path) { return openDocument(path, false); }
+QVariantMap DocumentService::openReference(const QString& path) {
+    return openDocument(path, false);
+}
 
 QVariantMap DocumentService::openDocument(const QString& path, bool activateDocument) {
     const QString absolute = normalizedPath(path);
@@ -163,8 +175,10 @@ QVariantMap DocumentService::openDocument(const QString& path, bool activateDocu
     if (absolute.isEmpty()) return failure(QStringLiteral("bad_path: 文档路径为空"));
     auto& reg = beatbench::edit::session_registry();
     if (const QString existing = findSessionId(absolute); !existing.isEmpty()) {
-        QVariantMap out = activateDocument ? activate(existing)
-            : result(true, existing, normalizedPath(qs(reg.by_id(utf8(existing))->path())));
+        QVariantMap out =
+            activateDocument
+                ? activate(existing)
+                : result(true, existing, normalizedPath(qs(reg.by_id(utf8(existing))->path())));
         out.insert(QStringLiteral("reused"), out.value(QStringLiteral("ok")).toBool());
         return out;
     }
@@ -174,7 +188,8 @@ QVariantMap DocumentService::openDocument(const QString& path, bool activateDocu
     do {
         id = "document-" + utf8(QUuid::createUuid().toString(QUuid::WithoutBraces));
     } while (reg.by_id(id));
-    if (!reg.create(id, activateDocument)) return failure(QStringLiteral("create_failed: 无法创建文档会话"));
+    if (!reg.create(id, activateDocument))
+        return failure(QStringLiteral("create_failed: 无法创建文档会话"));
     // Background loads never transiently activate B; commands always use its explicit ID.
     auto rollback = [&] {
         reg.close(id);
@@ -226,10 +241,11 @@ QVariantList DocumentService::dirtyDocuments() const {
         const auto* session = reg.by_id(id);
         if (!session || !session->has_chart() || !session->is_dirty()) continue;
         const QString path = normalizedPath(qs(session->path()));
-        out.push_back(QVariantMap{{QStringLiteral("id"), qs(id)},
-                                 {QStringLiteral("path"), path},
-                                 {QStringLiteral("label"), path.isEmpty()
-                                      ? QStringLiteral("未命名谱面") : QFileInfo(path).fileName()}});
+        out.push_back(
+            QVariantMap{{QStringLiteral("id"), qs(id)},
+                        {QStringLiteral("path"), path},
+                        {QStringLiteral("label"), path.isEmpty() ? QStringLiteral("未命名谱面")
+                                                                 : QFileInfo(path).fileName()}});
     }
     return out;
 }
@@ -244,7 +260,8 @@ QVariantMap DocumentService::save(const QString& id, const QString& path) {
         return result(false, id, {}, QStringLiteral("no_path: 未命名文档需要另存为"));
     const QString owner = findSessionId(target);
     if (!owner.isEmpty() && owner != id)
-        return result(false, id, target, QStringLiteral("path_in_use: 该路径已由另一个打开的文档占用"));
+        return result(false, id, target,
+                      QStringLiteral("path_in_use: 该路径已由另一个打开的文档占用"));
     try {
         Json args = Json::object();
         args.set("session_id", utf8(id));
@@ -259,7 +276,8 @@ QVariantMap DocumentService::save(const QString& id, const QString& path) {
         refresh();
         return result(true, id, normalizedPath(qs(session->path())));
     } catch (const std::exception& e) {
-        return result(false, id, target, QStringLiteral("save_failed: ") + QString::fromUtf8(e.what()));
+        return result(false, id, target,
+                      QStringLiteral("save_failed: ") + QString::fromUtf8(e.what()));
     }
 }
 
@@ -277,18 +295,22 @@ QVariantMap DocumentService::saveDirtyNamed(bool requirePmsConfirmation) {
         const auto* document = beatbench::edit::session_registry().by_id(utf8(id));
         if (requirePmsConfirmation && document && document->has_chart() &&
             EditUtils::pmsSuffixNeedsConfirmation(qs(document->chart().mode_id.value_or("")),
-                                                 doc.value(QStringLiteral("path")).toString())) {
+                                                  doc.value(QStringLiteral("path")).toString())) {
             confirmation.push_back(doc);
             continue;
         }
         const QVariantMap response = save(id);
-        if (response.value(QStringLiteral("ok")).toBool()) ++saved;
-        else errors.push_back(response);
+        if (response.value(QStringLiteral("ok")).toBool())
+            ++saved;
+        else
+            errors.push_back(response);
     }
-    return {{QStringLiteral("ok"), errors.isEmpty() && unnamed.isEmpty() && confirmation.isEmpty() &&
-                                  dirtyDocuments().isEmpty()},
-            {QStringLiteral("saved"), saved}, {QStringLiteral("errors"), errors},
-            {QStringLiteral("unnamed"), unnamed}, {QStringLiteral("confirmation"), confirmation}};
+    return {{QStringLiteral("ok"), errors.isEmpty() && unnamed.isEmpty() &&
+                                       confirmation.isEmpty() && dirtyDocuments().isEmpty()},
+            {QStringLiteral("saved"), saved},
+            {QStringLiteral("errors"), errors},
+            {QStringLiteral("unnamed"), unnamed},
+            {QStringLiteral("confirmation"), confirmation}};
 }
 
 }  // namespace beatbench::app

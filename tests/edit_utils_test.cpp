@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 
 #include <QVariantMap>
-
 #include <string>
 
 #include "bridge/EditUtils.hpp"
@@ -151,7 +150,8 @@ TEST(EditUtils, PmsSuffixNeedsConfirmationMatrix) {
             EXPECT_TRUE(EditUtils::pmsSuffixNeedsConfirmation(QString::fromLatin1(mode),
                                                               QString::fromLatin1(path)));
         }
-        for (const auto* path : {"song.pms", "song.PMS", "song.PmS", "dir/song.v2.pms", ".pms", ""}) {
+        for (const auto* path :
+             {"song.pms", "song.PMS", "song.PmS", "dir/song.v2.pms", ".pms", ""}) {
             SCOPED_TRACE(std::string(mode) + ":" + path);
             EXPECT_FALSE(EditUtils::pmsSuffixNeedsConfirmation(QString::fromLatin1(mode),
                                                                QString::fromLatin1(path)));
@@ -169,7 +169,8 @@ TEST(EditUtils, PmsSuffixNeedsConfirmationMatrix) {
 TEST(EditUtils, PmsSuffixNeedsConfirmationIsInvokable) {
     EditUtils utils;
     bool needsConfirmation = false;
-    ASSERT_TRUE(QMetaObject::invokeMethod(&utils, "pmsSuffixNeedsConfirmation", Qt::DirectConnection,
+    ASSERT_TRUE(QMetaObject::invokeMethod(
+        &utils, "pmsSuffixNeedsConfirmation", Qt::DirectConnection,
         Q_RETURN_ARG(bool, needsConfirmation), Q_ARG(QString, QStringLiteral("pms9k")),
         Q_ARG(QString, QStringLiteral("song.bms"))));
     EXPECT_TRUE(needsConfirmation);
@@ -180,7 +181,8 @@ TEST(EditUtils, ClassifyExternalFile) {
     // 谱面（与 FileDialog(nameFilters) 一致）
     EXPECT_EQ(u.classifyExternalFile(QStringLiteral("song.bms")), QStringLiteral("chart"));
     EXPECT_EQ(u.classifyExternalFile(QStringLiteral("C:/charts/a.bme")), QStringLiteral("chart"));
-    EXPECT_EQ(u.classifyExternalFile(QStringLiteral("a.BML")), QStringLiteral("chart"));   // 大写后缀
+    EXPECT_EQ(u.classifyExternalFile(QStringLiteral("a.BML")),
+              QStringLiteral("chart"));  // 大写后缀
     EXPECT_EQ(u.classifyExternalFile(QStringLiteral("a.pms")), QStringLiteral("chart"));
     // 音频（与 audio_extension_supported 一致，含 oga）
     EXPECT_EQ(u.classifyExternalFile(QStringLiteral("stem.wav")), QStringLiteral("audio"));

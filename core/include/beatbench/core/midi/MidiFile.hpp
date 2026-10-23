@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MIDI 文件解析器（M6.1）：Standard MIDI File（.mid）→ note/tempo/拍号模型。
 //
-// 定位（doc/02 §3）：M6 切音工作台的「MIDI 驱动」数据源——MIDI note 天然给出
+// 定位（doc/core-model.md 三、）：M6 切音工作台的「MIDI 驱动」数据源——MIDI note 天然给出
 // 切片边界（note on/off）与铺放拍位。零 Qt、零依赖、可单测；CLI/GUI/测试三方复用。
 //
 // 解析范围（刻意保守）：
@@ -25,17 +25,17 @@ namespace beatbench::midi {
 
 /// 解析失败（结构性损坏）；命令层转 CommandError("bad_midi")。
 class MidiError : public std::runtime_error {
-public:
+   public:
     explicit MidiError(const std::string& message) : std::runtime_error(message) {}
 };
 
 /// 一个配对完成的音符（同轨/同通道/同音高 on→off）。
 struct MidiNote {
-    int track = 0;        ///< 轨道序号（0 起）
-    int channel = 0;      ///< MIDI 通道 0-15
-    int pitch = 0;        ///< MIDI 音高 0-127（60 = C4）
-    int velocity = 0;     ///< Note On 力度（1-127）
-    int startTick = 0;    ///< 起止 tick（绝对，PPQ 基准）
+    int track = 0;      ///< 轨道序号（0 起）
+    int channel = 0;    ///< MIDI 通道 0-15
+    int pitch = 0;      ///< MIDI 音高 0-127（60 = C4）
+    int velocity = 0;   ///< Note On 力度（1-127）
+    int startTick = 0;  ///< 起止 tick（绝对，PPQ 基准）
     int endTick = 0;
     double startSec = 0.0;  ///< 经 tempo 表换算的秒
     double endSec = 0.0;
@@ -59,7 +59,7 @@ struct MidiTimeSig {
 
 /// 解析产物（全部值，无文件路径引用）。
 struct MidiFile {
-    int format = 0;            ///< 0 单轨 / 1 多轨同步 / 2 顺序
+    int format = 0;  ///< 0 单轨 / 1 多轨同步 / 2 顺序
     int ntrks = 0;
     int division = 0;          ///< raw 16 位（PPQ 或 SMPTE 编码）
     bool isSMPTE = false;      ///< true = division 高位为 1（帧率时间基）

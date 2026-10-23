@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 内置游玩模式配置表（格式无关）。通道映射表（BMS 的 11-19/51-69 等）不在本文件：
 // 那是 codec 层按格式 × 模式索引的映射，见 core/src/codec/bms_channel_maps.cpp。
-#include "beatbench/core/ChartMode.hpp"
-
 #include <algorithm>
+
+#include "beatbench/core/ChartMode.hpp"
 
 namespace beatbench {
 namespace {
 
 // 键 1..7（1P）
 constexpr Lane k1p[7] = {
-    {0, LaneKind::Key, 1}, {0, LaneKind::Key, 2}, {0, LaneKind::Key, 3},
-    {0, LaneKind::Key, 4}, {0, LaneKind::Key, 5}, {0, LaneKind::Key, 6},
-    {0, LaneKind::Key, 7},
+    {0, LaneKind::Key, 1}, {0, LaneKind::Key, 2}, {0, LaneKind::Key, 3}, {0, LaneKind::Key, 4},
+    {0, LaneKind::Key, 5}, {0, LaneKind::Key, 6}, {0, LaneKind::Key, 7},
 };
 // 键 1..9（1P，PMS 9key：无皿/踏板）
 constexpr Lane k1p9[9] = {
@@ -22,9 +21,8 @@ constexpr Lane k1p9[9] = {
 };
 // 键 1..7（2P）
 constexpr Lane k2p[7] = {
-    {1, LaneKind::Key, 1}, {1, LaneKind::Key, 2}, {1, LaneKind::Key, 3},
-    {1, LaneKind::Key, 4}, {1, LaneKind::Key, 5}, {1, LaneKind::Key, 6},
-    {1, LaneKind::Key, 7},
+    {1, LaneKind::Key, 1}, {1, LaneKind::Key, 2}, {1, LaneKind::Key, 3}, {1, LaneKind::Key, 4},
+    {1, LaneKind::Key, 5}, {1, LaneKind::Key, 6}, {1, LaneKind::Key, 7},
 };
 
 // 7key SP（含 5key 呈现）：键1-5 + 皿 + 踏板/保留 + 键6 + 键7（BMS 通道 11-19）
@@ -32,9 +30,9 @@ ChartMode make_sp7k() {
     ChartMode m;
     m.id = "sp7k";
     m.display_name = "SP 7 Keys";
-    m.lanes = {k1p[0], k1p[1], k1p[2], k1p[3], k1p[4],
-               {0, LaneKind::Scratch, 0}, {0, LaneKind::Pedal, 0},
-               k1p[5], k1p[6]};
+    m.lanes = {
+        k1p[0], k1p[1], k1p[2], k1p[3], k1p[4], {0, LaneKind::Scratch, 0}, {0, LaneKind::Pedal, 0},
+        k1p[5], k1p[6]};
     return m;
 }
 
@@ -66,8 +64,7 @@ ChartMode make_pms9k() {
     ChartMode m;
     m.id = "pms9k";
     m.display_name = "PMS 9 Keys";
-    m.lanes = {k1p9[0], k1p9[1], k1p9[2], k1p9[3], k1p9[4],
-               k1p9[5], k1p9[6], k1p9[7], k1p9[8]};
+    m.lanes = {k1p9[0], k1p9[1], k1p9[2], k1p9[3], k1p9[4], k1p9[5], k1p9[6], k1p9[7], k1p9[8]};
     return m;
 }
 

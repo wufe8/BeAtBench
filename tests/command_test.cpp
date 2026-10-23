@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 命令框架测试：注册表 / 信封分发 / 内建命令（version/capabilities/info/check/convert）。
 // 全部用临时文件与合成谱面，不依赖 local/ 资产。
+#include "beatbench/core/command/Command.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -10,14 +12,13 @@
 #include <fstream>
 #include <string>
 
+#include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Builtins.hpp"
-#include "beatbench/core/Version.hpp"
-#include "beatbench/core/command/Command.hpp"
 
 using beatbench::cmd::CommandError;
-using beatbench::cmd::Registry;
 using beatbench::cmd::register_builtin_commands;
+using beatbench::cmd::Registry;
 using beatbench::json::Json;
 
 namespace {
@@ -56,11 +57,11 @@ constexpr const char* kSmallChart =
     "#BPM 150\n"
     "#WAV01 kick.wav\n"
     "#BPM01 150\n"
-    "#00002:1\n"          // 2/4 小节
-    "#00008:01\n"         // BPM → 槽位引用
-    "#00101:01000000\n"   // 两个 1/4 note
-    "#00103:01\n"         // LN 头
-    "#00111:01000000\n"   // 普通 note + BGA？(01 = WAV01)
+    "#00002:1\n"         // 2/4 小节
+    "#00008:01\n"        // BPM → 槽位引用
+    "#00101:01000000\n"  // 两个 1/4 note
+    "#00103:01\n"        // LN 头
+    "#00111:01000000\n"  // 普通 note + BGA？(01 = WAV01)
     ;
 
 // 需要真实存在的 WAV 才能过 lint 的 missing_wav 检查
@@ -86,7 +87,7 @@ TEST(Command, RegistryAddFindNames) {
 
     // 重复注册抛错
     class Dup : public beatbench::cmd::Command {
-    public:
+       public:
         std::string_view name() const override { return "info"; }
         Json run(const Json&) const override { return Json(); }
     };
@@ -103,7 +104,7 @@ TEST(Command, DispatchOkAndIdEcho) {
     EXPECT_TRUE(resp.is_object());
     EXPECT_TRUE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("id").as_i64(), 7);
-    // version 契约：name / version / api / license 四字段齐全（doc/06 §3.5）。
+    // version 契约：name / version / api / license 四字段齐全（doc/command-protocol.md 三、5.）。
     const auto& result = resp.at("result");
     EXPECT_EQ(result.at("name").as_str(), "beatbench");
     // 版本从单一来源 kVersion 派生：避免测试硬编码版本号（推进版本时漏改）
@@ -118,7 +119,7 @@ TEST(Command, DispatchEnvelopeIdAndDefaultArgs) {
     Registry reg;
     register_builtin_commands(reg);
 
-    // id 为字符串 → 原样回显（doc/06 §3.2）。
+    // id 为字符串 → 原样回显（doc/command-protocol.md 三、2.）。
     const Json resp = reg.dispatch(request("version", Json::object(), Json("req-1")));
     ASSERT_TRUE(resp.at("ok").as_bool());
     EXPECT_EQ(resp.at("id").as_str(), "req-1");
@@ -130,7 +131,7 @@ TEST(Command, DispatchEnvelopeIdAndDefaultArgs) {
     ASSERT_TRUE(resp2.at("ok").as_bool());
     EXPECT_EQ(resp2.find("id"), nullptr);
 
-    // args 缺省 = 空对象（doc/06 §3.2）：info 无参 → 参数语义错误 bad_args，
+    // args 缺省 = 空对象（doc/command-protocol.md 三、2.）：info 无参 → 参数语义错误 bad_args，
     // 而不是信封错误 bad_request。
     Json only_cmd = Json::object();
     only_cmd.set("command", "info");
@@ -197,17 +198,17 @@ TEST(Command, CapabilitiesListsCommandsAndFormats) {
     const auto& commands = result.at("commands").as_array();
     EXPECT_GE(commands.size(), 5);
     // 代表性命令覆盖三类入口：基础查询 / 会话编辑 / M6 导入与切分。
-    for (const char* name : {"version", "capabilities", "info", "check", "convert",
-                             "session.load", "note.put", "midi.parse", "slice.detect"}) {
-        const bool found = std::find_if(commands.begin(), commands.end(),
-                                        [&](const Json& v) { return v.as_str() == name; }) !=
-                           commands.end();
+    for (const char* name : {"version", "capabilities", "info", "check", "convert", "session.load",
+                             "note.put", "midi.parse", "slice.detect"}) {
+        const bool found = std::find_if(commands.begin(), commands.end(), [&](const Json& v) {
+                               return v.as_str() == name;
+                           }) != commands.end();
         EXPECT_TRUE(found) << "capabilities 缺少命令: " << name;
     }
     const auto& formats = result.at("formats").as_array();
     ASSERT_EQ(formats.size(), 1);
     EXPECT_EQ(formats[0].as_str(), "bms");
-    // modes 按格式给出（doc/06 §3.5）；bms 至少有一种模式。
+    // modes 按格式给出（doc/command-protocol.md 三、5.）；bms 至少有一种模式。
     const auto& modes = result.at("modes").at("bms").as_array();
     EXPECT_FALSE(modes.empty());
 }
@@ -511,15 +512,13 @@ TEST(Command, PlayerDerivedFromModeOnSave) {
         Json op = Json::object();
         op.set("path", path);
         ASSERT_TRUE(reg.dispatch(request("session.load", std::move(op))).at("ok").as_bool());
-        const auto path2 =
-            (temp_dir() / (std::string("player-reopen-") + c.mode + ext)).string();
+        const auto path2 = (temp_dir() / (std::string("player-reopen-") + c.mode + ext)).string();
         Json sv2 = Json::object();
         sv2.set("path", path2);
         sv2.set("overwrite", true);
         ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv2))).at("ok").as_bool());
         std::ifstream in2(path2, std::ios::binary);
-        std::string text2((std::istreambuf_iterator<char>(in2)),
-                          std::istreambuf_iterator<char>());
+        std::string text2((std::istreambuf_iterator<char>(in2)), std::istreambuf_iterator<char>());
         if (c.player_line) {
             EXPECT_NE(text2.find(c.player_line), std::string::npos)
                 << "mode=" << c.mode << " 保存重开后再保存，PLAYER 不应退回";
@@ -570,6 +569,5 @@ TEST(Command, TransformReturnsModeAwareSelection) {
     ASSERT_TRUE(r.at("result").find("selection") != nullptr);
     const auto& sel = r.at("result").at("selection").as_array();
     ASSERT_EQ(sel.size(), 1u);
-    EXPECT_EQ(sel[0].at("lane").at("index").as_i64(), 9)
-        << "pms9k 镜像键1 应得键9";
+    EXPECT_EQ(sel[0].at("lane").at("index").as_i64(), 9) << "pms9k 镜像键1 应得键9";
 }

@@ -40,9 +40,7 @@ std::string ascii_safe(const std::string& s) {
     return out;
 }
 
-Chart chart_from_text(const std::string& text) {
-    return read_bms(text).chart;
-}
+Chart chart_from_text(const std::string& text) { return read_bms(text).chart; }
 
 double pos_double(const Rational& r) {
     return static_cast<double>(r.num) / static_cast<double>(r.den);
@@ -133,8 +131,8 @@ TEST(Timing, StopGapMapsBack) {
 }
 
 TEST(Timing, Monotonicity) {
-    auto chart = chart_from_text(
-        "#BPM 150\n#STOP01 96\n#00009:01\n#00002:2\n#00003:200\n#00111:01\n");
+    auto chart =
+        chart_from_text("#BPM 150\n#STOP01 96\n#00009:01\n#00002:2\n#00003:200\n#00111:01\n");
     TimingEngine te;
     te.rebuild(chart);
     std::int64_t prev = -1;
@@ -234,7 +232,7 @@ TEST(Timing, RandomBranchTiming) {
 TEST(TimingRealCharts, SelfConsistentRoundTrip) {
     namespace fs = std::filesystem;
     // 快速回归：BB_SKIP_REAL=1 跳过（本测试对 358 谱面逐事件时序正逆算，约 1 分钟；
-    // 提交前完整回归跑，见 doc/04 §6）
+    // 提交前完整回归跑，见 doc/development.md 六、）
     if (std::getenv("BB_SKIP_REAL")) {
         GTEST_SKIP() << "BB_SKIP_REAL 已设置：跳过真实谱面时序自洽（快速回归）";
     }
@@ -264,8 +262,8 @@ TEST(TimingRealCharts, SelfConsistentRoundTrip) {
         }
         TimingEngine te;
         te.rebuild(r1.chart);
-        if (r1.chart.notes.empty() && r1.chart.bpm_events.empty() &&
-            r1.chart.stop_events.empty() && r1.chart.measure_events.empty()) {
+        if (r1.chart.notes.empty() && r1.chart.bpm_events.empty() && r1.chart.stop_events.empty() &&
+            r1.chart.measure_events.empty()) {
             continue;  // 无事件（纯头部/文本谱）无时序可言
         }
         // 全事件自洽往返

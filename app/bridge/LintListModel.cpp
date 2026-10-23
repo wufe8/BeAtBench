@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // core↔QML 桥接：lint 列表模型（lint 面板数据源，M2 第 4 步）。
 // 数据 = check 命令响应：lint.missing_wav（结构化）+ diagnostics（诊断）。
-// 检索/装配逻辑在 C++（双语言纪律 doc/08 §2），QML 只绑定展示。
+// 检索/装配逻辑在 C++（双语言纪律 doc/skin-system.md 二、），QML 只绑定展示。
 #include "bridge/LintListModel.hpp"
 
 #include "beatbench/core/json/Json.hpp"
@@ -24,18 +24,26 @@ QVariant LintListModel::data(const QModelIndex& index, int role) const {
         return {};
     const Entry& e = m_rows[static_cast<std::size_t>(index.row())];
     switch (role) {
-        case SeverityRole: return e.severity;
-        case MessageRole: return e.message;
-        case IdRole: return e.id;
-        case FileRole: return e.file;
-        case LineRole: return e.line;
-        default: return {};
+        case SeverityRole:
+            return e.severity;
+        case MessageRole:
+            return e.message;
+        case IdRole:
+            return e.id;
+        case FileRole:
+            return e.file;
+        case LineRole:
+            return e.line;
+        default:
+            return {};
     }
 }
 
 QHash<int, QByteArray> LintListModel::roleNames() const {
-    return {{SeverityRole, "severity"}, {MessageRole, "message"},
-            {IdRole, "id"},             {FileRole, "file"},
+    return {{SeverityRole, "severity"},
+            {MessageRole, "message"},
+            {IdRole, "id"},
+            {FileRole, "file"},
             {LineRole, "line"}};
 }
 
@@ -88,8 +96,7 @@ void LintListModel::loadFromCheck(const QString& checkJson) {
             //     lint.* 数组；loadFromCheck 此前忽略 → 打开谱面时 lint 面板不显示，
             //     只有编辑触发 refreshLint（session.lint → loadFromIssues）才出现）。
             //     2026-09 用户：补齐「打开即显示重叠 note / 悬挂 LN」。
-            const auto add_positional = [&](const char* key,
-                                            const QString& fallbackType) {
+            const auto add_positional = [&](const char* key, const QString& fallbackType) {
                 if (const Json* arr = lint->find(key); arr && arr->is_array()) {
                     for (const auto& d : arr->as_array()) {
                         Entry e;
@@ -153,8 +160,7 @@ void LintListModel::loadFromIssues(const QString& issuesJson) {
                 e.severity = QStringLiteral("warning");
                 if (const Json* v = d.find("severity"))
                     e.severity = QString::fromUtf8(v->as_str().c_str());
-                if (const Json* v = d.find("code"))
-                    e.id = QString::fromUtf8(v->as_str().c_str());
+                if (const Json* v = d.find("code")) e.id = QString::fromUtf8(v->as_str().c_str());
                 if (const Json* v = d.find("message"))
                     e.message = QString::fromUtf8(v->as_str().c_str());
                 if (!e.message.isEmpty()) rows.push_back(std::move(e));

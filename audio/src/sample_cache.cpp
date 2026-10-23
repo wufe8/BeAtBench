@@ -17,14 +17,13 @@
 // - 命中路径：缓存持有 1，ref() +1 给调用方（计数 2 = 缓存 + 调用方）；
 // - 逐出/失效：decoded_sample_release（unref；归零仅当无外部持有者 → delete）。
 // 播放时调用方把「这份 1」所有权转移给 SamplePlayer::play（协议不变）。
-#include "beatbench/audio/SampleCache.hpp"
-
 #include <algorithm>
 #include <condition_variable>
 #include <functional>
 #include <thread>
 
 #include "beatbench/audio/AudioDecoder.hpp"
+#include "beatbench/audio/SampleCache.hpp"
 
 namespace beatbench::audio {
 
@@ -33,7 +32,7 @@ struct SampleCache::InFlight {
     std::mutex m;
     std::condition_variable cv;
     bool done = false;
-    bool cancelled = false;   ///< 失效/clear 置位：解码完成后不插入
+    bool cancelled = false;  ///< 失效/clear 置位：解码完成后不插入
     std::string message;
 };
 
@@ -44,7 +43,8 @@ std::string to_key(const std::string& u8) { return u8; }
 std::string to_key(const std::wstring& w) {
     std::string out;
     for (wchar_t c : w) {
-        if (c < 0x80) out.push_back(static_cast<char>(c));
+        if (c < 0x80)
+            out.push_back(static_cast<char>(c));
         else if (c < 0x800) {
             out.push_back(static_cast<char>(0xC0 | (c >> 6)));
             out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
@@ -60,9 +60,7 @@ std::string to_key(const std::wstring& w) {
 
 SampleCache::SampleCache(std::size_t budgetBytes) : m_budget(budgetBytes) {}
 
-SampleCache::~SampleCache() {
-    clear();
-}
+SampleCache::~SampleCache() { clear(); }
 
 void SampleCache::setDecoders(DecodeFn fn, DecodeFnW fnW) {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -77,9 +75,7 @@ SampleCacheResult SampleCache::get(const std::string& path) {
         fn = m_fn;  // 快照解码器（setDecoders 并发安全）
     }
     const std::string key = to_key(path);
-    return getImpl(key, [&] {
-        return fn ? fn(path) : decode_audio_file(path);
-    });
+    return getImpl(key, [&] { return fn ? fn(path) : decode_audio_file(path); });
 }
 
 SampleCacheResult SampleCache::get_w(const std::wstring& path) {
@@ -89,9 +85,7 @@ SampleCacheResult SampleCache::get_w(const std::wstring& path) {
         fn = m_fnW;
     }
     const std::string key = to_key(path);
-    return getImpl(key, [&] {
-        return fn ? fn(path) : decode_audio_file_w(path);
-    });
+    return getImpl(key, [&] { return fn ? fn(path) : decode_audio_file_w(path); });
 }
 
 SampleCacheResult SampleCache::getImpl(const std::string& key,
@@ -107,11 +101,19 @@ SampleCacheResult SampleCache::getImpl(const std::string& key,
         }
     }
 
-    // 2) 注册/加入 in-flight
+    // 2) 注册/加入 in-flight（与第 1 步之间有一段无锁空档，必须在同一把锁内二次确认缓存：
+    //    空档里解码者可能已完成并擦除 in-flight，此时既没命中缓存也看不到 in-flight，
+    //    不复查就会重复解码同一 key——2026-10 macOS CI 实测 calls=2 即此竞态）
     std::shared_ptr<InFlight> inf;
     bool amDecoder = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        auto hit = m_cache.find(key);
+        if (hit != m_cache.end()) {
+            hit->second.sample->ref();
+            touch(hit->second);
+            return {true, hit->second.sample, {}};
+        }
         auto fit = m_inFlight.find(key);
         if (fit != m_inFlight.end()) {
             inf = fit->second;  // 等待者：已有解码在途
@@ -160,8 +162,7 @@ SampleCacheResult SampleCache::getImpl(const std::string& key,
             }
             // 取消（invalidate/clear 抢先）：不插入——结果归还解码者（本 get 的
             // 调用方仍拿到 decoded，自己释放；等待者唤醒后查缓存不到 → 递归）。
-            if (!fit->second->cancelled && decoded)
-                insertLocked(key, decoded);
+            if (!fit->second->cancelled && decoded) insertLocked(key, decoded);
             m_inFlight.erase(fit);
         }
         // fit 必然找到：clear/invalidate 只置 cancelled、不移除 map 条目
@@ -220,9 +221,7 @@ void SampleCache::invalidate(const std::string& pathUtf8) {
     }
 }
 
-void SampleCache::invalidate_w(const std::wstring& path) {
-    invalidate(to_key(path));
-}
+void SampleCache::invalidate_w(const std::wstring& path) { invalidate(to_key(path)); }
 
 void SampleCache::clear() {
     std::lock_guard<std::mutex> lock(m_mutex);

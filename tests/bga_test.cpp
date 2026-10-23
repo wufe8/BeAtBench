@@ -13,8 +13,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -193,8 +193,8 @@ TEST(Bga, SampleSetFileDefaultWavUnchanged) {
     args.set("file", "kick.wav");
     req.set("args", std::move(args));
     ASSERT_TRUE(global_registry().dispatch(req).at("ok").as_bool());
-    EXPECT_EQ(session.chart().samples.count({SampleKind::Wav, 1}), 1);   // 默认 wav
-    EXPECT_EQ(session.chart().samples.count({SampleKind::Bmp, 1}), 0);   // 未误建 bmp
+    EXPECT_EQ(session.chart().samples.count({SampleKind::Wav, 1}), 1);  // 默认 wav
+    EXPECT_EQ(session.chart().samples.count({SampleKind::Bmp, 1}), 0);  // 未误建 bmp
 }
 
 // —— bga.move / timing.move：单 undo 步移动（值/id 保持） ——

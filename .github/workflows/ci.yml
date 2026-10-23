@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# CI：三平台构建 + 测试 + GUI 无头冒烟（doc/04 §4 构建、M8「跨平台 CI」落地）。
+# CI：三平台构建 + 测试 + GUI 无头冒烟（doc/development.md 四、 构建、M8「跨平台 CI」落地）。
 #
 # 设计决策（为什么长这样）：
 # - Qt 统一 6.11.2：回归、打包与发布包用同一版本，避免「测的是 X、发的是 Y」。
-# - 五个 job：linux-core / windows-msvc-core 无 Qt（core/cli/audio/tests + ctest），
+# - 七个 job：format（纯格式门禁，无构建）、lint（clang-tidy 全量 + 文档护栏，无 Qt），
+#   加五个回归 job：linux-core / windows-msvc-core 无 Qt（core/cli/audio/tests + ctest），
 #   linux-full / macos-full / windows-mingw-full 带 Qt（桥层单测 + GUI 构建 + offscreen 冒烟）。
+#   全部阻塞，任一 job 失败 run 即红（无汇总层）。
 # - Windows 用 MinGW 全量钉住发布链路（Qt 官方 Windows 默认 kit 即 MinGW，与
 #   scripts/package-release.sh 同源），另设 MSVC 无 Qt job 守护 MSVC 兼容性。
-# - macOS continue-on-error：macOS 侧从未人工验证过，首跑风险隔离；其余 job 阻塞。
 # - 冒烟断言 = 截图存在 + 日志含「皮肤已运行时切换」（与 package-release.sh 同口径），
 #   把「皮肤未随包/路径解析失败」类回归钉死在 CI；截图上传 artifact 供人工查验。
 # - 依赖照旧 FetchContent（PortAudio v19.7.0 / googletest v1.15.2）；Qt 装机走 action 缓存，
 #   编译走钉版 ccache（三 Qt job 共用；macOS 的 make -j 无限并发曾是 CI 总时长瓶颈）。
-# - 发布打包不在这里：独立 package.yml（tag/手动触发，见 doc/11）。
+# - 发布打包不在这里：独立 package.yml（tag/手动触发，见 doc/packaging.md）。
 name: CI
 
 on:
@@ -134,8 +135,6 @@ jobs:
 
   macos-full:
     name: macos-full
-    # macOS 侧从未人工验证过，风险隔离；其实际结论由 summary job 经 API 翻出
-    continue-on-error: true
     runs-on: macos-15
     # 历史教训：make -j 无限并发曾把全量构建拖到 18–35 分钟（147 个编译单元同起跑，
     # 3 vCPU/7GB 被调度与换页压垮）；--parallel 3 后冷构建实测 116s。timeout 90 为
@@ -280,45 +279,36 @@ jobs:
         # Expected bool is supplied by BEATBENCH_TEST_EXPECT_ASIO in tests/CMakeLists.txt.
         run: ctest --test-dir build --output-on-failure --no-tests=error -R "^(audio_backend_capability_tests|asio_buffer_sizes_tests)$"
 
-  # ---------- 汇总：把被 continue-on-error 洗掉的 macOS 真实结论翻出来 ----------
-  # needs.<job>.result 在 continue-on-error 下恒为 success，故经 API 取实际 conclusion：
-  # 阻塞四 job 任一失败 → 本 job 红；macOS 失败 → warning 标注（run 绿灯不含 macOS）。
-  summary:
-    name: ci-summary
-    permissions:
-      actions: read
-    needs: [linux-core, linux-full, macos-full, windows-msvc-core, windows-mingw-full]
-    if: always()
+  # ---------- 静态检查：clang-tidy 全量（存量已清零，WAE 拦截）+ 文档护栏（无 Qt，独立可重跑） ----------
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install clang-tidy 23（与存量清零同版；大版本差异会引入新告警）
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 23
+          sudo apt-get install -y -q clang-tidy-23
+          echo "/usr/lib/llvm-23/bin" >> "$GITHUB_PATH"
+      - name: Configure（无 Qt 路径）
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=OFF -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: clang-tidy 全量（--warnings-as-errors）
+        run: |
+          git ls-files 'core/src/*.cpp' 'audio/src/*.cpp' 'cli/*.cpp' \
+            | xargs -P 4 -I{} clang-tidy -p build-lint --warnings-as-errors='*' '{}'
+      - name: 文档护栏（挂账生命周期 / 路径指针 / 中文弯引号）
+        run: bash scripts/check-docs.sh
+  # ---------- 纯格式门禁：不构建，与 scripts/check-format.sh 同一入口 ----------
+  format:
+    name: format
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: 汇总各 job 实际结论
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          # These four jobs do not use continue-on-error. Their dependency results
-          # are authoritative; the jobs REST API can lag or omit inherited jobs
-          # during a failed-job rerun, and must not turn success into a false red.
-          fail=""
-          for j in linux-core linux-full windows-msvc-core windows-mingw-full; do
-            c=$(jq -r --arg j "$j" '.[$j].result' <<< "$NEEDS_JSON")
-            echo "$j = $c"
-            if [ "$c" != "success" ]; then echo "::error::阻塞 job 失败：$j = $c"; fail=1; fi
-          done
-          # macOS uses continue-on-error, so needs cannot reveal its real result.
-          # Bound retries for REST propagation; unknown is never reported as pass.
-          m="unknown"
-          for attempt in 1 2 3 4 5 6; do
-            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100&refresh=$(date +%s)-$attempt" \
-                --jq '.jobs | map(select(.name == "macos-full")) | first | .conclusion // "unknown"' > macos-result.txt; then
-              m=$(cat macos-result.txt)
-            fi
-            [ "$m" != "unknown" ] && break
-            [ "$attempt" = 6 ] || sleep 5
-          done
-          echo "macos-full actual conclusion = $m"
-          if [ "$m" != "success" ]; then
-            echo "::warning::macos-full 实际结论：$m（非阻塞门禁——本 run 绿灯不含 macOS）"
-          fi
-          [ -z "$fail" ]
+      - uses: actions/checkout@v7
+      - name: Install clang-format (pinned 23.1.3)
+        run: pipx install clang-format==23.1.3
+      - name: Check formatting
+        run: scripts/check-format.sh

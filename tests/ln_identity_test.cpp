@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <gtest/gtest.h>
 
-#include "beatbench/core/command/Command.hpp"
-#include "beatbench/core/bms/BmsCodec.hpp"
 #include <algorithm>
 #include <string>
 #include <vector>
+
+#include "beatbench/core/bms/BmsCodec.hpp"
+#include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/Selection.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
@@ -78,7 +79,7 @@ Json move_item(Json from, Json to) {
 
 Chart paired_identity_chart() {
     auto chart = identity_chart();
-    chart.notes.pop_back(); // Ordinary + LN head at the same position/sample.
+    chart.notes.pop_back();  // Ordinary + LN head at the same position/sample.
     auto ordinary_tail = chart.notes[0];
     ordinary_tail.pos = Rational(1, 2);
     auto ln_tail = ordinary_tail;
@@ -105,7 +106,7 @@ void expect_notes_exact(const std::vector<Event<Note>>& actual,
         EXPECT_EQ(actual[i].value.sub_line, expected[i].value.sub_line);
     }
 }
-} // namespace
+}  // namespace
 
 TEST(LnIdentity, SelectionRetainsAllSamePositionKinds) {
     Selection selection;
@@ -190,7 +191,8 @@ TEST(LnIdentity, ProtocolQuantizeTargetsOnlyMine) {
     ASSERT_TRUE(response.at("ok").as_bool());
     ASSERT_TRUE(response.at("result").at("ok").as_bool());
     for (const auto& note : session.chart().notes)
-        EXPECT_EQ(note.pos, note.value.kind == NoteKind::Landmine ? Rational(5, 16) : Rational(1, 3));
+        EXPECT_EQ(note.pos,
+                  note.value.kind == NoteKind::Landmine ? Rational(5, 16) : Rational(1, 3));
 }
 
 TEST(LnIdentity, ProtocolDeleteTargetsOnlyMine) {
@@ -288,7 +290,7 @@ TEST(LnIdentity, CrossKeyMoveKeepsLnFlagsAndUnselectedPartnerUnchanged) {
     session.load(paired_identity_chart());
     const auto before = session.chart().notes;
     auto response = dispatch("note.move", move_item(note_position(1, Rational(0, 1)),
-                                                   note_position(1, Rational(0, 1), 2)));
+                                                    note_position(1, Rational(0, 1), 2)));
     ASSERT_TRUE(response.at("ok").as_bool());
     ASSERT_TRUE(response.at("result").at("ok").as_bool());
     const auto after = session.chart().notes;
@@ -329,8 +331,10 @@ TEST(LnIdentity, BatchMovesBothLnEndsAcrossLaneWithoutMovingOrdinaryAliases) {
     session.load(paired_identity_chart());
     const auto before = session.chart().notes;
     Json moves = Json::array();
-    moves.push_back(move_item(note_position(1, Rational(0, 1)), note_position(2, Rational(0, 1), 2)));
-    moves.push_back(move_item(note_position(1, Rational(1, 2)), note_position(2, Rational(1, 2), 2)));
+    moves.push_back(
+        move_item(note_position(1, Rational(0, 1)), note_position(2, Rational(0, 1), 2)));
+    moves.push_back(
+        move_item(note_position(1, Rational(1, 2)), note_position(2, Rational(1, 2), 2)));
     Json args = Json::object();
     args.set("moves", std::move(moves));
     const auto response = dispatch("note.move", std::move(args));
@@ -392,8 +396,8 @@ TEST(LnIdentity, BatchSameIdChainAndSwapBindOriginalSourcesWithoutRecapture) {
         std::vector<std::uint32_t> measures;
         for (const auto& note : after) measures.push_back(note.measure);
         std::sort(measures.begin(), measures.end());
-        EXPECT_EQ(measures, (swap ? std::vector<std::uint32_t>{1, 2}
-                                 : std::vector<std::uint32_t>{2, 3}));
+        EXPECT_EQ(measures,
+                  (swap ? std::vector<std::uint32_t>{1, 2} : std::vector<std::uint32_t>{2, 3}));
         ASSERT_TRUE(session.undo());
         expect_notes_exact(session.chart().notes, before);
         ASSERT_TRUE(session.redo());
@@ -538,7 +542,8 @@ TEST(LnIdentity, LnMoveToBgmRejectsWithoutMutationOrUndoEntry) {
     auto target = note_position(2, Rational(0, 1));
     target.as_object().at("lane").set("kind", "bgm");
     target.as_object().at("lane").set("index", 0);
-    const auto response = dispatch("note.move", move_item(note_position(1, Rational(0, 1)), std::move(target)));
+    const auto response =
+        dispatch("note.move", move_item(note_position(1, Rational(0, 1)), std::move(target)));
     ASSERT_FALSE(response.at("ok").as_bool());
     EXPECT_EQ(response.at("error").at("code").as_str(), "bad_args");
     EXPECT_EQ(session.undo_depth(), 0u);

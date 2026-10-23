@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // BMS 文本写出：头部字段 + 定义表 + 事件重建数据行（通道聚合 + 槽位最小化）+ raw 原样。
 // 布局：头部块 → 空行 → 定义表（WAV/BPM/BMP/STOP 分组）→ 空行 → 数据行 → 空行 → raw_lines。
-#include "beatbench/core/bms/BmsCodec.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -18,10 +16,10 @@
 #include <string_view>
 #include <vector>
 
+#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
-
 #include "bms_sections.hpp"
 #include "encoding.hpp"
 
@@ -30,9 +28,8 @@ namespace {
 
 // 头部字段规范输出顺序（BMSE/iBMSC 惯例；其余键按字母序追加）
 constexpr std::string_view kMetaOrder[] = {
-    "PLAYER",   "GENRE",      "TITLE",     "ARTIST",   "BPM",       "PLAYLEVEL",
-    "DIFFICULTY", "SUBTITLE", "SUBARTIST", "RANK",     "TOTAL",     "STAGEFILE",
-    "BANNER",   "BACKBMP",    "LNTYPE",    "LNOBJ",
+    "PLAYER",    "GENRE", "TITLE", "ARTIST",    "BPM",    "PLAYLEVEL", "DIFFICULTY", "SUBTITLE",
+    "SUBARTIST", "RANK",  "TOTAL", "STAGEFILE", "BANNER", "BACKBMP",   "LNTYPE",     "LNOBJ",
 };
 
 // 分割线注释常量在 bms_sections.hpp（writer 生成 / parser 结构豁免，roundtrip 幂等）。
@@ -65,8 +62,8 @@ inline void ensure_block_sep(std::string& out) {
 void emit_section_comment(std::string& out, std::string_view line) {
     // 上方空行：目标 = 输出以「一条空行」结尾（末两字符 \n\n），或文件首的前导空行。
     if (!out.empty()) {
-        const bool ends_blank = out.size() >= 2 && out.back() == '\n' &&
-                                out[out.size() - 2] == '\n';
+        const bool ends_blank =
+            out.size() >= 2 && out.back() == '\n' && out[out.size() - 2] == '\n';
         if (out.back() != '\n') out.push_back('\n');  // 结束当前内容行
         if (!ends_blank) out.push_back('\n');         // 补一条空行
     } else {
@@ -107,6 +104,7 @@ inline std::string fmt_id(const Chart& chart, std::uint32_t id) {
 
 }  // namespace
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BMS 写回通道聚合状态机
 std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     std::string out;
     out.reserve(4096);
@@ -124,8 +122,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             (void)value;
             const auto up = upper_ascii(key);
             if (up == "BASE") continue;  // id 进制已由 id_base 结构化输出，meta 不重复
-            const bool is_known = std::find(std::begin(kMetaOrder), std::end(kMetaOrder), up) !=
-                                  std::end(kMetaOrder);
+            const bool is_known =
+                std::find(std::begin(kMetaOrder), std::end(kMetaOrder), up) != std::end(kMetaOrder);
             (is_known ? known : unknown).push_back(up);
         }
         // #PLAYER 派生（2026-10 模式系统阶段一）：显式元信息优先；缺失/空且模式推导值
@@ -136,22 +134,23 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         std::optional<std::string> derived_player;
         if (meta_player == chart.meta.end() || meta_player->second.empty()) {
             if (chart.mode_id) {
-                if (*chart.mode_id == "dp") derived_player = "3";
-                else if (*chart.mode_id == "battle") derived_player = "4";
+                if (*chart.mode_id == "dp")
+                    derived_player = "3";
+                else if (*chart.mode_id == "battle")
+                    derived_player = "4";
             }
         }
         if (derived_player) {
             known.push_back("PLAYER");  // kMetaOrder 已含 PLAYER，排序自然归位
         }
-        std::sort(known.begin(), known.end(),
-                  [](const std::string& a, const std::string& b) {
-                      std::size_t ia = 0, ib = 0;
-                      for (; ia < std::size(kMetaOrder); ++ia)
-                          if (kMetaOrder[ia] == a) break;
-                      for (; ib < std::size(kMetaOrder); ++ib)
-                          if (kMetaOrder[ib] == b) break;
-                      return ia < ib;
-                  });
+        std::sort(known.begin(), known.end(), [](const std::string& a, const std::string& b) {
+            std::size_t ia = 0, ib = 0;
+            for (; ia < std::size(kMetaOrder); ++ia)
+                if (kMetaOrder[ia] == a) break;
+            for (; ib < std::size(kMetaOrder); ++ib)
+                if (kMetaOrder[ib] == b) break;
+            return ia < ib;
+        });
         for (const auto& k : known) {
             if (const auto it = chart.meta.find(k); it != chart.meta.end()) {
                 if (k == "PLAYER" && it->second.empty() && derived_player) {
@@ -223,8 +222,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 // 不一致 → 落入下方派生（新 id）
             }
             // id 空间上限（36 = 1295；62 = 3843）；全满时复用最后一个（退化，理论不可达）
-            const std::uint32_t max_id =
-                chart.id_base == IdBase::Base62 ? 3843 : 1295;
+            const std::uint32_t max_id = chart.id_base == IdBase::Base62 ? 3843 : 1295;
             while (next_id < max_id && (stop_defs.count(next_id) || ref_used.count(next_id)))
                 ++next_id;
             const auto text = format_num(static_cast<double>(count));
@@ -234,10 +232,10 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             ++next_id;
         }
     }
-    std::map<double, std::uint32_t> bpm_id_by_value;         // BPM 值 → 引用 id
-    std::map<std::uint32_t, std::string> derived_bpms;       // 派生 #BPMxx（id → 原值文本）
+    std::map<double, std::uint32_t> bpm_id_by_value;    // BPM 值 → 引用 id
+    std::map<std::uint32_t, std::string> derived_bpms;  // 派生 #BPMxx（id → 原值文本）
     {
-        std::map<std::uint32_t, std::string> bpm_defs;       // 现有定义 id → 原文本
+        std::map<std::uint32_t, std::string> bpm_defs;  // 现有定义 id → 原文本
         for (const auto& [key, def] : chart.samples) {
             if (key.first == SampleKind::Bpm) bpm_defs[key.second] = def.value;
         }
@@ -285,8 +283,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 }
                 // 不一致 → 落入下方派生（新 id）
             }
-            const std::uint32_t max_id =
-                chart.id_base == IdBase::Base62 ? 3843 : 1295;
+            const std::uint32_t max_id = chart.id_base == IdBase::Base62 ? 3843 : 1295;
             while (next_id < max_id && (bpm_defs.count(next_id) || ref_used.count(next_id)))
                 ++next_id;
             const auto text = format_num(v);
@@ -303,7 +300,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             (void)def;
             if (key.first == kind) ids.push_back(key.second);
         }
-        const auto& derived = (kind == SampleKind::Stop) ? derived_stops
+        const auto& derived = (kind == SampleKind::Stop)  ? derived_stops
                               : (kind == SampleKind::Bpm) ? derived_bpms
                                                           : derived_stops;
         if (kind == SampleKind::Stop || kind == SampleKind::Bpm) {
@@ -342,9 +339,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     // 行键 = (measure, channel)，单元格 = (pos, 文本)
     std::map<std::pair<std::uint32_t, std::string>, std::vector<RowCell>> rows;
 
-    const auto add_cell = [&](std::uint32_t measure, std::string_view channel,
-                              const Rational& pos, std::string text,
-                              std::uint32_t sub_line = 0) {
+    const auto add_cell = [&](std::uint32_t measure, std::string_view channel, const Rational& pos,
+                              std::string text, std::uint32_t sub_line = 0) {
         auto& cells = rows[{measure, std::string(channel)}];
         cells.push_back({pos, std::move(text), sub_line});
     };
@@ -388,8 +384,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 if (end != defit->second.value.c_str() && *end == '\0') d = dd;
                 keep_ref = (d == v);
             }
-            slot_id = keep_ref ? *b.ref_id
-                               : bpm_id_by_value.find(v)->second;
+            slot_id = keep_ref ? *b.ref_id : bpm_id_by_value.find(v)->second;
         } else {
             const auto it = bpm_id_by_value.find(v);
             if (it == bpm_id_by_value.end()) continue;  // 理论上不会发生（上面已派生）
@@ -412,8 +407,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
                 if (end != defit->second.value.c_str() && *end == '\0') d = dd;
                 keep_ref = (static_cast<std::int64_t>(std::llround(d)) == ev.value.count);
             }
-            slot_id = keep_ref ? *ev.value.ref_id
-                               : stop_id_by_count.find(ev.value.count)->second;
+            slot_id = keep_ref ? *ev.value.ref_id : stop_id_by_count.find(ev.value.count)->second;
         } else {
             const auto it = stop_id_by_count.find(ev.value.count);
             if (it == stop_id_by_count.end()) continue;  // 理论上不会发生（上面已派生）
@@ -436,10 +430,17 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     for (const auto& ev : chart.bga_events) {
         std::string_view channel = "04";
         switch (ev.value.layer) {
-            case 1: channel = "06"; break;
-            case 2: channel = "07"; break;
-            case 3: channel = "0A"; break;
-            default: break;  // layer 0 = base（未知层号兜底 ch04）
+            case 1:
+                channel = "06";
+                break;
+            case 2:
+                channel = "07";
+                break;
+            case 3:
+                channel = "0A";
+                break;
+            default:
+                break;  // layer 0 = base（未知层号兜底 ch04）
         }
         add_cell(ev.measure, channel, ev.pos, fmt_id(chart, ev.value.image.id));
     }
@@ -470,8 +471,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             }();
             if (group_sub_lines) {
                 std::uint32_t n_groups = 1;
-                for (const auto& c : cells)
-                    n_groups = std::max(n_groups, c.sub_line + 1);
+                for (const auto& c : cells) n_groups = std::max(n_groups, c.sub_line + 1);
                 for (std::uint32_t g = 0; g < n_groups; ++g) {
                     // 本组 cells（sub_line == g）
                     std::map<Rational, std::vector<std::string>> by_pos;

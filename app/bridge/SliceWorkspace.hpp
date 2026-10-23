@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 切音工作台数据桥（M6.1）：参考音频（外部 stem.wav）+ MIDI（notes.mid）的装载与持有。
 //
-// 定位（doc/02 §3 M6.1）：与编辑页平级的切音工作台的数据侧——「导入工作台」：
+// 定位（doc/core-model.md 三、 M6.1）：与编辑页平级的切音工作台的数据侧——「导入工作台」：
 // 外部音频解码（→ 波形金字塔 + 时长/采样率）+ MIDI 解析（→ note 表）+ offset 微调
 // （全局；逻辑在此桥换算出「+offset」后的秒）。播放/seek 委托 AudioEngine
 // （参考音频专用 PcmPlayback，与谱面播放独立）。MIDI 解析走 core `midi` 模块
 // （headless 可测；本桥只做文件读取与 QML 适配）。
 //
-// 双语言纪律（doc/08 §2）：解码/解析/数据持有在 C++，QML 只消费信号/属性。
+// 双语言纪律（doc/skin-system.md 二、）：解码/解析/数据持有在 C++，QML 只消费信号/属性。
 // 线程：解码在 QThreadPool（不卡 UI），完成回 UI 线程装载。
 #pragma once
 
-#include <QObject>
 #include <QByteArray>
+#include <QObject>
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
-
 #include <memory>
 #include <optional>
 #include <vector>
@@ -45,8 +44,8 @@ class SliceWorkspace : public QObject {
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusChanged)
     /// M7 切音目标集合（绝对路径；QML 注入：项目页勾选，未勾选 = 当前编辑谱）。
     /// 勾选非空时，「同时铺入编辑区」对所有目标生效（每谱一个撤销步）。
-    Q_PROPERTY(QStringList exportTargets READ exportTargets WRITE setExportTargets
-                   NOTIFY exportTargetsChanged)
+    Q_PROPERTY(QStringList exportTargets READ exportTargets WRITE setExportTargets NOTIFY
+                   exportTargetsChanged)
     // ---- M6.2 切片 ----
     Q_PROPERTY(QVariantList slices READ slices NOTIFY slicesChanged)
     Q_PROPERTY(bool hasSlices READ hasSlices NOTIFY slicesChanged)
@@ -55,7 +54,7 @@ class SliceWorkspace : public QObject {
     /// MIDI tempo（首个 tempo 事件 → BPM；无 MIDI/无 tempo → 120）。网格参数默认值。
     Q_PROPERTY(qreal midiTempoBpm READ midiTempoBpm NOTIFY midiChanged)
 
-public:
+   public:
     explicit SliceWorkspace(QObject* parent = nullptr);
 
     /// 播放/seek 委托目标（main.cpp 接线；不拥有）。
@@ -88,11 +87,10 @@ public:
     /// 不挤旧行、新内容跨小节同列），单 CompositeCommand = 一个撤销步；需已加载谱面。
     /// 返回 {ok, raw, count, error, startMeasure, endMeasure, placementText, nextStartId,
     ///       placed, placedNotes, placeError, outDir, collisions, conflictPolicy}。
-    Q_INVOKABLE QVariantMap exportSlices(qreal bpm, int subdivision,
-                                         int beatsPerMeasure, int startId,
-                                         int startMeasure,
-                                         const QString& outDir, const QString& prefix,
-                                         qreal fadeMs, bool placeIntoChart = false,
+    Q_INVOKABLE QVariantMap exportSlices(qreal bpm, int subdivision, int beatsPerMeasure,
+                                         int startId, int startMeasure, const QString& outDir,
+                                         const QString& prefix, qreal fadeMs,
+                                         bool placeIntoChart = false,
                                          const QString& conflictPolicy = QStringLiteral("error"),
                                          int idBaseMode = 0, bool independentExport = false);
     /// 固定参数/切片、目标身份与内容版本、磁盘冲突的预览；不写音频、不编辑谱面。
@@ -117,8 +115,7 @@ public:
     /// 测试入口：同步装载参考音频（不经 QThreadPool / 不碰声卡）。生产路径仍用 loadAudioFile。
     bool loadAudioFileSyncForTest(const QString& path);
     /// 测试入口：直接注入切片表（绕过 detectSlices）。
-    void setSlicesForTest(std::vector<beatbench::slice::Slice> slices,
-                          std::vector<bool> enabled);
+    void setSlicesForTest(std::vector<beatbench::slice::Slice> slices, std::vector<bool> enabled);
     /// 建议的铺放起始小节（1-based）：当前谱面已用小节数 + 1（下一空小节；
     /// 无谱面 → 1）。「起始小节」SpinBox 默认值用；夹逼 [1,999]。
     Q_INVOKABLE int suggestedStartMeasure() const;
@@ -214,7 +211,7 @@ public:
     bool busy() const { return m_busy; }
     QString statusText() const { return m_statusText; }
 
-signals:
+   signals:
     void audioChanged();
     void midiChanged();
     void offsetChanged();
@@ -229,7 +226,7 @@ signals:
     /// 波形刷新，定义表需显式重拉 session.samples）。
     void samplesPlaced();
 
-private:
+   private:
     void setStatus(const QString& text);
     /// M6.4c 手动切分点：命中内部边界（startSec ≈ t，i>=1）的切片序号；无 → -1。
     int findBoundaryIndex(double t) const;
@@ -256,8 +253,7 @@ private:
     void restoreSliceSnapshot(const SliceSnapshot& snap);
     /// 解码完成（UI 线程）：ok 且 track 有效 → 移入 m_track + 交 AudioEngine 预览；
     /// 失败 → statusText（原参考音轨保留）。
-    void audioDecoded(bool ok, beatbench::audio::ReferenceTrack* track,
-                      const QString& path);
+    void audioDecoded(bool ok, beatbench::audio::ReferenceTrack* track, const QString& path);
 
     struct ExportTarget {
         std::string id;

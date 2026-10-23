@@ -2,7 +2,7 @@
 // 通用勾选框（主题统一样式，M2 2026-09）：文字 = Theme.text（修复黑字不可读）；
 // indicator = 14×14 圆角边框（checked = 主色底 + 白勾）。控件交互语义 = Qt Quick
 // Controls 2 CheckBox（checkable + onToggled 外部状态不入 checked 断绑——用 toggled 事件
-// 手动驱动外部状态，checked 只作显示绑定，避免「点击断绑残留」，doc/05 §4.3）
+// 手动驱动外部状态，checked 只作显示绑定，避免「点击断绑残留」，doc/ui-design.md 四、.3）
 import QtQuick
 import QtQuick.Controls
 

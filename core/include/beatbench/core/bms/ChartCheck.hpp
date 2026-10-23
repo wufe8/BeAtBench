@@ -29,15 +29,15 @@ EventStats collect_event_stats(const Chart& chart);
 /// wav 来自 notes（键/皿/踏板/地雷引用数 + 首次小节 + 轨道类别，按 player 分）；
 /// bmp 来自 bga_events；bpm/stop 的事件落值不保留原始 id，统计为 0（面板忽略）。
 struct SampleUsage {
-    std::size_t refs = 0;        ///< 引用次数（note/bga 物件数）
+    std::size_t refs = 0;             ///< 引用次数（note/bga 物件数）
     std::uint32_t first_measure = 0;  ///< 首次引用小节（无引用 = 0）
-    std::size_t key1 = 0;        ///< 1P 按键轨引用数
-    std::size_t scratch1 = 0;    ///< 1P 皿轨引用数
-    std::size_t pedal1 = 0;      ///< 1P 踏板轨引用数
-    std::size_t key2 = 0;        ///< 2P 按键轨引用数（DP/双人模式；1P 为 0）
-    std::size_t scratch2 = 0;    ///< 2P 皿轨
-    std::size_t pedal2 = 0;      ///< 2P 踏板轨
-    std::size_t bgm = 0;         ///< 背景音轨（ch01）引用数（游戏不可见，到达自动播放）
+    std::size_t key1 = 0;             ///< 1P 按键轨引用数
+    std::size_t scratch1 = 0;         ///< 1P 皿轨引用数
+    std::size_t pedal1 = 0;           ///< 1P 踏板轨引用数
+    std::size_t key2 = 0;             ///< 2P 按键轨引用数（DP/双人模式；1P 为 0）
+    std::size_t scratch2 = 0;         ///< 2P 皿轨
+    std::size_t pedal2 = 0;           ///< 2P 踏板轨
+    std::size_t bgm = 0;              ///< 背景音轨（ch01）引用数（游戏不可见，到达自动播放）
 };
 
 std::map<std::pair<SampleKind, std::uint32_t>, SampleUsage> collect_sample_usage(
@@ -55,17 +55,17 @@ struct LintIssue {
     std::string message;
     Severity severity = Severity::Warning;
     int line = 0;
-    std::string id;     ///< 采样槽位（missing_wav / wav_ext_mismatch）
-    std::string file;   ///< 引用路径（missing_wav / wav_ext_mismatch）
+    std::string id;        ///< 采样槽位（missing_wav / wav_ext_mismatch）
+    std::string file;      ///< 引用路径（missing_wav / wav_ext_mismatch）
     std::string resolved;  ///< 实际找到的同名文件（仅 wav_ext_mismatch）
     // —— 位置信息（overlapping_notes / dangling_ln；0 = 无） ——
     std::uint32_t measure = 0;
-    std::int64_t pos_num = 0;   ///< 节内位置（Rational num/den；den 0 = 无）
+    std::int64_t pos_num = 0;  ///< 节内位置（Rational num/den；den 0 = 无）
     std::int64_t pos_den = 0;
     std::uint8_t lane_player = 0;  ///< 轨道（Lane：player/kind/index；kind 255 = 无）
     std::uint8_t lane_kind = 255;
     std::uint8_t lane_index = 0;
-    std::uint32_t sample = 0;   ///< 采样 id（dangling_ln 用）
+    std::uint32_t sample = 0;  ///< 采样 id（dangling_ln 用）
 };
 
 /// 最小 lint（M1 范围）：缺失 #WAV 引用文件 / 缺 #RANK / 缺 #TOTAL / 空谱面 /

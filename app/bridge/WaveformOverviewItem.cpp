@@ -3,17 +3,16 @@
 // 方向：0 = 水平（底部条）；1 = 垂直（右侧条，当前布局——时间轴与视口同向）。
 #include "bridge/WaveformOverviewItem.hpp"
 
+#include <QCursor>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QCursor>
-
 #include <algorithm>
 #include <cmath>
 
+#include "beatbench/audio/WaveformPyramid.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/ChartViewItem.hpp"
 #include "bridge/ThemeManager.hpp"
-#include "beatbench/audio/WaveformPyramid.hpp"
 
 namespace beatbench::app {
 
@@ -156,7 +155,8 @@ QVariantMap WaveformOverviewItem::viewportTimeWindow() const {
     // accidentally combine B geometry with A timing. Unwired/mismatched is hidden.
     if (!view || view->session() != m_session)
         return {{QStringLiteral("valid"), false},
-                {QStringLiteral("t0"), 0.0}, {QStringLiteral("t1"), 0.0}};
+                {QStringLiteral("t0"), 0.0},
+                {QStringLiteral("t1"), 0.0}};
     return view->viewportTimeWindow();
 }
 
@@ -239,7 +239,8 @@ void WaveformOverviewItem::paint(QPainter* p) {
         // 未渲染：提示（旋转 90° 的文本在垂直条上太挤 → 用短文本 + 方向感知）
         p->setPen(th ? th->textFaint() : QColor(QStringLiteral("#6b7484")));
         p->drawText(QRectF(0, 0, w, h), Qt::AlignCenter,
-                    m_orientation == 1 ? QStringLiteral("波形") : QStringLiteral("波形（Space 渲染后显示）"));
+                    m_orientation == 1 ? QStringLiteral("波形")
+                                       : QStringLiteral("波形（Space 渲染后显示）"));
         return;
     }
 
@@ -278,8 +279,7 @@ void WaveformOverviewItem::paint(QPainter* p) {
         const qlonglong f0 = static_cast<qlonglong>(t0s * sr);
         const qlonglong f1 = static_cast<qlonglong>(t1s * sr);
         if (f1 <= f0) continue;
-        const auto r = wf ? wf->range(static_cast<std::size_t>(f0),
-                                      static_cast<std::size_t>(f1))
+        const auto r = wf ? wf->range(static_cast<std::size_t>(f0), static_cast<std::size_t>(f1))
                           : beatbench::audio::WaveformPyramid::Range{};
         const double mn = r.min;
         const double mx = r.max;
@@ -289,7 +289,8 @@ void WaveformOverviewItem::paint(QPainter* p) {
             // 垂直：幅度向左/右铺（center ± scale）；时间轴 = i（y 方向）
             const qreal xLeft = center - mx * scale;
             const qreal xRight = center - mn * scale;
-            p->fillRect(QRectF(std::min(xLeft, xRight), i, std::max<qreal>(1.0, std::abs(xRight - xLeft)), 1.0),
+            p->fillRect(QRectF(std::min(xLeft, xRight), i,
+                               std::max<qreal>(1.0, std::abs(xRight - xLeft)), 1.0),
                         waveCol);
         } else {
             // 水平：幅度向上/下铺（center ± scale）；时间轴 = i（x 方向）

@@ -14,9 +14,8 @@
 #include <QSettings>
 #include <QThread>
 #include <QTimer>
-#include <QVariantList>
 #include <QVariant>
-
+#include <QVariantList>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -34,8 +33,8 @@
 #include <windows.h>
 #endif
 
-#include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/AsioBufferSizes.hpp"
+#include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 #include "bridge/ChartSession.hpp"
 
@@ -64,10 +63,10 @@ beatbench::audio::DecodedSample* makeTestToneSample() {
 
 AudioEngine::AudioEngine(QObject* parent)
     : AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend>(
-                      beatbench::audio::create_portaudio_backend()), parent) {}
+                      beatbench::audio::create_portaudio_backend()),
+                  parent) {}
 
-AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend,
-                         QObject* parent)
+AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend, QObject* parent)
     : QObject(parent),
       m_backend(std::move(backend)),
       m_playback(&m_player, 44100.0),
@@ -186,23 +185,20 @@ bool AudioEngine::playPreview(const QString& file) {
     const QString pathCopy = absPath;
     qInfo("AudioEngine: playPreview %s", qPrintable(pathCopy));  // 冒烟日志
     m_previewPool.start([this, pathCopy, generation] {
-        // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）——
-        // 窄字符 fopen 走 ANSI 代码页（GBK）打不开日文谱面目录（2026-09 用户实测）。
-        // 跨平台：Windows 用 toStdWString；其它平台窄字符（注释见 AudioDecoder.hpp）。
-        // SampleCache 内部负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
+    // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）——
+    // 窄字符 fopen 走 ANSI 代码页（GBK）打不开日文谱面目录（2026-09 用户实测）。
+    // 跨平台：Windows 用 toStdWString；其它平台窄字符（注释见 AudioDecoder.hpp）。
+    // SampleCache 内部负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
 #ifdef _WIN32
-        const beatbench::audio::SampleCacheResult r =
-            m_cache.get_w(pathCopy.toStdWString());
+        const beatbench::audio::SampleCacheResult r = m_cache.get_w(pathCopy.toStdWString());
 #else
-        const beatbench::audio::SampleCacheResult r =
-            m_cache.get(pathCopy.toStdString());
+        const beatbench::audio::SampleCacheResult r = m_cache.get(pathCopy.toStdString());
 #endif
         {
             std::lock_guard<std::mutex> lock(m_previewResultsMutex);
             m_previewResults.push_back({generation, r});
         }
-        QMetaObject::invokeMethod(this, [this] { completePreviewDecodes(); },
-                                  Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this, [this] { completePreviewDecodes(); }, Qt::QueuedConnection);
     });
     return true;
 }
@@ -257,7 +253,9 @@ void AudioEngine::stopAll() {
 
 void AudioEngine::playTestTone() {
     stopPreview();
-    if (!m_initialized) { return; }
+    if (!m_initialized) {
+        return;
+    }
     // 合成 440Hz（计数 1；playPreview 转移）
     m_busy = m_player.playPreview(makeTestToneSample(), 1.0f);
     emit busyChanged();
@@ -300,7 +298,8 @@ void AudioEngine::resolveSavedDevice() {
         return;
     }
     m_settings = {};
-    setSettingsError(QStringLiteral("已保存的音频设备无法唯一确认，已改用系统默认设备；请重新选择设备"));
+    setSettingsError(
+        QStringLiteral("已保存的音频设备无法唯一确认，已改用系统默认设备；请重新选择设备"));
 }
 
 void AudioEngine::pauseForStreamChange() {
@@ -319,8 +318,10 @@ void AudioEngine::pauseForStreamChange() {
 
 QVariantMap AudioEngine::deviceCapabilities(int device) const {
     beatbench::audio::AudioDeviceCapabilities caps;
-    if (m_backendReady) caps = m_backend->deviceCapabilities(device);
-    else caps.error = "音频后端不可用";
+    if (m_backendReady)
+        caps = m_backend->deviceCapabilities(device);
+    else
+        caps.error = "音频后端不可用";
     return {{QStringLiteral("asio"), caps.asio},
             {QStringLiteral("bufferMin"), static_cast<qlonglong>(caps.bufferMin)},
             {QStringLiteral("bufferMax"), static_cast<qlonglong>(caps.bufferMax)},
@@ -336,12 +337,12 @@ QVariantList AudioEngine::bufferOptions(int device) const {
     if (!m_backendReady) return options;
     const auto caps = m_backend->deviceCapabilities(device);
     std::set<int> values;
-    const beatbench::audio::AsioBufferSizes sizes{
-        caps.bufferMin, caps.bufferMax, caps.bufferPreferred, caps.bufferGranularity};
+    const beatbench::audio::AsioBufferSizes sizes{caps.bufferMin, caps.bufferMax,
+                                                  caps.bufferPreferred, caps.bufferGranularity};
     auto add = [&](long value) {
         if (value <= 0 || value > std::numeric_limits<int>::max()) return;
-        if (!caps.asio || (caps.error.empty() &&
-                          beatbench::audio::resolveAsioBufferSize(sizes, value) == value))
+        if (!caps.asio ||
+            (caps.error.empty() && beatbench::audio::resolveAsioBufferSize(sizes, value) == value))
             values.insert(static_cast<int>(value));
     };
     // A bounded candidate set, never enumerate arbitrary driver ranges/granularities.
@@ -365,21 +366,22 @@ bool AudioEngine::showDeviceControlPanel() {
     const auto caps = m_backend->deviceCapabilities(m_settings.device);
     // Buffer metadata errors can be repaired in the driver panel, even without a stream.
     if (!asioCompiled() || !caps.asio) {
-        setSettingsError(QStringLiteral("ASIO 控制面板不可用：%1")
-                             .arg(QString::fromStdString(caps.error)));
+        setSettingsError(
+            QStringLiteral("ASIO 控制面板不可用：%1").arg(QString::fromStdString(caps.error)));
         return false;
     }
     const bool wasAvailable = m_initialized;
     pauseForStreamChange();
     m_renderCtx.ready.store(false, std::memory_order_release);
-    m_backend->stop(); // stop closes the stream before entering the native driver dialog.
+    m_backend->stop();  // stop closes the stream before entering the native driver dialog.
     m_initialized = false;
     void* nativeWindow = nullptr;
 #ifdef _WIN32
     nativeWindow = reinterpret_cast<void*>(GetActiveWindow());
 #endif
     std::string panelError;
-    const bool panelOk = m_backend->showDeviceControlPanel(m_settings.device, nativeWindow, &panelError);
+    const bool panelOk =
+        m_backend->showDeviceControlPanel(m_settings.device, nativeWindow, &panelError);
     std::string reopenError;
     bool reopened = startStream(m_settings, reopenError);
     bool usedDefaultBuffer = false;
@@ -399,11 +401,13 @@ bool AudioEngine::showDeviceControlPanel() {
     if (!reopened) {
         setSettingsError(QStringLiteral("ASIO 面板%1，音频流重开失败，音频不可用：%2；%3")
                              .arg(panelOk ? QStringLiteral("已关闭") : QStringLiteral("打开失败"),
-                                  QString::fromStdString(panelError), QString::fromStdString(reopenError)));
+                                  QString::fromStdString(panelError),
+                                  QString::fromStdString(reopenError)));
     } else if (!panelOk) {
-        setSettingsError(QStringLiteral("ASIO 控制面板打开失败，音频流已恢复%1：%2")
-                             .arg(usedDefaultBuffer ? QStringLiteral("（缓冲已回退驱动首选）") : QString(),
-                                  QString::fromStdString(panelError)));
+        setSettingsError(
+            QStringLiteral("ASIO 控制面板打开失败，音频流已恢复%1：%2")
+                .arg(usedDefaultBuffer ? QStringLiteral("（缓冲已回退驱动首选）") : QString(),
+                     QString::fromStdString(panelError)));
     } else if (usedDefaultBuffer) {
         setSettingsError(QStringLiteral("原缓冲不可用，已回退驱动首选；驱动能力更改后请重启应用"));
     } else {
@@ -419,29 +423,33 @@ bool AudioEngine::showDeviceControlPanel() {
 bool AudioEngine::applySettings(int device, int sampleRate, int framesPerBuffer,
                                 qreal masterVolumePercent) {
     if (device < -1 || sampleRate < 0 || framesPerBuffer < -1 ||
-        !std::isfinite(masterVolumePercent) || masterVolumePercent < 0 || masterVolumePercent > 100) {
+        !std::isfinite(masterVolumePercent) || masterVolumePercent < 0 ||
+        masterVolumePercent > 100) {
         setSettingsError(QStringLiteral("无效的音频设置参数"));
         return false;
     }
     if (framesPerBuffer == -1) framesPerBuffer = 0;
     std::string backendError;
     if (!ensureBackend(backendError)) {
-        setSettingsError(QStringLiteral("音频后端不可用：%1").arg(QString::fromStdString(backendError)));
+        setSettingsError(
+            QStringLiteral("音频后端不可用：%1").arg(QString::fromStdString(backendError)));
         return false;
     }
-    if (device >= 0 && std::none_of(m_deviceSnapshot.begin(), m_deviceSnapshot.end(),
-            [device](const auto& d) { return d.index == device && d.maxOutputChannels >= 2; })) {
+    if (device >= 0 &&
+        std::none_of(m_deviceSnapshot.begin(), m_deviceSnapshot.end(), [device](const auto& d) {
+            return d.index == device && d.maxOutputChannels >= 2;
+        })) {
         setSettingsError(QStringLiteral("所选输出设备不可用"));
         return false;
     }
     if (m_backendReady) {
         const auto caps = m_backend->deviceCapabilities(device);
-        const beatbench::audio::AsioBufferSizes sizes{
-            caps.bufferMin, caps.bufferMax, caps.bufferPreferred, caps.bufferGranularity};
+        const beatbench::audio::AsioBufferSizes sizes{caps.bufferMin, caps.bufferMax,
+                                                      caps.bufferPreferred, caps.bufferGranularity};
         if (caps.asio && (!caps.error.empty() ||
-                         !beatbench::audio::resolveAsioBufferSize(sizes, framesPerBuffer))) {
-            setSettingsError(QStringLiteral("ASIO 缓冲参数不可用：%1")
-                                 .arg(QString::fromStdString(caps.error)));
+                          !beatbench::audio::resolveAsioBufferSize(sizes, framesPerBuffer))) {
+            setSettingsError(
+                QStringLiteral("ASIO 缓冲参数不可用：%1").arg(QString::fromStdString(caps.error)));
             return false;
         }
     }
@@ -458,11 +466,12 @@ bool AudioEngine::applySettings(int device, int sampleRate, int framesPerBuffer,
             std::string restoreError;
             const bool restored = startStream(old, restoreError);
             m_player.setMasterVolume(oldVolume);
-            m_errorText = restored
-                ? QStringLiteral("设置应用失败，已恢复原音频流：%1")
-                      .arg(QString::fromStdString(error))
-                : QStringLiteral("设置应用失败，恢复原音频流也失败，音频不可用：%1；%2")
-                      .arg(QString::fromStdString(error), QString::fromStdString(restoreError));
+            m_errorText =
+                restored
+                    ? QStringLiteral("设置应用失败，已恢复原音频流：%1")
+                          .arg(QString::fromStdString(error))
+                    : QStringLiteral("设置应用失败，恢复原音频流也失败，音频不可用：%1；%2")
+                          .arg(QString::fromStdString(error), QString::fromStdString(restoreError));
             m_statusText = m_errorText;
             emit errorTextChanged();
             emit statusTextChanged();
@@ -480,8 +489,7 @@ bool AudioEngine::applySettings(int device, int sampleRate, int framesPerBuffer,
     return true;
 }
 
-bool AudioEngine::startStream(const beatbench::audio::AudioSettings& settings,
-                              std::string& error) {
+bool AudioEngine::startStream(const beatbench::audio::AudioSettings& settings, std::string& error) {
     error.clear();
     m_initialized = false;
     if (!m_backend) {
@@ -500,7 +508,9 @@ bool AudioEngine::startStream(const beatbench::audio::AudioSettings& settings,
                     return;
                 }
                 ctx->player->render(out, frames, ctx->deviceRate.load());
-            }, &m_renderCtx, settings, &error)) return false;
+            },
+            &m_renderCtx, settings, &error))
+        return false;
     const double rate = static_cast<double>(m_backend->streamInfo().sampleRate);
     if (rate <= 0) {
         m_backend->stop();
@@ -569,8 +579,7 @@ void AudioEngine::setChartSession(QObject* session) {
     m_waitRender = false;
     emit waitRenderChanged();
     // 断开旧连接（重复 set → 避免重复装载）
-    if (m_chartSession)
-        disconnect(m_chartSession, nullptr, this, nullptr);
+    if (m_chartSession) disconnect(m_chartSession, nullptr, this, nullptr);
     m_chartSession = qobject_cast<ChartSession*>(session);
     if (!m_chartSession) {
         // 无 session：清除播放（停止 + 载入空）
@@ -582,32 +591,30 @@ void AudioEngine::setChartSession(QObject* session) {
     }
     // 已有渲染结果 → 载入（载入谱面后自动渲染未完成时为空，等 renderFinished）
     if (m_chartSession->hasRendered()) {
-        m_playback.load(m_chartSession->renderedPcm(),
-                        m_chartSession->renderedSampleRate());
+        m_playback.load(m_chartSession->renderedPcm(), m_chartSession->renderedSampleRate());
     }
     // renderFinished → 装载新 PCM + waitRender 续播
     connect(m_chartSession, &ChartSession::renderFinished, this,
             [this](bool ok, const QString&, double) {
-        if (!ok) {
-            m_waitRender = false;
-            emit waitRenderChanged();
-            return;
-        }
-        if (m_chartSession && m_chartSession->hasRendered()) {
-            m_playback.load(m_chartSession->renderedPcm(),
-                            m_chartSession->renderedSampleRate());
-            emit playbackChanged();
-        }
-        // waitRender 等待中 → 续播（从当前位置/开头）
-        if (m_waitRender) {
-            m_waitRender = false;
-            emit waitRenderChanged();
-            play();
-        }
-    });
+                if (!ok) {
+                    m_waitRender = false;
+                    emit waitRenderChanged();
+                    return;
+                }
+                if (m_chartSession && m_chartSession->hasRendered()) {
+                    m_playback.load(m_chartSession->renderedPcm(),
+                                    m_chartSession->renderedSampleRate());
+                    emit playbackChanged();
+                }
+                // waitRender 等待中 → 续播（从当前位置/开头）
+                if (m_waitRender) {
+                    m_waitRender = false;
+                    emit waitRenderChanged();
+                    play();
+                }
+            });
     // 编辑即停（M5 决策）：内容变化 → 停止播放（计划/渲染过期；下次起播用新版）
-    connect(m_chartSession, &ChartSession::contentChanged, this,
-            [this] {
+    connect(m_chartSession, &ChartSession::contentChanged, this, [this] {
         if (m_playback.playing()) {
             m_playback.stop();
             emit playbackChanged();
@@ -630,8 +637,7 @@ bool AudioEngine::togglePlay() {
 bool AudioEngine::play() {
     if (!m_chartSession || !m_chartSession->hasRendered()) {
         // 无 PCM：可能渲染中（waitRender）或从未渲染
-        if (m_waitRenderSetting && m_chartSession &&
-            !m_chartSession->hasRendered()) {
+        if (m_waitRenderSetting && m_chartSession && !m_chartSession->hasRendered()) {
             m_waitRender = true;
             emit waitRenderChanged();
             m_statusText = QStringLiteral("渲染中…完成即播放");
@@ -644,8 +650,7 @@ bool AudioEngine::play() {
     }
     // 停止中的旧 PCM 若无 → 重载（增量可能换了 PCM）
     if (!m_playback.hasLoaded() || m_playback.durationSec() <= 0.0) {
-        m_playback.load(m_chartSession->renderedPcm(),
-                        m_chartSession->renderedSampleRate());
+        m_playback.load(m_chartSession->renderedPcm(), m_chartSession->renderedSampleRate());
     }
     const float vol = m_player.masterVolume();
     if (m_playback.play(vol)) {
@@ -683,16 +688,16 @@ void AudioEngine::setWaitRenderSetting(bool v) {
 
 bool AudioEngine::setLoopA(double sec) {
     // 同点再点 = 解除（当前 A == 传入位置 → -1）
-    const double a = (m_playback.loopA() >= 0.0 &&
-                      std::abs(m_playback.loopA() - sec) < 0.01) ? -1.0 : sec;
+    const double a =
+        (m_playback.loopA() >= 0.0 && std::abs(m_playback.loopA() - sec) < 0.01) ? -1.0 : sec;
     m_playback.setLoopGap(a, m_playback.loopB());
     emit playbackChanged();
     return a >= 0.0;
 }
 
 bool AudioEngine::setLoopB(double sec) {
-    const double b = (m_playback.loopB() >= 0.0 &&
-                      std::abs(m_playback.loopB() - sec) < 0.01) ? -1.0 : sec;
+    const double b =
+        (m_playback.loopB() >= 0.0 && std::abs(m_playback.loopB() - sec) < 0.01) ? -1.0 : sec;
     m_playback.setLoopGap(m_playback.loopA(), b);
     emit playbackChanged();
     return b >= 0.0;
@@ -712,11 +717,9 @@ QString AudioEngine::resolveAudioPath(const QString& resolved) {
     // 回退：相同 basename、其它音频扩展名（顺序 = BMS 社区常见优先级）
     const QString base = fi.completeBaseName();
     const QString dir = fi.absolutePath();
-    static const QStringList kFallbackExts = {
-        QStringLiteral(".ogg"), QStringLiteral(".mp3"),
-        QStringLiteral(".flac"), QStringLiteral(".wav"),
-        QStringLiteral(".oga"), QStringLiteral(".m4a")
-    };
+    static const QStringList kFallbackExts = {QStringLiteral(".ogg"),  QStringLiteral(".mp3"),
+                                              QStringLiteral(".flac"), QStringLiteral(".wav"),
+                                              QStringLiteral(".oga"),  QStringLiteral(".m4a")};
     for (const QString& ext : kFallbackExts) {
         const QString candidate = QDir(dir).filePath(base + ext);
         if (QFileInfo::exists(candidate)) return QFileInfo(candidate).absoluteFilePath();
@@ -749,11 +752,10 @@ void AudioEngine::loadSettings() {
     m_settings.device = s.value(QStringLiteral("audio/deviceIndex"), -1).toInt();
     m_savedDeviceName = s.value(QStringLiteral("audio/deviceName")).toString();
     m_savedDeviceApiType = s.value(QStringLiteral("audio/deviceApiType")).toInt();
-    m_hasSavedDeviceIdentity = s.contains(QStringLiteral("audio/deviceApiType")) &&
-                               !m_savedDeviceName.isEmpty();
+    m_hasSavedDeviceIdentity =
+        s.contains(QStringLiteral("audio/deviceApiType")) && !m_savedDeviceName.isEmpty();
     m_settings.sampleRate = s.value(QStringLiteral("audio/sampleRate"), 0).toInt();
-    m_settings.framesPerBuffer =
-        s.value(QStringLiteral("audio/framesPerBuffer"), 0).toInt();
+    m_settings.framesPerBuffer = s.value(QStringLiteral("audio/framesPerBuffer"), 0).toInt();
     const int vol = s.value(QStringLiteral("audio/masterVolume"), 100).toInt();
     m_player.setMasterVolume(static_cast<float>(vol) * 0.01f);
 }
@@ -764,8 +766,9 @@ void AudioEngine::saveSettings() const {
     s.remove(QStringLiteral("audio/deviceName"));
     s.remove(QStringLiteral("audio/deviceApiType"));
     if (m_settings.device >= 0) {
-        const auto selected = std::find_if(m_deviceSnapshot.begin(), m_deviceSnapshot.end(),
-            [this](const auto& d) { return d.index == m_settings.device; });
+        const auto selected =
+            std::find_if(m_deviceSnapshot.begin(), m_deviceSnapshot.end(),
+                         [this](const auto& d) { return d.index == m_settings.device; });
         if (selected != m_deviceSnapshot.end()) {
             s.setValue(QStringLiteral("audio/deviceName"), QString::fromStdString(selected->name));
             s.setValue(QStringLiteral("audio/deviceApiType"), selected->apiType);

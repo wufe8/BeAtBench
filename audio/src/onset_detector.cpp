@@ -7,14 +7,14 @@
 // - 相对门：median(flux) + delta·mean|flux - median|——适应整体响度/密度；
 // - 绝对底线：0.1·max(flux) 与 kFluxAbsFloor 取大——拒绝静音段/稳态长音的
 //   数值噪声峰（相对门在「整段近似稳态」时会退化到噪声量级，必须由绝对门兜底）。
-#include "beatbench/audio/OnsetDetector.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <limits>
 #include <numeric>
+
+#include "beatbench/audio/OnsetDetector.hpp"
 
 namespace beatbench::audio {
 namespace {
@@ -65,11 +65,10 @@ double median_of(std::vector<double> v) {
 
 }  // namespace
 
-std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCount,
-                                  int channels, double sampleRate,
-                                  const OnsetConfig& cfg) {
-    if (interleaved == nullptr || frameCount == 0 || channels <= 0 || sampleRate <= 0.0)
-        return {};
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——谱通量峰值拾取：阈值比较状态链，拆散反而伤可读
+std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCount, int channels,
+                                  double sampleRate, const OnsetConfig& cfg) {
+    if (interleaved == nullptr || frameCount == 0 || channels <= 0 || sampleRate <= 0.0) return {};
     if (!is_pow2(cfg.windowSize) || !is_pow2(cfg.hopSize) || cfg.hopSize > cfg.windowSize)
         return {};
 
@@ -80,8 +79,9 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
     // Hann 窗（预计算）
     std::vector<double> hann(win);
     for (std::size_t n = 0; n < win; ++n)
-        hann[n] = 0.5 * (1.0 - std::cos(2.0 * kPi * static_cast<double>(n) /
-                                        static_cast<double>(win - 1)));
+        hann[n] =
+            0.5 *
+            (1.0 - std::cos(2.0 * kPi * static_cast<double>(n) / static_cast<double>(win - 1)));
 
     // 分帧 STFT → complex-domain 谱通量（相位预测 + 半波整流）。
     // 为什么不用 bin/频带幅度差分：hop 非信号周期整数倍时，截断正弦的窗内起点相位
@@ -100,8 +100,8 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
         for (std::size_t n = 0; n < win; ++n) {
             double mono = 0.0;
             for (int c = 0; c < channels; ++c)
-                mono += static_cast<double>(base[n * static_cast<std::size_t>(channels) +
-                                                 static_cast<std::size_t>(c)]);
+                mono += static_cast<double>(
+                    base[n * static_cast<std::size_t>(channels) + static_cast<std::size_t>(c)]);
             mono /= static_cast<double>(channels);
             spec[n] = std::complex<double>(mono * hann[n], 0.0);
         }
@@ -113,8 +113,7 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
                 const double rx = std::abs(x);
                 // 相位外推 φ̂ = 2φ_{i-1} - φ_{i-2}；幅度外推 R̂ = 2R_{i-1} - R_{i-2}
                 const double dphi = std::remainder(
-                    2.0 * std::arg(prev1[k]) - std::arg(prev2[k]) - std::arg(x),
-                    2.0 * kPi);
+                    2.0 * std::arg(prev1[k]) - std::arg(prev2[k]) - std::arg(x), 2.0 * kPi);
                 const double rPred = 2.0 * std::abs(prev1[k]) - std::abs(prev2[k]);
                 // 预测偏差 O = X_i - X̂_i 的实部（半波：只累积正向偏离）
                 const double dev = rx * std::cos(dphi) - rPred;
@@ -149,8 +148,7 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
         if (flux[f] < threshold) continue;
         bool isPeak = true;
         for (std::size_t k = 1; k <= kPeakRadius && isPeak; ++k) {
-            if ((f >= k && flux[f - k] > flux[f]) ||
-                (f + k < frameTotal && flux[f + k] > flux[f]))
+            if ((f >= k && flux[f - k] > flux[f]) || (f + k < frameTotal && flux[f + k] > flux[f]))
                 isPeak = false;
         }
         if (isPeak) candidates.push_back({f, flux[f]});

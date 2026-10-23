@@ -26,5 +26,5 @@ beatbench.exe --skin skins/Linear
 ## 已知边界
 
 - L2 目前覆盖面 = **token 层**（密度/圆角/字体/note 样式），即 doc 主题①③⑤⑥ 的关键差异点；
-  真正的**布局结构改动**（工具条行增删/面板排列/L3 QML 壳）仍属深水区（doc/08 §6），本样例不做；
-- `--skin` 只影响表现层，core/命令接口不变（doc/08 §3.3）。
+  真正的**布局结构改动**（工具条行增删/面板排列/L3 QML 壳）仍属深水区（doc/skin-system.md 五、），本样例不做；
+- `--skin` 只影响表现层，core/命令接口不变（doc/skin-system.md 三、3.）。

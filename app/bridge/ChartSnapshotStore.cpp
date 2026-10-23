@@ -14,11 +14,10 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
-#include <QStringList>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QUuid>
 #include <QVariantList>
-
 #include <algorithm>
 #include <vector>
 
@@ -68,7 +67,7 @@ bool validSource(const QString& path, QString& error) {
 bool isLink(const QFileInfo& info) {
     return info.isSymLink()
 #ifdef Q_OS_WIN
-        || info.isJunction()
+           || info.isJunction()
 #endif
         ;
 }
@@ -100,7 +99,7 @@ bool prepareDirectory(const QString& dir, bool create, QString& error) {
 #ifndef Q_OS_WIN
                               || !part.isExecutable()
 #endif
-                              )) {
+                                  )) {
             error = QStringLiteral("快照目录路径无法访问或不是目录：%1").arg(ancestor);
             return false;
         }
@@ -150,13 +149,15 @@ struct Snapshot {
     qint64 size = 0;
     int sequence = 0;
     QVariantMap entry() const {
-        return {{QStringLiteral("id"), id}, {QStringLiteral("time"), time},
-                {QStringLiteral("note"), note}, {QStringLiteral("size"), size}};
+        return {{QStringLiteral("id"), id},
+                {QStringLiteral("time"), time},
+                {QStringLiteral("note"), note},
+                {QStringLiteral("size"), size}};
     }
 };
 
-bool readSnapshot(const QString& path, const QString& key, const QString& id,
-                  Snapshot& out, QByteArray* payload, QString& error) {
+bool readSnapshot(const QString& path, const QString& key, const QString& id, Snapshot& out,
+                  QByteArray* payload, QString& error) {
     const auto corrupt = [&]() {
         error = QStringLiteral("快照损坏或元数据无效：%1").arg(path);
         return false;
@@ -176,12 +177,17 @@ bool readSnapshot(const QString& path, const QString& key, const QString& id,
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) return corrupt();
     const auto obj = doc.object();
     if (obj.value(QStringLiteral("version")) != QJsonValue(1) ||
-        !obj.value(QStringLiteral("source")).isString() || obj.value(QStringLiteral("source")).toString() != key ||
-        !obj.value(QStringLiteral("id")).isString() || obj.value(QStringLiteral("id")).toString() != id ||
-        !validId(id) || !obj.value(QStringLiteral("time")).isString() ||
-        !obj.value(QStringLiteral("note")).isString() || !obj.value(QStringLiteral("sha256")).isString() ||
-        !obj.value(QStringLiteral("data")).isString() || !obj.value(QStringLiteral("size")).isDouble() ||
-        !obj.value(QStringLiteral("sequence")).isDouble()) return corrupt();
+        !obj.value(QStringLiteral("source")).isString() ||
+        obj.value(QStringLiteral("source")).toString() != key ||
+        !obj.value(QStringLiteral("id")).isString() ||
+        obj.value(QStringLiteral("id")).toString() != id || !validId(id) ||
+        !obj.value(QStringLiteral("time")).isString() ||
+        !obj.value(QStringLiteral("note")).isString() ||
+        !obj.value(QStringLiteral("sha256")).isString() ||
+        !obj.value(QStringLiteral("data")).isString() ||
+        !obj.value(QStringLiteral("size")).isDouble() ||
+        !obj.value(QStringLiteral("sequence")).isDouble())
+        return corrupt();
     out.id = id;
     out.time = obj.value(QStringLiteral("time")).toString();
     out.note = obj.value(QStringLiteral("note")).toString();
@@ -190,19 +196,23 @@ bool readSnapshot(const QString& path, const QString& key, const QString& id,
     const double sequence = obj.value(QStringLiteral("sequence")).toDouble(-1);
     if (size < 0 || size > maxChartBytes || sequence < 1 || sequence > maxSnapshots ||
         size != static_cast<qint64>(size) || sequence != static_cast<int>(sequence) ||
-        out.note.size() > maxNoteChars) return corrupt();
+        out.note.size() > maxNoteChars)
+        return corrupt();
     out.size = static_cast<qint64>(size);
     out.sequence = static_cast<int>(sequence);
     if (id.left(8).toUInt(nullptr, 16) != static_cast<uint>(out.sequence)) return corrupt();
     const auto time = QDateTime::fromString(out.time, Qt::ISODateWithMs);
     if (!time.isValid() || !out.time.endsWith(QLatin1Char('Z')) ||
-        time.toUTC().toString(Qt::ISODateWithMs) != out.time) return corrupt();
+        time.toUTC().toString(Qt::ISODateWithMs) != out.time)
+        return corrupt();
     const QString encoded = obj.value(QStringLiteral("data")).toString();
     if (encoded.size() > ((maxChartBytes + 2) / 3) * 4) return corrupt();
     const QByteArray base64 = encoded.toLatin1();
-    const auto decoded = QByteArray::fromBase64Encoding(base64, QByteArray::AbortOnBase64DecodingErrors);
+    const auto decoded =
+        QByteArray::fromBase64Encoding(base64, QByteArray::AbortOnBase64DecodingErrors);
     if (!decoded || QString::fromLatin1(base64) != encoded || decoded.decoded.size() != out.size ||
-        decoded.decoded.toBase64() != base64 || digest(decoded.decoded) != out.sha256) return corrupt();
+        decoded.decoded.toBase64() != base64 || digest(decoded.decoded) != out.sha256)
+        return corrupt();
     if (payload) *payload = decoded.decoded;
     return true;
 }
@@ -220,8 +230,8 @@ bool listIds(const QString& dir, QStringList& ids, QString& error) {
         const QString id = info.completeBaseName();
         bool parsed = false;
         const uint sequence = id.left(8).toUInt(&parsed, 16);
-        if (!info.isFile() || info.suffix() != QStringLiteral("json") || !validId(id) ||
-            !parsed || sequence < 1 || sequence > maxSnapshots || sequences.contains(sequence)) {
+        if (!info.isFile() || info.suffix() != QStringLiteral("json") || !validId(id) || !parsed ||
+            sequence < 1 || sequence > maxSnapshots || sequences.contains(sequence)) {
             error = QStringLiteral("谱面历史中存在未知或损坏的条目：%1").arg(path);
             return false;
         }
@@ -240,31 +250,38 @@ bool listIds(const QString& dir, QStringList& ids, QString& error) {
     return true;
 }
 
-bool readHistory(const QString& dir, const QString& key, std::vector<Snapshot>& records, QString& error) {
+bool readHistory(const QString& dir, const QString& key, std::vector<Snapshot>& records,
+                 QString& error) {
     QStringList ids;
     if (!listIds(dir, ids, error)) return false;
     // 仅保留元数据，不将所有快照内容累计放进内存。
     for (const auto& id : ids) {
         Snapshot record;
-        if (!readSnapshot(QDir(dir).filePath(id + QStringLiteral(".json")), key, id, record, nullptr, error)) return false;
+        if (!readSnapshot(QDir(dir).filePath(id + QStringLiteral(".json")), key, id, record,
+                          nullptr, error))
+            return false;
         records.push_back(record);
     }
     return true;
 }
 
 QVariantMap createResult(bool ok, bool unchanged, const QString& id, const QString& error) {
-    return {{QStringLiteral("ok"), ok}, {QStringLiteral("unchanged"), unchanged},
-            {QStringLiteral("id"), id}, {QStringLiteral("error"), error}};
+    return {{QStringLiteral("ok"), ok},
+            {QStringLiteral("unchanged"), unchanged},
+            {QStringLiteral("id"), id},
+            {QStringLiteral("error"), error}};
 }
 QVariantMap restoreResult(bool ok, const QString& path, const QString& error) {
-    return {{QStringLiteral("ok"), ok}, {QStringLiteral("path"), path}, {QStringLiteral("error"), error}};
+    return {{QStringLiteral("ok"), ok},
+            {QStringLiteral("path"), path},
+            {QStringLiteral("error"), error}};
 }
-} // namespace
+}  // namespace
 
 ChartSnapshotStore::ChartSnapshotStore(QString root) {
     if (root.isEmpty()) {
         const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-        if (base.isEmpty()) return; // 不能静默改写到工作目录。
+        if (base.isEmpty()) return;  // 不能静默改写到工作目录。
         root = QDir(base).filePath(QStringLiteral("chart-history-v1"));
     }
     root_ = absolutePath(root);
@@ -275,26 +292,34 @@ QString ChartSnapshotStore::rootPath() const { return root_; }
 QVariantMap ChartSnapshotStore::create(const QString& sourcePath, const QString& note) {
     QString error;
     if (!validSource(sourcePath, error)) return createResult(false, false, {}, error);
-    if (root_.isEmpty()) return createResult(false, false, {}, QStringLiteral("无法确定快照存储位置。"));
-    if (note.size() > maxNoteChars) return createResult(false, false, {}, QStringLiteral("快照备注过长，最多允许 65536 个字符。"));
+    if (root_.isEmpty())
+        return createResult(false, false, {}, QStringLiteral("无法确定快照存储位置。"));
+    if (note.size() > maxNoteChars)
+        return createResult(false, false, {},
+                            QStringLiteral("快照备注过长，最多允许 65536 个字符。"));
     const QString normalized = normalizedSourcePath(sourcePath);
     const QFileInfo info(normalized);
     if (!info.isFile() || info.size() > maxChartBytes) {
-        return createResult(false, false, {}, QStringLiteral("原谱面不存在、不是普通文件或超过 16 MiB 上限。"));
+        return createResult(false, false, {},
+                            QStringLiteral("原谱面不存在、不是普通文件或超过 16 MiB 上限。"));
     }
     QFile source(normalized);
     if (!source.open(QIODevice::ReadOnly))
-        return createResult(false, false, {}, QStringLiteral("无法打开原谱面：%1").arg(source.errorString()));
+        return createResult(false, false, {},
+                            QStringLiteral("无法打开原谱面：%1").arg(source.errorString()));
     // 同一打开句柄前后校验大小与修改时间，可发现多数外部改写；
     // 同大小且时间戳精度内的改写仍有竞态，不能将此检查视为文件系统事务。
     const qint64 beforeSize = source.size();
     const QDateTime beforeTime = source.fileTime(QFileDevice::FileModificationTime);
     if (beforeSize < 0 || beforeSize > maxChartBytes || !beforeTime.isValid())
-        return createResult(false, false, {}, QStringLiteral("无法读取原谱面属性或谱面超过 16 MiB 上限。"));
+        return createResult(false, false, {},
+                            QStringLiteral("无法读取原谱面属性或谱面超过 16 MiB 上限。"));
     const QByteArray bytes = source.read(maxChartBytes + 1);
     if (source.error() != QFileDevice::NoError || bytes.size() > maxChartBytes)
-        return createResult(false, false, {}, QStringLiteral("无法读取谱面或谱面超过 16 MiB 上限。"));
-    if (source.size() != beforeSize || source.fileTime(QFileDevice::FileModificationTime) != beforeTime ||
+        return createResult(false, false, {},
+                            QStringLiteral("无法读取谱面或谱面超过 16 MiB 上限。"));
+    if (source.size() != beforeSize ||
+        source.fileTime(QFileDevice::FileModificationTime) != beforeTime ||
         bytes.size() != beforeSize)
         return createResult(false, false, {}, QStringLiteral("读取期间原谱面被修改，请重试。"));
     source.close();
@@ -310,33 +335,49 @@ QVariantMap ChartSnapshotStore::create(const QString& sourcePath, const QString&
     // 仅与最新内容比较，A -> B -> A 仍生成三条历史。
     if (!ids.empty()) {
         Snapshot latest;
-        if (!readSnapshot(QDir(dir).filePath(ids.front() + QStringLiteral(".json")), key, ids.front(), latest, nullptr, error))
+        if (!readSnapshot(QDir(dir).filePath(ids.front() + QStringLiteral(".json")), key,
+                          ids.front(), latest, nullptr, error))
             return createResult(false, false, {}, error);
         if (latest.sha256 == sha256 && latest.size == bytes.size())
             return createResult(true, true, latest.id, {});
     }
     if (ids.size() >= maxSnapshots)
-        return createResult(false, false, {}, QStringLiteral("谱面历史已满（1000 条），未删除任何历史。"));
+        return createResult(false, false, {},
+                            QStringLiteral("谱面历史已满（1000 条），未删除任何历史。"));
     const QString id = QStringLiteral("%1").arg(ids.size() + 1, 8, 16, QLatin1Char('0')) +
-        QUuid::createUuid().toString(QUuid::Id128).right(24);
+                       QUuid::createUuid().toString(QUuid::Id128).right(24);
     const QString path = QDir(dir).filePath(id + QStringLiteral(".json"));
     if (!safePath(path, error)) return createResult(false, false, {}, error);
-    if (QFileInfo::exists(path)) return createResult(false, false, {}, QStringLiteral("快照编号冲突，请重试。"));
-    const QJsonObject obj{{QStringLiteral("version"), 1}, {QStringLiteral("source"), key},
-        {QStringLiteral("id"), id}, {QStringLiteral("time"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
-        {QStringLiteral("note"), note}, {QStringLiteral("size"), static_cast<double>(bytes.size())},
+    if (QFileInfo::exists(path))
+        return createResult(false, false, {}, QStringLiteral("快照编号冲突，请重试。"));
+    const QJsonObject obj{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("source"), key},
+        {QStringLiteral("id"), id},
+        {QStringLiteral("time"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("note"), note},
+        {QStringLiteral("size"), static_cast<double>(bytes.size())},
         {QStringLiteral("sequence"), static_cast<int>(ids.size()) + 1},
-        {QStringLiteral("sha256"), sha256}, {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}};
+        {QStringLiteral("sha256"), sha256},
+        {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}};
     const QByteArray json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     QSaveFile file(path);
     file.setDirectWriteFallback(false);
-    if (!file.open(QIODevice::WriteOnly)) return createResult(false, false, {}, QStringLiteral("无法创建快照文件：%1").arg(file.errorString()));
+    if (!file.open(QIODevice::WriteOnly))
+        return createResult(false, false, {},
+                            QStringLiteral("无法创建快照文件：%1").arg(file.errorString()));
     if (file.write(json) != json.size()) {
         file.cancelWriting();
-        return createResult(false, false, {}, QStringLiteral("无法完整写入快照：%1").arg(file.errorString()));
+        return createResult(false, false, {},
+                            QStringLiteral("无法完整写入快照：%1").arg(file.errorString()));
     }
-    if (!safePath(path, error)) { file.cancelWriting(); return createResult(false, false, {}, error); }
-    if (!file.commit()) return createResult(false, false, {}, QStringLiteral("无法完成快照写入：%1").arg(file.errorString()));
+    if (!safePath(path, error)) {
+        file.cancelWriting();
+        return createResult(false, false, {}, error);
+    }
+    if (!file.commit())
+        return createResult(false, false, {},
+                            QStringLiteral("无法完成快照写入：%1").arg(file.errorString()));
     return createResult(true, false, id, {});
 }
 
@@ -344,11 +385,15 @@ QVariantMap ChartSnapshotStore::history(const QString& sourcePath) const {
     QString error;
     QVariantList entries;
     const auto result = [&](bool ok) -> QVariantMap {
-        return {{QStringLiteral("ok"), ok}, {QStringLiteral("entries"), ok ? entries : QVariantList{}},
+        return {{QStringLiteral("ok"), ok},
+                {QStringLiteral("entries"), ok ? entries : QVariantList{}},
                 {QStringLiteral("error"), error}};
     };
     if (!validSource(sourcePath, error)) return result(false);
-    if (root_.isEmpty()) { error = QStringLiteral("无法确定快照存储位置。"); return result(false); }
+    if (root_.isEmpty()) {
+        error = QStringLiteral("无法确定快照存储位置。");
+        return result(false);
+    }
     const QString key = sourceKey(sourcePath);
     const QString dir = chartDirectory(root_, key);
     if (!prepareDirectory(dir, false, error)) return result(false);
@@ -374,35 +419,43 @@ QVariantMap ChartSnapshotStore::restoreCopy(const QString& sourcePath, const QSt
     if (!acquire(lock, dir, error)) return restoreResult(false, {}, error);
     QStringList ids;
     if (!listIds(dir, ids, error)) return restoreResult(false, {}, error);
-    if (!ids.contains(snapshotId)) return restoreResult(false, {}, QStringLiteral("未找到该快照。"));
+    if (!ids.contains(snapshotId))
+        return restoreResult(false, {}, QStringLiteral("未找到该快照。"));
     QByteArray bytes;
     Snapshot checked;
-    if (!readSnapshot(QDir(dir).filePath(snapshotId + QStringLiteral(".json")), key, snapshotId, checked, &bytes, error))
+    if (!readSnapshot(QDir(dir).filePath(snapshotId + QStringLiteral(".json")), key, snapshotId,
+                      checked, &bytes, error))
         return restoreResult(false, {}, error);
     const QFileInfo source(normalizedSourcePath(sourcePath));
     const QDir parent(source.absolutePath());
     if (!parent.exists()) return restoreResult(false, {}, QStringLiteral("原谱面所在目录不存在。"));
-    const QString timestamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmsszzz"));
+    const QString timestamp =
+        QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmsszzz"));
     for (int attempt = 0; attempt < 16; ++attempt) {
-        const QString name = source.completeBaseName() + QStringLiteral("-恢复-") + timestamp + QLatin1Char('-') +
-            QUuid::createUuid().toString(QUuid::Id128).left(8) + QLatin1Char('.') + source.suffix();
+        const QString name = source.completeBaseName() + QStringLiteral("-恢复-") + timestamp +
+                             QLatin1Char('-') + QUuid::createUuid().toString(QUuid::Id128).left(8) +
+                             QLatin1Char('.') + source.suffix();
         const QString path = parent.filePath(name);
         QFile output(path);
         if (!output.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
             // 重名（含悬空链接）只会重试，绝不能打开并覆盖。
             if (QFileInfo::exists(path) || isLink(QFileInfo(path))) continue;
-            return restoreResult(false, {}, QStringLiteral("无法创建恢复副本：%1").arg(output.errorString()));
+            return restoreResult(false, {},
+                                 QStringLiteral("无法创建恢复副本：%1").arg(output.errorString()));
         }
         if (output.write(bytes) != bytes.size() || !output.flush()) {
             // 保留本次创建的未完成副本：其他进程可能已替换该路径，
             // 不能为清理而误删用户文件。
-            return restoreResult(false, path, QStringLiteral("无法写入恢复副本：%1").arg(output.errorString()));
+            return restoreResult(false, path,
+                                 QStringLiteral("无法写入恢复副本：%1").arg(output.errorString()));
         }
         output.close();
-        if (output.error() != QFileDevice::NoError) return restoreResult(false, path, QStringLiteral("无法完成恢复副本写入：%1").arg(output.errorString()));
+        if (output.error() != QFileDevice::NoError)
+            return restoreResult(
+                false, path, QStringLiteral("无法完成恢复副本写入：%1").arg(output.errorString()));
         return restoreResult(true, path, {});
     }
     return restoreResult(false, {}, QStringLiteral("无法生成不重名的恢复副本，请重试。"));
 }
 
-} // namespace beatbench::app
+}  // namespace beatbench::app

@@ -4,24 +4,23 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
-#include <QEventLoop>
-#include <QTimer>
 #include <QTemporaryDir>
-
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "bridge/ChartSession.hpp"
-#include "bridge/DocumentService.hpp"
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
+#include "bridge/ChartSession.hpp"
+#include "bridge/DocumentService.hpp"
 
 namespace {
 using beatbench::app::ChartSession;
@@ -29,7 +28,7 @@ using beatbench::app::DocumentService;
 using beatbench::edit::session_registry;
 
 class DocumentInstancesTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         static int argc = 1;
         static char name[] = "document-instances-test";
@@ -39,11 +38,14 @@ protected:
         previousIds_ = session_registry().ids();
         const QString base = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
         ASSERT_TRUE(QDir().mkpath(base));
-        temporary_ = std::make_unique<QTemporaryDir>(QDir(base).filePath("document-instances-XXXXXX"));
+        temporary_ =
+            std::make_unique<QTemporaryDir>(QDir(base).filePath("document-instances-XXXXXX"));
         ASSERT_TRUE(temporary_->isValid());
-        const QDir source(QDir(QString::fromUtf8(BEATBENCH_SOURCE_DIR)).filePath("testdata/m7-mini-project"));
-        for (const QString& fileName : {QStringLiteral("01-easy.bms"), QStringLiteral("02-hard.bms"),
-                                        QStringLiteral("03-base62.bms")}) {
+        const QDir source(
+            QDir(QString::fromUtf8(BEATBENCH_SOURCE_DIR)).filePath("testdata/m7-mini-project"));
+        for (const QString& fileName :
+             {QStringLiteral("01-easy.bms"), QStringLiteral("02-hard.bms"),
+              QStringLiteral("03-base62.bms")}) {
             ASSERT_TRUE(QFile::copy(source.filePath(fileName), temporary_->filePath(fileName)));
         }
         // Shared, deterministic 40ms resources; distinct amplitudes expose wrong sample-ID routing.
@@ -93,7 +95,8 @@ protected:
     static bool putNote(const QString& id, unsigned sample = 1) {
         auto* s = core(id);
         return s && s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-            2, beatbench::Rational(1, 4), beatbench::Lane{0, beatbench::LaneKind::Key, 7}, sample));
+                        2, beatbench::Rational(1, 4),
+                        beatbench::Lane{0, beatbench::LaneKind::Key, 7}, sample));
     }
     QVariantMap entry(const QString& id) {
         for (const auto& value : service_->instances()) {
@@ -273,9 +276,9 @@ TEST_F(DocumentInstancesTest, RevisionGuardRejectsSameAddressEditsUntilRefresh) 
     const auto* address = bridge.chart();
     ASSERT_NE(address, nullptr);
     const auto revision = reg.by_id(id)->revision();
-    ASSERT_TRUE(reg.by_id(id)->exec(
-        std::make_unique<beatbench::edit::MetaEditCommand>("BPM", "240")));
-    ASSERT_EQ(&reg.by_id(id)->chart(), address); // deterministic: no allocator reuse needed
+    ASSERT_TRUE(
+        reg.by_id(id)->exec(std::make_unique<beatbench::edit::MetaEditCommand>("BPM", "240")));
+    ASSERT_EQ(&reg.by_id(id)->chart(), address);  // deterministic: no allocator reuse needed
     ASSERT_NE(reg.by_id(id)->revision(), revision);
     EXPECT_EQ(bridge.chart(), nullptr);
     EXPECT_EQ(bridge.timing(), nullptr);
@@ -296,29 +299,43 @@ TEST_F(DocumentInstancesTest, ModeHelpersUseBoundLiveDocumentAcrossReloadAndClos
     auto& reg = session_registry();
     const std::string aId = "mode-helper-a", bId = "mode-helper-b";
     ASSERT_TRUE(reg.create(aId));
-    beatbench::Chart a; a.mode_id = "pms9k"; reg.by_id(aId)->load(a);
-    ChartSession fixed; fixed.setSessionId(QString::fromStdString(aId));
-    EXPECT_EQ(fixed.chartMode(), "pms9k"); EXPECT_EQ(fixed.playKeyCount(), 9);
+    beatbench::Chart a;
+    a.mode_id = "pms9k";
+    reg.by_id(aId)->load(a);
+    ChartSession fixed;
+    fixed.setSessionId(QString::fromStdString(aId));
+    EXPECT_EQ(fixed.chartMode(), "pms9k");
+    EXPECT_EQ(fixed.playKeyCount(), 9);
     EXPECT_EQ(fixed.laneChannel(0, "key", 8), "24");
     ASSERT_TRUE(reg.create(bId));
-    beatbench::Chart b; b.mode_id = "pms9k-bmesp"; reg.by_id(bId)->load(b);
-    ChartSession reference; reference.setSessionId(QString::fromStdString(bId));
+    beatbench::Chart b;
+    b.mode_id = "pms9k-bmesp";
+    reg.by_id(bId)->load(b);
+    ChartSession reference;
+    reference.setSessionId(QString::fromStdString(bId));
     EXPECT_EQ(reference.chartMode(), "pms9k-bmesp");
-    EXPECT_EQ(reference.playKeyCount(), 9); EXPECT_EQ(reference.laneChannel(0, "key", 8), "16");
-    EXPECT_EQ(fixed.chartMode(), "pms9k"); // 活动切换不偷读B
+    EXPECT_EQ(reference.playKeyCount(), 9);
+    EXPECT_EQ(reference.laneChannel(0, "key", 8), "16");
+    EXPECT_EQ(fixed.chartMode(), "pms9k");  // 活动切换不偷读B
     // 替换对象后refresh之前，缓存不能解引用，也不能回退活动文档B。
-    a.mode_id = "dp"; reg.by_id(aId)->load(a);
-    EXPECT_EQ(fixed.chartMode(), ""); EXPECT_EQ(fixed.playKeyCount(), 7);
+    a.mode_id = "dp";
+    reg.by_id(aId)->load(a);
+    EXPECT_EQ(fixed.chartMode(), "");
+    EXPECT_EQ(fixed.playKeyCount(), 7);
     EXPECT_EQ(fixed.laneChannel(0, "key", 8), "");
-    fixed.refresh(); EXPECT_EQ(fixed.chartMode(), "dp");
+    fixed.refresh();
+    EXPECT_EQ(fixed.chartMode(), "dp");
     // 旧newChart兼容接口同样必须传固定文档ID与mode，不修改当前活动B。
     ASSERT_TRUE(fixed.newChart("battle"));
-    EXPECT_EQ(reg.active_id(), bId); EXPECT_EQ(fixed.chartMode(), "battle");
+    EXPECT_EQ(reg.active_id(), bId);
+    EXPECT_EQ(fixed.chartMode(), "battle");
     EXPECT_EQ(reference.chartMode(), "pms9k-bmesp");
     ASSERT_TRUE(reg.close(aId));
-    EXPECT_EQ(fixed.chartMode(), ""); EXPECT_EQ(fixed.playKeyCount(), 7);
+    EXPECT_EQ(fixed.chartMode(), "");
+    EXPECT_EQ(fixed.playKeyCount(), 7);
     fixed.refresh();
-    EXPECT_FALSE(fixed.hasChart()); EXPECT_EQ(fixed.chartMode(), "");
+    EXPECT_FALSE(fixed.hasChart());
+    EXPECT_EQ(fixed.chartMode(), "");
     EXPECT_EQ(reference.chartMode(), "pms9k-bmesp");
 }
 
@@ -327,7 +344,7 @@ TEST_F(DocumentInstancesTest, AttachedIdentitySurvivesActiveSwitchButNotCoreClos
     const std::string aId = "bridge-lifetime-follow-a", bId = "bridge-lifetime-follow-b";
     ASSERT_TRUE(reg.create(aId));
     reg.by_id(aId)->load(beatbench::Chart{});
-    ChartSession follower; // legacy empty sessionId follows active only when refreshed
+    ChartSession follower;  // legacy empty sessionId follows active only when refreshed
     follower.refresh();
     ASSERT_NE(follower.chart(), nullptr);
     const auto* aChart = follower.chart();
@@ -379,7 +396,7 @@ TEST_F(DocumentInstancesTest, FixedBridgesEditUndoSaveAndReopenWithoutCrossDocum
     const auto diskA = bytes(aBridge->path());
     const auto diskB = bytes(bBridge->path());
     const auto bTimingHash = bBridge->debugTimingHash();
-    ASSERT_TRUE(putNote(aId)); // A is inactive: the explicit target must win over global active.
+    ASSERT_TRUE(putNote(aId));  // A is inactive: the explicit target must win over global active.
     ASSERT_TRUE(meta(aId, "TITLE", "Independent edited Easy"));
     ASSERT_TRUE(meta(aId, "BPM", "240"));
     service_->refresh();
@@ -400,7 +417,7 @@ TEST_F(DocumentInstancesTest, FixedBridgesEditUndoSaveAndReopenWithoutCrossDocum
     EXPECT_EQ(bytes(bBridge->path()), diskB);
 
     ASSERT_TRUE(ok(service_->activate(aId)));
-    ASSERT_TRUE(putNote(bId, 36)); // Exercise the other inactive bridge and its own undo stack.
+    ASSERT_TRUE(putNote(bId, 36));  // Exercise the other inactive bridge and its own undo stack.
     service_->refresh();
     ASSERT_TRUE(core(bId)->undo());
     service_->refresh();
@@ -431,7 +448,7 @@ TEST_F(DocumentInstancesTest, FixedBridgesEditUndoSaveAndReopenWithoutCrossDocum
     EXPECT_EQ(idOf(reused), aId);
     EXPECT_EQ(service_->currentSession(), aBridge);
     EXPECT_EQ(service_->instances().size(), initialCount_ + 2);
-    EXPECT_EQ(core(aId)->undo_depth(), 3u); // Duplicate open did not silently reload.
+    EXPECT_EQ(core(aId)->undo_depth(), 3u);  // Duplicate open did not silently reload.
 
     ASSERT_TRUE(ok(service_->activate(bId)));
     ASSERT_TRUE(session_registry().close(aId.toStdString()));
@@ -486,7 +503,7 @@ TEST_F(DocumentInstancesTest, CreateKeepsUnnamedInstancesIndependentThroughSaveA
     EXPECT_TRUE(secondBridge->chart()->notes.empty());
     EXPECT_EQ(hard->chart()->notes.size(), hardNotes);
     EXPECT_FALSE(hard->dirty());
-    EXPECT_FALSE(ok(service_->save(firstId))); // Unnamed documents require an explicit target.
+    EXPECT_FALSE(ok(service_->save(firstId)));  // Unnamed documents require an explicit target.
     const QString target = temporary_->filePath("new-independent.bms");
     ASSERT_TRUE(ok(service_->save(firstId, target)));
     service_->refresh();
@@ -516,10 +533,14 @@ TEST_F(DocumentInstancesTest, EditingDuringFirstRenderStillProducesCurrentDocume
         timeout.setSingleShot(true);
         bool finished = false;
         const auto connection = QObject::connect(bridge, &ChartSession::renderFinished, &loop,
-            [&](bool success, const QString&, double) { finished = success; loop.quit(); });
+                                                 [&](bool success, const QString&, double) {
+                                                     finished = success;
+                                                     loop.quit();
+                                                 });
         QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
         ASSERT_TRUE(bridge->renderAsync(8000));
-        ASSERT_TRUE(meta(idOf(a), editAudio ? "BPM" : "TITLE", editAudio ? "240" : "Rendering title edit"));
+        ASSERT_TRUE(
+            meta(idOf(a), editAudio ? "BPM" : "TITLE", editAudio ? "240" : "Rendering title edit"));
         service_->refresh();
         timeout.start(5000);
         loop.exec();
@@ -552,11 +573,11 @@ TEST_F(DocumentInstancesTest, OfflineRenderUsesEachFixedTimingAndSharedResourceM
     auto aAudio = decode(aOut), bAudio = decode(bOut);
     ASSERT_NE(aAudio, nullptr);
     ASSERT_NE(bAudio, nullptr);
-    EXPECT_NEAR(pcmAt(*aAudio, 0.01), 0.375, 0.002); // A's unsaved #WAV01 edit.
-    EXPECT_NEAR(pcmAt(*bAudio, 0.01), 0.125, 0.002); // B's first note is #WAV02.
-    EXPECT_NEAR(pcmAt(*aAudio, 0.51), 0.25, 0.002); // A half-measure at BPM 240.
-    EXPECT_NEAR(pcmAt(*aAudio, 1.01), 0.25, 0.002); // A measure 1 at BPM 240.
-    EXPECT_NEAR(pcmAt(*bAudio, 1.01), 0.375, 0.002); // B half-measure at BPM 120.
+    EXPECT_NEAR(pcmAt(*aAudio, 0.01), 0.375, 0.002);  // A's unsaved #WAV01 edit.
+    EXPECT_NEAR(pcmAt(*bAudio, 0.01), 0.125, 0.002);  // B's first note is #WAV02.
+    EXPECT_NEAR(pcmAt(*aAudio, 0.51), 0.25, 0.002);   // A half-measure at BPM 240.
+    EXPECT_NEAR(pcmAt(*aAudio, 1.01), 0.25, 0.002);   // A measure 1 at BPM 240.
+    EXPECT_NEAR(pcmAt(*bAudio, 1.01), 0.375, 0.002);  // B half-measure at BPM 120.
     EXPECT_EQ(service_->activeId(), bId);
     EXPECT_TRUE(aBridge->dirty());
     EXPECT_FALSE(bBridge->dirty());
@@ -571,4 +592,4 @@ TEST_F(DocumentInstancesTest, OfflineRenderUsesEachFixedTimingAndSharedResourceM
     EXPECT_EQ(aBridge->activeSessionId(), aId);
     EXPECT_EQ(bBridge->activeSessionId(), bId);
 }
-} // namespace
+}  // namespace

@@ -47,7 +47,8 @@ step() { echo; echo "==> $*"; }
 
 # ---- 工具链探测（不设就猜常见位置，猜不到才报错）----
 if [ -z "${QT_PREFIX:-}" ]; then
-  QT_PREFIX="$(ls -d /c/Qt/6.11.*/mingw_64 /g/Qt/6.11.*/mingw_64 /opt/Qt/6.11.*/gcc_64 /usr/lib/x86_64-linux-gnu/cmake/Qt6 2>/dev/null | sort -V | tail -1 || true)"
+  # /usr/lib/qt6：Arch 系标准位置（无版本号目录，滚动发行版满足 6.11+）
+  QT_PREFIX="$(ls -d /c/Qt/6.11.*/mingw_64 /g/Qt/6.11.*/mingw_64 /opt/Qt/6.11.*/gcc_64 /usr/lib/qt6 /usr/lib/x86_64-linux-gnu/cmake/Qt6 2>/dev/null | sort -V | tail -1 || true)"
 fi
 if [ -d "${MINGW_BIN:-}" ]; then
   export PATH="$MINGW_BIN:$PATH"
@@ -82,6 +83,10 @@ echo "==> Qt:      ${QT_PREFIX:-（无 Qt 路径）}"
 echo "==> 模式:    $([ "$CORE_ONLY" -eq 1 ] && echo 'core（无 Qt）' || echo '全量 + GUI')$([ "$QUICK" -eq 1 ] && echo ' / 快速')"
 
 START="$(date +%s)"
+
+# ---- 0. 格式检查（与 CI format job 同一入口；<2s，失败快速返回）----
+step "格式检查"
+"$ROOT/scripts/check-format.sh"
 
 # ---- 1. 配置 ----
 if [ "$REUSE" -eq 0 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then

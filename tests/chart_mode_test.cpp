@@ -6,9 +6,9 @@
 #include <optional>
 
 #include "beatbench/core/ChartMode.hpp"
-#include "beatbench/core/codec/BmsChannelMaps.hpp"
-#include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
+#include "beatbench/core/bms/ChannelMap.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 
 using namespace beatbench;
 
@@ -59,11 +59,9 @@ TEST(ChartMode, Sp7kContainsScratchAndPedal) {
 
 TEST(BmsChannelMaps, SevenKeyMatchesDefaultTable) {
     // 抽查一组通道：bms_channel_rule_for("sp7k", ch) 必须与 bms_channel_rule(ch) 完全一致
-    const char* chs[] = {"01", "02", "03", "04", "06", "07", "0A", "08", "09",
-                         "11", "15", "16", "17", "18", "19",
-                         "21", "26", "28", "29",
-                         "51", "56", "59", "61", "68",
-                         "D3", "D7", "E3", "99"};
+    const char* chs[] = {"01", "02", "03", "04", "06", "07", "0A", "08", "09", "11",
+                         "15", "16", "17", "18", "19", "21", "26", "28", "29", "51",
+                         "56", "59", "61", "68", "D3", "D7", "E3", "99"};
     for (const auto* ch : chs) {
         const auto def = bms::bms_channel_rule(ch);
         const auto for7 = bms::bms_channel_rule_for("sp7k", ch);
@@ -97,16 +95,14 @@ TEST(BmsChannelMaps, Pms9kTableNoScratchPedal) {
     EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "D9")->note_kind, NoteKind::Landmine);
     EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "E4")->lane, (Lane{0, LaneKind::Key, 8}));
     // BGA/控制通道不变
-    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "04")->semantics,
-              bms::ChannelSemantics::Bga);
+    EXPECT_EQ(bms::bms_channel_rule_for("pms9k", "04")->semantics, bms::ChannelSemantics::Bga);
 }
 
 TEST(BmsChannelMaps, ReverseByMode) {
     // 7key 反向与默认一致
     EXPECT_EQ(bms::bms_channel_for_mode("sp7k", {0, LaneKind::Key, 1}, false, NoteKind::Normal),
               "11");
-    EXPECT_EQ(bms::bms_channel_for_mode("sp7k", {0, LaneKind::Scratch, 0}, false,
-                                        NoteKind::Normal),
+    EXPECT_EQ(bms::bms_channel_for_mode("sp7k", {0, LaneKind::Scratch, 0}, false, NoteKind::Normal),
               "16");
     EXPECT_EQ(bms::bms_channel_for_mode("sp7k", {0, LaneKind::Key, 2}, true, NoteKind::Normal),
               "52");
@@ -116,14 +112,13 @@ TEST(BmsChannelMaps, ReverseByMode) {
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 9}, false, NoteKind::Normal),
               "25");
     // 单面9key不注册28/27，不能将不支持的2P普通键宣称可保真写出。
-    EXPECT_TRUE(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 6}, false,
-                                        NoteKind::Normal).empty());
-    EXPECT_TRUE(bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 9}, false,
-                                        NoteKind::Normal).empty());
+    EXPECT_TRUE(
+        bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 6}, false, NoteKind::Normal).empty());
+    EXPECT_TRUE(
+        bms::bms_channel_for_mode("pms9k", {1, LaneKind::Key, 9}, false, NoteKind::Normal).empty());
     EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 7}, true, NoteKind::Normal),
               "63");
-    EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 3}, false,
-                                        NoteKind::Landmine),
+    EXPECT_EQ(bms::bms_channel_for_mode("pms9k", {0, LaneKind::Key, 3}, false, NoteKind::Landmine),
               "D3");
     // 未知 mode → 按 7key 兜底
     EXPECT_EQ(bms::bms_channel_for_mode("nope", {0, LaneKind::Key, 1}, false, NoteKind::Normal),

@@ -12,7 +12,7 @@
 # pull requests" 处于关闭状态，GITHUB_TOKEN 连 release PR 都建不出来——**不存在可用的
 # GITHUB_TOKEN 降级路径**；缺 secret 时本 workflow 会在创建 PR 时失败（见下方检查步骤）。
 #
-# 操作约定（配合 doc/11 §5）：
+# 操作约定（配合 doc/packaging.md 五、）：
 # - 变更只写 Conventional Commits：feat → 次版本，fix → 修订版，
 #   `!` + `BREAKING CHANGE:` 脚注 → 主版本；ci/docs/chore 等不进 CHANGELOG；
 # - 不再手工改 CHANGELOG 版本小节、不再手工打发布 tag；
@@ -37,7 +37,7 @@ jobs:
           RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           if [ -z "$RELEASE_PLEASE_TOKEN" ]; then
-            echo '::warning::未配置 secret RELEASE_PLEASE_TOKEN：GITHUB_TOKEN 既建不出 release PR（本仓库未开启 Actions 创建 PR），其打的 tag 也不会触发 release.yml / package.yml（GitHub 防递归）——本次发版必然失败。请配置该 secret（Contents RW + Issues RW + Pull requests RW），见 doc/11 §5。'
+            echo '::warning::未配置 secret RELEASE_PLEASE_TOKEN：GITHUB_TOKEN 既建不出 release PR（本仓库未开启 Actions 创建 PR），其打的 tag 也不会触发 release.yml / package.yml（GitHub 防递归）——本次发版必然失败。请配置该 secret（Contents RW + Issues RW + Pull requests RW），见 doc/packaging.md 五、。'
           fi
       - uses: googleapis/release-please-action@v4
         with:

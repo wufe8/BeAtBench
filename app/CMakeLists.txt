@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# GUI：Qt Quick/QML（doc/08 决策）。默认皮肤（qml/）经 qt_add_qml_module 打进资源，
-# URI = BeatBench；将来 L3 皮肤包可注册同名/扩展 URI（doc/08 §3）。
+# GUI：Qt Quick/QML（doc/skin-system.md 决策）。默认皮肤（qml/）经 qt_add_qml_module 打进资源，
+# URI = BeatBench；将来 L3 皮肤包可注册同名/扩展 URI（doc/skin-system.md 三、）。
 qt_standard_project_setup()   # AUTOMOC/AUTORCC/AUTOUIC 统一策略（Qt 6.3+）
 
 add_executable(beatbench
@@ -59,7 +59,7 @@ beatbench_set_warnings(beatbench)
 #   规模触发的空指针）；移走 qmltypes 或换成空 qmltypes 则编译成功。
 #   因此这里在 6.12.x 上**跳过 QML 字节码预编译**（NO_CACHEGEN）：QML 仍在资源里、运行时编译，
 #   功能等价，只损失一点首屏编译开销；Qt 修复该 bug 后即可删除本绕过。
-#   依据：doc/11-打包与发布.md §2；Qt 文档 qt_add_qml_module 的 NO_CACHEGEN 选项。
+#   依据：doc/packaging.md 二、；Qt 文档 qt_add_qml_module 的 NO_CACHEGEN 选项。
 set(BEATBENCH_QML_NO_CACHEGEN "")
 if(Qt6_VERSION VERSION_GREATER_EQUAL 6.12 AND Qt6_VERSION VERSION_LESS 6.13)
   message(STATUS "Qt ${Qt6_VERSION}：跳过 QML 字节码预编译（qmlcachegen 在本模块上崩溃，见 app/CMakeLists 注释）")
@@ -103,7 +103,7 @@ qt_add_qml_module(beatbench
         qml/components/BgaPanel.qml
         qml/components/SliceStatusBar.qml
     # C++ 注册类型（QML_ELEMENT，经 qmltyperegistrar 注册为 BeatBench 组件）：
-    # ChartViewItem = 竖向时间轴自绘视口（皮肤 L3 按组件覆写的落点，doc/05 §8）
+    # ChartViewItem = 竖向时间轴自绘视口（皮肤 L3 按组件覆写的落点，doc/ui-design.md 八、）
     # WaveformOverviewItem = 波形总览条（M4.3c；Space 渲染后显示，点击/拖动跳转）
     # PlayheadOverlayItem = 播放头/A-B 标记叠层（M5.2 性能拆层：播放时钟只重绘本层）
     # SliceWaveformItem = 切音工作台波形（M6.1：参考音频波形 + note 刻度 + 播放头）
@@ -132,7 +132,7 @@ set_target_properties(beatbench PROPERTIES
 target_compile_definitions(beatbench PRIVATE
   BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
 
-# ---------- Linux 安装规则（发行版打包；doc/04 §4） ----------
+# ---------- Linux 安装规则（发行版打包；doc/development.md 四、） ----------
 # 布局遵循各发行版惯例：可执行进 bin；QML 模块进构建所用 Qt 的 QML 导入目录；皮肤进
 # <datadir>/beatbench/skins；desktop/图标/metainfo 进标准位置。打包脚本用
 # `DESTDIR=<pkgroot> cmake --install` 复用本规则，包格式（deb/rpm/arch）只加元数据。

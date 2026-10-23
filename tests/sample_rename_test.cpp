@@ -15,8 +15,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -214,8 +214,8 @@ TEST(SampleRename, PutTimingSyncsDefAndReferencers) {
     EditorSession s;
     s.load(make_chart());
     // make_chart：bpm_events[0] = m1 pos0 value 280 ref_id 4（#BPM4 = "280"）
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 1, Rational(0, 1), 300.0)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutTimingCommand>(TimingKind::Bpm, 1, Rational(0, 1), 300.0)));
     EXPECT_EQ(s.chart().samples.at({SampleKind::Bpm, 4}).value, "300");
     EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 300.0);
     // undo：定义回 "280"，事件回 280
@@ -230,8 +230,8 @@ TEST(SampleRename, SetNoteSampleChangesOne) {
     EditorSession s;
     s.load(make_chart());
     // m1 key1 pos0 的 s1 note → s5
-    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 0, 5)));
+    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(1, Rational(0, 1),
+                                                              Lane{0, LaneKind::Key, 1}, 1, 0, 5)));
     int s5 = 0, s2 = 0;
     for (const auto& e : s.chart().notes) {
         if (e.value.sample.id == 5) s5++;
@@ -250,10 +250,9 @@ TEST(SampleRename, SetNoteSampleNoMatchNoOp) {
     EditorSession s;
     s.load(make_chart());
     // 不存在 (measure 9, pos0, lane key9, sample 7) → 无操作
-    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(
-        9, Rational(0, 1), Lane{0, LaneKind::Key, 9}, 7, 0, 5)));
-    for (const auto& e : s.chart().notes)
-        EXPECT_FALSE(e.value.sample.id == 5);
+    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(9, Rational(0, 1),
+                                                              Lane{0, LaneKind::Key, 9}, 7, 0, 5)));
+    for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.sample.id == 5);
 }
 
 // —— 协议 note.setSample（id 文本 to） ——
@@ -266,10 +265,13 @@ TEST(SampleRename, ProtocolSetNoteSample) {
     Json args = Json::object();
     args.set("measure", static_cast<std::int64_t>(1));
     Json pos = Json::object();
-    pos.set("num", 0); pos.set("den", 1);
+    pos.set("num", 0);
+    pos.set("den", 1);
     args.set("pos", std::move(pos));
     Json lane = Json::object();
-    lane.set("player", 0); lane.set("kind", "key"); lane.set("index", 1);
+    lane.set("player", 0);
+    lane.set("kind", "key");
+    lane.set("index", 1);
     args.set("lane", std::move(lane));
     args.set("sample", static_cast<std::int64_t>(1));
     args.set("to", "1A");

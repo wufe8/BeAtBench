@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 切音页状态栏摘要（2026-09）：视口 / 光标 / 参考音频 / 播放 / 切片 / MIDI。
 // 由 Main.qml 底部全局状态栏在 currentPage === 1 时显示（与编辑页状态互斥）；
-// 只读展示，不含业务逻辑（doc/08 §2 双语言纪律）。
+// 只读展示，不含业务逻辑（doc/skin-system.md 二、 双语言纪律）。
 // 数据源：sliceWorkspace / audioEngine（模块上下文属性）+ 切音页只读摘要（page.*）。
 import QtQuick
 import QtQuick.Controls

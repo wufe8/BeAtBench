@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "beatbench/core/command/Command.hpp"
-
 #include "beatbench/core/command/Builtins.hpp"
+#include "beatbench/core/command/Command.hpp"
 
 namespace beatbench::cmd {
 

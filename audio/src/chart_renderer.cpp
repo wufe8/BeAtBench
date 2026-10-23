@@ -2,7 +2,7 @@
 // ChartRenderer 实现（M4.3b）：区间混音（事件→秒 + 倒推衔接 + 插值/包络同
 // SamplePlayer 语义）+ WAV 写出。
 //
-// 混音语义对齐 SamplePlayer（doc/02 §8「回调内只做整数插值」，此处离线版本一致）：
+// 混音语义对齐 SamplePlayer（回调内只做整数插值；此处离线版本一致）：
 // - 线性插值重采样（源率/渲染率）；源率 = 采样文件率（解码保留）；
 // - 5ms 线性包络（起止防爆音）；
 // - 键音音量恒 1.0（BMS 无每-note 音量）；主音量不烘焙（渲染 = 原始素材，
@@ -11,8 +11,6 @@
 //
 // ⚠️ WAV 16-bit 写出：仅作「可听验证」用途（CLI/编辑器导出）；浮点精度损失
 // 对验证无碍。将来导出/波形用原 float 数据（RenderedAudio 已保留）。
-#include "beatbench/audio/ChartRenderer.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -23,6 +21,7 @@
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/AudioPath.hpp"
+#include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/core/io/AtomicWrite.hpp"
 
 namespace beatbench::audio {
@@ -69,8 +68,8 @@ std::string encode_wav_pcm(const std::vector<float>& pcm, float sampleRate) {
     return out;
 }
 
-bool write_wav16(const std::string& path, const std::vector<float>& pcm,
-                 float sampleRate, std::string* message) {
+bool write_wav16(const std::string& path, const std::vector<float>& pcm, float sampleRate,
+                 std::string* message) {
     const std::string bytes = encode_wav_pcm(pcm, sampleRate);
     if (bytes.empty()) {
         if (message) *message = "PCM 数据为空";
@@ -85,8 +84,8 @@ bool write_wav16(const std::string& path, const std::vector<float>& pcm,
 }
 
 #ifdef _WIN32
-bool write_wav16_w(const std::wstring& path, const std::vector<float>& pcm,
-                   float sampleRate, std::string* message) {
+bool write_wav16_w(const std::wstring& path, const std::vector<float>& pcm, float sampleRate,
+                   std::string* message) {
     const std::string bytes = encode_wav_pcm(pcm, sampleRate);
     if (bytes.empty()) {
         if (message) *message = "PCM 数据为空";
@@ -104,8 +103,8 @@ bool write_wav16_w(const std::wstring& path, const std::vector<float>& pcm,
 /// 时间区间内混入单个采样：sample = 已解码（引用计数由调用方/cache 管理）；
 /// t0/t1 = 渲染区间（秒）；触发秒 = 采样开始时刻；渲染率 = rate。
 /// 采样可大幅长于区间（任意起播倒推）——混入 [t0,t1) 内落在采样播放窗口的部分。
-void mix_sample(const DecodedSample& sample, double triggerSec, double rate,
-                double t0, double t1, std::vector<float>& out) {
+void mix_sample(const DecodedSample& sample, double triggerSec, double rate, double t0, double t1,
+                std::vector<float>& out) {
     const double srcRate = sample.sampleRate;
     if (srcRate <= 0.0) return;
     const double srcFrames = static_cast<double>(sample.frameCount());
@@ -118,10 +117,9 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate,
 
     // 输出帧 o = 区间内相对帧（o=0 → 渲染时刻 t0）。
     // 有效范围：渲染时刻 ∈ [start, end) → o ∈ [ceil((start-t0)*rate), ceil((end-t0)*rate))
-    const std::size_t firstOut = static_cast<std::size_t>(
-        std::ceil((start - t0) * rate));
-    const std::size_t lastOut = std::min<std::size_t>(
-        outFrames, static_cast<std::size_t>(std::ceil((end - t0) * rate)));
+    const std::size_t firstOut = static_cast<std::size_t>(std::ceil((start - t0) * rate));
+    const std::size_t lastOut =
+        std::min<std::size_t>(outFrames, static_cast<std::size_t>(std::ceil((end - t0) * rate)));
 
     const std::uint64_t envFrames =
         static_cast<std::uint64_t>(std::max(1.0, rate * 0.005));  // 5ms 包络
@@ -145,12 +143,12 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate,
 
         // 5ms 包络（起止；与 SamplePlayer 一致）
         double env = 1.0;
-        if (playPos < envFrames / rate)
-            env = playPos / (envFrames / rate);
+        const double envSec = static_cast<double>(envFrames) / rate;
+        if (playPos < envSec)
+            env = playPos / envSec;
         else {
-            const double remain = (srcFrames / srcRate) - playPos;
-            const double envEnd = envFrames / rate;
-            if (remain < envEnd) env = remain / envEnd;
+            const double remain = static_cast<double>(srcFrames) / srcRate - playPos;
+            if (remain < envSec) env = remain / envSec;
         }
         env = std::clamp(env, 0.0, 1.0);
         out[o * 2] += l * static_cast<float>(env);
@@ -160,19 +158,18 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate,
 
 }  // namespace
 
-RenderResult render_chart_range(const beatbench::Chart& chart,
-                                const beatbench::TimingEngine& timing,
-                                SampleCache& cache, double sampleRate,
-                                double t0, double t1,
-                                const std::string& sourceDir) {    // 窄版：UTF-8 → UTF-16（Windows 原生；ASCII 路径无损，非 ASCII 走宽版）
+RenderResult render_chart_range(
+    const beatbench::Chart& chart, const beatbench::TimingEngine& timing, SampleCache& cache,
+    double sampleRate, double t0, double t1,
+    const std::string&
+        sourceDir) {  // 窄版：UTF-8 → UTF-16（Windows 原生；ASCII 路径无损，非 ASCII 走宽版）
     return render_chart_range_w(chart, timing, cache, sampleRate, t0, t1,
                                 std::filesystem::u8path(sourceDir).wstring());
 }
 
 RenderResult render_chart_range_w(const beatbench::Chart& chart,
-                                  const beatbench::TimingEngine& timing,
-                                  SampleCache& cache, double sampleRate,
-                                  double t0, double t1,
+                                  const beatbench::TimingEngine& timing, SampleCache& cache,
+                                  double sampleRate, double t0, double t1,
                                   const std::wstring& sourceDir) {
     RenderResult res;
     res.audio.sampleRate = sampleRate;
@@ -246,8 +243,7 @@ RenderResult render_chart_range_w(const beatbench::Chart& chart,
         const double len = c.sample->durationSeconds();
         if (ev.triggerSec + len < t0) continue;  // 已结束
         if (ev.triggerSec > t1) break;           // 之后不会再触发（排序）
-        mix_sample(*c.sample, ev.triggerSec, sampleRate, t0, t1,
-                   res.audio.interleavedStereo);
+        mix_sample(*c.sample, ev.triggerSec, sampleRate, t0, t1, res.audio.interleavedStereo);
         // 调用方持有（get 返回计数 1）：渲染完即释放（cache 持有那份保留——LRU）
         beatbench::audio::decoded_sample_release(c.sample);
     }
@@ -258,31 +254,25 @@ RenderResult render_chart_range_w(const beatbench::Chart& chart,
     return res;
 }
 
-RenderResult render_chart(const beatbench::Chart& chart,
-                          const beatbench::TimingEngine& timing,
-                          SampleCache& cache, double sampleRate,
-                          const std::string& sourceDir) {
+RenderResult render_chart(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
+                          SampleCache& cache, double sampleRate, const std::string& sourceDir) {
     return render_chart_range(chart, timing, cache, sampleRate, 0.0, -1.0, sourceDir);
 }
 
-RenderResult render_chart_w(const beatbench::Chart& chart,
-                            const beatbench::TimingEngine& timing,
-                            SampleCache& cache, double sampleRate,
-                            const std::wstring& sourceDir) {
+RenderResult render_chart_w(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
+                            SampleCache& cache, double sampleRate, const std::wstring& sourceDir) {
     return render_chart_range_w(chart, timing, cache, sampleRate, 0.0, -1.0, sourceDir);
 }
 
-bool write_wav_file(const std::string& path, const RenderedAudio& audio,
-                    std::string* message) {
-    return write_wav16(path, audio.interleavedStereo,
-                       static_cast<float>(audio.sampleRate), message);
+bool write_wav_file(const std::string& path, const RenderedAudio& audio, std::string* message) {
+    return write_wav16(path, audio.interleavedStereo, static_cast<float>(audio.sampleRate),
+                       message);
 }
 
-bool write_wav_file_w(const std::wstring& path, const RenderedAudio& audio,
-                      std::string* message) {
+bool write_wav_file_w(const std::wstring& path, const RenderedAudio& audio, std::string* message) {
 #ifdef _WIN32
-    return write_wav16_w(path, audio.interleavedStereo,
-                         static_cast<float>(audio.sampleRate), message);
+    return write_wav16_w(path, audio.interleavedStereo, static_cast<float>(audio.sampleRate),
+                         message);
 #else
     // 非 Windows：宽字符转窄即可（POSIX 窄 API 原生 UTF-8）
     return write_wav16(std::string(path.begin(), path.end()), audio.interleavedStereo,

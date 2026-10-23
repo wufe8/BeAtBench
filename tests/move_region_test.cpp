@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -63,9 +63,12 @@ Json selection_json(const std::vector<NoteRef>& refs) {
         Json lane = Json::object();
         lane.set("player", static_cast<std::int64_t>(r.lane.player));
         std::string kind = "key";
-        if (r.lane.kind == LaneKind::Scratch) kind = "scratch";
-        else if (r.lane.kind == LaneKind::Pedal) kind = "pedal";
-        else if (r.lane.kind == LaneKind::Bgm) kind = "bgm";
+        if (r.lane.kind == LaneKind::Scratch)
+            kind = "scratch";
+        else if (r.lane.kind == LaneKind::Pedal)
+            kind = "pedal";
+        else if (r.lane.kind == LaneKind::Bgm)
+            kind = "bgm";
         lane.set("kind", kind);
         lane.set("index", static_cast<std::int64_t>(r.lane.index));
         item.set("lane", std::move(lane));
@@ -89,10 +92,10 @@ TEST(MoveRegion, ShiftAllByDelta) {
     Json args = Json::object();
     // selection：全部 3 个 note
     args.set("selection", selection_json({
-        {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
-        {1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2},
-        {2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 3},
-    }));
+                              {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                              {1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2},
+                              {2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 3},
+                          }));
     // delta：+2 小节 + 1/2 拍
     Json delta = Json::object();
     delta.set("measure", 2);
@@ -147,9 +150,9 @@ TEST(MoveRegion, ShiftAndChangeLane) {
     req.set("command", "note.moveRegion");
     Json args = Json::object();
     args.set("selection", selection_json({
-        {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
-        {1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2},
-    }));
+                              {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                              {1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2},
+                          }));
     Json delta = Json::object();
     delta.set("measure", 1);
     Json dpos = Json::object();
@@ -214,8 +217,8 @@ TEST(MoveRegion, MissingDeltaRejected) {
     req.set("command", "note.moveRegion");
     Json args = Json::object();
     args.set("selection", selection_json({
-        {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
-    }));
+                              {1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                          }));
     req.set("args", std::move(args));
     const Json resp = global_registry().dispatch(req);
     EXPECT_FALSE(resp.at("ok").as_bool());

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "ChartHistoryController.hpp"
-#include "ChartSnapshotStore.hpp"
-#include "DocumentService.hpp"
 
 #include <QDateTime>
 #include <QFileInfo>
@@ -11,6 +9,9 @@
 #include <QStringList>
 #include <exception>
 #include <utility>
+
+#include "ChartSnapshotStore.hpp"
+#include "DocumentService.hpp"
 
 namespace beatbench::app {
 namespace {
@@ -25,11 +26,12 @@ QString errorText(const QVariantMap& result) {
     const QString error = result.value(QStringLiteral("error")).toString();
     return error.isEmpty() ? QStringLiteral("未知存储错误") : error;
 }
-}
+}  // namespace
 
 ChartHistoryController::ChartHistoryController(DocumentService* documents, QObject* parent,
-                                             QString root)
-    : QObject(parent), m_documents(documents),
+                                               QString root)
+    : QObject(parent),
+      m_documents(documents),
       m_storagePath(ChartSnapshotStore(std::move(root)).rootPath()) {
     // 读取设置和 rootPath 不创建历史存储。
     QSettings settings;
@@ -58,8 +60,10 @@ void ChartHistoryController::setEntries(const QVariantList& entries) {
         const QString time = row.value(QStringLiteral("time")).toString();
         QDateTime parsed = QDateTime::fromString(time, Qt::ISODateWithMs);
         if (!parsed.isValid()) parsed = QDateTime::fromString(time, Qt::ISODate);
-        row.insert(QStringLiteral("displayTime"), parsed.isValid()
-                   ? parsed.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : time);
+        row.insert(QStringLiteral("displayTime"),
+                   parsed.isValid()
+                       ? parsed.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+                       : time);
         m_entries.append(row);
     }
     emit entriesChanged();
@@ -124,7 +128,8 @@ bool ChartHistoryController::validateDocument(const QString& id, const QString& 
         setMessage(tr("未命名谱面请先另存为，再创建快照。"));
         return false;
     }
-    const QString currentPath = DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString());
+    const QString currentPath =
+        DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString());
     if (!samePath(currentPath, path)) {
         setMessage(tr("谱面路径已改变，已取消快照。请重新打开历史窗口。"));
         return false;
@@ -150,20 +155,26 @@ void ChartHistoryController::showHistory(const QString& documentId, bool present
     emit sourcePathChanged();
     emit documentLabelChanged();
     setEntries({});
-    if (row.isEmpty()) setMessage(tr("找不到指定谱面。"));
-    else if (!m_enabled) setMessage(tr("本地谱面历史默认关闭。启用后可查看和创建历史；禁用不会删除已有历史。"));
-    else if (m_sourcePath.isEmpty()) setMessage(tr("未命名谱面请先另存为，再创建快照。"));
-    else loadHistory();
+    if (row.isEmpty())
+        setMessage(tr("找不到指定谱面。"));
+    else if (!m_enabled)
+        setMessage(tr("本地谱面历史默认关闭。启用后可查看和创建历史；禁用不会删除已有历史。"));
+    else if (m_sourcePath.isEmpty())
+        setMessage(tr("未命名谱面请先另存为，再创建快照。"));
+    else
+        loadHistory();
     if (!m_exitSnapshotError.isEmpty()) setMessage(m_exitSnapshotError);
     if (m_presentDialog) emit showRequested();
 }
 void ChartHistoryController::browseHistory(const QString& sourcePath) {
-    if (m_busy) return; // 不在已接受的操作中改变目标或弹窗模式。
+    if (m_busy) return;  // 不在已接受的操作中改变目标或弹窗模式。
     const QString path = DocumentService::normalizedPath(sourcePath);
     if (m_documents && !path.isEmpty()) {
         for (const auto& item : m_documents->instances()) {
             const auto row = item.toMap();
-            if (samePath(DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString()), path)) {
+            if (samePath(
+                    DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString()),
+                    path)) {
                 showHistory(row.value(QStringLiteral("id")).toString(), false);
                 return;
             }
@@ -176,13 +187,14 @@ void ChartHistoryController::browseHistory(const QString& sourcePath) {
     emit sourcePathChanged();
     emit documentLabelChanged();
     setEntries({});
-    if (path.isEmpty()) setMessage(tr("请在左侧选择谱面，或先打开一个谱面。"));
-    else if (!m_enabled) setMessage(tr("启用本地谱面历史后可查看；仅包含谱面文件，不含媒体。"));
-    else loadHistory();
+    if (path.isEmpty())
+        setMessage(tr("请在左侧选择谱面，或先打开一个谱面。"));
+    else if (!m_enabled)
+        setMessage(tr("启用本地谱面历史后可查看；仅包含谱面文件，不含媒体。"));
+    else
+        loadHistory();
 }
-void ChartHistoryController::loadHistory() {
-    launch(Operation::History, m_sourcePath);
-}
+void ChartHistoryController::loadHistory() { launch(Operation::History, m_sourcePath); }
 void ChartHistoryController::createSnapshot(const QString& note) {
     if (!canStart() || !validateDocument(m_documentId, m_sourcePath, true)) return;
     launch(Operation::Create, m_sourcePath, note);
@@ -224,62 +236,78 @@ void ChartHistoryController::restoreCopy(const QString& snapshotId) {
     launch(Operation::Restore, m_sourcePath, snapshotId);
 }
 
-void ChartHistoryController::launch(Operation operation, const QString& path, const QString& argument) {
+void ChartHistoryController::launch(Operation operation, const QString& path,
+                                    const QString& argument) {
     const QString root = m_storagePath;
     if (operation != Operation::History) m_exitSnapshotError.clear();
     setBusy(true);
     if (operation == Operation::History && !m_exitSnapshotError.isEmpty())
         setMessage(m_exitSnapshotError);
     else
-        setMessage(operation == Operation::History ? tr("正在读取历史…")
-                   : operation == Operation::Create ? tr("正在创建快照…") : tr("正在恢复为新副本…"));
+        setMessage(operation == Operation::History  ? tr("正在读取历史…")
+                   : operation == Operation::Create ? tr("正在创建快照…")
+                                                    : tr("正在恢复为新副本…"));
     m_pool.start(QRunnable::create([this, root, path, argument, operation] {
         QVariantMap result;
         QVariantMap history;
         try {
             ChartSnapshotStore store(root);
             switch (operation) {
-            case Operation::History: result = store.history(path); break;
-            case Operation::Create:
-                result = store.create(path, argument);
-                if (result.value(QStringLiteral("ok")).toBool()) history = store.history(path);
-                break;
-            case Operation::Restore: result = store.restoreCopy(path, argument); break;
+                case Operation::History:
+                    result = store.history(path);
+                    break;
+                case Operation::Create:
+                    result = store.create(path, argument);
+                    if (result.value(QStringLiteral("ok")).toBool()) history = store.history(path);
+                    break;
+                case Operation::Restore:
+                    result = store.restoreCopy(path, argument);
+                    break;
             }
         } catch (const std::exception& error) {
             result = {{QStringLiteral("ok"), false},
                       {QStringLiteral("error"), QString::fromUtf8(error.what())}};
         } catch (...) {
-            result = {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("未知存储异常")}};
+            result = {{QStringLiteral("ok"), false},
+                      {QStringLiteral("error"), QStringLiteral("未知存储异常")}};
         }
-        QMetaObject::invokeMethod(this, [this, operation, result, history] {
-            bool ok = result.value(QStringLiteral("ok")).toBool();
-            if (!ok) {
-                QString failure = tr("历史操作失败：%1").arg(errorText(result));
-                if (operation == Operation::Restore && !result.value(QStringLiteral("path")).toString().isEmpty())
-                    failure += tr("\n可能留下未完成的副本，请检查：%1").arg(result.value(QStringLiteral("path")).toString());
-                setMessage(m_exitSnapshotError.isEmpty() ? failure
-                           : m_exitSnapshotError + QLatin1Char('\n') + failure);
-            } else if (operation == Operation::History) {
-                setEntries(result.value(QStringLiteral("entries")).toList());
-                setMessage(!m_exitSnapshotError.isEmpty() ? m_exitSnapshotError
-                           : m_entries.isEmpty() ? tr("尚无历史快照。") : tr("已加载 %1 条快照。").arg(m_entries.size()));
-            } else if (operation == Operation::Restore) {
-                setMessage(tr("已恢复为新副本（未自动打开，未覆盖原文件）：\n%1")
-                           .arg(result.value(QStringLiteral("path")).toString()));
-            } else {
-                setMessage(result.value(QStringLiteral("unchanged")).toBool()
-                           ? tr("谱面内容未变化，已跳过重复快照。") : tr("已创建谱面快照。"));
-                if (history.value(QStringLiteral("ok")).toBool()) {
-                    setEntries(history.value(QStringLiteral("entries")).toList());
+        QMetaObject::invokeMethod(
+            this,
+            [this, operation, result, history] {
+                bool ok = result.value(QStringLiteral("ok")).toBool();
+                if (!ok) {
+                    QString failure = tr("历史操作失败：%1").arg(errorText(result));
+                    if (operation == Operation::Restore &&
+                        !result.value(QStringLiteral("path")).toString().isEmpty())
+                        failure += tr("\n可能留下未完成的副本，请检查：%1")
+                                       .arg(result.value(QStringLiteral("path")).toString());
+                    setMessage(m_exitSnapshotError.isEmpty()
+                                   ? failure
+                                   : m_exitSnapshotError + QLatin1Char('\n') + failure);
+                } else if (operation == Operation::History) {
+                    setEntries(result.value(QStringLiteral("entries")).toList());
+                    setMessage(!m_exitSnapshotError.isEmpty() ? m_exitSnapshotError
+                               : m_entries.isEmpty()
+                                   ? tr("尚无历史快照。")
+                                   : tr("已加载 %1 条快照。").arg(m_entries.size()));
+                } else if (operation == Operation::Restore) {
+                    setMessage(tr("已恢复为新副本（未自动打开，未覆盖原文件）：\n%1")
+                                   .arg(result.value(QStringLiteral("path")).toString()));
                 } else {
-                    ok = false;
-                    setMessage(tr("快照已处理，但刷新历史失败：%1").arg(errorText(history)));
+                    setMessage(result.value(QStringLiteral("unchanged")).toBool()
+                                   ? tr("谱面内容未变化，已跳过重复快照。")
+                                   : tr("已创建谱面快照。"));
+                    if (history.value(QStringLiteral("ok")).toBool()) {
+                        setEntries(history.value(QStringLiteral("entries")).toList());
+                    } else {
+                        ok = false;
+                        setMessage(tr("快照已处理，但刷新历史失败：%1").arg(errorText(history)));
+                    }
                 }
-            }
-            setBusy(false);
-            emit operationFinished(ok);
-        }, Qt::QueuedConnection);
+                setBusy(false);
+                emit operationFinished(ok);
+            },
+            Qt::QueuedConnection);
     }));
 }
 
@@ -300,9 +328,11 @@ bool ChartHistoryController::snapshotAllSaved() {
                                       QStringLiteral("bml"), QStringLiteral("pms")};
     for (const QVariant& item : instances) {
         const QVariantMap row = item.toMap();
-        const QString path = DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString());
-        if (!path.isEmpty() && !row.value(QStringLiteral("dirty")).toBool()
-            && chartExtensions.contains(QFileInfo(path).suffix().toLower())) paths.append(path);
+        const QString path =
+            DocumentService::normalizedPath(row.value(QStringLiteral("path")).toString());
+        if (!path.isEmpty() && !row.value(QStringLiteral("dirty")).toBool() &&
+            chartExtensions.contains(QFileInfo(path).suffix().toLower()))
+            paths.append(path);
     }
     setBusy(true);
     ChartSnapshotStore store(m_storagePath);
@@ -333,10 +363,11 @@ bool ChartHistoryController::snapshotAllSaved() {
     if (failureCount > errors.size())
         errors.append(tr("另有 %1 项失败未展开。").arg(failureCount - errors.size()));
     m_exitSnapshotError = ok ? QString{}
-        : tr("谱面保存状态不变；退出快照失败，已阻止退出：\n%1").arg(errors.join(QLatin1Char('\n')));
+                             : tr("谱面保存状态不变；退出快照失败，已阻止退出：\n%1")
+                                   .arg(errors.join(QLatin1Char('\n')));
     setMessage(ok ? tr("已完成退出前的谱面历史快照检查。") : m_exitSnapshotError);
     setBusy(false);
     emit operationFinished(ok);
     return ok;
 }
-} // namespace beatbench::app
+}  // namespace beatbench::app

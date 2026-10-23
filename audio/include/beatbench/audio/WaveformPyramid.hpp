@@ -18,7 +18,7 @@ namespace beatbench::audio {
 
 /// PCM → min/max 金字塔（见文件头注释）。
 class WaveformPyramid {
-public:
+   public:
     /// 基础桶大小（帧数；2 的幂——上层按 2 桶合并）。
     static constexpr std::size_t kBaseBucket = 256;
 
@@ -36,8 +36,8 @@ public:
     /// 自持 PCM 版（M4.3c 增量重渲染用）：金字塔持 shared_ptr 保活 PCM 缓冲区，
     /// rebuild_range 局部重扫时指针恒有效；调用方替换缓冲区**元素**（不 realloc）
     /// 后调 rebuild_range 即正确。⚠️ 元素赋值不改变缓冲区地址（vector 语义）。
-    void build(std::shared_ptr<const std::vector<float>> interleaved,
-               std::size_t channels, double sampleRate = 0.0);
+    void build(std::shared_ptr<const std::vector<float>> interleaved, std::size_t channels,
+               double sampleRate = 0.0);
 
     [[nodiscard]] bool valid() const noexcept { return m_frameCount > 0 && !m_levels.empty(); }
     [[nodiscard]] std::size_t frameCount() const noexcept { return m_frameCount; }
@@ -64,7 +64,7 @@ public:
     /// frameHi ≤ frameLo = no-op。
     void rebuild_range(std::size_t frameLo, std::size_t frameHi) noexcept;
 
-private:
+   private:
     /// 内部：无状态重建（指针版核心逻辑；self 版先设 m_pcmSelf 再调用）。
     void build_impl(const float* interleaved, std::size_t frameCount, std::size_t channels,
                     double sampleRate);
