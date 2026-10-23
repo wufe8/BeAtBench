@@ -2,6 +2,15 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [0.4.2](https://github.com/wufe8/BeAtBench/compare/v0.4.1...v0.4.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **audio:** SampleCache 单飞二次确认，避免同键重复解码 ([#40](https://github.com/wufe8/BeAtBench/issues/40)) ([b3c0f8a](https://github.com/wufe8/BeAtBench/commit/b3c0f8a83dd7c9e1d865d71538a6f85c66bb508a))
+* **docs:** repair public documentation and portable commit guard ([#33](https://github.com/wufe8/BeAtBench/issues/33)) ([c766906](https://github.com/wufe8/BeAtBench/commit/c766906a79506902c77b3036c9885f43f30c5824))
+* **scripts:** check.sh Qt 自动探测补 Arch 标准位置 /usr/lib/qt6 ([#30](https://github.com/wufe8/BeAtBench/issues/30)) ([12c8325](https://github.com/wufe8/BeAtBench/commit/12c8325db1c5e718deb28a2f0fd8172d4fb68652))
+
 ## [0.4.1](https://github.com/wufe8/BeAtBench/compare/v0.4.0...v0.4.1) (2026-10-20)
 
 

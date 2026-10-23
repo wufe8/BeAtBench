@@ -12,7 +12,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # 全局覆盖，且**跨平台通用**（原先靠 audio/patch_portaudio.ps1 往 upstream 首行插
 # ENABLE_LANGUAGE(C)，那既依赖 PowerShell，也与平台无关地必要——2026-09 改为本方案）。
 # 版本号唯一手改点：release-please 依行尾标记自动 bump（同步 Version.hpp / README / CHANGELOG）
-project(beatbench VERSION 0.4.1 LANGUAGES C CXX) # x-release-please-version
+project(beatbench VERSION 0.4.2 LANGUAGES C CXX) # x-release-please-version
 
 # 安装路径变量（GNUInstallDirs：CMAKE_INSTALL_BINDIR/DATADIR/FULL_DATADIR 等）。
 # 供 app/cli 的 Linux 安装规则使用（发行版打包，见 app/CMakeLists 末尾）。
