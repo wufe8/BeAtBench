@@ -201,6 +201,29 @@ TEST_F(SampleCacheTest, ConcurrentSameKeyDecodesOnce) {
     EXPECT_EQ(cache.count(), 1u);
 }
 
+// 重复同一竞态窗口：单轮触发概率低（本机约 1/60），多轮把"快查与登记 in-flight 之间
+// 的空档"放大成可稳定复现的回归（2026-10 macOS CI 实测 calls=2，即单飞失效）。
+TEST_F(SampleCacheTest, RepeatedConcurrentSameKeyDecodesOnce) {
+    constexpr int kRounds = 50;
+    for (int round = 0; round < kRounds; ++round) {
+        SampleCache cache;
+        std::atomic<int> calls{0};
+        installCountingDecoder(cache, calls);
+
+        constexpr int kThreads = 8;
+        std::vector<std::thread> threads;
+        threads.reserve(kThreads);
+        for (int i = 0; i < kThreads; ++i) {
+            threads.emplace_back([&] {
+                auto r = cache.get("shared.wav");
+                if (r.ok) beatbench::audio::decoded_sample_release(r.sample);
+            });
+        }
+        for (auto& t : threads) t.join();
+        ASSERT_EQ(calls.load(), 1) << "round " << round;
+    }
+}
+
 TEST_F(SampleCacheTest, BudgetShrinkEvicts) {
     SampleCache cache(4 * 8000);
     std::atomic<int> calls{0};

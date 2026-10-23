@@ -101,11 +101,19 @@ SampleCacheResult SampleCache::getImpl(const std::string& key,
         }
     }
 
-    // 2) 注册/加入 in-flight
+    // 2) 注册/加入 in-flight（与第 1 步之间有一段无锁空档，必须在同一把锁内二次确认缓存：
+    //    空档里解码者可能已完成并擦除 in-flight，此时既没命中缓存也看不到 in-flight，
+    //    不复查就会重复解码同一 key——2026-10 macOS CI 实测 calls=2 即此竞态）
     std::shared_ptr<InFlight> inf;
     bool amDecoder = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        auto hit = m_cache.find(key);
+        if (hit != m_cache.end()) {
+            hit->second.sample->ref();
+            touch(hit->second);
+            return {true, hit->second.sample, {}};
+        }
         auto fit = m_inFlight.find(key);
         if (fit != m_inFlight.end()) {
             inf = fit->second;  // 等待者：已有解码在途
