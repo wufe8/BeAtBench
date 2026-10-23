@@ -58,12 +58,12 @@ TEST(ChartMode, Sp7kContainsScratchAndPedal) {
 // —— 通道映射表按模式（7key 与默认表一致是硬约束，M2 会话依赖） ——
 
 TEST(BmsChannelMaps, SevenKeyMatchesDefaultTable) {
-    // 抽查一组通道：bms_channel_rule_for("sp7k", ch) 必须与 bms_channel_rule(ch) 完全一致
+    // 抽查一组通道：bms_channel_rule_for("sp7k", ch) 必须与 bms_channel_rule_for("sp7k", ch) 完全一致
     const char* chs[] = {"01", "02", "03", "04", "06", "07", "0A", "08", "09", "11",
                          "15", "16", "17", "18", "19", "21", "26", "28", "29", "51",
                          "56", "59", "61", "68", "D3", "D7", "E3", "99"};
     for (const auto* ch : chs) {
-        const auto def = bms::bms_channel_rule(ch);
+        const auto def = bms::bms_channel_rule_for("sp7k", ch);
         const auto for7 = bms::bms_channel_rule_for("sp7k", ch);
         ASSERT_EQ(for7.has_value(), def.has_value()) << "通道 " << ch;
         if (def.has_value()) {

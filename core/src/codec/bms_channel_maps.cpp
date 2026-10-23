@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // BMS 通道映射表（按游玩模式索引）：通道字符串 → 格式无关语义/Lane（正向），
-// 以及 Lane → 通道字符串（反向，写回重建用）。纯查找，无状态。
+// 以及 Lane → 通道字符串（反向，写回重建用）。纯查找，无状态；
+// 本文件是通道映射的唯一实现（公共类型在 bms/ChannelMap.hpp）。
 //
-// 表来源与 core/src/bms/channel_map.cpp 一致（该文件保留 7key 默认表不动，
-// M2 会话 ChartViewItem 依赖其签名）。7key 语义（sp7k/dp/battle 共用）：
+// 7key 语义（sp7k/dp/battle 共用）：
 //   11-15=键1-5  16=皿  17=踏板/保留  18=键6  19=键7（2P 21-29 同构）；
 //   51-59=1P LN 通道、61-69=2P LN 通道（LNTYPE 1 同一通道内按时间序交替头尾）；
 //   D1-D9=1P 地雷、E1-E9=2P 地雷（槽位与 11-19/21-29 同构）。
