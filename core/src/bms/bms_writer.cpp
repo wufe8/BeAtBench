@@ -115,7 +115,8 @@ inline std::string fmt_id(const Chart& chart, std::uint32_t id) {
 
 }  // namespace
 
-std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——BMS 写回通道聚合状态机
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BMS 写回通道聚合状态机
+std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
     std::string out;
     out.reserve(4096);
 

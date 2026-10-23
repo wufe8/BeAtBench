@@ -89,7 +89,8 @@ TimingEngine::~TimingEngine() = default;
 TimingEngine::TimingEngine(TimingEngine&&) noexcept = default;
 TimingEngine& TimingEngine::operator=(TimingEngine&&) noexcept = default;
 
-void TimingEngine::rebuild(const Chart& chart) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——BPM/STOP 序列重建状态链
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BPM/STOP 序列重建状态链
+void TimingEngine::rebuild(const Chart& chart) {
     Impl& im = *impl_;
     im.measures.clear();
 

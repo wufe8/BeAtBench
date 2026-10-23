@@ -110,7 +110,8 @@ std::optional<std::size_t> find_partner(const std::vector<Event<Note>>& notes,
 //     严格交替：第 1 个=头、第 2 个=尾、第 3 个=新头、第 4 个=新尾…；
 //   - 未配对（单数/不成对/与其它通道同值冲突）→ ln_pair 留空（lint 提示）。
 // 调用时机：EditorSession::exec / undo / redo 之后（每次文档变更后统一推导）。
-void rebuild_ln_pairs(Chart& chart) { // NOLINT(readability-function-cognitive-complexity)——LN 配对区间重连状态链
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——LN 配对区间重连状态链
+void rebuild_ln_pairs(Chart& chart) {
     for (auto& n : chart.notes) n.value.ln_pair.reset();
 
     // LNTYPE 1（含未声明，默认）：只处理 ln_channel==true（来自 51-69/61-69 LN 通道），
@@ -417,7 +418,8 @@ MoveNoteCommand::MoveNoteCommand(std::uint32_t from_measure, Rational from_pos, 
       m_to_measure(to_measure), m_to_pos(to_pos), m_move_ln_pair(move_ln_pair),
       m_to_lane(to_lane), m_from_sub_line(from_sub_line), m_to_sub_line(to_sub_line) {}
 
-void MoveNoteCommand::apply(Chart& chart) { // NOLINT(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+void MoveNoteCommand::apply(Chart& chart) {
     const auto idx = find_note(chart.notes, m_from_measure, m_from_pos, m_lane, m_sample,
                                m_from_sub_line);
     if (!idx) return;  // 找不到 → 无操作
@@ -522,7 +524,8 @@ void MoveNoteCommand::apply(Chart& chart) { // NOLINT(readability-function-cogni
     m_last_delta = (m_to_pos - m_from_pos);
 }
 
-void MoveNoteCommand::invert(Chart& chart) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——逆操作精确回滚分支
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——逆操作精确回滚分支
+void MoveNoteCommand::invert(Chart& chart) {
     if (!m_moved) return;  // apply 未执行（找不到 note）→ 无操作
     // 反向：把 (m_to_measure, m_to_pos, 当前lane, sample) 移回 (m_from_measure, m_from_pos)
     // 当前 lane：跨通道后 note 在 to_lane；纯时间移动 = m_lane。
@@ -940,7 +943,8 @@ std::string CompositeCommand::describe() const {
 
 // ---------- Selection ----------
 
-void Selection::add_rect(std::uint32_t measure_lo, std::uint32_t measure_hi, // NOLINT(readability-function-size)——固有分支密度（解析/协议形状），有意保留
+// NOLINTNEXTLINE(readability-function-size)——固有分支密度（解析/协议形状），有意保留
+void Selection::add_rect(std::uint32_t measure_lo, std::uint32_t measure_hi,
                          const std::vector<Lane>& lanes, Rational pos_lo, Rational pos_hi,
                          const std::vector<NoteRef>& candidates) {
     for (const auto& ref : candidates) {
@@ -989,7 +993,8 @@ inline std::string format_number(double v) {
     return s;
 }
 
-void PutTimingCommand::apply(Chart& chart) { // NOLINT(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+void PutTimingCommand::apply(Chart& chart) {
     m_existed = false;
     m_applied_index.reset();
     m_old_ref.reset();
@@ -1079,7 +1084,8 @@ void PutTimingCommand::apply(Chart& chart) { // NOLINT(readability-function-cogn
     }
 }
 
-void PutTimingCommand::invert(Chart& chart) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——逆操作精确回滚分支
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——逆操作精确回滚分支
+void PutTimingCommand::invert(Chart& chart) {
     const auto do_invert = [&](auto& evs) {
         if (m_existed) {
             const auto [lo, hi] = find_event_range(evs, m_measure, m_pos);
@@ -1268,7 +1274,8 @@ ConvertMetaToNoteCommand::ConvertMetaToNoteCommand(std::string kind, std::uint32
     : m_kind(std::move(kind)), m_measure(measure), m_pos(pos), m_layer(layer),
       m_to_lane(to_lane), m_to_measure(to_measure), m_to_pos(to_pos) {}
 
-void ConvertMetaToNoteCommand::apply(Chart& chart) { // NOLINT(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+void ConvertMetaToNoteCommand::apply(Chart& chart) {
     m_did = false;
     m_bga.reset(); m_bpm.reset(); m_stop.reset();
     m_note_index.reset();
@@ -1628,7 +1635,8 @@ RenameSampleCommand::RenameSampleCommand(SampleKind kind, std::uint32_t from_id,
                                          std::uint32_t to_id)
     : m_kind(kind), m_from_id(from_id), m_to_id(to_id) {}
 
-void RenameSampleCommand::apply(Chart& chart) { // NOLINT(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——编辑命令语义分支（配对/地雷/BGM 行）
+void RenameSampleCommand::apply(Chart& chart) {
     const auto key_from = std::make_pair(m_kind, m_from_id);
     const auto key_to = std::make_pair(m_kind, m_to_id);
     const auto it_from = chart.samples.find(key_from);
@@ -1725,7 +1733,8 @@ std::string SetSampleFileCommand::describe() const {
 SetSampleValueCommand::SetSampleValueCommand(SampleKind kind, std::uint32_t id, std::string value)
     : m_kind(kind), m_id(id), m_value(std::move(value)) {}
 
-void SetSampleValueCommand::apply(Chart& chart) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——编辑命令语义分支（配对/地雷/BGM 行）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——编辑命令语义分支（配对/地雷/BGM 行）
+void SetSampleValueCommand::apply(Chart& chart) {
     m_bpm_evs.clear();
     m_stop_evs.clear();
     const auto key = std::make_pair(m_kind, m_id);

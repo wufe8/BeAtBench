@@ -34,7 +34,8 @@ constexpr std::string_view kControlTags[] = {
     "SETRANDOM", "ENCODING",
 };
 
-inline bool is_control_tag(std::string_view tag) { // NOLINT(readability-function-size)——控制指令识别链
+// NOLINTNEXTLINE(readability-function-size)——控制指令识别链
+inline bool is_control_tag(std::string_view tag) {
     for (const auto t : kControlTags) {
         if (tag.size() == t.size()) {
             bool eq = true;
@@ -170,7 +171,8 @@ struct NoteInfo {
 
 }  // namespace
 
-BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——BMS 逐行解析状态机（格式核心，勿轻拆）
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BMS 逐行解析状态机（格式核心，勿轻拆）
+BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     BmsReadResult result;
     Chart& chart = result.chart;
 
@@ -712,7 +714,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) { // N
     return result;
 }
 
-BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——文件装载：编码与模式探测分支
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——文件装载：编码与模式探测分支
+BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts) {
     BmsReadResult result;
 
     // 路径处理（2026-09 修复日文/非 ASCII 路径打不开）：

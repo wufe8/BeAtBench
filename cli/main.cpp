@@ -324,7 +324,8 @@ int cmd_render_impl(const std::string& in_path, const std::string& out_path,
 // 同一进程连续 dispatch——session 状态（编辑会话）跨请求保持，CLI 可脚本编辑
 // （session.load → note.put → session.undo → convert 序列）。
 // 退出码：0 = 全部请求已产出信封；2 = 请求 JSON 非法/无输入；1 = 内部异常。
-int run_json(const std::string& request_text, bool multiline) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——JSON 子命令分派与批处理流程
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——JSON 子命令分派与批处理流程
+int run_json(const std::string& request_text, bool multiline) {
     auto dispatch_one = [&](const std::string& text, int& code) -> bool {
         try {
             const auto request = beatbench::json::Json::parse(text);
@@ -365,7 +366,8 @@ int run_json(const std::string& request_text, bool multiline) { // NOLINT(readab
         std::printf("%s\n",
                     beatbench::cmd::global_registry().dispatch(single).dump().c_str());
         return 0;
-    } catch (const beatbench::json::JsonError&) { // NOLINT(bugprone-empty-catch)——控制流分流：单 JSON 失败即转批处理
+    // NOLINTNEXTLINE(bugprone-empty-catch)——控制流分流：单 JSON 失败即转批处理
+    } catch (const beatbench::json::JsonError&) {
         // 非单 JSON → 按行批处理
     }
     // 多行：逐行 dispatch；空行跳过；任一失败 → 退出码取最严重
@@ -408,7 +410,8 @@ int run_json(const std::string& request_text, bool multiline) { // NOLINT(readab
 
 }  // namespace
 
-int main(int argc, char** argv) { // NOLINT(readability-function-cognitive-complexity)——CLI 全局参数与子命令分派
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——CLI 全局参数与子命令分派
+int main(int argc, char** argv) {
     setup_console();
     if (argc < 2) {
         print_usage();

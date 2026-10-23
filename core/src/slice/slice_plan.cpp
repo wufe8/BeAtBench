@@ -45,7 +45,8 @@ SlicePlan plan_from_grid(const GridConfig& cfg) {
     return plan;
 }
 
-SlicePlan plan_from_midi(const midi::MidiFile& midi, double offsetSec, // NOLINT(readability-function-cognitive-complexity)——MIDI 切片规划：通道聚合与边界分支
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——MIDI 切片规划：通道聚合与边界分支
+SlicePlan plan_from_midi(const midi::MidiFile& midi, double offsetSec,
                          double durationSec, bool extendToNextOnset) {
     SlicePlan plan;
     plan.durationSec = durationSec;

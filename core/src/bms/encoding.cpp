@@ -141,7 +141,8 @@ bool is_valid_utf8(std::string_view in) {
     return true;
 }
 
-std::string shiftjis_to_utf8(std::string_view in) { // NOLINT(readability-function-size)——Shift-JIS 双字节解码状态机
+// NOLINTNEXTLINE(readability-function-size)——Shift-JIS 双字节解码状态机
+std::string shiftjis_to_utf8(std::string_view in) {
     std::string out;
     out.reserve(in.size() + in.size() / 4);
     std::size_t i = 0;

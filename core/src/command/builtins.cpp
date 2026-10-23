@@ -152,7 +152,8 @@ Json diags_json(const std::vector<beatbench::codec::Diagnostic>& diags) {
     return arr;
 }
 
-Json samples_json(const Chart& chart) { // NOLINT(readability-function-cognitive-complexity)——采样表 JSON 组装分支
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——采样表 JSON 组装分支
+Json samples_json(const Chart& chart) {
     Json wav = Json::array(), bmp = Json::array(), bpm = Json::array(), stop = Json::array();
     const auto usage = collect_sample_usage(chart);
     // 生成单个条目（id 文本 + 使用统计 + file/value；未绑定 → 空 file）
@@ -306,7 +307,8 @@ public:
 class CheckCommand : public Command {
 public:
     std::string_view name() const override { return "check"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         const std::string& path = arg_str(args, "path");
         const Codec* codec = resolve_codec(args, path);
         beatbench::codec::ReadOptions opts;
@@ -650,7 +652,8 @@ double number_arg(const Json& args, const char* key) {
 
 // 时间轴事件集合 → JSON 数组（timing.list 结果；按 (measure,pos) 升序）
 // kind 未知 → bad_args（协议层兜底，命令层不产生该情况）
-Json timing_events_json(const Chart& chart, std::string_view kind) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——时序事件 JSON 组装分支
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——时序事件 JSON 组装分支
+Json timing_events_json(const Chart& chart, std::string_view kind) {
     Json arr = Json::array();
     const auto push = [&](std::uint32_t measure, const Rational& pos, double value,
                           std::optional<std::uint32_t> ref = std::nullopt) {
@@ -973,7 +976,8 @@ public:
 class ClipboardCopyCommand : public Command {
 public:
     std::string_view name() const override { return "clipboard.copy"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
         const auto& chart = session.chart();
@@ -1082,7 +1086,8 @@ private:
 class ClipboardPasteCommand : public Command {
 public:
     std::string_view name() const override { return "clipboard.paste"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
         const auto& chart = session.chart();
@@ -1388,7 +1393,8 @@ public:
 class SessionSaveCommand : public Command {
 public:
     std::string_view name() const override { return "session.save"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
             throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1551,7 +1557,8 @@ public:
 class NotePutCommand : public Command {
 public:
     std::string_view name() const override { return "note.put"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
             throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1705,7 +1712,8 @@ public:
 class NoteDeleteCommand : public Command {
 public:
     std::string_view name() const override { return "note.delete"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
             throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1925,7 +1933,8 @@ edit::ConvertTarget convert_target_from_json(const Json& args) {
 class NoteConvertCommand : public Command {
 public:
     std::string_view name() const override { return "note.convert"; }
-    Json run(const Json& args) const override { // NOLINT(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) {
             throw CommandError("no_chart", "未加载谱面（先 session.load）");

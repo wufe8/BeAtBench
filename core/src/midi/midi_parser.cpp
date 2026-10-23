@@ -86,7 +86,8 @@ struct PendingNote {
 
 }  // namespace
 
-MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——MIDI 事件流逐字节状态机
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——MIDI 事件流逐字节状态机
+MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
     Reader r(bytes);
 
     // ---- MThd 头块 ----
@@ -128,7 +129,8 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) { // NOLINT(re
     int maxTick = 0;          // 全曲最大事件 tick（含 EOT）
     bool smpteTempo = false;  // SMPTE 基下出现 tempo 事件 → 警告
 
-    auto handle_channel = [&](Reader& tr, int& tick, int status, bool hasFirst, // NOLINT(readability-function-cognitive-complexity)——note-off 配对扫描（与 note-on 对称）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——note-off 配对扫描（与 note-on 对称）
+    auto handle_channel = [&](Reader& tr, int& tick, int status, bool hasFirst,
                               std::uint8_t first, int track,
                               std::vector<PendingNote>& pending, int& unmatchedOff,
                               std::vector<MidiNote>& emit) {

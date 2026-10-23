@@ -117,7 +117,8 @@ void SamplePlayer::shutdown() {
     m_pcmBaseline.store(-1, std::memory_order_relaxed);
 }
 
-void SamplePlayer::render(float* out, int frames, double deviceRate) { // NOLINT(readability-function-cognitive-complexity,readability-function-size)——混音内核逐样本实时循环（回调零分配纪律），拆分引入调用开销
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——混音内核逐样本实时循环（回调零分配纪律），拆分引入调用开销
+void SamplePlayer::render(float* out, int frames, double deviceRate) {
     if (frames <= 0) return;
     if (deviceRate > 0) m_deviceRate = deviceRate;
 
