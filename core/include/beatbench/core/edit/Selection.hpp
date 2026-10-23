@@ -39,7 +39,7 @@ struct NoteRef {
 /// 选择集：无序 note 集合（有序容器便于确定性输出/对比）。
 /// 会话状态，不入 undo 栈；由 EditorSession 持有。
 class Selection {
-public:
+   public:
     void add(NoteRef ref) { m_refs.insert(ref); }
     void remove(const NoteRef& ref) { m_refs.erase(ref); }
     void clear() { m_refs.clear(); }
@@ -56,7 +56,7 @@ public:
                   const std::vector<Lane>& lanes, Rational pos_lo, Rational pos_hi,
                   const std::vector<NoteRef>& candidates);
 
-private:
+   private:
     std::set<NoteRef> m_refs;
 };
 

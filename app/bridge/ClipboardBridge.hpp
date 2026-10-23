@@ -11,7 +11,7 @@ namespace beatbench::app {
 
 class ClipboardBridge : public QObject {
     Q_OBJECT
-public:
+   public:
     explicit ClipboardBridge(QObject* parent = nullptr);
 
     /// 系统剪贴板当前文本（无文本/非文本 → 空串）。

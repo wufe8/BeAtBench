@@ -18,10 +18,10 @@ namespace beatbench {
 /// 其他格式（bmson sound_channels 等）映射到同构概念。
 /// SampleRef.id 单独出现时由使用方语境决定 kind（note 引用 WAV、BGA 引用 BMP）。
 enum class SampleKind : std::uint8_t {
-    Wav,  ///< 音频采样（#WAVxx → file）
-    Bmp,  ///< 图像/BGA（#BMPxx → file）
-    Bpm,  ///< BPM 定义（#BPMxx → value 原文本，保留精度）
-    Stop, ///< STOP 定义（#STOPxx → value 原文本）
+    Wav,   ///< 音频采样（#WAVxx → file）
+    Bmp,   ///< 图像/BGA（#BMPxx → file）
+    Bpm,   ///< BPM 定义（#BPMxx → value 原文本，保留精度）
+    Stop,  ///< STOP 定义（#STOPxx → value 原文本）
 };
 
 struct SampleDef {

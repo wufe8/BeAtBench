@@ -5,13 +5,13 @@
 // 不重采样——源率保留，混音回调按设备率插值（M4.1 决策）。
 // ⚠️ Windows 路径：含非 ASCII 必须走 `ma_decoder_init_file_w`（宽字符），
 // 窄字符走 fopen ANSI 代码页（GBK）→ 日文谱面目录打开失败（2026-09 用户实测）。
-#include "beatbench/audio/AudioDecoder.hpp"
-
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <memory>
+
+#include "beatbench/audio/AudioDecoder.hpp"
 
 // ⚠️ Vorbis 支持（2026-09 修复「定义 wav 实际 ogg 无声」根因）：
 // miniaudio **默认不内嵌 vorbis**——`MA_HAS_VORBIS` 仅在定义了
@@ -37,9 +37,9 @@
 #undef R
 #endif
 
-#define MA_IMPLEMENTATION      // 本 TU 唯一实现点（多 TU 重复定义将链接失败）
-#define MA_NO_ENCODING         // 只解码不编码（减小编译面）
-#define MA_NO_DEVICE_IO        // 设备 IO 走 PortAudio（backend_portaudio.cpp）
+#define MA_IMPLEMENTATION  // 本 TU 唯一实现点（多 TU 重复定义将链接失败）
+#define MA_NO_ENCODING     // 只解码不编码（减小编译面）
+#define MA_NO_DEVICE_IO    // 设备 IO 走 PortAudio（backend_portaudio.cpp）
 #include "miniaudio.h"
 
 namespace beatbench::audio {
@@ -68,9 +68,14 @@ void downmix_to_stereo(const float* src, std::size_t frames, std::uint32_t ch,
             std::uint32_t restCount = 0;
             for (std::uint32_t c = 0; c < ch; ++c) {
                 const float v = src[i * ch + c];
-                if (c == 0) l = v;
-                else if (c == 1) r = v;
-                else { rest += v; ++restCount; }
+                if (c == 0)
+                    l = v;
+                else if (c == 1)
+                    r = v;
+                else {
+                    rest += v;
+                    ++restCount;
+                }
             }
             if (restCount > 0) {
                 const float m = rest / static_cast<float>(restCount);
@@ -118,8 +123,8 @@ DecodeResult decode_with(OpenFn openFile, const std::string& pathForRecord) {
             ma_decoder_read_pcm_frames(&decoder, block.data(), 0x10000, &frameCount);
         if (r != MA_SUCCESS) break;
         if (frameCount == 0) break;
-        pcm.insert(pcm.end(), block.begin(), block.begin() +
-            static_cast<std::ptrdiff_t>(frameCount) * ch);
+        pcm.insert(pcm.end(), block.begin(),
+                   block.begin() + static_cast<std::ptrdiff_t>(frameCount) * ch);
     }
     ma_decoder_uninit(&decoder);
 
@@ -147,9 +152,11 @@ DecodeResult decode_audio_file(const std::string& path) {
         res.message = "文件不存在";
         return res;
     }
-    return decode_with([&](ma_decoder* d, const ma_decoder_config* c) {
-        return ma_decoder_init_file(path.c_str(), c, d);
-    }, path);
+    return decode_with(
+        [&](ma_decoder* d, const ma_decoder_config* c) {
+            return ma_decoder_init_file(path.c_str(), c, d);
+        },
+        path);
 }
 
 DecodeResult decode_audio_file_w(const std::wstring& path) {
@@ -169,18 +176,19 @@ DecodeResult decode_audio_file_w(const std::wstring& path) {
     try {
         const auto u8 = std::filesystem::path(path).u8string();  // C++20: std::u8string
         recordPath.assign(reinterpret_cast<const char*>(u8.data()), u8.size());
-    // NOLINTNEXTLINE(bugprone-empty-catch)——诊断字段容错，解码主流程不依赖此路径
+        // NOLINTNEXTLINE(bugprone-empty-catch)——诊断字段容错，解码主流程不依赖此路径
     } catch (...) {
     }
-    return decode_with([&](ma_decoder* d, const ma_decoder_config* c) {
-        return ma_decoder_init_file_w(path.c_str(), c, d);  // Windows 宽字符（UTF-16）
-    }, recordPath);
+    return decode_with(
+        [&](ma_decoder* d, const ma_decoder_config* c) {
+            return ma_decoder_init_file_w(path.c_str(), c, d);  // Windows 宽字符（UTF-16）
+        },
+        recordPath);
 }
 
 bool audio_extension_supported(const std::string& ext) {
     // 小写扩展名（不带点）
-    return ext == "wav" || ext == "ogg" || ext == "oga" || ext == "mp3" ||
-           ext == "flac";
+    return ext == "wav" || ext == "ogg" || ext == "oga" || ext == "mp3" || ext == "flac";
 }
 
 }  // namespace beatbench::audio

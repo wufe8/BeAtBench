@@ -19,8 +19,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -30,8 +30,7 @@ Chart make_chart() {
     c.meta["PLAYER"] = "1";
     c.meta["BPM"] = "130";
     // 一个 BPM 事件 + 一个 STOP 事件 + 一个小节定义
-    c.bpm_events = {{1, Rational(0, 1), Bpm{130.0}},
-                    {1, Rational(1, 2), Bpm{170.0}}};
+    c.bpm_events = {{1, Rational(0, 1), Bpm{130.0}}, {1, Rational(1, 2), Bpm{170.0}}};
     c.stop_events = {{1, Rational(1, 2), Stop{96}}};
     c.measure_events = {{1, Rational(0, 1), MeasureLen{4.0}}};
     return c;
@@ -44,9 +43,12 @@ std::vector<std::tuple<std::uint32_t, Rational, double>> norm_evs(
     std::vector<std::tuple<std::uint32_t, Rational, double>> out;
     for (const auto& e : evs) {
         double v = 0;
-        if constexpr (std::is_same_v<T, Bpm>) v = e.value.value;
-        else if constexpr (std::is_same_v<T, Stop>) v = static_cast<double>(e.value.count);
-        else v = e.value.beats;
+        if constexpr (std::is_same_v<T, Bpm>)
+            v = e.value.value;
+        else if constexpr (std::is_same_v<T, Stop>)
+            v = static_cast<double>(e.value.count);
+        else
+            v = e.value.beats;
         out.emplace_back(e.measure, e.pos, v);
     }
     return out;
@@ -59,8 +61,8 @@ std::vector<std::tuple<std::uint32_t, Rational, double>> norm_evs(
 TEST(TimingCommands, PutBpmInserts) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 2, Rational(0, 1), 200.0)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutTimingCommand>(TimingKind::Bpm, 2, Rational(0, 1), 200.0)));
     ASSERT_EQ(s.chart().bpm_events.size(), 3u);
     EXPECT_DOUBLE_EQ(s.chart().bpm_events.back().value.value, 200.0);
     EXPECT_EQ(s.chart().bpm_events.back().measure, 2u);
@@ -76,8 +78,8 @@ TEST(TimingCommands, PutReplacesSamePos) {
     EditorSession s;
     s.load(make_chart());
     // m1 pos0 已有 130 → 同位 put 200 替换（引擎同 pos 覆盖语义）
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 1, Rational(0, 1), 200.0)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutTimingCommand>(TimingKind::Bpm, 1, Rational(0, 1), 200.0)));
     ASSERT_EQ(s.chart().bpm_events.size(), 2u);  // 不新增
     // undo 恢复 130
     ASSERT_TRUE(s.undo());
@@ -89,12 +91,12 @@ TEST(TimingCommands, PutStopAndMeasure) {
     EditorSession s;
     s.load(make_chart());
     // STOP：新增（m2）
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Stop, 2, Rational(1, 4), 96.0)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutTimingCommand>(TimingKind::Stop, 2, Rational(1, 4), 96.0)));
     ASSERT_EQ(s.chart().stop_events.size(), 2u);
     // 节拍：pos 传非 0 → 归 0；同位替换 m1
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Measure, 1, Rational(1, 2), 8.0)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutTimingCommand>(TimingKind::Measure, 1, Rational(1, 2), 8.0)));
     ASSERT_EQ(s.chart().measure_events.size(), 1u);  // 替换不新增
     EXPECT_DOUBLE_EQ(s.chart().measure_events[0].value.beats, 8.0);
     EXPECT_EQ(s.chart().measure_events[0].pos, Rational(0, 1));  // 归 0
@@ -111,8 +113,7 @@ TEST(TimingCommands, DeleteRemoves) {
     EditorSession s;
     s.load(make_chart());
     // 删 m1 pos1/2 的 BPM（170）
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(
-        TimingKind::Bpm, 1, Rational(1, 2))));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(TimingKind::Bpm, 1, Rational(1, 2))));
     ASSERT_EQ(s.chart().bpm_events.size(), 1u);
     EXPECT_DOUBLE_EQ(s.chart().bpm_events[0].value.value, 130.0);
     // undo 恢复
@@ -124,8 +125,7 @@ TEST(TimingCommands, DeleteMissingNoop) {
     EditorSession s;
     s.load(make_chart());
     const auto before = norm_evs(s.chart().bpm_events);
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(
-        TimingKind::Bpm, 9, Rational(0, 1))));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(TimingKind::Bpm, 9, Rational(0, 1))));
     EXPECT_EQ(norm_evs(s.chart().bpm_events), before);
     ASSERT_TRUE(s.undo());  // 空命令 undo 也无变化
     EXPECT_EQ(norm_evs(s.chart().bpm_events), before);
@@ -134,8 +134,7 @@ TEST(TimingCommands, DeleteMissingNoop) {
 TEST(TimingCommands, DeleteStop) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(
-        TimingKind::Stop, 1, Rational(1, 2))));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(TimingKind::Stop, 1, Rational(1, 2))));
     EXPECT_TRUE(s.chart().stop_events.empty());
     ASSERT_TRUE(s.undo());
     EXPECT_EQ(norm_evs(s.chart().stop_events), norm_evs(make_chart().stop_events));
@@ -144,8 +143,8 @@ TEST(TimingCommands, DeleteStop) {
 TEST(TimingCommands, DeleteMeasure) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteTimingCommand>(
-        TimingKind::Measure, 1, Rational(0, 1))));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<DeleteTimingCommand>(TimingKind::Measure, 1, Rational(0, 1))));
     EXPECT_TRUE(s.chart().measure_events.empty());
     ASSERT_TRUE(s.undo());
     EXPECT_EQ(norm_evs(s.chart().measure_events), norm_evs(make_chart().measure_events));
@@ -263,8 +262,8 @@ TEST(TimingCommands, InsertKeepsOrder) {
     EditorSession s;
     s.load(make_chart());
     // 插到已有序事件的中间（m1 pos0 与 pos1/2 之间 → pos1/4）
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 1, Rational(1, 4), 150.0)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutTimingCommand>(TimingKind::Bpm, 1, Rational(1, 4), 150.0)));
     const auto& evs = s.chart().bpm_events;
     ASSERT_EQ(evs.size(), 3u);
     EXPECT_EQ(evs[0].pos, Rational(0, 1));
@@ -281,9 +280,8 @@ TEST(TimingCommands, Base62LowerCaseRef) {
     s.load(std::move(c));
 
     // 用小写 id "ab" 绑定 BPM 事件（新增事件）
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 0, Rational(0, 1), 180.0,
-        bms::c62_to_u32("ab", 2))));
+    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(TimingKind::Bpm, 0, Rational(0, 1), 180.0,
+                                                          bms::c62_to_u32("ab", 2))));
     ASSERT_EQ(s.chart().bpm_events.size(), 3u);
     ASSERT_TRUE(s.chart().bpm_events[0].value.ref_id.has_value());
     const std::uint32_t ab_id = bms::c62_to_u32("ab", 2);
@@ -292,18 +290,17 @@ TEST(TimingCommands, Base62LowerCaseRef) {
     EXPECT_NE(ab_id, AB_id);  // ab 和 AB 是不同的 id
 
     // 用大写 id "AB" 绑定另一个事件
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 0, Rational(1, 4), 200.0, AB_id)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutTimingCommand>(TimingKind::Bpm, 0, Rational(1, 4), 200.0, AB_id)));
     ASSERT_TRUE(s.chart().bpm_events[1].value.ref_id.has_value());
     EXPECT_EQ(*s.chart().bpm_events[1].value.ref_id, AB_id);
 
     // 两个事件的 ref 应该不同
-    EXPECT_NE(*s.chart().bpm_events[0].value.ref_id,
-              *s.chart().bpm_events[1].value.ref_id);
+    EXPECT_NE(*s.chart().bpm_events[0].value.ref_id, *s.chart().bpm_events[1].value.ref_id);
 
     // 替换小写 id 事件的值（同位替换）
-    ASSERT_TRUE(s.exec(std::make_unique<PutTimingCommand>(
-        TimingKind::Bpm, 0, Rational(0, 1), 190.0, ab_id)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutTimingCommand>(TimingKind::Bpm, 0, Rational(0, 1), 190.0, ab_id)));
     // 替换后 ref 应保持，且定义表应更新
     EXPECT_EQ(*s.chart().bpm_events[0].value.ref_id, ab_id);
     const auto key_ab = std::make_pair(SampleKind::Bpm, ab_id);

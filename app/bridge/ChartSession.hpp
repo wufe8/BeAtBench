@@ -8,7 +8,6 @@
 
 #include <QObject>
 #include <QString>
-
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -16,9 +15,9 @@
 #include <mutex>
 #include <string>
 
+#include "beatbench/audio/WaveformPyramid.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/timing/TimingEngine.hpp"
-#include "beatbench/audio/WaveformPyramid.hpp"
 
 namespace beatbench::app {
 
@@ -29,7 +28,7 @@ class ChartSession : public QObject {
     Q_PROPERTY(int measureCount READ measureCount NOTIFY documentChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
 
-public:
+   public:
     explicit ChartSession(QObject* parent = nullptr);
 
     /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/command-protocol.md 三、6.）。
@@ -124,8 +123,7 @@ public:
         const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
         double sampleRate);  ///< 锁定 m_noteSnapMutex → 非 const（mutex 解 const）。
     /// 渲染完成后更新 note 快照（全量渲染后调用；供下次 diff）。
-    void updateNoteSnapshot(const beatbench::Chart& chart,
-                            const beatbench::TimingEngine& timing);
+    void updateNoteSnapshot(const beatbench::Chart& chart, const beatbench::TimingEngine& timing);
 
     /// M4.3c 波形显示：最近渲染的 min/max 金字塔查询。
     /// 帧区间 [frameLo, frameHi)（已夹逼）→ {min, max}（mono 混音）。
@@ -158,15 +156,15 @@ public:
     /// 小节数 = 最大事件小节 + 1（空谱 = 0）。
     int measureCount() const;
 
-signals:
-    void chartChanged();      ///< 兼容旧接口：文档或内容任一变化
-    void documentChanged();   ///< 活动会话/文档切换（QML 应重置视图滚动）
-    void contentChanged();    ///< 同文档内容变化（QML 保持视图滚动）
-    void dirtyChanged();      ///< 未保存状态变化
+   signals:
+    void chartChanged();     ///< 兼容旧接口：文档或内容任一变化
+    void documentChanged();  ///< 活动会话/文档切换（QML 应重置视图滚动）
+    void contentChanged();   ///< 同文档内容变化（QML 保持视图滚动）
+    void dirtyChanged();     ///< 未保存状态变化
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
 
-private:
+   private:
     void attachActive(bool rebuildTiming);
     void resetRenderState();  ///< 换文档：丢弃 PCM/金字塔并作废 in-flight
     void syncDirty();
@@ -185,7 +183,7 @@ private:
     bool m_initialized = false;  ///< 首次 attach 强制重建 timing
     bool m_dirty = false;
     // —— M4.3c+ 后台渲染 ——
-    std::atomic<bool> m_renderInFlight{false};   ///< 渲染中（去重）
+    std::atomic<bool> m_renderInFlight{false};      ///< 渲染中（去重）
     std::atomic<std::uint64_t> m_renderVersion{0};  ///< 版本号（过期结果丢弃）
     struct RenderedAudioHolder;
     std::shared_ptr<RenderedAudioHolder> m_rendered;  ///< 最近结果（线程安全；null = 无）

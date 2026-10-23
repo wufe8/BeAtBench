@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "beatbench/core/codec/CodecRegistry.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
+
+#include "beatbench/core/codec/CodecRegistry.hpp"
 
 namespace beatbench::codec {
 

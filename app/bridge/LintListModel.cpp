@@ -24,18 +24,26 @@ QVariant LintListModel::data(const QModelIndex& index, int role) const {
         return {};
     const Entry& e = m_rows[static_cast<std::size_t>(index.row())];
     switch (role) {
-        case SeverityRole: return e.severity;
-        case MessageRole: return e.message;
-        case IdRole: return e.id;
-        case FileRole: return e.file;
-        case LineRole: return e.line;
-        default: return {};
+        case SeverityRole:
+            return e.severity;
+        case MessageRole:
+            return e.message;
+        case IdRole:
+            return e.id;
+        case FileRole:
+            return e.file;
+        case LineRole:
+            return e.line;
+        default:
+            return {};
     }
 }
 
 QHash<int, QByteArray> LintListModel::roleNames() const {
-    return {{SeverityRole, "severity"}, {MessageRole, "message"},
-            {IdRole, "id"},             {FileRole, "file"},
+    return {{SeverityRole, "severity"},
+            {MessageRole, "message"},
+            {IdRole, "id"},
+            {FileRole, "file"},
             {LineRole, "line"}};
 }
 
@@ -88,8 +96,7 @@ void LintListModel::loadFromCheck(const QString& checkJson) {
             //     lint.* 数组；loadFromCheck 此前忽略 → 打开谱面时 lint 面板不显示，
             //     只有编辑触发 refreshLint（session.lint → loadFromIssues）才出现）。
             //     2026-09 用户：补齐「打开即显示重叠 note / 悬挂 LN」。
-            const auto add_positional = [&](const char* key,
-                                            const QString& fallbackType) {
+            const auto add_positional = [&](const char* key, const QString& fallbackType) {
                 if (const Json* arr = lint->find(key); arr && arr->is_array()) {
                     for (const auto& d : arr->as_array()) {
                         Entry e;
@@ -153,8 +160,7 @@ void LintListModel::loadFromIssues(const QString& issuesJson) {
                 e.severity = QStringLiteral("warning");
                 if (const Json* v = d.find("severity"))
                     e.severity = QString::fromUtf8(v->as_str().c_str());
-                if (const Json* v = d.find("code"))
-                    e.id = QString::fromUtf8(v->as_str().c_str());
+                if (const Json* v = d.find("code")) e.id = QString::fromUtf8(v->as_str().c_str());
                 if (const Json* v = d.find("message"))
                     e.message = QString::fromUtf8(v->as_str().c_str());
                 if (!e.message.isEmpty()) rows.push_back(std::move(e));

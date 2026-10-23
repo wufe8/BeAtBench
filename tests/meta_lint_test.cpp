@@ -18,8 +18,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -86,8 +86,8 @@ TEST(MetaLint, MetaEditBaseUndoRestoresIdBase) {
     ASSERT_TRUE(s.exec(std::make_unique<MetaEditCommand>("BASE", "36")));
     EXPECT_EQ(s.chart().id_base, IdBase::Base36);
     ASSERT_TRUE(s.undo());
-    EXPECT_EQ(s.chart().id_base, IdBase::Base62);   // 曾误恢复成 Base36（审查 bug）
-    EXPECT_EQ(s.chart().meta.count("BASE"), 0u);    // 原 meta 无 BASE → 恢复后不残留
+    EXPECT_EQ(s.chart().id_base, IdBase::Base62);  // 曾误恢复成 Base36（审查 bug）
+    EXPECT_EQ(s.chart().meta.count("BASE"), 0u);   // 原 meta 无 BASE → 恢复后不残留
     ASSERT_TRUE(s.redo());
     EXPECT_EQ(s.chart().id_base, IdBase::Base36);
     ASSERT_TRUE(s.undo());
@@ -185,7 +185,8 @@ TEST(MetaLint, LintSubLinesAllowedForBgm) {
     n.value.sub_line = 5;  // 子行 > 0（ch01 允许）
     c.notes.push_back(n);
     const auto issues = bms::lint_chart(c, std::filesystem::path());
-    for (const auto& issue : issues) EXPECT_NE(issue.code, "sub_lines_not_allowed") << issue.message;
+    for (const auto& issue : issues)
+        EXPECT_NE(issue.code, "sub_lines_not_allowed") << issue.message;
 }
 
 TEST(MetaLint, LintSubLinesNotAllowedForPlay) {
@@ -255,10 +256,10 @@ TEST(MetaLint, LintUnboundReferencedWav) {
     c.meta["LNOBJ"] = "ZZ";  // base36 ZZ = 1295
     Event<Note> n1{1, Rational(0, 1), {}};
     n1.value.lane = {0, LaneKind::Key, 1};
-    n1.value.sample.id = 5;    // #WAV05 未定义 → 应警告
+    n1.value.sample.id = 5;  // #WAV05 未定义 → 应警告
     Event<Note> n2{1, Rational(1, 2), {}};
     n2.value.lane = {0, LaneKind::Key, 1};
-    n2.value.sample.id = 1295; // #WAVZZ = LNOBJ → 豁免
+    n2.value.sample.id = 1295;  // #WAVZZ = LNOBJ → 豁免
     c.notes.push_back(n1);
     c.notes.push_back(n2);
     const auto issues = bms::lint_chart(c, std::filesystem::path());
@@ -268,8 +269,8 @@ TEST(MetaLint, LintUnboundReferencedWav) {
         if (issue.id == "05") wav5_warned = true;
         if (issue.id == "ZZ") wavzz_warned = true;
     }
-    EXPECT_TRUE(wav5_warned);   // 未定义引用 → 警告
-    EXPECT_FALSE(wavzz_warned); // LNOBJ 空音尾 → 豁免
+    EXPECT_TRUE(wav5_warned);    // 未定义引用 → 警告
+    EXPECT_FALSE(wavzz_warned);  // LNOBJ 空音尾 → 豁免
 }
 
 // —— 协议 dispatch ——

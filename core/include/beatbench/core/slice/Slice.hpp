@@ -19,28 +19,28 @@ namespace beatbench::slice {
 
 /// 一个切片（位置源切出的一段音频，[startSec, endSec)）。
 struct Slice {
-    int index = 0;        ///< 序号（0 起；按 startSec 升序）
+    int index = 0;  ///< 序号（0 起；按 startSec 升序）
     double startSec = 0.0;
     double endSec = 0.0;
-    std::string kind;     ///< "grid" | "midi" | "manual"（来源标注；UI 着色/后续放置策略用）
-    int note = 0;         ///< midi 音高（grid/manual = 0）
-    int noteCount = 0;    ///< 该起始点合并的 midi note 数（和弦合并；1 = 单音，grid/manual = 0）
-    int startTick = -1;   ///< midi 绝对 tick（grid/manual = -1；后续拍位换算用）
+    std::string kind;    ///< "grid" | "midi" | "manual"（来源标注；UI 着色/后续放置策略用）
+    int note = 0;        ///< midi 音高（grid/manual = 0）
+    int noteCount = 0;   ///< 该起始点合并的 midi note 数（和弦合并；1 = 单音，grid/manual = 0）
+    int startTick = -1;  ///< midi 绝对 tick（grid/manual = -1；后续拍位换算用）
 };
 
 struct SlicePlan {
-    std::vector<Slice> slices;      ///< 按 startSec 升序；无切片 = 空
+    std::vector<Slice> slices;          ///< 按 startSec 升序；无切片 = 空
     std::vector<std::string> warnings;  ///< 可恢复的输入问题（人类可读中文）
-    double durationSec = 0.0;       ///< 已知的音频时长（0 = 未知/未限制）
+    double durationSec = 0.0;           ///< 已知的音频时长（0 = 未知/未限制）
 };
 
 /// 网格源配置（BPM/每拍细分/offset；beatsPerMeasure 仅随附元数据——M6.3 铺放拍位显示用）。
 struct GridConfig {
     double bpm = 120.0;
     int beatsPerMeasure = 4;
-    int subdivision = 4;      ///< 每拍几等分（4=16 分、3=三连、2=8 分、6=24 分…）
-    double offsetSec = 0.0;   ///< 网格第一线位置（音频秒；负值切片起点夹到 0）
-    double durationSec = 0.0; ///< 生成上限（<=0 = 不限时）
+    int subdivision = 4;       ///< 每拍几等分（4=16 分、3=三连、2=8 分、6=24 分…）
+    double offsetSec = 0.0;    ///< 网格第一线位置（音频秒；负值切片起点夹到 0）
+    double durationSec = 0.0;  ///< 生成上限（<=0 = 不限时）
 };
 
 /// 网格源：offset 起每 (60/bpm/subdivision) 秒一条边界 → 相邻边界成切片。
@@ -50,7 +50,7 @@ SlicePlan plan_from_grid(const GridConfig& cfg);
 /// 只标起始点，右边界 = 下一个唯一起始点/音频末尾；同一起始多 note（和弦）合并成一片
 /// （noteCount 计数）。`false` = 每个 note 一片 [on, off)（历史行为）。
 /// durationSec > 0 时末端夹逼（起点超过时长的切片丢弃）。
-SlicePlan plan_from_midi(const midi::MidiFile& midi, double offsetSec,
-                         double durationSec = 0.0, bool extendToNextOnset = true);
+SlicePlan plan_from_midi(const midi::MidiFile& midi, double offsetSec, double durationSec = 0.0,
+                         bool extendToNextOnset = true);
 
 }  // namespace beatbench::slice

@@ -31,8 +31,7 @@ struct OnsetConfig {
 /// 输入交错 PCM（float32；channels 声道交错；多声道按帧平均混为单声道）。
 /// 返回 onset 时间（秒，升序；帧起点对齐，粒度 ≈ hop/sampleRate）。
 /// sampleRate <= 0 / frameCount == 0 / 非法窗参数 → 空表。
-std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCount,
-                                  int channels, double sampleRate,
-                                  const OnsetConfig& cfg = {});
+std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCount, int channels,
+                                  double sampleRate, const OnsetConfig& cfg = {});
 
 }  // namespace beatbench::audio

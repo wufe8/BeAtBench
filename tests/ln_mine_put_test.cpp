@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -49,14 +49,14 @@ TEST(LnMinePut, PutLnHeadThenTailPairs) {
     EditorSession s;
     s.load(make_chart());
     // 放头（m1 pos0 key1 sample1，ln_kind）→ 无候选，作为未配对候选头
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_EQ(s.chart().notes.size(), 1u);
     EXPECT_FALSE(s.chart().notes[0].value.ln_pair.has_value());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 放尾（m1 pos1/2 key1 sample1，ln_kind）→ 自动配对
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_EQ(s.chart().notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 头尾互指
@@ -69,10 +69,10 @@ TEST(LnMinePut, PutLnHeadThenTailPairs) {
 TEST(LnMinePut, PutLnUndoRestoresUnpaired) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_TRUE(ln_consistent(s.chart().notes));
     // undo 尾 → 头解除配对，尾消失
     ASSERT_TRUE(s.undo());
@@ -88,10 +88,10 @@ TEST(LnMinePut, PutLnDifferentSampleNoPair) {
     EditorSession s;
     s.load(make_chart());
     // 头 sample1，尾 sample2 → 不配对（不同采样 id 不是一对）
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 2, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 2, true)));
     ASSERT_EQ(s.chart().notes.size(), 2u);
     for (const auto& e : s.chart().notes) {
         EXPECT_FALSE(e.value.ln_pair.has_value());
@@ -121,12 +121,10 @@ TEST(LnMinePut, WriterLnAndMineChannels) {
     EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{0, LaneKind::Key, 1}, true, NoteKind::Normal),
               "51");
     // 地雷：1P key1 → D1
-    EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{0, LaneKind::Key, 1}, false,
-                                   NoteKind::Landmine),
+    EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{0, LaneKind::Key, 1}, false, NoteKind::Landmine),
               "D1");
     // 2P 地雷 key2 → E2
-    EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{1, LaneKind::Key, 2}, false,
-                                   NoteKind::Landmine),
+    EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{1, LaneKind::Key, 2}, false, NoteKind::Landmine),
               "E2");
 }
 
@@ -330,11 +328,11 @@ TEST(LnMinePut, CrossLaneMiddleStillPairs) {
     EditorSession s;
     s.load(make_chart());
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));   // 头 A
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));  // 头 A
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, true)));   // B（不同通道，普通候选）
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, true)));  // B（不同通道，普通候选）
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));   // 尾 A：忽略中间 B，配到 A 头
+        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));  // 尾 A：忽略中间 B，配到 A 头
     ASSERT_EQ(s.chart().notes.size(), 3u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 头 A（pos0）与尾 A（pos3/4）配对；B（key2）保持未配对
@@ -357,10 +355,10 @@ TEST(LnMinePut, CrossLaneMiddleStillPairs) {
 TEST(LnMinePut, AdjacentSameLaneStillPairs) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_EQ(s.chart().notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     EXPECT_EQ(s.chart().notes[0].value.ln_pair.value_or(999), 1u);
@@ -372,12 +370,12 @@ TEST(LnMinePut, AdjacentSameLaneStillPairs) {
 TEST(LnMinePut, MiddleOtherLaneOrdinaryNoteStillPairs) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
         1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, false)));  // 普通 note（非 ln）
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_EQ(s.chart().notes.size(), 3u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 两个 key1 note 配对（头 pos0 + 尾 pos3/4）
@@ -397,11 +395,11 @@ TEST(LnMinePut, AlreadyPairedStopsRescan) {
     EditorSession s;
     s.load(make_chart());
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));   // 头
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));  // 头
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));   // 尾（配成 LN）
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));  // 尾（配成 LN）
     ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));   // 再放：向前遇到已配对 → 新头
+        1, Rational(3, 4), Lane{0, LaneKind::Key, 1}, 1, true)));  // 再放：向前遇到已配对 → 新头
     ASSERT_EQ(s.chart().notes.size(), 3u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 第 3 个（pos3/4）未配对（不重复配）
@@ -420,7 +418,7 @@ Chart make_chart_lntype2() {
     c.meta["PLAYER"] = "1";
     c.meta["BPM"] = "130";
     c.meta["LNTYPE"] = "2";
-    c.meta["LNOBJ"] = "01";   // c36 id = 1（#LNOBJ 尾采样）
+    c.meta["LNOBJ"] = "01";  // c36 id = 1（#LNOBJ 尾采样）
     return c;
 }
 
@@ -428,13 +426,13 @@ TEST(LnMinePut, LnType2HeadThenTailPairs) {
     EditorSession s;
     s.load(make_chart_lntype2());
     // 头（普通 note，sample5 非 LNOBJ）
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
     EXPECT_FALSE(s.chart().notes[0].value.ln_pair.has_value());
     EXPECT_FALSE(s.chart().notes[0].value.ln_channel);  // LNTYPE 2 头在普通通道（非 5x）
     // 尾（sample1 == #LNOBJ id）→ 自动配对
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, false)));
     ASSERT_EQ(s.chart().notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     EXPECT_EQ(s.chart().notes[0].value.ln_pair.value_or(999), 1u);
@@ -444,10 +442,10 @@ TEST(LnMinePut, LnType2HeadThenTailPairs) {
 TEST(LnMinePut, LnType2UndoTailUnpairs) {
     EditorSession s;
     s.load(make_chart_lntype2());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, false)));
     ASSERT_TRUE(ln_consistent(s.chart().notes));
     ASSERT_TRUE(s.undo());
     ASSERT_EQ(s.chart().notes.size(), 1u);
@@ -458,11 +456,11 @@ TEST(LnMinePut, LnType2TailBeforeHeadNoPair) {
     EditorSession s;
     s.load(make_chart_lntype2());
     // 尾（sample1）在前 → 无可配对的头
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, false)));
     // 头在后 → 尾仍未配对（头在时间上晚于尾，不进尾的头栈命中窗）
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 5, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 5, false)));
     for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.ln_pair.has_value());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 }
@@ -471,12 +469,10 @@ TEST(LnMinePut, LnType2CrossChannelNoPair) {
     EditorSession s;
     s.load(make_chart_lntype2());
     // 头 key1，尾 key2（不同 lane）→ 不配对（头尾须同 lane）
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 5, false)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 1, false)));
     for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.ln_pair.has_value());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 }
-
-

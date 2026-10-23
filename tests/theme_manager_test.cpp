@@ -148,7 +148,7 @@ TEST(ThemeManager, BuiltinSkinCatalog) {
     EXPECT_TRUE(names.contains(QStringLiteral("Aurora")));
     EXPECT_TRUE(names.contains(QStringLiteral("Linear")));
     EXPECT_TRUE(names.contains(QStringLiteral("OsuLight")));  // 亮色内置皮肤
-    EXPECT_TRUE(names.contains(QStringLiteral("Win10")));      // 直角/扁平内置皮肤
+    EXPECT_TRUE(names.contains(QStringLiteral("Win10")));     // 直角/扁平内置皮肤
     EXPECT_EQ(th.skinDir(QStringLiteral("Aurora")), QStringLiteral("skins/Aurora"));
     EXPECT_EQ(th.skinDir(QStringLiteral("Linear")), QStringLiteral("skins/Linear"));
     EXPECT_EQ(th.skinDir(QStringLiteral("OsuLight")), QStringLiteral("skins/OsuLight"));
@@ -190,11 +190,11 @@ TEST(ThemeManager, SkinDirResolvedInSearchesBases) {
 TEST(ThemeManager, SkinSearchBasesPrefersCwdThenExeDir) {
     const QStringList bases = ThemeManager::skinSearchBases();
     ASSERT_FALSE(bases.isEmpty());
-    EXPECT_EQ(bases.first(), QStringLiteral("."));   // cwd 优先（常规启动/开发）
+    EXPECT_EQ(bases.first(), QStringLiteral("."));  // cwd 优先（常规启动/开发）
     EXPECT_TRUE(bases.contains(QStringLiteral("..")));
     EXPECT_TRUE(bases.contains(QStringLiteral("../..")));
     EXPECT_TRUE(bases.contains(QStringLiteral("../../..")));
-    if (QCoreApplication::instance()) {              // 有实例时注入 exe 目录（发布包布局）
+    if (QCoreApplication::instance()) {  // 有实例时注入 exe 目录（发布包布局）
         const QString appDir = QCoreApplication::applicationDirPath();
         EXPECT_FALSE(appDir.isEmpty());
         EXPECT_TRUE(bases.contains(appDir));
@@ -255,7 +255,8 @@ TEST(ThemeManager, IndependentShapeTokens) {
     // radiusSm 不变
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString path = write_theme(dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6, "keyLaneTintAlpha": 0})");
+    const QString path = write_theme(
+        dir, R"({"buttonRadius": 0, "boxRadius": 8, "radiusSm": 6, "keyLaneTintAlpha": 0})");
     ASSERT_FALSE(path.isEmpty());
     th.loadTheme(path);
     EXPECT_DOUBLE_EQ(th.buttonRadius(), 0.0);

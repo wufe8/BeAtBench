@@ -16,8 +16,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -70,9 +70,9 @@ TEST(NoteMoveLane, MoveTimeAndLane) {
     EditorSession s;
     s.load(make_chart());
     // m1 pos0 key1 s1 → m3 pos1/4 scratch（时间 + 通道一起动）
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
-        3, Rational(1, 4), false, Lane{0, LaneKind::Scratch, 0})));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3,
+                                          Rational(1, 4), false, Lane{0, LaneKind::Scratch, 0})));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 3u);
     // 找到移动后的 note：m3 pos1/4 scratch s1
@@ -86,9 +86,9 @@ TEST(NoteMoveLane, MoveTimeAndLane) {
     EXPECT_TRUE(found);
     // 原位 m1 pos0 key1 不再有 s1
     for (const auto& e : notes) {
-        const bool still_at_source =
-            e.measure == 1 && e.pos == Rational(0, 1) &&
-            e.value.lane == Lane{0, LaneKind::Key, 1} && e.value.sample.id == 1;
+        const bool still_at_source = e.measure == 1 && e.pos == Rational(0, 1) &&
+                                     e.value.lane == Lane{0, LaneKind::Key, 1} &&
+                                     e.value.sample.id == 1;
         EXPECT_FALSE(still_at_source);
     }
     EXPECT_TRUE(ln_consistent(notes));
@@ -103,8 +103,7 @@ TEST(NoteMoveLane, BackwardCompatNoLane) {
     EditorSession s;
     s.load(make_chart());
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
-        5, Rational(1, 2))));  // 无 to_lane
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 5, Rational(1, 2))));  // 无 to_lane
     // lane 不变，measure/pos 变
     bool found = false;
     for (const auto& e : s.chart().notes) {
@@ -145,9 +144,9 @@ TEST(NoteMoveLane, LnPairMovesBothLanes) {
     // 2026-09 用户最终确认（LN 跨通道断开）：移动只移动选中 note；跨通道（lane 变）
     // → 不再是同通道 LN → **断开**（两端都变普通单点，ln_pair 清空）。
     // 头 m1 pos0 key1 → m2 pos0 key5；尾留 m1 pos1/2 key1；两者不相连。
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
-        2, Rational(0, 1), true, Lane{0, LaneKind::Key, 5})));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 2,
+                                                 Rational(0, 1), true, Lane{0, LaneKind::Key, 5})));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 2u);
     bool head_ok = false, tail_ok = false;
@@ -173,9 +172,9 @@ TEST(NoteMoveLane, LnSingleNoteBreaksPairCrossLane) {
     s.load(ln_chart());
     // 单 note 模式跨通道：只移头（key1→key7），**断开**（跨通道不构成 LN）——
     // 2026-09 用户最终确认：要么移动到普通游玩通道（断开变单点），要么留在 LN 通道。
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
-        2, Rational(0, 1), false, Lane{0, LaneKind::Key, 7})));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 2,
+                                          Rational(0, 1), false, Lane{0, LaneKind::Key, 7})));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 2u);
     // 头在 m2 key7 无配对；尾在 m1 key1 无配对（断开）
@@ -204,16 +203,14 @@ TEST(NoteMoveLane, LnSingleMoveSameLaneReconnectsForward) {
     s.load(ln_chart());  // 头 m1 pos0 + 尾 m1 pos1/2，互指
     // 只移尾（同通道，m1 pos1/2 → m2 pos3/4）：尾在新位置向前找最近同通道未配对 note
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1,
-        2, Rational(3, 4), false)));
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, 2, Rational(3, 4), false)));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(notes));
     // 尾移到 m2 pos3/4；向前找最近同通道未配对 = 头（m1 pos0，被断开后未配对）→ 重连
     bool tail_reconnected = false;
     for (const auto& e : notes) {
-        if (e.measure == 2 && e.pos == Rational(3, 4) &&
-            e.value.lane == Lane{0, LaneKind::Key, 1})
+        if (e.measure == 2 && e.pos == Rational(3, 4) && e.value.lane == Lane{0, LaneKind::Key, 1})
             tail_reconnected = e.value.ln_pair.has_value();
     }
     EXPECT_TRUE(tail_reconnected);
@@ -230,12 +227,11 @@ TEST(NoteMoveLane, CompositeBatchCrossLaneOneUndo) {
     s.load(make_chart());  // 3 notes
     // 批量：n1 (m1 pos0 key1 s1) → m3 key5；n2 (m1 pos1/2 key2 s2) → m3 scratch
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1,
-        3, Rational(0, 1), false, Lane{0, LaneKind::Key, 5}));
-    comp->add(std::make_unique<MoveNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2,
-        3, Rational(1, 2), false, Lane{0, LaneKind::Scratch, 0}));
+    comp->add(std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3,
+                                                Rational(0, 1), false, Lane{0, LaneKind::Key, 5}));
+    comp->add(std::make_unique<MoveNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, 3,
+                                                Rational(1, 2), false,
+                                                Lane{0, LaneKind::Scratch, 0}));
     ASSERT_TRUE(s.exec(std::move(comp)));
     EXPECT_EQ(s.undo_depth(), 1u);  // 一个 undo 步
 
@@ -246,7 +242,8 @@ TEST(NoteMoveLane, CompositeBatchCrossLaneOneUndo) {
     for (const auto& e : notes) {
         if (e.measure == 3 && e.value.lane == Lane{0, LaneKind::Key, 5} && e.value.sample.id == 1)
             a = true;
-        if (e.measure == 3 && e.value.lane == Lane{0, LaneKind::Scratch, 0} && e.value.sample.id == 2)
+        if (e.measure == 3 && e.value.lane == Lane{0, LaneKind::Scratch, 0} &&
+            e.value.sample.id == 2)
             b = true;
         if (e.measure == 2 && e.value.lane == Lane{0, LaneKind::Key, 3} && e.value.sample.id == 3)
             c_ok = true;
@@ -413,10 +410,9 @@ TEST(NoteMoveLane, ProtocolMovesArrayMultiOneUndo) {
     req.set("command", "note.move");
     Json args = Json::object();
     Json moves = Json::array();
-    auto push_move = [&](std::uint32_t fm, std::int64_t pn, std::int64_t pd,
-                         std::uint32_t sample, const char* kind, std::uint32_t index,
-                         std::uint32_t tm, std::int64_t tn, std::int64_t td,
-                         const char* to_kind, std::uint32_t to_index) {
+    auto push_move = [&](std::uint32_t fm, std::int64_t pn, std::int64_t pd, std::uint32_t sample,
+                         const char* kind, std::uint32_t index, std::uint32_t tm, std::int64_t tn,
+                         std::int64_t td, const char* to_kind, std::uint32_t to_index) {
         Json m = Json::object();
         Json from = Json::object();
         from.set("measure", static_cast<std::int64_t>(fm));
@@ -459,7 +455,8 @@ TEST(NoteMoveLane, ProtocolMovesArrayMultiOneUndo) {
     for (const auto& e : session.chart().notes) {
         if (e.measure == 3 && e.value.lane == Lane{0, LaneKind::Key, 5} && e.value.sample.id == 1)
             a = true;
-        if (e.measure == 3 && e.value.lane == Lane{0, LaneKind::Scratch, 0} && e.value.sample.id == 2)
+        if (e.measure == 3 && e.value.lane == Lane{0, LaneKind::Scratch, 0} &&
+            e.value.sample.id == 2)
             b = true;
         if (e.measure == 2 && e.value.lane == Lane{0, LaneKind::Key, 3} && e.value.sample.id == 3)
             c_ok = true;
@@ -533,7 +530,12 @@ TEST(NoteMoveLane, ProtocolLegacyTopLevelFromTo) {
 
 // BGM 行号归一化：把每个 Bgm note 的 (measure,pos,sample,sub_line) 提出排序
 // （Bgm 消歧靠 sub_line，故需含它；非 Bgm 不在此表）。
-struct BgmRow { std::uint32_t measure; Rational pos; std::uint32_t sample; std::uint32_t line; };
+struct BgmRow {
+    std::uint32_t measure;
+    Rational pos;
+    std::uint32_t sample;
+    std::uint32_t line;
+};
 std::vector<BgmRow> bgm_rows(const std::vector<Event<Note>>& notes) {
     std::vector<BgmRow> out;
     for (const auto& e : notes) {
@@ -560,8 +562,8 @@ TEST(NoteMoveLane, BgmMultiMoveAutoAssign) {
     req.set("command", "note.move");
     Json args = Json::object();
     Json moves = Json::array();
-    const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx,
-                              std::uint32_t sample, std::uint32_t tm, int tn, int td) -> Json {
+    const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx, std::uint32_t sample,
+                              std::uint32_t tm, int tn, int td) -> Json {
         Json m = Json::object();
         Json from = Json::object();
         from.set("measure", static_cast<std::int64_t>(fm));
@@ -590,9 +592,9 @@ TEST(NoteMoveLane, BgmMultiMoveAutoAssign) {
         m.set("to", std::move(to));
         return m;
     };
-    moves.push_back(make_move(1, 0, 1, 1, 1, 5, 3, 4));   // key1 s1 → BGM m5 3/4
-    moves.push_back(make_move(1, 1, 2, 2, 2, 5, 3, 4));   // key2 s2 → BGM m5 3/4
-    moves.push_back(make_move(2, 0, 1, 3, 3, 5, 3, 4));   // key3 s3 → BGM m5 3/4
+    moves.push_back(make_move(1, 0, 1, 1, 1, 5, 3, 4));  // key1 s1 → BGM m5 3/4
+    moves.push_back(make_move(1, 1, 2, 2, 2, 5, 3, 4));  // key2 s2 → BGM m5 3/4
+    moves.push_back(make_move(2, 0, 1, 3, 3, 5, 3, 4));  // key3 s3 → BGM m5 3/4
     args.set("moves", std::move(moves));
     req.set("args", std::move(args));
 
@@ -628,9 +630,8 @@ TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
     req.set("command", "note.move");
     Json args = Json::object();
     Json moves = Json::array();
-    const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx,
-                              std::uint32_t sample, std::uint32_t tm, int tn, int td,
-                              int sub_line) -> Json {
+    const auto make_move = [](std::uint32_t fm, int fn, int fd, int kind_idx, std::uint32_t sample,
+                              std::uint32_t tm, int tn, int td, int sub_line) -> Json {
         Json m = Json::object();
         Json from = Json::object();
         from.set("measure", static_cast<std::int64_t>(fm));
@@ -660,8 +661,8 @@ TEST(NoteMoveLane, BgmMultiMoveExplicitLine) {
         m.set("to", std::move(to));
         return m;
     };
-    moves.push_back(make_move(1, 0, 1, 1, 1, 5, 1, 4, 2));   // key1 s1 → BGM m5 1/4 line2
-    moves.push_back(make_move(1, 1, 2, 2, 2, 5, 3, 4, 2));   // key2 s2 → BGM m5 3/4 line2
+    moves.push_back(make_move(1, 0, 1, 1, 1, 5, 1, 4, 2));  // key1 s1 → BGM m5 1/4 line2
+    moves.push_back(make_move(1, 1, 2, 2, 2, 5, 3, 4, 2));  // key2 s2 → BGM m5 3/4 line2
     args.set("moves", std::move(moves));
     req.set("args", std::move(args));
 

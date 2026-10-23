@@ -14,12 +14,12 @@ enum class Type : std::uint8_t { Null, Bool, Int, Double, String, Array, Object 
 
 /// JSON 解析/序列化错误，携带输入中的字节偏移（0 = 无）。
 class JsonError : public std::runtime_error {
-public:
+   public:
     JsonError(const std::string& message, std::size_t offset = 0)
         : std::runtime_error(message), offset_(offset) {}
     std::size_t offset() const noexcept { return offset_; }
 
-private:
+   private:
     std::size_t offset_;
 };
 
@@ -32,7 +32,7 @@ private:
 ///   尾随垃圾；嵌套深度上限 512（防恶意输入爆栈）。
 /// - 对象键用 std::map：dump 输出按键排序（确定性，便于 diff 与缓存）。
 class Json {
-public:
+   public:
     using Array = std::vector<Json>;
     using Object = std::map<std::string, Json>;
 
@@ -89,7 +89,7 @@ public:
     /// 完整解析；失败抛 JsonError（message 含偏移说明）。
     static Json parse(std::string_view text);
 
-private:
+   private:
     std::variant<std::nullptr_t, bool, std::int64_t, double, std::string, Array, Object> v_;
 };
 

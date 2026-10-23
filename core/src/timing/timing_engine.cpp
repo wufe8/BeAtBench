@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 时序引擎：小节↔时间 双向换算。
 // 内部单位 double 秒（BPM 分段积分 + STOP 间隙）；对外接口用微秒（四舍五入）。
-#include "beatbench/core/timing/TimingEngine.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -10,6 +8,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "beatbench/core/timing/TimingEngine.hpp"
 
 namespace beatbench {
 namespace {
@@ -107,7 +107,8 @@ void TimingEngine::rebuild(const Chart& chart) {
     std::map<std::uint32_t, double> beats_map;
     std::map<std::uint32_t, std::vector<std::pair<Rational, double>>> bpm_map;
     std::map<std::uint32_t, std::vector<std::pair<Rational, std::int64_t>>> stop_map;
-    std::uint32_t max_measure = 0;    const auto touch = [&](std::uint32_t m) { max_measure = std::max(max_measure, m); };
+    std::uint32_t max_measure = 0;
+    const auto touch = [&](std::uint32_t m) { max_measure = std::max(max_measure, m); };
     for (const auto& ev : chart.measure_events) {
         beats_map[ev.measure] = ev.value.beats;
         touch(ev.measure);
@@ -173,7 +174,10 @@ void TimingEngine::rebuild(const Chart& chart) {
                 const double p = rational_to_double(pos);
                 double bpm = mm.segs.back().bpm;  // 兜底
                 for (const auto& s : mm.segs) {
-                    if (p >= s.start && p < s.end) { bpm = s.bpm; break; }
+                    if (p >= s.start && p < s.end) {
+                        bpm = s.bpm;
+                        break;
+                    }
                 }
                 const double sec = static_cast<double>(count) * 240.0 / (192.0 * bpm);
                 mm.stops.push_back({p, sec});
@@ -217,7 +221,10 @@ double TimingEngine::bpm_at(Position p) const {
     double bpm = 0.0;
     for (const auto& s : mm.segs) {
         // 分段乘积区间 [start, end)：pos ∈ [start, end) 生效（同 pos 前者）
-        if (pos >= s.start && (pos < s.end || s.end == 1.0)) { bpm = s.bpm; break; }
+        if (pos >= s.start && (pos < s.end || s.end == 1.0)) {
+            bpm = s.bpm;
+            break;
+        }
     }
     // 兜底：pos 落在段外（浮点边界）→ 取最后段
     if (bpm == 0.0 && !mm.segs.empty()) bpm = mm.segs.back().bpm;

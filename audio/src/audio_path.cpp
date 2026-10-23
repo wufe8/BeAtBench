@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioPath 实现（见 hpp）：扩展名回退 + 存在性检查（std::filesystem，零 Qt）。
-#include "beatbench/audio/AudioPath.hpp"
-
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#include "beatbench/audio/AudioPath.hpp"
 
 namespace beatbench::audio {
 
 namespace {
 /// 尝试的扩展名（顺序 = BMS 社区常见优先级；原扩展名已试过则跳过）
 const std::vector<std::string>& fallback_exts() {
-    static const std::vector<std::string> exts = {
-        ".ogg", ".mp3", ".flac", ".wav", ".oga", ".m4a"
-    };
+    static const std::vector<std::string> exts = {".ogg", ".mp3", ".flac", ".wav", ".oga", ".m4a"};
     return exts;
 }
 }  // namespace

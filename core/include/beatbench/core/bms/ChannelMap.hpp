@@ -5,9 +5,9 @@
 #include <string>
 #include <string_view>
 
+#include "beatbench/core/Chart.hpp"
 #include "beatbench/core/Lane.hpp"
 #include "beatbench/core/Payloads.hpp"
-#include "beatbench/core/Chart.hpp"
 
 namespace beatbench::bms {
 
@@ -33,12 +33,12 @@ enum class ChannelSemantics : std::uint8_t {
 /// 未来按模式注册不同表即可，解析逻辑不变。
 struct BmsChannelRule {
     ChannelSemantics semantics = ChannelSemantics::KeepRaw;
-    Lane lane;                    ///< semantics==Note 时有效
+    Lane lane;                              ///< semantics==Note 时有效
     NoteKind note_kind = NoteKind::Normal;  ///< 地雷等
-    bool ln_channel = false;      ///< 51-59（1P）/ 61-69（2P）：RDM LN 通道
-                                  ///< LNTYPE 1 = 同一通道内按时间序交替头尾；
-                                  ///< LNTYPE 2 = 该通道不参与（头尾在普通通道，尾=#LNOBJ 值）
-    std::uint8_t bga_layer = 0;   ///< Bga/BgaPoor 的层号（0=base 1=poor 2=layer 3=layer2）
+    bool ln_channel = false;                ///< 51-59（1P）/ 61-69（2P）：RDM LN 通道
+                                            ///< LNTYPE 1 = 同一通道内按时间序交替头尾；
+    ///< LNTYPE 2 = 该通道不参与（头尾在普通通道，尾=#LNOBJ 值）
+    std::uint8_t bga_layer = 0;  ///< Bga/BgaPoor 的层号（0=base 1=poor 2=layer 3=layer2）
     /// 该通道是否允许「同小节多行 = 子行」（sub_line；2026-09 泛化）。默认 false = 不应有子行；
     /// 仅 ch01（BGM 背景音）显式 true。驱动：解析（为重复行赋 FIFO 行号）/ 写回（分组多行）/
     /// lint（多行是否合法）/ 编辑器（该通道可展开成子列）。⚠️ 磁盘上无"子通道"——就是重复行。

@@ -18,8 +18,8 @@ namespace beatbench::audio {
 
 struct DecodeResult {
     bool ok = false;
-    DecodedSample* sample = nullptr;   ///< ok 时有效；**裸指针，引用计数 = 1（调用方持有）**
-    std::string message;               ///< 失败原因（中文，面向 UI）
+    DecodedSample* sample = nullptr;  ///< ok 时有效；**裸指针，引用计数 = 1（调用方持有）**
+    std::string message;              ///< 失败原因（中文，面向 UI）
 };
 
 /// 解码单个音频文件为 stereo float32（按源采样率；重采样留到混音回调）。

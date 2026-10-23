@@ -7,22 +7,21 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
-
-#include "beatbench/core/ChartMode.hpp"
-#include "beatbench/core/bms/BmsCodec.hpp"
 #include <string>
 #include <tuple>
 #include <vector>
 
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/ChartMode.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -63,8 +62,8 @@ TEST(TransformQuantize, QuantizeSnapsToGrid) {
     EditorSession s;
     s.load(make_chart());
     // 量化 m1 pos1/3 → 1/16 网格：1/3 ≈ 0.333，round(0.333*16)=5 → 5/16
-    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(
-        1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1, 1, 16)));
+    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(1, Rational(1, 3),
+                                                             Lane{0, LaneKind::Key, 1}, 1, 1, 16)));
     // 找到该 note（值定位：新 pos 5/16）
     bool found = false;
     for (const auto& e : s.chart().notes) {
@@ -85,8 +84,8 @@ TEST(TransformQuantize, QuantizeAlreadyOnGridNoop) {
     EditorSession s;
     s.load(make_chart());
     // pos 1/2 已在 1/16 网格 → 无变化
-    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, 1, 16)));
+    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(1, Rational(1, 2),
+                                                             Lane{0, LaneKind::Key, 2}, 2, 1, 16)));
     EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(make_chart().notes));
     // undo 也无变化（空命令）
     ASSERT_TRUE(s.undo());
@@ -97,8 +96,8 @@ TEST(TransformQuantize, QuantizeCustomSnap) {
     EditorSession s;
     s.load(make_chart());
     // snap 3/16：1/3 ≈ 0.333，round(0.333*16/3)=round(1.777)=2 → 6/16 = 3/8
-    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(
-        1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1, 3, 16)));
+    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(1, Rational(1, 3),
+                                                             Lane{0, LaneKind::Key, 1}, 1, 3, 16)));
     bool found = false;
     for (const auto& e : s.chart().notes) {
         if (e.value.lane == Lane{0, LaneKind::Key, 1} && e.value.sample.id == 1) {
@@ -116,12 +115,12 @@ TEST(TransformQuantize, MirrorFlipsKeys) {
     s.load(make_chart());
     // 镜像全部 3 个 note
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<TransformNoteCommand>(
-        1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1, true, 0));
-    comp->add(std::make_unique<TransformNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, true, 0));
-    comp->add(std::make_unique<TransformNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 7}, 3, true, 0));
+    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 3), Lane{0, LaneKind::Key, 1},
+                                                     1, true, 0));
+    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2},
+                                                     2, true, 0));
+    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 7},
+                                                     3, true, 0));
     ASSERT_TRUE(s.exec(std::move(comp)));
     EXPECT_EQ(s.undo_depth(), 1u);
     // key1→key7, key2→key6, key7→key1
@@ -129,11 +128,14 @@ TEST(TransformQuantize, MirrorFlipsKeys) {
     bool a = false, b = false, c_ok = false;
     for (const auto& e : notes) {
         if (e.pos == Rational(1, 3) && e.value.lane == Lane{0, LaneKind::Key, 7} &&
-            e.value.sample.id == 1) a = true;
+            e.value.sample.id == 1)
+            a = true;
         if (e.pos == Rational(1, 2) && e.value.lane == Lane{0, LaneKind::Key, 6} &&
-            e.value.sample.id == 2) b = true;
+            e.value.sample.id == 2)
+            b = true;
         if (e.pos == Rational(0, 1) && e.value.lane == Lane{0, LaneKind::Key, 1} &&
-            e.value.sample.id == 3) c_ok = true;
+            e.value.sample.id == 3)
+            c_ok = true;
     }
     EXPECT_TRUE(a);
     EXPECT_TRUE(b);
@@ -150,22 +152,25 @@ TEST(TransformQuantize, RotateCyclesKeys) {
     s.load(make_chart());
     // 旋转 +1：key1→key2, key2→key3, key7→key1
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<TransformNoteCommand>(
-        1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1, false, 1));
-    comp->add(std::make_unique<TransformNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, false, 1));
-    comp->add(std::make_unique<TransformNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 7}, 3, false, 1));
+    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 3), Lane{0, LaneKind::Key, 1},
+                                                     1, false, 1));
+    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2},
+                                                     2, false, 1));
+    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 7},
+                                                     3, false, 1));
     ASSERT_TRUE(s.exec(std::move(comp)));
     const auto& notes = s.chart().notes;
     bool a = false, b = false, c_ok = false;
     for (const auto& e : notes) {
         if (e.pos == Rational(1, 3) && e.value.lane == Lane{0, LaneKind::Key, 2} &&
-            e.value.sample.id == 1) a = true;
+            e.value.sample.id == 1)
+            a = true;
         if (e.pos == Rational(1, 2) && e.value.lane == Lane{0, LaneKind::Key, 3} &&
-            e.value.sample.id == 2) b = true;
+            e.value.sample.id == 2)
+            b = true;
         if (e.pos == Rational(0, 1) && e.value.lane == Lane{0, LaneKind::Key, 1} &&
-            e.value.sample.id == 3) c_ok = true;
+            e.value.sample.id == 3)
+            c_ok = true;
     }
     EXPECT_TRUE(a);
     EXPECT_TRUE(b);
@@ -283,8 +288,12 @@ Chart collision_chart(bool bmesp) {
     opts.mode = "pms9k";
     // 两拍的普通音与 LN 头尾都用 sample1，镜像后源/目标值交叉。
     const std::string normal = bmesp ? "17" : "25";
-    return bms::read_bms("#BPM 120\n#LNTYPE 1\n#WAV01 hit.wav\n"
-                         "#00051:01010000\n#000" + normal + ":01010000\n", opts).chart;
+    return bms::read_bms(
+               "#BPM 120\n#LNTYPE 1\n#WAV01 hit.wav\n"
+               "#00051:01010000\n#000" +
+                   normal + ":01010000\n",
+               opts)
+        .chart;
 }
 
 void expect_pairs(const Chart& chart, int ln_key) {
@@ -310,8 +319,8 @@ using FullNoteSig = std::tuple<std::uint32_t, Rational, Lane, std::uint32_t, boo
 std::vector<FullNoteSig> full_notes(const Chart& chart) {
     std::vector<FullNoteSig> out;
     for (const auto& e : chart.notes)
-        out.emplace_back(e.measure, e.pos, e.value.lane, e.value.sample.id,
-                         e.value.ln_channel, e.value.kind);
+        out.emplace_back(e.measure, e.pos, e.value.lane, e.value.sample.id, e.value.ln_channel,
+                         e.value.kind);
     std::sort(out.begin(), out.end());
     return out;
 }
@@ -346,12 +355,12 @@ Json transform_request(const Chart& chart, const std::vector<int>& order, bool m
 }
 
 std::unique_ptr<TransformNoteCommand> mirror_note(const Event<Note>& e) {
-    return std::make_unique<TransformNoteCommand>(e.measure, e.pos, e.value.lane,
-                                                 e.value.sample.id, true, 0, e.value.sub_line);
+    return std::make_unique<TransformNoteCommand>(e.measure, e.pos, e.value.lane, e.value.sample.id,
+                                                  true, 0, e.value.sub_line);
 }
 
 class FailingTransformBatchCommand : public EditCommand {
-public:
+   public:
     std::string name() const override { return "test.fail"; }
     void apply(Chart&) override { throw std::runtime_error("batch rollback"); }
     void invert(Chart&) override {}
@@ -371,12 +380,12 @@ TEST(TransformQuantize, BatchCollisionsAllOrdersMirrorRotateUndoRedoRoundTrip) {
             const int ln_key = mirror ? 9 : (operation == 1 ? 2 : 9);
             std::vector<int> order{0, 1, 2, 3};
             do {
-                SCOPED_TRACE(::testing::Message() << "bmesp=" << bmesp << " rotate="
-                             << operation << " order=" << order[0] << order[1]
-                             << order[2] << order[3]);
+                SCOPED_TRACE(::testing::Message()
+                             << "bmesp=" << bmesp << " rotate=" << operation
+                             << " order=" << order[0] << order[1] << order[2] << order[3]);
                 session.load(before);
-                const auto response = global_registry().dispatch(
-                    transform_request(before, order, mirror, operation));
+                const auto response =
+                    global_registry().dispatch(transform_request(before, order, mirror, operation));
                 ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
                 ASSERT_TRUE(response.at("result").at("ok").as_bool()) << response.dump();
                 EXPECT_EQ(session.undo_depth(), 1u);
@@ -425,7 +434,8 @@ TEST(TransformQuantize, DetectedBmespUsesNineKeysWithoutBecomingCreationMode) {
     ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
     ASSERT_EQ(session.chart().notes.size(), 1u);
     EXPECT_EQ(session.chart().notes[0].value.lane.index, 2);
-    EXPECT_EQ(response.at("result").at("selection").as_array()[0].at("lane").at("index").as_i64(), 2);
+    EXPECT_EQ(response.at("result").at("selection").as_array()[0].at("lane").at("index").as_i64(),
+              2);
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(session.chart().notes[0].value.lane.index, 8);
     ASSERT_TRUE(session.redo());
@@ -519,8 +529,7 @@ TEST(TransformQuantize, IdenticalSourceValuesAreClaimedOncePerObject) {
     Chart expected = chart;
     for (auto& e : expected.notes) e.value.lane = transform_lane(e.value.lane, true, 0, 9);
     EXPECT_EQ(full_notes(session.chart()), full_notes(expected));
-    for (std::size_t i = 4; i < 7; ++i)
-        EXPECT_EQ(session.chart().notes[i].value.sub_line, 3u);
+    for (std::size_t i = 4; i < 7; ++i) EXPECT_EQ(session.chart().notes[i].value.sub_line, 3u);
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(full_notes(session.chart()), full_notes(chart));
     expect_pairs(session.chart(), 1);

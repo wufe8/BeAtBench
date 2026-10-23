@@ -14,6 +14,8 @@
 #include <string>
 #include <string_view>
 
+#include "beatbench/audio/ChartRenderer.hpp"
+#include "beatbench/audio/SampleCache.hpp"
 #include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
@@ -22,11 +24,9 @@
 #include "beatbench/core/codec/CodecRegistry.hpp"
 #include "beatbench/core/command/Builtins.hpp"
 #include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/io/AtomicWrite.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/timing/TimingEngine.hpp"
-#include "beatbench/core/io/AtomicWrite.hpp"
-#include "beatbench/audio/ChartRenderer.hpp"
-#include "beatbench/audio/SampleCache.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -60,9 +60,12 @@ void print_usage() {
 
 std::string severity_name(beatbench::codec::Severity s) {
     switch (s) {
-        case beatbench::codec::Severity::Error: return "ERROR";
-        case beatbench::codec::Severity::Warning: return "WARN ";
-        default: return "INFO ";
+        case beatbench::codec::Severity::Error:
+            return "ERROR";
+        case beatbench::codec::Severity::Warning:
+            return "WARN ";
+        default:
+            return "INFO ";
     }
 }
 
@@ -70,9 +73,7 @@ std::string severity_name(beatbench::codec::Severity s) {
 /// 已经过 CRT 从 UTF-16 → ACP 转换——argv 就是 GBK 字节；`u8path(GBK)` 会把
 /// GBK 字节当 UTF-8 解 → 无效序列抛异常（2026-09 CLI 日文渲染异常实测）。
 /// `path(string)`（ACP 解读）与 argv 编码一致 → 正确。
-std::filesystem::path u8ps(const std::string& s) {
-    return std::filesystem::path(s);
-}
+std::filesystem::path u8ps(const std::string& s) { return std::filesystem::path(s); }
 
 void print_diagnostics(const std::vector<beatbench::codec::Diagnostic>& diags) {
     for (const auto& d : diags) {
@@ -87,9 +88,8 @@ void print_diagnostics(const std::vector<beatbench::codec::Diagnostic>& diags) {
 
 int cmd_info(const std::string& path, const std::string& format) {
     // M3：人类子命令与 --json 走同一 CodecRegistry（doc/command-protocol.md 三、6. 单点逻辑）
-    const auto* codec =
-        format.empty() ? beatbench::codec::global_codec_registry().by_path(path)
-                       : beatbench::codec::global_codec_registry().by_id(format);
+    const auto* codec = format.empty() ? beatbench::codec::global_codec_registry().by_path(path)
+                                       : beatbench::codec::global_codec_registry().by_id(format);
     if (!codec) {
         std::printf("[ERROR] 无法识别格式: %s（可用 format 参数）\n", path.c_str());
         return 2;
@@ -121,10 +121,18 @@ int cmd_info(const std::string& path, const std::string& format) {
     for (const auto& [key, def] : chart.samples) {
         (void)def;
         switch (key.first) {
-            case beatbench::SampleKind::Wav: ++count[0]; break;
-            case beatbench::SampleKind::Bmp: ++count[1]; break;
-            case beatbench::SampleKind::Bpm: ++count[2]; break;
-            case beatbench::SampleKind::Stop: ++count[3]; break;
+            case beatbench::SampleKind::Wav:
+                ++count[0];
+                break;
+            case beatbench::SampleKind::Bmp:
+                ++count[1];
+                break;
+            case beatbench::SampleKind::Bpm:
+                ++count[2];
+                break;
+            case beatbench::SampleKind::Stop:
+                ++count[3];
+                break;
         }
     }
     std::printf("WAV: %zu 个  BMP: %zu 个  BPM: %zu 个  STOP: %zu 个\n", count[0], count[1],
@@ -139,9 +147,10 @@ int cmd_info(const std::string& path, const std::string& format) {
 
     const auto stats = beatbench::bms::collect_event_stats(chart);
     std::printf("\n--- 事件 ---\n");
-    std::printf("note: %zu  LN 对: %zu  BPM: %zu  STOP: %zu  节拍: %zu  BGA: %zu  raw 保留行: %zu\n",
-                stats.notes, stats.ln_pairs, stats.bpm, stats.stop, stats.measure, stats.bga,
-                stats.raw_lines);
+    std::printf(
+        "note: %zu  LN 对: %zu  BPM: %zu  STOP: %zu  节拍: %zu  BGA: %zu  raw 保留行: %zu\n",
+        stats.notes, stats.ln_pairs, stats.bpm, stats.stop, stats.measure, stats.bga,
+        stats.raw_lines);
     if (!stats.channels.empty()) {
         std::printf("通道分布（note）:");
         for (const auto& [ch, n] : stats.channels) {
@@ -161,9 +170,8 @@ int cmd_info(const std::string& path, const std::string& format) {
 }
 
 int cmd_check(const std::string& path, const std::string& format) {
-    const auto* codec =
-        format.empty() ? beatbench::codec::global_codec_registry().by_path(path)
-                       : beatbench::codec::global_codec_registry().by_id(format);
+    const auto* codec = format.empty() ? beatbench::codec::global_codec_registry().by_path(path)
+                                       : beatbench::codec::global_codec_registry().by_id(format);
     if (!codec) {
         std::printf("[ERROR] 无法识别格式: %s（可用 format 参数）\n", path.c_str());
         return 2;
@@ -175,8 +183,7 @@ int cmd_check(const std::string& path, const std::string& format) {
     std::printf("检查: %s\n", path.c_str());
     print_diagnostics(result.diagnostics);
 
-    const auto lint =
-        beatbench::bms::lint_chart(chart, std::filesystem::path(path).parent_path());
+    const auto lint = beatbench::bms::lint_chart(chart, std::filesystem::path(path).parent_path());
     std::size_t missing = 0;
     std::size_t ext_mismatch = 0;
     std::string ext_first, ext_resolved;
@@ -191,33 +198,33 @@ int cmd_check(const std::string& path, const std::string& format) {
             }
             continue;
         }
-        const char* tag = issue.severity == beatbench::bms::Severity::Warning
-                              ? "[WARN ]"
-                              : (issue.severity == beatbench::bms::Severity::Error
-                                     ? "[ERROR]"
-                                     : "[INFO ]");
+        const char* tag =
+            issue.severity == beatbench::bms::Severity::Warning
+                ? "[WARN ]"
+                : (issue.severity == beatbench::bms::Severity::Error ? "[ERROR]" : "[INFO ]");
         std::printf("%s %s\n", tag, issue.message.c_str());
     }
     if (ext_mismatch > 0) {
-        std::printf("[INFO ] %zu 个采样文件扩展名与引用不符（示例: %s → %s）\n",
-                    ext_mismatch, ext_first.c_str(), ext_resolved.c_str());
+        std::printf("[INFO ] %zu 个采样文件扩展名与引用不符（示例: %s → %s）\n", ext_mismatch,
+                    ext_first.c_str(), ext_resolved.c_str());
     }
 
     std::size_t lint_warn = 0, lint_error = 0;
     for (const auto& issue : lint) {
-        if (issue.severity == beatbench::bms::Severity::Error) ++lint_error;
-        else if (issue.severity == beatbench::bms::Severity::Warning) ++lint_warn;
+        if (issue.severity == beatbench::bms::Severity::Error)
+            ++lint_error;
+        else if (issue.severity == beatbench::bms::Severity::Warning)
+            ++lint_warn;
     }
-    std::printf("结果: %zu 错误, %zu 警告, 缺失采样 %zu 个, lint 警告 %zu 个, 信息 %zu 个\n",
-                static_cast<std::size_t>(std::count_if(
-                    result.diagnostics.begin(), result.diagnostics.end(),
-                    [](const auto& d) { return d.severity == beatbench::codec::Severity::Error; })),
-                static_cast<std::size_t>(std::count_if(
-                    result.diagnostics.begin(), result.diagnostics.end(),
-                    [](const auto& d) {
-                        return d.severity == beatbench::codec::Severity::Warning;
-                    })),
-                missing, lint_warn, ext_mismatch);
+    std::printf(
+        "结果: %zu 错误, %zu 警告, 缺失采样 %zu 个, lint 警告 %zu 个, 信息 %zu 个\n",
+        static_cast<std::size_t>(std::count_if(
+            result.diagnostics.begin(), result.diagnostics.end(),
+            [](const auto& d) { return d.severity == beatbench::codec::Severity::Error; })),
+        static_cast<std::size_t>(std::count_if(
+            result.diagnostics.begin(), result.diagnostics.end(),
+            [](const auto& d) { return d.severity == beatbench::codec::Severity::Warning; })),
+        missing, lint_warn, ext_mismatch);
 
     bool failed = lint_error != 0 || lint_warn != 0;
     for (const auto& d : result.diagnostics) {
@@ -228,9 +235,8 @@ int cmd_check(const std::string& path, const std::string& format) {
 
 int cmd_convert(const std::string& in_path, const std::string& out_path,
                 const std::string& encoding, const std::string& format) {
-    const auto* codec =
-        format.empty() ? beatbench::codec::global_codec_registry().by_path(in_path)
-                       : beatbench::codec::global_codec_registry().by_id(format);
+    const auto* codec = format.empty() ? beatbench::codec::global_codec_registry().by_path(in_path)
+                                       : beatbench::codec::global_codec_registry().by_id(format);
     if (!codec) {
         std::printf("[ERROR] 无法识别格式: %s（可用 format 参数）\n", in_path.c_str());
         return 2;
@@ -254,18 +260,18 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
         std::printf("[ERROR] %s\n", wr.error.c_str());
         return 1;
     }
-    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(),
-                text.size(), encoding.c_str());
+    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(), text.size(),
+                encoding.c_str());
     return 0;
 }
 
 /// M4.3b：渲染谱面 → 混音 WAV（可听验证用；M5 播放的前置产物）。
 /// 用法：beatbench-cli render <in.bms> <out.wav> [--sample-rate <Hz>] [--format <fmt>]
-int cmd_render_impl(const std::string& in_path, const std::string& out_path,
-                    double sampleRate, const std::string& format);
+int cmd_render_impl(const std::string& in_path, const std::string& out_path, double sampleRate,
+                    const std::string& format);
 
-int cmd_render(const std::string& in_path, const std::string& out_path,
-               double sampleRate, const std::string& format) {
+int cmd_render(const std::string& in_path, const std::string& out_path, double sampleRate,
+               const std::string& format) {
     try {
         return cmd_render_impl(in_path, out_path, sampleRate, format);
     } catch (const std::exception& e) {
@@ -277,11 +283,10 @@ int cmd_render(const std::string& in_path, const std::string& out_path,
     }
 }
 
-int cmd_render_impl(const std::string& in_path, const std::string& out_path,
-                    double sampleRate, const std::string& format) {
-    const auto* codec =
-        format.empty() ? beatbench::codec::global_codec_registry().by_path(in_path)
-                       : beatbench::codec::global_codec_registry().by_id(format);
+int cmd_render_impl(const std::string& in_path, const std::string& out_path, double sampleRate,
+                    const std::string& format) {
+    const auto* codec = format.empty() ? beatbench::codec::global_codec_registry().by_path(in_path)
+                                       : beatbench::codec::global_codec_registry().by_id(format);
     if (!codec) {
         std::printf("[ERROR] 无法识别格式: %s（可用 format 参数）\n", in_path.c_str());
         return 2;
@@ -300,8 +305,8 @@ int cmd_render_impl(const std::string& in_path, const std::string& out_path,
     beatbench::TimingEngine timing;
     timing.rebuild(result.chart);
     beatbench::audio::SampleCache cache;
-    const auto r = beatbench::audio::render_chart_w(result.chart, timing, cache,
-                                                    sampleRate, sourceDir);
+    const auto r =
+        beatbench::audio::render_chart_w(result.chart, timing, cache, sampleRate, sourceDir);
     if (!r.ok) {
         std::printf("[ERROR] 渲染失败: %s\n", r.message.c_str());
         return 1;
@@ -312,9 +317,8 @@ int cmd_render_impl(const std::string& in_path, const std::string& out_path,
         std::printf("[ERROR] 写出 WAV 失败: %s\n", err.c_str());
         return 1;
     }
-    std::printf("渲染完成: %s -> %s（%.2f 秒，%d Hz）\n", in_path.c_str(),
-                out_path.c_str(), r.audio.durationSeconds(),
-                static_cast<int>(r.audio.sampleRate));
+    std::printf("渲染完成: %s -> %s（%.2f 秒，%d Hz）\n", in_path.c_str(), out_path.c_str(),
+                r.audio.durationSeconds(), static_cast<int>(r.audio.sampleRate));
     return 0;
 }
 
@@ -363,10 +367,9 @@ int run_json(const std::string& request_text, bool multiline) {
     // 失败则按行拆分（每行一个请求，session 跨请求保持）。
     try {
         const auto single = beatbench::json::Json::parse(request_text);
-        std::printf("%s\n",
-                    beatbench::cmd::global_registry().dispatch(single).dump().c_str());
+        std::printf("%s\n", beatbench::cmd::global_registry().dispatch(single).dump().c_str());
         return 0;
-    // NOLINTNEXTLINE(bugprone-empty-catch)——控制流分流：单 JSON 失败即转批处理
+        // NOLINTNEXTLINE(bugprone-empty-catch)——控制流分流：单 JSON 失败即转批处理
     } catch (const beatbench::json::JsonError&) {
         // 非单 JSON → 按行批处理
     }
@@ -429,7 +432,8 @@ int main(int argc, char** argv) {
             multiline = true;  // stdin 输入：多行批处理模式（session 跨请求保持）
         }
         if (request_text.empty()) {
-            std::printf("{\"ok\":false,\"error\":{\"code\":\"bad_request\",\"message\":\"空请求\"}}\n");
+            std::printf(
+                "{\"ok\":false,\"error\":{\"code\":\"bad_request\",\"message\":\"空请求\"}}\n");
             return 2;
         }
         return run_json(request_text, multiline);
@@ -451,7 +455,8 @@ int main(int argc, char** argv) {
     }
     if (cmd == "convert") {
         if (argc < 4) {
-            std::printf("用法: beatbench-cli convert <in> <out> [--encoding utf8|sjis] [--format <fmt>]\n");
+            std::printf(
+                "用法: beatbench-cli convert <in> <out> [--encoding utf8|sjis] [--format <fmt>]\n");
             return 2;
         }
         std::string encoding = "utf8";
@@ -473,7 +478,9 @@ int main(int argc, char** argv) {
     }
     if (cmd == "render") {
         if (argc < 4) {
-            std::printf("用法: beatbench-cli render <in> <out.wav> [--sample-rate <Hz>] [--format <fmt>]\n");
+            std::printf(
+                "用法: beatbench-cli render <in> <out.wav> [--sample-rate <Hz>] [--format "
+                "<fmt>]\n");
             return 2;
         }
         double sampleRate = 44100.0;

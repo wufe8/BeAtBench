@@ -28,14 +28,13 @@
 namespace beatbench::audio {
 
 class PcmPlayback {
-public:
+   public:
     enum class State : std::uint8_t { Idle, Playing, Paused, Stopped };
 
     /// player = 混音内核（命令 ring 入口）；deviceRate = 设备采样率（时钟换算；
     /// 与 AudioEngine 的 m_renderCtx.deviceRate 同源——每帧 render 用实际值）。
     /// slot = 内核槽位（默认 kPcmSlot = 谱面播放；参考音轨传 kRefPcmSlot——M6.1）。
-    explicit PcmPlayback(SamplePlayer* player, double deviceRate = 44100.0,
-                         int slot = kPcmSlot);
+    explicit PcmPlayback(SamplePlayer* player, double deviceRate = 44100.0, int slot = kPcmSlot);
     ~PcmPlayback();
 
     PcmPlayback(const PcmPlayback&) = delete;
@@ -92,12 +91,12 @@ public:
         if (rate > 0.0) m_deviceRate = rate;
     }
 
-private:
+   private:
     void applyVolume(float volume) { m_volume = volume; }
 
     SamplePlayer* m_player = nullptr;
     double m_deviceRate = 44100.0;
-    int m_slot = kPcmSlot;         ///< 内核槽位（谱面 vs 参考音轨分槽，互不挤占）
+    int m_slot = kPcmSlot;  ///< 内核槽位（谱面 vs 参考音轨分槽，互不挤占）
     State m_state = State::Idle;
     std::shared_ptr<const std::vector<float>> m_pcm;  ///< 借用的渲染 PCM（保活）
     double m_sampleRate = 0.0;

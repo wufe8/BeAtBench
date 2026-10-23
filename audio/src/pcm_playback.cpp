@@ -2,15 +2,16 @@
 // PcmPlayback 实现（见 hpp 注释）。
 // 时钟换算：播放中 currentSec = m_pcmStartSec + (totalFrames - baseline) / rate。
 // ⚠️ totalFrames/baseline 是回调线程写的原子；本类只在 UI 线程读（relaxed 一致）。
-#include "beatbench/audio/PcmPlayback.hpp"
-
 #include <algorithm>
 #include <cmath>
+
+#include "beatbench/audio/PcmPlayback.hpp"
 
 namespace beatbench::audio {
 
 PcmPlayback::PcmPlayback(SamplePlayer* player, double deviceRate, int slot)
-    : m_player(player), m_deviceRate(deviceRate > 0.0 ? deviceRate : 44100.0),
+    : m_player(player),
+      m_deviceRate(deviceRate > 0.0 ? deviceRate : 44100.0),
       m_slot(slot >= 0 ? slot : kPcmSlot) {
     if (!m_player) m_player = nullptr;
 }
@@ -93,8 +94,7 @@ bool PcmPlayback::seek(double seconds) {
     m_positionSec = std::clamp(seconds, 0.0, m_durationSec);
     if (m_state == State::Playing) {
         // 就地跳转（截取窗口续播；SamplePlayer 停旧启新）
-        if (m_player->playSharedPcm(m_pcm, m_sampleRate, m_volume, m_positionSec,
-                                    m_slot)) {
+        if (m_player->playSharedPcm(m_pcm, m_sampleRate, m_volume, m_positionSec, m_slot)) {
             // 时钟基准更新（startSec = 新位置；输出帧基准 = 当前）
             m_playStartSec = m_positionSec;
             m_playFrames0 = m_player->totalFramesRendered();
@@ -112,8 +112,7 @@ double PcmPlayback::currentSec() const {
     if (m_state == State::Playing && m_player) {
         // 自持时钟基准（seek/play 时记录）：startSec + 输出帧差 / rate
         const std::uint64_t total = m_player->totalFramesRendered();
-        const double rendered =
-            static_cast<double>(total) - static_cast<double>(m_playFrames0);
+        const double rendered = static_cast<double>(total) - static_cast<double>(m_playFrames0);
         const double sec = m_playStartSec + rendered / m_deviceRate;
         return std::clamp(sec, 0.0, m_durationSec);
     }
@@ -157,8 +156,7 @@ bool PcmPlayback::loopTick() {
             if (m_player) m_player->stopAll();
             m_positionSec = m_loopA;
             // 从 A 重新播放（截取窗口）
-            if (m_player->playSharedPcm(m_pcm, m_sampleRate, m_volume, m_loopA,
-                                        m_slot)) {
+            if (m_player->playSharedPcm(m_pcm, m_sampleRate, m_volume, m_loopA, m_slot)) {
                 m_playStartSec = m_loopA;
                 m_playFrames0 = m_player->totalFramesRendered();
                 m_state = State::Playing;

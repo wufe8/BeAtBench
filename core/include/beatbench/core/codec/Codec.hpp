@@ -45,7 +45,7 @@ struct WriteOptions {
 /// 「换格式 = 换映射表」的核心兑现点。每个格式注册一个 Codec，
 /// 声明扩展名、支持的模式集合、读写入口；GUI/CLI/命令共用同一注册表。
 class Codec {
-public:
+   public:
     virtual ~Codec() = default;
 
     /// 格式稳定 id（协议用，如 "bms"）。大小写敏感，注册表全局唯一。

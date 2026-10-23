@@ -55,9 +55,7 @@ const QRegularExpression& base62DeclRe() {
 
 EditUtils::EditUtils(QObject* parent) : QObject(parent) {}
 
-int EditUtils::gcd(int a, int b) const {
-    return static_cast<int>(gcd64(a, b));
-}
+int EditUtils::gcd(int a, int b) const { return static_cast<int>(gcd64(a, b)); }
 
 bool EditUtils::refEquals(const QVariantMap& a, const QVariantMap& b) const {
     if (a.isEmpty() || b.isEmpty()) return false;  // JS: a && b
@@ -74,8 +72,7 @@ bool EditUtils::refEquals(const QVariantMap& a, const QVariantMap& b) const {
     if (pa.value(QStringLiteral("den")) != pb.value(QStringLiteral("den"))) return false;
     const bool aSub = hasValue(a, QStringLiteral("sub_line"));
     const bool bSub = hasValue(b, QStringLiteral("sub_line"));
-    if (aSub && bSub &&
-        a.value(QStringLiteral("sub_line")) != b.value(QStringLiteral("sub_line")))
+    if (aSub && bSub && a.value(QStringLiteral("sub_line")) != b.value(QStringLiteral("sub_line")))
         return false;
     return true;
 }
@@ -99,9 +96,9 @@ QVariantMap EditUtils::addPosDelta(const QVariantMap& ref, const QVariantMap& de
     pos.insert(QStringLiteral("num"), static_cast<int>(rem / g));
     pos.insert(QStringLiteral("den"), static_cast<int>(newDen / g));
     QVariantMap out;
-    out.insert(QStringLiteral("measure"),
-               ref.value(QStringLiteral("measure")).toInt() +
-                   delta.value(QStringLiteral("measure")).toInt() + static_cast<int>(carry));
+    out.insert(QStringLiteral("measure"), ref.value(QStringLiteral("measure")).toInt() +
+                                              delta.value(QStringLiteral("measure")).toInt() +
+                                              static_cast<int>(carry));
     out.insert(QStringLiteral("pos"), pos);
     return out;
 }

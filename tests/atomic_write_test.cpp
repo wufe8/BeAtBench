@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 原子写入：成功替换；失败保留原文件；不把 .tmp 留成目标。
+#include <gtest/gtest.h>
+
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
-
-#include <gtest/gtest.h>
 
 #include "beatbench/core/io/AtomicWrite.hpp"
 

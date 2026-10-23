@@ -31,7 +31,7 @@ class SampleListModel : public QAbstractListModel {
     Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
     Q_PROPERTY(bool isBase62 READ isBase62 NOTIFY isBase62Changed)
 
-public:
+   public:
     explicit SampleListModel(QObject* parent = nullptr);
 
     enum Roles {
@@ -87,7 +87,7 @@ public:
     bool isBase62() const { return m_isBase62; }
     void setIsBase62(bool v);
 
-signals:
+   signals:
     void currentSampleChanged(const QString& id);
     void countChanged(int count);
     void filterTextChanged();
@@ -96,7 +96,7 @@ signals:
     void groupsChanged();
     void isBase62Changed();
 
-private:
+   private:
     struct Entry {
         QString id;
         QString file;
@@ -109,7 +109,7 @@ private:
         int key2 = 0;
         int scratch2 = 0;
         int pedal2 = 0;
-        int bgm = 0;             // 背景音轨（ch01）引用数
+        int bgm = 0;  // 背景音轨（ch01）引用数
         bool missing = false;
         bool extMismatch = false;  // 扩展名不符（wav_ext_mismatch，lint 信息级）
     };
@@ -117,14 +117,14 @@ private:
     void rebuild();
     void track_counts(const Entry& e);
 
-    QVector<Entry> m_all;    // 全量
-    QVector<Entry> m_rows;   // 过滤+排序后的视图
-    QStringList m_mru;       // 最近使用（前 = 最新；仅 SortRecent 生效）
+    QVector<Entry> m_all;   // 全量
+    QVector<Entry> m_rows;  // 过滤+排序后的视图
+    QStringList m_mru;      // 最近使用（前 = 最新；仅 SortRecent 生效）
     QString m_filterText;
     QString m_group = QStringLiteral("all");
     int m_sortMode = SortSmart;
-    QVariantList m_groups;   // 动态分组 [{id,label,count}]（文本过滤后统计）
-    bool m_isBase62 = false; // 当前谱面是否为 base62 模式
+    QVariantList m_groups;    // 动态分组 [{id,label,count}]（文本过滤后统计）
+    bool m_isBase62 = false;  // 当前谱面是否为 base62 模式
 };
 
 }  // namespace beatbench::app

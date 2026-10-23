@@ -75,8 +75,7 @@ struct NoteSig {
 std::vector<NoteSig> note_sigs(const Chart& c) {
     std::vector<NoteSig> out;
     for (const auto& ev : c.notes) {
-        out.push_back({ev.measure, ev.pos, ev.value.lane, ev.value.kind,
-                       ev.value.ln_channel});
+        out.push_back({ev.measure, ev.pos, ev.value.lane, ev.value.kind, ev.value.ln_channel});
     }
     std::sort(out.begin(), out.end());
     return out;
@@ -107,8 +106,7 @@ TEST(PmsVariant, StandardKeptIntact) {
     const auto r = read_pms(
         "#TITLE std\n#BPM 120\n"
         "#00022:0100\n"
-        "#00025:0200\n"
-    );
+        "#00025:0200\n");
     ASSERT_TRUE(r.chart.mode_id.has_value());
     EXPECT_EQ(*r.chart.mode_id, "pms9k");
     EXPECT_EQ(count_notes(r.chart, LaneKind::Key, 6), 1u);
@@ -122,8 +120,7 @@ TEST(PmsVariant, PureLnEvidenceUpgrades) {
     const auto r = read_pms(
         "#TITLE ln\n#BPM 120\n#LNTYPE 1\n"
         "#00056:0100\n"
-        "#00056:00020000\n"
-    );
+        "#00056:00020000\n");
     ASSERT_EQ(*r.chart.mode_id, "pms9k-bmesp");
     EXPECT_EQ(count_notes(r.chart, LaneKind::Key, 8), 2u);  // 头尾均键8
     std::size_t paired = 0;
@@ -137,8 +134,7 @@ TEST(PmsVariant, PureLnEvidenceUpgrades) {
 TEST(PmsVariant, PureLandmineEvidenceUpgrades) {
     const auto r = read_pms(
         "#TITLE mine\n#BPM 120\n#WAV00 mine.wav\n"
-        "#000D7:0100\n"
-    );
+        "#000D7:0100\n");
     ASSERT_EQ(*r.chart.mode_id, "pms9k-bmesp");
     EXPECT_EQ(count_notes(r.chart, LaneKind::Key, 9), 1u);
     bool mine = false;
@@ -171,8 +167,7 @@ TEST(PmsVariant, MixedUsageWarnsAndReadsEachAliasCorrectly) {
     const auto r = read_pms(
         "#TITLE mixed\n#BPM 120\n"
         "#00016:0100\n"
-        "#00022:0200\n"
-    );
+        "#00022:0200\n");
     ASSERT_TRUE(r.chart.mode_id.has_value());
     EXPECT_EQ(*r.chart.mode_id, "pms9k");
     EXPECT_TRUE(has_warning(r));
@@ -185,8 +180,7 @@ TEST(PmsVariant, SameKeyAliasConflictKeepsBoth) {
     const auto r = read_pms(
         "#TITLE dual\n#BPM 120\n"
         "#00022:0100\n"
-        "#00018:0100\n"
-    );
+        "#00018:0100\n");
     EXPECT_EQ(count_notes(r.chart, LaneKind::Key, 6), 2u);
     // 同小节同位置两枚
     std::size_t same_pos = 0;
@@ -222,8 +216,7 @@ TEST(PmsVariant, BlockCommentNotEvidence) {
     const auto with_comment = read_pms(
         "#TITLE cmt\n#BPM 120\n"
         "/*\n#00022:01\n*/\n"
-        "#00016:01\n"
-    );
+        "#00016:01\n");
     EXPECT_EQ(*with_comment.chart.mode_id, "pms9k-bmesp");
     EXPECT_EQ(count_notes(with_comment.chart, LaneKind::Key, 8), 1u);
 
@@ -231,8 +224,7 @@ TEST(PmsVariant, BlockCommentNotEvidence) {
     const auto without = read_pms(
         "#TITLE cmt\n#BPM 120\n"
         "#00022:01\n"
-        "#00016:01\n"
-    );
+        "#00016:01\n");
     EXPECT_EQ(*without.chart.mode_id, "pms9k");
     EXPECT_TRUE(has_warning(without));
 }
@@ -242,8 +234,7 @@ TEST(PmsVariant, AllZeroLineNotEvidence) {
     const auto r = read_pms(
         "#TITLE zero\n#BPM 120\n"
         "#00016:0000\n"
-        "#00022:01\n"
-    );
+        "#00022:01\n");
     EXPECT_EQ(*r.chart.mode_id, "pms9k");
     EXPECT_EQ(count_notes(r.chart, LaneKind::Key, 8), 0u);  // 全 00 行无物件
     EXPECT_EQ(count_notes(r.chart, LaneKind::Key, 6), 1u);
@@ -267,8 +258,7 @@ TEST(PmsVariant, DeleteLastNormalKeepsVariant) {
     const auto second = read_pms(
         "#TITLE drift\n#BPM 120\n#LNTYPE 1\n"
         "#00056:0100\n"
-        "#00056:00020000\n"
-    );
+        "#00056:00020000\n");
     ASSERT_EQ(*second.chart.mode_id, "pms9k-bmesp");
     EXPECT_EQ(count_notes(second.chart, LaneKind::Key, 8), 2u);
 }
@@ -389,8 +379,7 @@ TEST(PmsVariant, WriteSideProfiles) {
         const int i = k - 6;
         EXPECT_EQ(bms_channel_for_mode("pms9k", lane, false, NoteKind::Normal),
                   kPmsStdKey69Text[i]);
-        EXPECT_EQ(bms_channel_for_mode("pms9k", lane, true, NoteKind::Normal),
-                  kPmsStdLn69Text[i]);
+        EXPECT_EQ(bms_channel_for_mode("pms9k", lane, true, NoteKind::Normal), kPmsStdLn69Text[i]);
         EXPECT_EQ(bms_channel_for_mode("pms9k", lane, false, NoteKind::Landmine),
                   kPmsStdMine69Text[i]);
         EXPECT_EQ(bms_channel_for_mode("pms9k-bmesp", lane, false, NoteKind::Normal),
@@ -424,11 +413,9 @@ TEST(PmsVariant, WriteSideProfiles) {
                       k == 1 || k >= 6 ? "E" + d : "");
         }
     }
-    EXPECT_EQ(bms_channel_for_mode("pms9k", Lane{1, LaneKind::Key, 6}, true,
-                                   NoteKind::Normal),
+    EXPECT_EQ(bms_channel_for_mode("pms9k", Lane{1, LaneKind::Key, 6}, true, NoteKind::Normal),
               "66");
-    EXPECT_EQ(bms_channel_for_mode("pms9k", Lane{1, LaneKind::Key, 8}, false,
-                                   NoteKind::Landmine),
+    EXPECT_EQ(bms_channel_for_mode("pms9k", Lane{1, LaneKind::Key, 8}, false, NoteKind::Landmine),
               "E8");
 }
 
@@ -450,16 +437,12 @@ TEST(PmsVariant, Sp7DpIsolation) {
     ASSERT_TRUE(ce2.has_value());
     EXPECT_EQ(ce2->lane, (Lane{1, LaneKind::Key, 2}));
 
-    EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{1, LaneKind::Key, 6}, false,
-                                   NoteKind::Normal),
+    EXPECT_EQ(bms_channel_for_mode("sp7k", Lane{1, LaneKind::Key, 6}, false, NoteKind::Normal),
               "28");
-    EXPECT_EQ(bms_channel_for_mode("dp", Lane{1, LaneKind::Key, 2}, true,
-                                   NoteKind::Normal),
-              "62");
-    EXPECT_EQ(bms_channel_for_mode("dp", Lane{1, LaneKind::Key, 2}, false,
-                                   NoteKind::Landmine),
+    EXPECT_EQ(bms_channel_for_mode("dp", Lane{1, LaneKind::Key, 2}, true, NoteKind::Normal), "62");
+    EXPECT_EQ(bms_channel_for_mode("dp", Lane{1, LaneKind::Key, 2}, false, NoteKind::Landmine),
               "E2");
-    EXPECT_EQ(bms_channel_for_mode("battle", Lane{0, LaneKind::Scratch, 0}, false,
-                                   NoteKind::Normal),
-              "16");
+    EXPECT_EQ(
+        bms_channel_for_mode("battle", Lane{0, LaneKind::Scratch, 0}, false, NoteKind::Normal),
+        "16");
 }

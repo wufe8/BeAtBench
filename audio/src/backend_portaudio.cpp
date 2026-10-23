@@ -3,12 +3,11 @@
 // ASIO 后置：v19.7 编译时检测 ASIO SDK；找不到 → 自动禁用（WASAPI 兜底，不阻塞）。
 // 回调线程 = PortAudio 创建；回调内只写缓冲（SamplePlayer::render 无锁无分配）。
 // M4.2：start(settings) 支持设备序号/采样率/缓冲帧数（设置页）；0/负 = 设备默认。
-#include "beatbench/audio/AudioBackend.hpp"
-
 #include <cstring>
 #include <mutex>
 #include <string>
 
+#include "beatbench/audio/AudioBackend.hpp"
 #include "portaudio.h"
 
 namespace beatbench::audio {
@@ -43,8 +42,8 @@ struct CallbackUser {
     double deviceRate = 0.0;
 };
 
-int paCallback(const void*, void* output, unsigned long frameCount,
-               const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void* userData) {
+int paCallback(const void*, void* output, unsigned long frameCount, const PaStreamCallbackTimeInfo*,
+               PaStreamCallbackFlags, void* userData) {
     auto* u = static_cast<CallbackUser*>(userData);
     auto* out = static_cast<float*>(output);
     if (u->cb) {
@@ -57,7 +56,7 @@ int paCallback(const void*, void* output, unsigned long frameCount,
 }  // namespace
 
 class PortAudioBackend final : public AudioBackend {
-public:
+   public:
     ~PortAudioBackend() override { shutdown(); }
 
     bool init(std::string* errMsg) override {
@@ -74,7 +73,10 @@ public:
             return false;
         }
         const PaDeviceInfo* di = Pa_GetDeviceInfo(defaultDev);
-        if (!di) { if (errMsg) *errMsg = "设备信息不可用"; return false; }
+        if (!di) {
+            if (errMsg) *errMsg = "设备信息不可用";
+            return false;
+        }
         m_defaultDevice = defaultDev;
         m_defaultName = di->name;
         m_defaultApi = Pa_GetHostApiInfo(di->hostApi)->name;
@@ -90,12 +92,14 @@ public:
         int dev = settings.device;
         if (dev < 0) dev = m_defaultDevice;
         const PaDeviceInfo* di = Pa_GetDeviceInfo(dev);
-        if (!di) { if (errMsg) *errMsg = "设备不存在或不可用"; return false; }
+        if (!di) {
+            if (errMsg) *errMsg = "设备不存在或不可用";
+            return false;
+        }
 
         // 采样率：0 = 设备默认；否则用设定值（PortAudio 共享模式通常按就近处理）
-        const double rate = (settings.sampleRate > 0)
-                                ? static_cast<double>(settings.sampleRate)
-                                : static_cast<double>(di->defaultSampleRate);
+        const double rate = (settings.sampleRate > 0) ? static_cast<double>(settings.sampleRate)
+                                                      : static_cast<double>(di->defaultSampleRate);
 
         // 缓冲帧数：0 = 设备默认（suggestedLatency 换算）；>0 = 用设定值（稀疏帧数 → 延迟更低）
         PaStreamParameters params;
@@ -116,9 +120,8 @@ public:
         m_cbUser.cb = cb;
         m_cbUser.user = user;
         m_cbUser.deviceRate = rate;
-        const PaError err =
-            Pa_OpenStream(&m_stream, nullptr, &params, rate, framesPerBuffer,
-                          paNoFlag, &paCallback, &m_cbUser);
+        const PaError err = Pa_OpenStream(&m_stream, nullptr, &params, rate, framesPerBuffer,
+                                          paNoFlag, &paCallback, &m_cbUser);
         if (err != paNoError) {
             if (errMsg) *errMsg = std::string("打开音频流失败：") + Pa_GetErrorText(err);
             return false;
@@ -176,7 +179,7 @@ public:
         return out;
     }
 
-private:
+   private:
     PaStream* m_stream = nullptr;
     int m_defaultDevice = -1;
     std::string m_defaultName;

@@ -35,7 +35,9 @@ inline Utf8Cp decode_utf8(std::string_view in, std::size_t at) {
     if (len == 0 || at + static_cast<std::size_t>(len) > n) return {};
     std::uint32_t cp = 0;
     switch (len) {
-        case 1: cp = b0; return {cp, 1};
+        case 1:
+            cp = b0;
+            return {cp, 1};
         case 2:
             if ((static_cast<unsigned char>(in[at + 1]) & 0xC0) != 0x80) return {};
             cp = ((b0 & 0x1Fu) << 6) | (static_cast<unsigned char>(in[at + 1]) & 0x3Fu);
@@ -58,7 +60,8 @@ inline Utf8Cp decode_utf8(std::string_view in, std::size_t at) {
             if (cp < 0x10000 || cp > 0x10FFFF) return {};  // 过编码/超范围
             break;
         }
-        default: return {};
+        default:
+            return {};
     }
     return {cp, len};
 }

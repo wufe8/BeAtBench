@@ -3,13 +3,12 @@
 // 所有权：decode 返回 DecodedSample 计数 = 1（调用方持有）；本类把
 // interleavedStereo **移动**进 shared_ptr<vector<float>>（帧数据零拷贝），
 // 再 decoded_sample_release 归还计数 1 → 归零 delete（缓冲已被移动，析构为空）。
-#include "beatbench/audio/ReferenceTrack.hpp"
-
 #include <algorithm>
 #include <cmath>
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/DecodedSample.hpp"
+#include "beatbench/audio/ReferenceTrack.hpp"
 
 namespace beatbench::audio {
 
@@ -65,9 +64,7 @@ void ReferenceTrack::clear() {
     m_error.clear();
 }
 
-std::size_t ReferenceTrack::frameCount() const {
-    return m_pcm ? m_pcm->size() / 2 : 0;
-}
+std::size_t ReferenceTrack::frameCount() const { return m_pcm ? m_pcm->size() / 2 : 0; }
 
 std::vector<float> ReferenceTrack::window(double startSec, double endSec) const {
     std::vector<float> out;
@@ -76,8 +73,7 @@ std::vector<float> ReferenceTrack::window(double startSec, double endSec) const 
     auto frameOf = [&](double sec) -> std::size_t {
         return static_cast<std::size_t>(
             std::clamp(static_cast<std::int64_t>(std::llround(sec * m_sampleRate)),
-                       static_cast<std::int64_t>(0),
-                       static_cast<std::int64_t>(totalFrames)));
+                       static_cast<std::int64_t>(0), static_cast<std::int64_t>(totalFrames)));
     };
     const std::size_t f0 = frameOf(startSec);
     const std::size_t f1 = frameOf(endSec);
@@ -87,15 +83,13 @@ std::vector<float> ReferenceTrack::window(double startSec, double endSec) const 
     return out;
 }
 
-void ReferenceTrack::apply_slice_fade(std::vector<float>& pcm, double sampleRate,
-                                      double fadeSec) {
+void ReferenceTrack::apply_slice_fade(std::vector<float>& pcm, double sampleRate, double fadeSec) {
     if (pcm.empty() || sampleRate <= 0.0 || fadeSec <= 0.0) return;
     const std::size_t frames = pcm.size() / 2;
     if (frames < 2) return;
     const std::size_t halfFrames = frames / 2;
     const std::size_t fadeFrames = static_cast<std::size_t>(
-        std::clamp(std::ceil(sampleRate * fadeSec), 1.0,
-                   static_cast<double>(halfFrames)));
+        std::clamp(std::ceil(sampleRate * fadeSec), 1.0, static_cast<double>(halfFrames)));
     for (std::size_t i = 0; i < frames; ++i) {
         float g = 1.0f;
         if (i < fadeFrames) {

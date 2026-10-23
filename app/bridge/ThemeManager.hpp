@@ -20,65 +20,70 @@ namespace beatbench::app {
 
 class ThemeManager : public QObject {
     Q_OBJECT
-public:
+   public:
     explicit ThemeManager(QObject* parent = nullptr) : QObject(parent) {}
 
     // ---- 颜色 token（访问器；默认值见 doc/beatbench-ui-preview.html :root） ----
     // NOTIFY tokensChanged：运行时换肤（loadTheme 重载）→ QML 绑定重算（doc/skin-system.md 三、3. 运行时换肤）。
-#define BB_THEME_COLOR_PROP(name)              \
+#define BB_THEME_COLOR_PROP(name)                          \
     Q_PROPERTY(QColor name READ name NOTIFY tokensChanged) \
     QColor name() const { return m_##name; }
-    BB_THEME_COLOR_PROP(bg)             // 视口底
-    BB_THEME_COLOR_PROP(surface)        // 面板底
-    BB_THEME_COLOR_PROP(surface2)       // 工具条/按钮底
-    BB_THEME_COLOR_PROP(surface3)       // hover 底
-    BB_THEME_COLOR_PROP(border)         // 分隔线
-    BB_THEME_COLOR_PROP(borderStrong)   // 控件边框
-    BB_THEME_COLOR_PROP(text)           // 正文
-    BB_THEME_COLOR_PROP(textMuted)      // 次级文字
-    BB_THEME_COLOR_PROP(textFaint)      // 占位/弱文字
-    BB_THEME_COLOR_PROP(primary)        // 主色（靛蓝）
-    BB_THEME_COLOR_PROP(primarySoft)    // 主色 15% 底（激活工具）
-    BB_THEME_COLOR_PROP(onAccent)       // 主色上文字
-    BB_THEME_COLOR_PROP(accent)         // 强调（青）
-    BB_THEME_COLOR_PROP(focusRing)      // 焦点区域高亮边缘（PR 式；默认 = accent 同系）
+    BB_THEME_COLOR_PROP(bg)            // 视口底
+    BB_THEME_COLOR_PROP(surface)       // 面板底
+    BB_THEME_COLOR_PROP(surface2)      // 工具条/按钮底
+    BB_THEME_COLOR_PROP(surface3)      // hover 底
+    BB_THEME_COLOR_PROP(border)        // 分隔线
+    BB_THEME_COLOR_PROP(borderStrong)  // 控件边框
+    BB_THEME_COLOR_PROP(text)          // 正文
+    BB_THEME_COLOR_PROP(textMuted)     // 次级文字
+    BB_THEME_COLOR_PROP(textFaint)     // 占位/弱文字
+    BB_THEME_COLOR_PROP(primary)       // 主色（靛蓝）
+    BB_THEME_COLOR_PROP(primarySoft)   // 主色 15% 底（激活工具）
+    BB_THEME_COLOR_PROP(onAccent)      // 主色上文字
+    BB_THEME_COLOR_PROP(accent)        // 强调（青）
+    BB_THEME_COLOR_PROP(focusRing)     // 焦点区域高亮边缘（PR 式；默认 = accent 同系）
     BB_THEME_COLOR_PROP(success)
     BB_THEME_COLOR_PROP(warning)
     BB_THEME_COLOR_PROP(danger)
-    BB_THEME_COLOR_PROP(keyNote)        // 按键 note
-    BB_THEME_COLOR_PROP(lnTail)         // LN 尾（rgba(139,156,248,.26)）
+    BB_THEME_COLOR_PROP(keyNote)  // 按键 note
+    BB_THEME_COLOR_PROP(lnTail)   // LN 尾（rgba(139,156,248,.26)）
     // 时间轴 note 着色（doc/ui-design.md 七、；= beatbench-ui-styles.html 默认主题，仅本地/视觉语义）
-    BB_THEME_COLOR_PROP(n1)             // 键音 1（键 1/5/… → n1..n4 循环）
-    BB_THEME_COLOR_PROP(n2)             // 键音 2
-    BB_THEME_COLOR_PROP(n3)             // 键音 3
-    BB_THEME_COLOR_PROP(n4)             // 键音 4
-    BB_THEME_COLOR_PROP(scratch)        // 皿
-    BB_THEME_COLOR_PROP(mine)           // 地雷
-    BB_THEME_COLOR_PROP(ln)             // LN 体（rgba(139,156,248,.26)）
-    BB_THEME_COLOR_PROP(wave)           // BGM 波形底（rgba(139,156,248,.12)）
-    BB_THEME_COLOR_PROP(accent2)        // 强调别名（styles.html accent2 = 青）
+    BB_THEME_COLOR_PROP(n1)       // 键音 1（键 1/5/… → n1..n4 循环）
+    BB_THEME_COLOR_PROP(n2)       // 键音 2
+    BB_THEME_COLOR_PROP(n3)       // 键音 3
+    BB_THEME_COLOR_PROP(n4)       // 键音 4
+    BB_THEME_COLOR_PROP(scratch)  // 皿
+    BB_THEME_COLOR_PROP(mine)     // 地雷
+    BB_THEME_COLOR_PROP(ln)       // LN 体（rgba(139,156,248,.26)）
+    BB_THEME_COLOR_PROP(wave)     // BGM 波形底（rgba(139,156,248,.12)）
+    BB_THEME_COLOR_PROP(accent2)  // 强调别名（styles.html accent2 = 青）
     // —— 时间轴 note 配色（2026-09 用户指定；原硬编码在 ChartViewItem，收敛到主题 token，
     //    替换皮肤/贴图时从 theme.json 注入）——
-    BB_THEME_COLOR_PROP(keyOdd)         // 奇数键（键 1/3/5/7 = ch11/13/15/19）→ 白
-    BB_THEME_COLOR_PROP(scratchNote)    // 皿（ch16）→ 红（高对比）
-    BB_THEME_COLOR_PROP(bgmNote)        // 背景轨（ch01）→ 绿（与 BGA 层一致）
+    BB_THEME_COLOR_PROP(keyOdd)       // 奇数键（键 1/3/5/7 = ch11/13/15/19）→ 白
+    BB_THEME_COLOR_PROP(scratchNote)  // 皿（ch16）→ 红（高对比）
+    BB_THEME_COLOR_PROP(bgmNote)      // 背景轨（ch01）→ 绿（与 BGA 层一致）
     // BGA 图层四列（04/06/07/0A；用户配色绿色系，层间深浅区分）
-    BB_THEME_COLOR_PROP(bgaBase)        // ch04 base：浅绿
-    BB_THEME_COLOR_PROP(bgaPoor)        // ch06 poor：深绿
-    BB_THEME_COLOR_PROP(bgaLayer)       // ch07 layer：亮绿
-    BB_THEME_COLOR_PROP(bgaLayer2)      // ch0A layer2：中绿
+    BB_THEME_COLOR_PROP(bgaBase)    // ch04 base：浅绿
+    BB_THEME_COLOR_PROP(bgaPoor)    // ch06 poor：深绿
+    BB_THEME_COLOR_PROP(bgaLayer)   // ch07 layer：亮绿
+    BB_THEME_COLOR_PROP(bgaLayer2)  // ch0A layer2：中绿
 #undef BB_THEME_COLOR_PROP
 
     // ---- 非颜色 token（L2 皮肤：密度/圆角/字体可覆写；默认值见 doc/beatbench-ui-preview.html） ----
-    Q_PROPERTY(qreal radiusSm READ radiusSm NOTIFY tokensChanged)   // 控件圆角（6）= button/box 默认
-    Q_PROPERTY(qreal radius READ radius NOTIFY tokensChanged)       // 面板圆角（10）
-    Q_PROPERTY(qreal noteRadius READ noteRadius NOTIFY tokensChanged) // note 圆角（2，= styles.html）
-    Q_PROPERTY(qreal buttonRadius READ buttonRadius NOTIFY tokensChanged) // 按钮/工具条按钮圆角（= radiusSm）
-    Q_PROPERTY(qreal boxRadius READ boxRadius NOTIFY tokensChanged)   // 复选框/输入框/下拉圆角（= radiusSm）
-    Q_PROPERTY(qreal keyLaneTintAlpha READ keyLaneTintAlpha NOTIFY tokensChanged) // 键轨底色透明度（0=无，默认 20）
-    Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)       // 正文/按钮（13，= preview.html 基准）
-    Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)     // 次级/标签（12）
-    Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)       // 提示/占位（11）
+    Q_PROPERTY(qreal radiusSm READ radiusSm NOTIFY tokensChanged)  // 控件圆角（6）= button/box 默认
+    Q_PROPERTY(qreal radius READ radius NOTIFY tokensChanged)      // 面板圆角（10）
+    Q_PROPERTY(
+        qreal noteRadius READ noteRadius NOTIFY tokensChanged)  // note 圆角（2，= styles.html）
+    Q_PROPERTY(qreal buttonRadius READ buttonRadius NOTIFY
+                   tokensChanged)  // 按钮/工具条按钮圆角（= radiusSm）
+    Q_PROPERTY(qreal boxRadius READ boxRadius NOTIFY
+                   tokensChanged)  // 复选框/输入框/下拉圆角（= radiusSm）
+    Q_PROPERTY(qreal keyLaneTintAlpha READ keyLaneTintAlpha NOTIFY
+                   tokensChanged)  // 键轨底色透明度（0=无，默认 20）
+    Q_PROPERTY(
+        qreal fsBase READ fsBase NOTIFY tokensChanged)  // 正文/按钮（13，= preview.html 基准）
+    Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)  // 次级/标签（12）
+    Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)    // 提示/占位（11）
     Q_PROPERTY(QString fontSans READ fontSans NOTIFY tokensChanged)
     Q_PROPERTY(QString fontMono READ fontMono NOTIFY tokensChanged)
 
@@ -128,14 +133,15 @@ public:
     /// 按名字应用皮肤（"默认"→resetDefault；否则 resolve 目录 applyTheme）。返回覆写数；-1 失败。
     Q_INVOKABLE int applySkinByName(const QString& name);
 
-signals:
+   signals:
     /// 任一 token 变化（运行时换肤/重置默认）→ QML 绑定重算 + ChartView 重绘。
     void tokensChanged();
 
     // 内部：theme.json 覆写用的逐个 setter（仅 loadTheme 调用；QML 侧只读）。
     // 显式 public：分隔上面的 signals 区（否则 moc 把 set_* 误读为信号）。
-public:
-#define BB_THEME_SETTER(name) void set_##name(const QColor& v) { m_##name = v; }
+   public:
+#define BB_THEME_SETTER(name) \
+    void set_##name(const QColor& v) { m_##name = v; }
     BB_THEME_SETTER(bg)
     BB_THEME_SETTER(surface)
     BB_THEME_SETTER(surface2)
@@ -174,7 +180,8 @@ public:
 #undef BB_THEME_SETTER
 
     // 非颜色 token 覆写（L2 皮肤：密度/圆角/字体）；仅 loadTheme 调用，QML 只读。
-#define BB_THEME_NUM_SETTER(name) void set_##name(qreal v) { m_##name = v; }
+#define BB_THEME_NUM_SETTER(name) \
+    void set_##name(qreal v) { m_##name = v; }
     BB_THEME_NUM_SETTER(radiusSm)
     BB_THEME_NUM_SETTER(radius)
     BB_THEME_NUM_SETTER(noteRadius)
@@ -188,10 +195,9 @@ public:
     void set_fontSans(const QString& v) { m_fontSans = v; }
     void set_fontMono(const QString& v) { m_fontMono = v; }
 
-private:
+   private:
     // 成员与上方访问器一一对应（同名同序，新增 token 两处同步）
-#define BB_THEME_COLOR_MEMBER(name, def) \
-    QColor m_##name = QColor(QStringLiteral(def));
+#define BB_THEME_COLOR_MEMBER(name, def) QColor m_##name = QColor(QStringLiteral(def));
     BB_THEME_COLOR_MEMBER(bg, "#0b0d10")
     BB_THEME_COLOR_MEMBER(surface, "#12151a")
     BB_THEME_COLOR_MEMBER(surface2, "#1a1e24")
@@ -205,37 +211,38 @@ private:
     BB_THEME_COLOR_MEMBER(primarySoft, "#266366f1")  // AARRGGBB：主色 15%
     BB_THEME_COLOR_MEMBER(onAccent, "#ffffff")
     BB_THEME_COLOR_MEMBER(accent, "#22d3ee")
-    BB_THEME_COLOR_MEMBER(focusRing, "#22d3ee")      // 默认 = accent 同系（皮肤可独立改）
+    BB_THEME_COLOR_MEMBER(focusRing, "#22d3ee")  // 默认 = accent 同系（皮肤可独立改）
     BB_THEME_COLOR_MEMBER(success, "#34d399")
     BB_THEME_COLOR_MEMBER(warning, "#fbbf24")
     BB_THEME_COLOR_MEMBER(danger, "#f87171")
     BB_THEME_COLOR_MEMBER(keyNote, "#8b9cf8")
-    BB_THEME_COLOR_MEMBER(lnTail, "#428b9cf8")       // AARRGGBB：rgba(139,156,248,.26)
+    BB_THEME_COLOR_MEMBER(lnTail, "#428b9cf8")  // AARRGGBB：rgba(139,156,248,.26)
     BB_THEME_COLOR_MEMBER(n1, "#8b9cf8")
     BB_THEME_COLOR_MEMBER(n2, "#8b9cf8")
     BB_THEME_COLOR_MEMBER(n3, "#8b9cf8")
     BB_THEME_COLOR_MEMBER(n4, "#8b9cf8")
     BB_THEME_COLOR_MEMBER(scratch, "#22d3ee")
     BB_THEME_COLOR_MEMBER(mine, "#f87171")
-    BB_THEME_COLOR_MEMBER(ln, "#428b9cf8")           // AARRGGBB：rgba(139,156,248,.26)
-    BB_THEME_COLOR_MEMBER(wave, "#1f8b9cf8")         // AARRGGBB：rgba(139,156,248,.12)
+    BB_THEME_COLOR_MEMBER(ln, "#428b9cf8")    // AARRGGBB：rgba(139,156,248,.26)
+    BB_THEME_COLOR_MEMBER(wave, "#1f8b9cf8")  // AARRGGBB：rgba(139,156,248,.12)
     BB_THEME_COLOR_MEMBER(accent2, "#22d3ee")
-    BB_THEME_COLOR_MEMBER(keyOdd, "#ffffff")         // 奇数键（1/3/5/7）→ 白
-    BB_THEME_COLOR_MEMBER(scratchNote, "#ef5350")    // 皿 → 红（用户配色）
-    BB_THEME_COLOR_MEMBER(bgmNote, "#4ade80")        // 背景轨 → 绿（与 BGA 层一致）
-    BB_THEME_COLOR_MEMBER(bgaBase, "#86efac")        // ch04 base：浅绿
-    BB_THEME_COLOR_MEMBER(bgaPoor, "#16a34a")        // ch06 poor：深绿
-    BB_THEME_COLOR_MEMBER(bgaLayer, "#4ade80")       // ch07 layer：亮绿
-    BB_THEME_COLOR_MEMBER(bgaLayer2, "#22c55e")      // ch0A layer2：中绿
+    BB_THEME_COLOR_MEMBER(keyOdd, "#ffffff")       // 奇数键（1/3/5/7）→ 白
+    BB_THEME_COLOR_MEMBER(scratchNote, "#ef5350")  // 皿 → 红（用户配色）
+    BB_THEME_COLOR_MEMBER(bgmNote, "#4ade80")      // 背景轨 → 绿（与 BGA 层一致）
+    BB_THEME_COLOR_MEMBER(bgaBase, "#86efac")      // ch04 base：浅绿
+    BB_THEME_COLOR_MEMBER(bgaPoor, "#16a34a")      // ch06 poor：深绿
+    BB_THEME_COLOR_MEMBER(bgaLayer, "#4ade80")     // ch07 layer：亮绿
+    BB_THEME_COLOR_MEMBER(bgaLayer2, "#22c55e")    // ch0A layer2：中绿
 #undef BB_THEME_COLOR_MEMBER
 
     // 非颜色 token 成员（与上方访问器一一对应；默认值 = 内置默认皮肤骨架）
     qreal m_radiusSm = 6.0;
     qreal m_radius = 10.0;
     qreal m_noteRadius = 2.0;
-    qreal m_buttonRadius = 6.0;   // = radiusSm（按钮/工具条按钮）
-    qreal m_boxRadius = 6.0;       // = radiusSm（复选框/输入框/下拉）
-    qreal m_keyLaneTintAlpha = 18.0; // 键轨底色透明度（0=无；>0 按 n1..n4 微透铺底，默认 18 轻着色）
+    qreal m_buttonRadius = 6.0;  // = radiusSm（按钮/工具条按钮）
+    qreal m_boxRadius = 6.0;     // = radiusSm（复选框/输入框/下拉）
+    qreal m_keyLaneTintAlpha =
+        18.0;  // 键轨底色透明度（0=无；>0 按 n1..n4 微透铺底，默认 18 轻着色）
     qreal m_fsBase = 13.0;
     qreal m_fsSmall = 12.0;
     qreal m_fsTiny = 11.0;

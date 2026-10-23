@@ -6,12 +6,12 @@
 // - 边界：命令与事件走 SPSC ring；DecodedSample 经 m_reclaimRing 归还，
 //   实际 delete 只发生在 UI 线程 drainReclaimed()（回调内零析构纪律）。
 // 引用协议见 DecodedSample.hpp（侵入计数，归零后回调入回收、UI delete）。
-#include "beatbench/audio/SamplePlayer.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+
+#include "beatbench/audio/SamplePlayer.hpp"
 
 namespace beatbench::audio {
 
@@ -38,9 +38,8 @@ bool SamplePlayer::play(DecodedSample* sample, float volume, double startSec) {
     return true;
 }
 
-bool SamplePlayer::playSharedPcm(std::shared_ptr<const std::vector<float>> pcm,
-                                 double sampleRate, float volume, double startSec,
-                                 int slot) {
+bool SamplePlayer::playSharedPcm(std::shared_ptr<const std::vector<float>> pcm, double sampleRate,
+                                 float volume, double startSec, int slot) {
     if (!pcm || pcm->empty() || sampleRate <= 0.0) return false;
     if (volume < 0.0f) volume = 0.0f;
     if (volume > 1.0f) volume = 1.0f;
@@ -148,7 +147,9 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
                 v.sample = nullptr;
                 v.active = false;
                 m_activeCount.fetch_sub(1, std::memory_order_relaxed);
-                Event ev; ev.type = EventType::Ended; ev.slot = cmd.slot;
+                Event ev;
+                ev.type = EventType::Ended;
+                ev.slot = cmd.slot;
                 m_eventRing.push(ev);
                 // M5 时钟：停掉 PCM 槽 → 基线复位
                 if (cmd.slot == kPcmSlot) {
@@ -181,25 +182,26 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
                 const bool last = v.sample->unref();
                 if (last) m_reclaimRing.push(v.sample);
             }
-            v.sample = cmd.sample;           // 命令的引用转移给 voice
+            v.sample = cmd.sample;  // 命令的引用转移给 voice
             const double startFrames = cmd.startSec * v.sample->sampleRate;
             v.framePos = static_cast<std::uint64_t>(startFrames);
             v.frac = startFrames - static_cast<double>(v.framePos);
-            v.startFrame0 = v.framePos;      // 截取起点（包络 base；见 render）
+            v.startFrame0 = v.framePos;  // 截取起点（包络 base；见 render）
             v.step = v.sample->sampleRate / m_deviceRate;
             v.volume = cmd.volume;
             v.env = 0.0f;
             v.active = true;
             m_activeCount.fetch_add(1, std::memory_order_relaxed);
-            Event ev; ev.type = EventType::Started; ev.slot = slot;
+            Event ev;
+            ev.type = EventType::Started;
+            ev.slot = slot;
             m_eventRing.push(ev);
             // M5 播放时钟：kPcmSlot 启动 → 记录输出帧基线（回调线程写）
             if (slot == kPcmSlot && cmd.type == CmdType::StartSharedPcm) {
                 m_pcmBaseline.store(static_cast<std::int64_t>(m_totalFrames),
                                     std::memory_order_relaxed);
                 m_pcmStartSec.store(cmd.startSec, std::memory_order_relaxed);
-                m_pcmDurationSec.store(
-                    v.sample->durationSeconds(), std::memory_order_relaxed);
+                m_pcmDurationSec.store(v.sample->durationSeconds(), std::memory_order_relaxed);
             }
         }
     }
@@ -219,7 +221,10 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
         const std::uint64_t envBase = v.startFrame0;  // 截取起点（源帧）
         for (int o = 0; o < frames; ++o) {
             const std::uint64_t fi = v.framePos;
-            if (fi >= srcFrames) { finished = true; break; }
+            if (fi >= srcFrames) {
+                finished = true;
+                break;
+            }
             // ⚠️ 显式钉 min 实参：fi 是 uint64_t，srcFrames 是 size_t；Apple 平台
             // uint64_t=unsigned long long ≠ size_t（unsigned long），模板推导冲突。
             const std::uint64_t i1 = std::min<std::uint64_t>(fi + 1, srcFrames - 1);
@@ -232,13 +237,11 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             if (rel < envFramesSrc)
                 env = static_cast<float>(rel) / static_cast<float>(envFramesSrc);
             else if (fi + envFramesSrc >= srcFrames)
-                env = static_cast<float>(srcFrames - fi) /
-                      static_cast<float>(envFramesSrc);
+                env = static_cast<float>(srcFrames - fi) / static_cast<float>(envFramesSrc);
             env = std::min(1.0f, std::max(0.0f, env));
             v.env = env;
             // 主音量（实时参数；回调线程读原子）乘到每个 voice
-            const float g = v.volume * env *
-                            m_masterVolume.load(std::memory_order_relaxed);
+            const float g = v.volume * env * m_masterVolume.load(std::memory_order_relaxed);
             out[static_cast<ptrdiff_t>(o * 2)] += l * g;
             out[o * 2 + 1] += rgt * g;
             v.frac += v.step;
@@ -254,7 +257,9 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             v.sample = nullptr;
             v.active = false;
             m_activeCount.fetch_sub(1, std::memory_order_relaxed);
-            Event ev; ev.type = EventType::Ended; ev.slot = s;
+            Event ev;
+            ev.type = EventType::Ended;
+            ev.slot = s;
             m_eventRing.push(ev);
             // M5 时钟：PCM 播完 → 基线复位
             if (s == kPcmSlot) {
@@ -263,8 +268,7 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
         }
     }
     // M5 时钟：本次 render 输出帧数累计（回调线程写、UI 读）
-    m_totalFrames.fetch_add(static_cast<std::uint64_t>(frames),
-                            std::memory_order_relaxed);
+    m_totalFrames.fetch_add(static_cast<std::uint64_t>(frames), std::memory_order_relaxed);
 }
 
 int SamplePlayer::drainEndedEvents() {

@@ -17,23 +17,23 @@ namespace beatbench::audio {
 
 /// 输出设备信息（设定页/状态栏显示）。
 struct AudioDeviceInfo {
-    std::string name;            ///< 设备名（如 "扬声器 (Realtek High Definition Audio)"）
-    int index = -1;              ///< 后端设备序号（AudioSettings.device 传回）
-    int defaultSampleRate = 0;   ///< 设备默认采样率
+    std::string name;           ///< 设备名（如 "扬声器 (Realtek High Definition Audio)"）
+    int index = -1;             ///< 后端设备序号（AudioSettings.device 传回）
+    int defaultSampleRate = 0;  ///< 设备默认采样率
     int maxOutputChannels = 0;
-    std::string apiName;         ///< "WASAPI" / "ASIO" / "DirectSound" 等
+    std::string apiName;  ///< "WASAPI" / "ASIO" / "DirectSound" 等
 };
 
 /// 输出流参数（设置页可编辑项；0/负 = 用设备默认值）。
 struct AudioSettings {
-    int device = -1;         ///< 设备序号（AudioDeviceInfo.index；-1 = 系统默认）
-    int sampleRate = 0;      ///< 目标采样率（0 = 设备默认；常用 44100/48000）
-    int framesPerBuffer = 0; ///< 缓冲帧数（0 = 设备默认；常用 128/256/512；-1 = 0 别名）
+    int device = -1;          ///< 设备序号（AudioDeviceInfo.index；-1 = 系统默认）
+    int sampleRate = 0;       ///< 目标采样率（0 = 设备默认；常用 44100/48000）
+    int framesPerBuffer = 0;  ///< 缓冲帧数（0 = 设备默认；常用 128/256/512；-1 = 0 别名）
 };
 
 /// 输出后端（init 打开默认输出设备；start 启动回调）。一次 init 对应一个流。
 class AudioBackend {
-public:
+   public:
     virtual ~AudioBackend() = default;
 
     /// 回调：向 out 缓冲写 [frames] 帧立体声（float32 交错，0..frames-1 每帧 2 样本）。

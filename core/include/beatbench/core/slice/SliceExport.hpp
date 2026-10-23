@@ -16,8 +16,8 @@
 #include <string>
 #include <vector>
 
-#include "beatbench/core/Rational.hpp"
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/Rational.hpp"
 #include "beatbench/core/slice/Slice.hpp"
 
 namespace beatbench::slice {
@@ -49,8 +49,7 @@ int parse_export_file_index(const std::string& fileName, const std::string& base
 int next_continue_file_index(const std::vector<int>& occupiedIndexes);
 
 /// 为 count 个即将写盘的启用切片分配续号：从 next_continue_file_index(occupied) 起连续 count 个。
-std::vector<int> allocate_continue_file_indexes(const std::vector<int>& occupiedIndexes,
-                                                int count);
+std::vector<int> allocate_continue_file_indexes(const std::vector<int>& occupiedIndexes, int count);
 
 /// 按策略改写 items 的 fileIndex/fileName。Error 且存在冲突名 → false（items 不变）。
 /// occupiedIndexes = 目标目录已有同前缀 wav 的序号；collidingNames = layout 原名与磁盘撞车的相对路径。
@@ -62,9 +61,9 @@ bool apply_export_file_policy(std::vector<SliceExportItem>& items, const std::st
 
 /// 为 count 个切片分配最低空闲 #WAV id：从 start_id 起，跳过 occupied + 本次已分配。
 /// 超出上限（1295 = ZZ）时截断（count 只计到可分配数）。返回按序的长度 ≤ count。
-std::vector<std::uint32_t> allocate_wav_ids(
-    const std::vector<std::uint32_t>& occupied, std::uint32_t start_id, int count,
-    IdBase idBase = IdBase::Base36);
+std::vector<std::uint32_t> allocate_wav_ids(const std::vector<std::uint32_t>& occupied,
+                                            std::uint32_t start_id, int count,
+                                            IdBase idBase = IdBase::Base36);
 
 /// 汇总导出布局：切片 → {id, 文件名, 拍位}。enabled[i] 决定是否铺放。
 /// 拍位换算：beat = (startSec - offset) * bpm / 60；measure = floor(beat/beatsPerMeasure)；
@@ -75,17 +74,16 @@ std::vector<std::uint32_t> allocate_wav_ids(
 /// 所有切片的 measure 整体平移 startMeasure-1；默认 1 = 从第 1 小节起，即文件 #000）。
 std::vector<SliceExportItem> build_export_layout(
     const std::vector<Slice>& slices, const std::vector<bool>& enabled,
-    const std::vector<std::uint32_t>& occupied, std::uint32_t start_id,
-    const std::string& baseName, double bpm, int beatsPerMeasure,
-    int subdivision, double offset, int startMeasure = 1, int width = 3,
-    IdBase idBase = IdBase::Base36);
+    const std::vector<std::uint32_t>& occupied, std::uint32_t start_id, const std::string& baseName,
+    double bpm, int beatsPerMeasure, int subdivision, double offset, int startMeasure = 1,
+    int width = 3, IdBase idBase = IdBase::Base36);
 
 /// 生成「可复制 BMS raw」：把 items 铺进一个临时 Chart（WAV 定义 + ch01 note），
 /// 经 bms::write_bms 写出再筛掉杂线，返回 `#WAVxx <file>` 定义 + ch01/ch02 数据行。
 /// Base62 导出额外保留 `#BASE 62` 声明行作为来源进制标记（clipboard.paste 忽略 #BASE，
 /// 不改变目标谱面进制；GUI 据此在粘贴进 Base36 谱面前提示数值歧义）。
 /// beatsPerMeasure 决定 ch02 小节长度（=4 时按默认 4/4，不输出）。
-std::string build_placement_raw(const std::vector<SliceExportItem>& items,
-                                double bpm, int beatsPerMeasure, IdBase idBase = IdBase::Base36);
+std::string build_placement_raw(const std::vector<SliceExportItem>& items, double bpm,
+                                int beatsPerMeasure, IdBase idBase = IdBase::Base36);
 
 }  // namespace beatbench::slice

@@ -4,13 +4,13 @@
 // ③ startSec（M5 接口形状）；④ playPreview 切换（停旧播新）；⑤ 引用计数（无泄漏）。
 // 不依赖 PortAudio 设备（SamplePlayer 是纯 DSP + 命令队列，可独立测试）。
 #define _USE_MATH_DEFINES
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/SamplePlayer.hpp"
@@ -21,8 +21,8 @@ using beatbench::audio::DecodedSample;
 using beatbench::audio::SamplePlayer;
 
 /// 写一个 16 位 PCM 单声道 wav（合成正弦波；便于断言）。
-std::string writeTestWav(const std::string& dir, const std::string& name,
-                         int sampleRate, int channels, int frames, double freq = 440.0) {
+std::string writeTestWav(const std::string& dir, const std::string& name, int sampleRate,
+                         int channels, int frames, double freq = 440.0) {
     const std::string path = dir + "/" + name;
     FILE* f = std::fopen(path.c_str(), "wb");
     EXPECT_TRUE(f != nullptr);
@@ -34,19 +34,18 @@ std::string writeTestWav(const std::string& dir, const std::string& name,
     std::fwrite("WAVE", 1, 4, f);
     std::fwrite("fmt ", 1, 4, f);
     write32(16);
-    write16(1);                          // PCM
+    write16(1);  // PCM
     write16(static_cast<std::uint16_t>(channels));
     write32(static_cast<std::uint32_t>(sampleRate));
     write32(static_cast<std::uint32_t>(sampleRate * channels * 2));  // byte rate
     write16(static_cast<std::uint16_t>(channels * 2));               // block align
-    write16(16);                          // bits
+    write16(16);                                                     // bits
     std::fwrite("data", 1, 4, f);
     write32(static_cast<std::uint32_t>(frames * channels * 2));
     for (int i = 0; i < frames; ++i) {
         const auto s = static_cast<std::int16_t>(
             std::lround(12000 * std::sin(2.0 * M_PI * freq * i / sampleRate)));
-        for (int c = 0; c < channels; ++c)
-            std::fwrite(&s, 2, 1, f);
+        for (int c = 0; c < channels; ++c) std::fwrite(&s, 2, 1, f);
     }
     std::fclose(f);
     return path;
@@ -66,7 +65,7 @@ DecodedSample* makeTestSample(double rate, std::size_t frames, float amp = 1.0f)
 }
 
 class AudioLibTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         m_tmp = std::filesystem::temp_directory_path() / "beatbench_audio_test";
         std::filesystem::create_directories(m_tmp);
@@ -94,8 +93,7 @@ TEST_F(AudioLibTest, DecodeWavBasic) {
 }
 
 TEST_F(AudioLibTest, DecodeMissingFile) {
-    const auto r = beatbench::audio::decode_audio_file(
-        (m_tmp / "no_such_file.wav").string());
+    const auto r = beatbench::audio::decode_audio_file((m_tmp / "no_such_file.wav").string());
     EXPECT_FALSE(r.ok);
     EXPECT_TRUE(r.sample == nullptr);
 }
@@ -162,8 +160,7 @@ TEST_F(AudioLibTest, VorbisOggSupported) {
 TEST_F(AudioLibTest, DecodeRealMp3) {
     // 真实 mp3 文件（本地 chart 目录；缺失则跳过——不是所有环境都有）
     const std::string mp3 =
-        std::string(BEATBENCH_SOURCE_DIR) +
-        "/local/chart/53857 Saiya - Remote Control/a.mp3";
+        std::string(BEATBENCH_SOURCE_DIR) + "/local/chart/53857 Saiya - Remote Control/a.mp3";
     if (!std::filesystem::exists(mp3)) GTEST_SKIP() << "无本地 mp3";
     const auto r = beatbench::audio::decode_audio_file(mp3);
     EXPECT_TRUE(r.ok) << r.message;
@@ -183,7 +180,7 @@ TEST_F(AudioLibTest, EndToEndPreviewChain) {
     DecodedSample* sample = r.sample;  // 计数 1 = 解码器持有
     SamplePlayer player;
     ASSERT_TRUE(player.playPreview(sample));  // 转移所有权（1 → voice 生命周期）
-    std::vector<float> out(4410 * 2, 0.0f);  // 0.1s 渲染
+    std::vector<float> out(4410 * 2, 0.0f);   // 0.1s 渲染
     player.render(out.data(), 4410, 44100.0);
     float peak = 0.0f;
     for (const float v : out) peak = std::max(peak, std::fabs(v));
@@ -227,7 +224,9 @@ TEST_F(AudioLibTest, DecodeRealOggMismatchedName) {
 }
 
 #ifdef _WIN32
-TEST_F(AudioLibTest, DecodeWideCharJapanesePath) {    // Windows 宽字符路径（回归：日文谱面目录无声，2026-09 用户实测）：
+TEST_F(
+    AudioLibTest,
+    DecodeWideCharJapanesePath) {  // Windows 宽字符路径（回归：日文谱面目录无声，2026-09 用户实测）：
     // 窄字符 fopen 走 ANSI 代码页打不开；ma_decoder_init_file_w（UTF-16）必须可用。
     const auto dir = m_tmp / L"彼岸帰航-idling mix-";
     std::filesystem::create_directories(dir);
@@ -242,8 +241,13 @@ TEST_F(AudioLibTest, DecodeWideCharJapanesePath) {    // Windows 宽字符路径
     write32(36 + 4410 * 2);
     std::fwrite("WAVE", 1, 4, f);
     std::fwrite("fmt ", 1, 4, f);
-    write32(16); write16(1); write16(1);
-    write32(44100); write32(44100 * 2); write16(2); write16(16);
+    write32(16);
+    write16(1);
+    write16(1);
+    write32(44100);
+    write32(44100 * 2);
+    write16(2);
+    write16(16);
     std::fwrite("data", 1, 4, f);
     write32(4410 * 2);
     for (int i = 0; i < 4410; ++i) {
@@ -274,7 +278,7 @@ TEST_F(AudioLibTest, MasterVolumeScales) {
     player.render(out.data(), 4410, 44100.0);
     float peak = 0.0f;
     for (const float v : out) peak = std::max(peak, std::fabs(v));
-    EXPECT_GT(peak, 0.2f);   // 0.8×0.5=0.4 减包络（取中段峰值）
+    EXPECT_GT(peak, 0.2f);  // 0.8×0.5=0.4 减包络（取中段峰值）
     EXPECT_LT(peak, 0.5f);
     player.drainReclaimed();
 }

@@ -17,7 +17,7 @@ namespace beatbench::codec {
 /// - capabilities 的 formats 列表改为动态声明（原 hardcode 移除）。
 /// 线程安全：M1 单线程约定；多线程化时在此加锁即可（与命令注册表一致）。
 class CodecRegistry {
-public:
+   public:
     void add(std::unique_ptr<Codec> codec);
 
     /// 按 id 查找（大小写敏感，协议 id 稳定）。
@@ -32,7 +32,7 @@ public:
     /// 全部已注册格式 id（按注册序或字典序，供 capabilities 输出）。
     std::vector<std::string> ids() const;
 
-private:
+   private:
     std::vector<std::unique_ptr<Codec>> codecs_;  // 保有所有权
 };
 

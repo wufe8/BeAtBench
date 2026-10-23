@@ -15,13 +15,13 @@ class LintListModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
-public:
+   public:
     explicit LintListModel(QObject* parent = nullptr);
 
     enum Roles {
         SeverityRole = Qt::UserRole + 1,  // "error" / "warning" / "info"
         MessageRole,
-        IdRole,    // 关联采样 id（missing_wav；其余为空）
+        IdRole,  // 关联采样 id（missing_wav；其余为空）
         FileRole,
         LineRole,  // 源文件行号（0 = 无）
     };
@@ -38,10 +38,10 @@ public:
 
     int count() const { return static_cast<int>(m_rows.size()); }
 
-signals:
+   signals:
     void countChanged(int count);
 
-private:
+   private:
     struct Entry {
         QString severity;
         QString message;

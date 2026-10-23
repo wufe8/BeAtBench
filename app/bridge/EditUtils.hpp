@@ -14,7 +14,7 @@ namespace beatbench::app {
 
 class EditUtils : public QObject {
     Q_OBJECT
-public:
+   public:
     explicit EditUtils(QObject* parent = nullptr);
 
     /// 最大公约数（负数取绝对值；0 → 1，避免除零——与旧 JS 版一致）。

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "beatbench/core/io/AtomicWrite.hpp"
-
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <system_error>
+
+#include "beatbench/core/io/AtomicWrite.hpp"
 
 #ifdef _WIN32
 #include <io.h>
@@ -70,8 +70,7 @@ WriteResult atomic_write_file(const std::filesystem::path& dest, const void* dat
     if (!f) return fail("无法创建临时文件: " + path_utf8(tmp));
 
     bool wrote = true;
-    if (size > 0)
-        wrote = std::fwrite(data, 1, size, f) == size;
+    if (size > 0) wrote = std::fwrite(data, 1, size, f) == size;
     const bool flushed = wrote && std::fflush(f) == 0;
 #ifdef _WIN32
     if (flushed) _commit(_fileno(f));

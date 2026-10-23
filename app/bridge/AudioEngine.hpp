@@ -44,7 +44,8 @@ class AudioEngine : public QObject {
     Q_PROPERTY(bool waitRenderSetting READ waitRenderSetting NOTIFY waitRenderSettingChanged)
 
     // ---- 设置页可读项（M4.2；写走 Q_INVOKABLE applySettings，改后 NOTIFY） ----
-    Q_PROPERTY(QVariantList devices READ devices NOTIFY devicesChanged)  // [{index,name,api,sampleRate}]
+    Q_PROPERTY(
+        QVariantList devices READ devices NOTIFY devicesChanged)  // [{index,name,api,sampleRate}]
     Q_PROPERTY(int deviceIndex READ deviceIndex NOTIFY settingsChanged)
     Q_PROPERTY(int sampleRate READ sampleRate NOTIFY settingsChanged)
     Q_PROPERTY(int framesPerBuffer READ framesPerBuffer NOTIFY settingsChanged)
@@ -55,7 +56,7 @@ class AudioEngine : public QObject {
     /// 设置错误提示（音频页顶部错误条显示；成功应用后清空）。
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 
-public:
+   public:
     explicit AudioEngine(QObject* parent = nullptr);
     ~AudioEngine() override;
 
@@ -156,13 +157,9 @@ public:
     int sampleRate() const { return m_settings.sampleRate; }
     int framesPerBuffer() const { return m_settings.framesPerBuffer; }
     /// 主音量（0-100 百分比；QML 滑杆直接绑定）。
-    qreal masterVolume() const {
-        return static_cast<qreal>(m_player.masterVolume()) * 100.0;
-    }
+    qreal masterVolume() const { return static_cast<qreal>(m_player.masterVolume()) * 100.0; }
     /// 实际流采样率（设备可能调整；显示真实值）。
-    int actualRate() const {
-        return m_backend ? m_backend->streamInfo().sampleRate : 0;
-    }
+    int actualRate() const { return m_backend ? m_backend->streamInfo().sampleRate : 0; }
     /// 实际延迟（ms；设置页显示）。
     qreal latencyMs() const {
         return m_backend ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
@@ -180,7 +177,7 @@ public:
     /// 设备信息（诊断/状态栏）。
     Q_INVOKABLE QString deviceDescription() const;
 
-signals:
+   signals:
     void busyChanged();
     void statusTextChanged();
     void availableChanged();
@@ -198,7 +195,7 @@ signals:
     /// M5 waitRenderSetting 变化（设置面板）。
     void waitRenderSettingChanged();
 
-private:
+   private:
     /// 音频路径解析 + **扩展名回退**：原路径存在 → 用它；否则按相同 basename
     /// 试其它音频扩展名；全无 → 空串。BMS 播放器惯例（beatoraja 同款）。
     static QString resolveAudioPath(const QString& resolved);
@@ -220,7 +217,7 @@ private:
     beatbench::audio::SamplePlayer m_player;
     beatbench::audio::SampleCache m_cache;  ///< 采样解码缓存（M4.3a：LRU+预算+合并）
     RenderCtx m_renderCtx;
-    QString m_sourceDir;         ///< 谱面目录（绝对路径；空 = 未打开）
+    QString m_sourceDir;  ///< 谱面目录（绝对路径；空 = 未打开）
     std::atomic<bool> m_busy{false};
     std::atomic<bool> m_initialized{false};
     QString m_statusText;
@@ -228,12 +225,12 @@ private:
     QVariantList m_devices;                      ///< 设备快照（[{index,name,api,sampleRate}]）
     QString m_errorText;                         ///< 设置错误（音频页显示；成功清空）
     // ---- M5 播放 ----
-    beatbench::audio::PcmPlayback m_playback;    ///< PCM 播放状态机（UI 线程；设备率随流更新）
+    beatbench::audio::PcmPlayback m_playback;  ///< PCM 播放状态机（UI 线程；设备率随流更新）
     // ---- M6.1 参考音频 ----
     beatbench::audio::PcmPlayback m_refPlayback;  ///< 参考音频（stem）预览状态机（独立于谱面播放）
-    ChartSession* m_chartSession = nullptr;      ///< 渲染 PCM 来源（ChartSession；不拥有）
-    bool m_waitRender = false;                   ///< 等待渲染中（renderFinished 后续播）
-    bool m_waitRenderSetting = false;            ///< 设置：Space 等待渲染完成（默认关）
+    ChartSession* m_chartSession = nullptr;       ///< 渲染 PCM 来源（ChartSession；不拥有）
+    bool m_waitRender = false;                    ///< 等待渲染中（renderFinished 后续播）
+    bool m_waitRenderSetting = false;             ///< 设置：Space 等待渲染完成（默认关）
 };
 
 }  // namespace beatbench::app

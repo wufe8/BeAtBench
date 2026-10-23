@@ -94,8 +94,7 @@ struct NormNote {
 };
 
 // 幂等失败定位：按行对比，打印前 3 处差异
-void print_line_diffs(const std::string& a, const std::string& b, const char* la,
-                      const char* lb) {
+void print_line_diffs(const std::string& a, const std::string& b, const char* la, const char* lb) {
     std::vector<std::string> lines_a;
     std::vector<std::string> lines_b;
     {
@@ -120,8 +119,8 @@ void print_line_diffs(const std::string& a, const std::string& b, const char* la
         const auto& x = i < lines_a.size() ? lines_a[i] : std::string("<EOF>");
         const auto& y = i < lines_b.size() ? lines_b[i] : std::string("<EOF>");
         if (x != y) {
-            std::printf("    L%zu %s: '%s'\n    L%zu %s: '%s'\n", i + 1, la, x.c_str(), i + 1,
-                        lb, y.c_str());
+            std::printf("    L%zu %s: '%s'\n    L%zu %s: '%s'\n", i + 1, la, x.c_str(), i + 1, lb,
+                        y.c_str());
             ++shown;
         }
     }
@@ -141,7 +140,8 @@ std::vector<std::tuple<std::uint32_t, std::int64_t, std::int64_t, T>> norm_event
     return out;
 }
 
-std::vector<NormNote> normalize_notes(const std::vector<Event<Note>>& notes) {    std::vector<NormNote> out;
+std::vector<NormNote> normalize_notes(const std::vector<Event<Note>>& notes) {
+    std::vector<NormNote> out;
     out.reserve(notes.size());
     for (std::size_t i = 0; i < notes.size(); ++i) {
         const auto& ev = notes[i];
@@ -200,10 +200,10 @@ TEST(BmsUtil, OverflowTruncatesToTail) {
 
 TEST(BmsUtil, C62ToU32) {
     EXPECT_EQ(c62_to_u32("00"), 0u);
-    EXPECT_EQ(c62_to_u32("0a"), 36u);   // 小写 a = 36
-    EXPECT_EQ(c62_to_u32("10"), 62u);   // 权重 62：10 进制值 62
+    EXPECT_EQ(c62_to_u32("0a"), 36u);              // 小写 a = 36
+    EXPECT_EQ(c62_to_u32("10"), 62u);              // 权重 62：10 进制值 62
     EXPECT_EQ(c62_to_u32("zZ"), 61u * 62u + 35u);  // 61*62+35 = 3817
-    EXPECT_EQ(c62_to_u32("zz"), 3843u); // 61*62+61 = 3843（2 位最大）
+    EXPECT_EQ(c62_to_u32("zz"), 3843u);            // 61*62+61 = 3843（2 位最大）
 }
 
 TEST(BmsUtil, U32ToC62) {
@@ -226,17 +226,18 @@ TEST(BmsUtil, C62CaseSensitive) {
 }
 
 TEST(BmsRead, Base62ParsesCaseSensitiveIds) {
-    const std::string text = "*----- HEADER\n"
-                             "#BASE 62\n"
-                             "#PLAYER 1\n"
-                             "#BPM 130\n"
-                             "#WAV1a kick_a.wav\n"   // 小写 id
-                             "#WAV1A kick_A.wav\n"   // 大写 id（与上不同）
-                             "#WAVzZ tail.wav\n"
-                             "#BPM0a 200\n"          // BPM 定义同样 base62
-                             "#00111:1a1A\n"         // 槽位引用大小写区分
-                             "#00111:zZ00\n"         // 同通道第二行（同 pos 冲突分裂）
-                             "#00308:0a\n";          // ch08 引用 #BPM0a
+    const std::string text =
+        "*----- HEADER\n"
+        "#BASE 62\n"
+        "#PLAYER 1\n"
+        "#BPM 130\n"
+        "#WAV1a kick_a.wav\n"  // 小写 id
+        "#WAV1A kick_A.wav\n"  // 大写 id（与上不同）
+        "#WAVzZ tail.wav\n"
+        "#BPM0a 200\n"   // BPM 定义同样 base62
+        "#00111:1a1A\n"  // 槽位引用大小写区分
+        "#00111:zZ00\n"  // 同通道第二行（同 pos 冲突分裂）
+        "#00308:0a\n";   // ch08 引用 #BPM0a
     const auto res = read_bms(text);
     ASSERT_FALSE(has_error(res)) << ascii_safe(res.diagnostics.front().message);
     EXPECT_EQ(res.chart.id_base, IdBase::Base62);
@@ -256,16 +257,17 @@ TEST(BmsRead, Base62ParsesCaseSensitiveIds) {
 }
 
 TEST(BmsRoundTrip, Base62Stable) {
-    const std::string text = "*----- HEADER\n"
-                             "#BASE 62\n"
-                             "#PLAYER 1\n"
-                             "#TITLE T\n"
-                             "#BPM 130\n"
-                             "#WAV1a kick.wav\n"
-                             "#WAVzZ end.wav\n"
-                             "#BPM0a 200\n"
-                             "#00111:1a0a\n"
-                             "#00008:0a\n";
+    const std::string text =
+        "*----- HEADER\n"
+        "#BASE 62\n"
+        "#PLAYER 1\n"
+        "#TITLE T\n"
+        "#BPM 130\n"
+        "#WAV1a kick.wav\n"
+        "#WAVzZ end.wav\n"
+        "#BPM0a 200\n"
+        "#00111:1a0a\n"
+        "#00008:0a\n";
     // 注意 #00111:1a0a 的第二个槽 0a 引用未定义 → 解析宽容（0），仅验证往返结构
     const auto res = read_bms(text);
     ASSERT_FALSE(has_error(res));
@@ -284,14 +286,15 @@ TEST(BmsRoundTrip, Ch01SubLinesPreserved) {
     // 2026-09 泛化：ch01 同小节多行 = 子行（sub_line）。读侧按 (measure,channel) FIFO 赋行号
     // （空行也占位）；写回按 sub_line 分组还原多行（**中间**空行输出 "00" 占位；末尾空行纯排版、
     // 无 note 即丢弃——用户：空行仅供前端排版，类似 CSV 空行）。验证用户示例结构往返稳定。
-    const std::string text = "*----- HEADER\n"
-                             "#BPM 130\n"
-                             "#WAV01 a.wav\n#WAV02 b.wav\n#WAV03 c.wav\n#WAV04 d.wav\n"
-                             "#WAV05 e.wav\n#WAV06 f.wav\n"
-                             "#00401:010203040506\n"  // 子行 0：6 采样
-                             "#00401:00\n"             // 子行 1：全空（中间占位）
-                             "#00401:010200\n"         // 子行 2：2 采样（第 3 槽空）
-                             "#00401:00\n";            // 子行 3：全空（末尾，写回丢弃）
+    const std::string text =
+        "*----- HEADER\n"
+        "#BPM 130\n"
+        "#WAV01 a.wav\n#WAV02 b.wav\n#WAV03 c.wav\n#WAV04 d.wav\n"
+        "#WAV05 e.wav\n#WAV06 f.wav\n"
+        "#00401:010203040506\n"  // 子行 0：6 采样
+        "#00401:00\n"            // 子行 1：全空（中间占位）
+        "#00401:010200\n"        // 子行 2：2 采样（第 3 槽空）
+        "#00401:00\n";           // 子行 3：全空（末尾，写回丢弃）
     const auto res = read_bms(text);
     ASSERT_FALSE(has_error(res));
     std::size_t bgm_count = 0;
@@ -301,13 +304,13 @@ TEST(BmsRoundTrip, Ch01SubLinesPreserved) {
         ++bgm_count;
         if (e.value.sub_line > max_line) max_line = e.value.sub_line;
     }
-    EXPECT_EQ(bgm_count, 8u);   // 6 + 2 非空槽
-    EXPECT_EQ(max_line, 2u);    // 有 note 的最高子行 = 2（中间空行的 sub_line=1 占位）
-    const auto out = write_bms(res.chart);   // 应还原 3 行（子行 0/1/2；末尾空行丢弃）
+    EXPECT_EQ(bgm_count, 8u);               // 6 + 2 非空槽
+    EXPECT_EQ(max_line, 2u);                // 有 note 的最高子行 = 2（中间空行的 sub_line=1 占位）
+    const auto out = write_bms(res.chart);  // 应还原 3 行（子行 0/1/2；末尾空行丢弃）
     EXPECT_NE(out.find("#00401:00\n"), std::string::npos);  // 中间空子行占位还原
     const auto res2 = read_bms(out);
     ASSERT_FALSE(has_error(res2));
-    EXPECT_EQ(write_bms(res2.chart), out);   // 幂等稳定
+    EXPECT_EQ(write_bms(res2.chart), out);  // 幂等稳定
 }
 
 // ---------- 通道子行能力（sub_line 泛化，2026-09） ----------
@@ -325,31 +328,32 @@ TEST(ChannelMap, AllowSubLinesFlag) {
 // ---------- 定义表使用统计（采样面板） ----------
 
 TEST(ChartCheck, SampleUsageCounts) {
-    const std::string text = "*----- HEADER\n"
-                             "#PLAYER 1\n"
-                             "#BPM 130\n"
-                             "#WAV01 kick.wav\n"
-                             "#WAV02 snare.wav\n"
-                             "#WAV03 bgm.wav\n"
-                             "#BMP01 bg.png\n"
-                             "#00211:0102\n"  // 小节 2：键1 kick、键2 snare
-                             "#00211:0100\n"  // 同通道第二行：键1 kick（同 pos 冲突分裂）
-                             "#00416:02\n"    // 小节 4：皿 snare
-                             "#00504:01\n"    // 小节 5：BGA bg
-                             "#00501:03\n";   // 小节 5：BGM 轨（ch01，游戏不可见自动播放）
+    const std::string text =
+        "*----- HEADER\n"
+        "#PLAYER 1\n"
+        "#BPM 130\n"
+        "#WAV01 kick.wav\n"
+        "#WAV02 snare.wav\n"
+        "#WAV03 bgm.wav\n"
+        "#BMP01 bg.png\n"
+        "#00211:0102\n"  // 小节 2：键1 kick、键2 snare
+        "#00211:0100\n"  // 同通道第二行：键1 kick（同 pos 冲突分裂）
+        "#00416:02\n"    // 小节 4：皿 snare
+        "#00504:01\n"    // 小节 5：BGA bg
+        "#00501:03\n";   // 小节 5：BGM 轨（ch01，游戏不可见自动播放）
     const auto res = read_bms(text);
     ASSERT_FALSE(has_error(res));
     const auto usage = collect_sample_usage(res.chart);
     {
         const auto& u = usage.at({SampleKind::Wav, 2});
-        EXPECT_EQ(u.refs, 2u);          // snare 键 1 次 + 皿 1 次
+        EXPECT_EQ(u.refs, 2u);  // snare 键 1 次 + 皿 1 次
         EXPECT_EQ(u.first_measure, 2u);
         EXPECT_EQ(u.key1, 1u);
         EXPECT_EQ(u.scratch1, 1u);
     }
     {
         const auto& u = usage.at({SampleKind::Wav, 3});
-        EXPECT_EQ(u.bgm, 1u);           // BGM 轨引用
+        EXPECT_EQ(u.bgm, 1u);  // BGM 轨引用
         EXPECT_EQ(u.refs, 1u);
     }
     {
@@ -465,11 +469,11 @@ TEST(BmsRead, UnknownHeaderPassesThrough) {
 }
 
 TEST(BmsRead, CommentsPreservedByDefault) {
-    const auto res = read_bms("// line comment\n* star comment\n/* block\n#00111:01\n*/\n#00112:02\n");
+    const auto res =
+        read_bms("// line comment\n* star comment\n/* block\n#00111:01\n*/\n#00112:02\n");
     // 块注释内行原样保留；块外的 #00112:02 是数据行（事件化，不进 raw）
-    EXPECT_EQ(res.chart.raw_lines,
-              (std::vector<std::string>{"// line comment", "* star comment", "/* block",
-                                        "#00111:01", "*/"}));
+    EXPECT_EQ(res.chart.raw_lines, (std::vector<std::string>{"// line comment", "* star comment",
+                                                             "/* block", "#00111:01", "*/"}));
 }
 
 TEST(BmsRead, CommentsDroppedWhenDisabled) {
@@ -536,7 +540,7 @@ TEST(BmsChannelMap, Semantics) {
     EXPECT_EQ(bms_channel_rule("04")->semantics, ChannelSemantics::Bga);
     EXPECT_EQ(bms_channel_rule("04")->bga_layer, 0);  // base
     EXPECT_EQ(bms_channel_rule("06")->semantics, ChannelSemantics::BgaPoor);
-    EXPECT_EQ(bms_channel_rule("06")->bga_layer, 1);  // poor
+    EXPECT_EQ(bms_channel_rule("06")->bga_layer, 1);                      // poor
     EXPECT_EQ(bms_channel_rule("07")->semantics, ChannelSemantics::Bga);  // BGA Layer（BMS 笔记）
     EXPECT_EQ(bms_channel_rule("07")->bga_layer, 2);
     EXPECT_EQ(bms_channel_rule("0A")->semantics, ChannelSemantics::Bga);  // BGA Layer2
@@ -544,7 +548,8 @@ TEST(BmsChannelMap, Semantics) {
     EXPECT_EQ(bms_channel_rule("0B")->semantics, ChannelSemantics::KeepRaw);  // 不透明度控制通道
     EXPECT_EQ(bms_channel_rule("08")->semantics, ChannelSemantics::BpmRef);
     EXPECT_EQ(bms_channel_rule("09")->semantics, ChannelSemantics::StopRef);
-    EXPECT_EQ(bms_channel_rule("01")->semantics, ChannelSemantics::Note);  // BGM 背景轨（2026-08 结构化）
+    EXPECT_EQ(bms_channel_rule("01")->semantics,
+              ChannelSemantics::Note);  // BGM 背景轨（2026-08 结构化）
     EXPECT_EQ(bms_channel_rule("01")->lane, (Lane{0, LaneKind::Bgm, 0}));
     EXPECT_FALSE(bms_channel_rule("99").has_value());
     EXPECT_FALSE(bms_channel_rule("").has_value());
@@ -624,16 +629,17 @@ TEST(BmsRead, EventizesMeasureLen) {
 TEST(BmsRead, EventizesBpmInlineAndRef) {
     // ch03：整段纯数字 = 直接数值（可变长）；含字母 = 2 字符槽位引用；
     // 引用未定义时按 LR2 兼容十六进制解析；ch08 = 引用
-    const auto res = read_bms("#BPM01 200\n#BPM8C 153\n#00103:0065536\n#00208:01\n#00303:64\n#00403:8C\n");
+    const auto res =
+        read_bms("#BPM01 200\n#BPM8C 153\n#00103:0065536\n#00208:01\n#00303:64\n#00403:8C\n");
     ASSERT_EQ(res.chart.bpm_events.size(), 4u);
     EXPECT_EQ(res.chart.bpm_events[0].measure, 1u);
     EXPECT_EQ(res.chart.bpm_events[0].value.value, 65536.0);  // 纯数字整体 → 直接数值
     EXPECT_EQ(res.chart.bpm_events[1].measure, 2u);
-    EXPECT_EQ(res.chart.bpm_events[1].value.value, 200.0);    // ch08 引用 #BPM01
+    EXPECT_EQ(res.chart.bpm_events[1].value.value, 200.0);  // ch08 引用 #BPM01
     EXPECT_EQ(res.chart.bpm_events[2].measure, 3u);
-    EXPECT_EQ(res.chart.bpm_events[2].value.value, 100.0);    // 无定义 → 十六进制 0x64
+    EXPECT_EQ(res.chart.bpm_events[2].value.value, 100.0);  // 无定义 → 十六进制 0x64
     EXPECT_EQ(res.chart.bpm_events[3].measure, 4u);
-    EXPECT_EQ(res.chart.bpm_events[3].value.value, 153.0);    // 引用 #BPM8C
+    EXPECT_EQ(res.chart.bpm_events[3].value.value, 153.0);  // 引用 #BPM8C
 }
 
 TEST(BmsRead, EventizesBpmHexFallback) {
@@ -704,8 +710,8 @@ TEST(BmsRead, LnDualType1And2) {
     // 普通通道内 头(11)+#LNOBJ 尾(ZZ) 按 LNTYPE 2 配对。二者互不干扰。
     const auto res = read_bms(
         "#LNTYPE 2\n#LNOBJ ZZ\n"
-        "#00151:01\n#00251:02\n"   // 51 通道 LN 头尾（LNTYPE 1 交替）
-        "#00311:03\n#00411:ZZ\n"); // 普通通道 头 + LNOBJ 尾（LNTYPE 2）
+        "#00151:01\n#00251:02\n"    // 51 通道 LN 头尾（LNTYPE 1 交替）
+        "#00311:03\n#00411:ZZ\n");  // 普通通道 头 + LNOBJ 尾（LNTYPE 2）
     const auto pair_of = [&](const Event<Note>& n) {
         if (n.value.ln_pair && *n.value.ln_pair < res.chart.notes.size())
             return static_cast<int>(*n.value.ln_pair);
@@ -842,10 +848,10 @@ TEST(BmsRoundTrip, BgmMultiLineKeepsRows) {
     // 写回按行序保持多行（字节级行结构无损）。
     const auto src =
         "#BPM 130\n#WAV01 a.wav\n#WAV03 b.wav\n#WAV32 c.wav\n"
-        "#00301:00000001\n"    // bgm1（行 0）
-        "#00301:0003030303000300\n"  // bgm2（行 1）
-        "#00301:00\n"          // bgm3（行 2，空占位）
-        "#00301:00\n"          // bgm4（行 3，空占位）
+        "#00301:00000001\n"           // bgm1（行 0）
+        "#00301:0003030303000300\n"   // bgm2（行 1）
+        "#00301:00\n"                 // bgm3（行 2，空占位）
+        "#00301:00\n"                 // bgm4（行 3，空占位）
         "#00301:0032323232000000\n";  // bgm5（行 4）
     const auto r1 = read_bms(src);
     // sub_line 记录：行 0 的 note = 0，行 1 = 1，行 4 = 4（空行无 note 但计数保留）
@@ -893,9 +899,9 @@ TEST(BmsRoundTrip, LnType2RoundTrip) {
 TEST(BmsWrite, BpmCh08StaysCh08) {
     const auto src =
         "#BPM 280\n#BPM01 9999280\n#BPM02 280\n"
-        "#00008:01\n"      // m0 pos0 ch08 引用 #BPM01（>255 必须 ch08）
+        "#00008:01\n"        // m0 pos0 ch08 引用 #BPM01（>255 必须 ch08）
         "#00108:00000002\n"  // m1 3/4 ch08 引用 #BPM02
-        "#00203:8C\n";     // m2 pos0 ch03 十六进制 140（≤255 合法 ch03）
+        "#00203:8C\n";       // m2 pos0 ch03 十六进制 140（≤255 合法 ch03）
     const auto r1 = read_bms(src);
     ASSERT_EQ(r1.chart.bpm_events.size(), 3u);
     EXPECT_TRUE(r1.chart.bpm_events[0].value.ch08);
@@ -1006,7 +1012,7 @@ TEST(BmsRoundTrip, RefSlotGetsDefinitionWhenMissing) {
     Chart c;
     Bpm b;
     b.value = 280.0;
-    b.ref_id = 1;   // #BPM01
+    b.ref_id = 1;  // #BPM01
     c.bpm_events.push_back({0, Rational(0, 1), b});
     const auto out = write_bms(c);
     EXPECT_NE(out.find("#BPM01 280"), std::string::npos);  // 补定义
@@ -1021,7 +1027,7 @@ TEST(BmsRoundTrip, StopRefSlotGetsDefinitionWhenMissing) {
     Chart c;
     Stop s;
     s.count = 96;
-    s.ref_id = 1;   // #STOP01
+    s.ref_id = 1;  // #STOP01
     c.stop_events.push_back({0, Rational(0, 1), s});
     const auto out = write_bms(c);
     EXPECT_NE(out.find("#STOP01 96"), std::string::npos);  // 补定义
@@ -1038,7 +1044,7 @@ TEST(BmsRoundTrip, RefMismatchDecouples) {
     c.samples[{SampleKind::Bpm, 1}] = SampleDef{.value = "150"};
     Bpm b;
     b.value = 280.0;
-    b.ref_id = 1;   // #BPM01 但值不一致（定义 150 ≠ 280）
+    b.ref_id = 1;  // #BPM01 但值不一致（定义 150 ≠ 280）
     c.bpm_events.push_back({0, Rational(0, 1), b});
     const auto out = write_bms(c);
     EXPECT_NE(out.find("#BPM01 150"), std::string::npos);  // 原定义保留
@@ -1133,8 +1139,8 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
             norm_events(a.bpm_events) != norm_events(b.bpm_events) ||
             norm_events(a.stop_events) != norm_events(b.stop_events) ||
             norm_events(a.measure_events) != norm_events(b.measure_events) ||
-            norm_events(a.bga_events) != norm_events(b.bga_events) ||
-            a.raw_lines != b.raw_lines || write_bms(b) != out) {
+            norm_events(a.bga_events) != norm_events(b.bga_events) || a.raw_lines != b.raw_lines ||
+            write_bms(b) != out) {
             std::printf(
                 "  [diff] %s notes:%d bpm:%d stop:%d measure:%d bga:%d raw:%d samples:%d idem:%d\n",
                 ascii_safe(entry.path().filename().string()).c_str(), na != nb,
@@ -1161,9 +1167,9 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
         // BPM/STOP 定义（模型事件是落值，写回需 #BPMxx/#STOPxx 引用，缺定义时派生）。
         EXPECT_GE(b.samples.size(), a.samples.size());
         for (const auto& [key, def] : a.samples) {
-            EXPECT_TRUE(b.samples.count(key)) << "samples 缺失 (kind="
-                                              << static_cast<int>(key.first) << " id="
-                                              << key.second << ")";
+            EXPECT_TRUE(b.samples.count(key))
+                << "samples 缺失 (kind=" << static_cast<int>(key.first) << " id=" << key.second
+                << ")";
             if (b.samples.count(key)) {
                 EXPECT_EQ(b.samples.at(key), def);
             }

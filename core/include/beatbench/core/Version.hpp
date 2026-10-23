@@ -8,7 +8,7 @@ namespace beatbench {
 /// ⚠️ 与 CMakeLists 的 project(... VERSION) 是**两份**：由 release-please 依行尾标记
 /// 自动同步 bump，不要手改其一（scripts/check-version.sh 硬性校验两者一致；
 /// v0.3.2 首发漏改此处，导致包名是 0.3.2 而二进制自报 0.3.1）。
-inline constexpr std::string_view kVersion = "0.4.1"; // x-release-please-version
+inline constexpr std::string_view kVersion = "0.4.1";  // x-release-please-version
 
 /// 命令协议 API 版本：请求/响应结构或语义不兼容变更时 +1。
 /// 客户端应读取 version 命令返回的 api 并按其适配。

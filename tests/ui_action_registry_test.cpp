@@ -7,9 +7,9 @@
 
 #include <QFile>
 #include <QString>
-#include <Qt>
 #include <QTemporaryDir>
 #include <QVariantMap>
+#include <Qt>
 
 #include "bridge/UiActionRegistry.hpp"
 
@@ -104,7 +104,7 @@ TEST(UiActionRegistry, SeparatorEnumeration) {
     r.add(make_def(QStringLiteral("file.open")));
     r.add(make_def(QStringLiteral("file.save")));
     r.add(make_def(QStringLiteral("file.saveAs")));
-    r.addSeparator(QStringLiteral("file"));      // 位于 saveAs 与 exit 之间
+    r.addSeparator(QStringLiteral("file"));  // 位于 saveAs 与 exit 之间
     r.add(make_def(QStringLiteral("file.exit")));
 
     // idsByCategory("file") 含分隔线 id，且顺序正确（open, save, saveAs, :sep, exit）
@@ -248,8 +248,11 @@ TEST(UiActionRegistry, KeymapFileApplyAndClear) {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("keymap.json"));
-    { QFile f(path); ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Text));
-      f.write("{\"file.save\":\"Ctrl+Alt+S\"}"); }
+    {
+        QFile f(path);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("{\"file.save\":\"Ctrl+Alt+S\"}");
+    }
     const int n = r.applyKeymapFile(path);
     EXPECT_EQ(n, 1);
     EXPECT_EQ(r.shortcut(QStringLiteral("file.save")), QStringLiteral("Ctrl+Alt+S"));
@@ -395,7 +398,8 @@ TEST(UiActionRegistry, ToolbarGroupMetadata) {
 
     // idsByToolbar 分组
     EXPECT_TRUE(r.idsByToolbar(QStringLiteral("tool")).contains(QStringLiteral("tool.pan")));
-    EXPECT_TRUE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.quantize")));
+    EXPECT_TRUE(
+        r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.quantize")));
     EXPECT_FALSE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("tool.pan")));
     EXPECT_FALSE(r.idsByToolbar(QStringLiteral("transform")).contains(QStringLiteral("file.save")));
     EXPECT_EQ(r.idsByToolbar(QStringLiteral("transform")).size(), 1u);

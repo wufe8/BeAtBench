@@ -2,6 +2,8 @@
 // Query tests use in-memory sessions only; export conflict tests write a temp dir
 // and decode a short synthetic wav. AudioEngine is linked but never opened.
 #define _USE_MATH_DEFINES
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -12,10 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include "bridge/ChartSession.hpp"
-#include "bridge/SliceWorkspace.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/command/Command.hpp"
@@ -23,11 +21,13 @@
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/slice/Slice.hpp"
+#include "bridge/ChartSession.hpp"
+#include "bridge/SliceWorkspace.hpp"
 
 namespace {
 
 class SliceWorkspaceTest : public ::testing::Test {
-protected:
+   protected:
     void SetUp() override {
         auto& registry = beatbench::edit::session_registry();
         previousSession_ = registry.active_id();
@@ -53,8 +53,7 @@ protected:
 
     static std::string readFile(const std::filesystem::path& path) {
         std::ifstream in(path, std::ios::binary);
-        return std::string((std::istreambuf_iterator<char>(in)),
-                           std::istreambuf_iterator<char>());
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
 
     /// 2s 44100Hz 单声道 16-bit；0.5/1.0/1.5s 处 50ms 指数衰减 880Hz burst
@@ -89,7 +88,8 @@ protected:
             }
         }
         for (int i = 0; i < frames; ++i) {
-            const double v = std::max(-1.0, std::min(1.0, static_cast<double>(buf[static_cast<std::size_t>(i)])));
+            const double v = std::max(
+                -1.0, std::min(1.0, static_cast<double>(buf[static_cast<std::size_t>(i)])));
             const auto s = static_cast<std::int16_t>(std::lround(v * 32000.0));
             std::fwrite(&s, 2, 1, f);
         }
@@ -119,8 +119,8 @@ protected:
         std::fwrite("data", 1, 4, f);
         write32(static_cast<std::uint32_t>(frames * channels * 2));
         for (int i = 0; i < frames; ++i) {
-            const auto s = static_cast<std::int16_t>(
-                std::lround(12000 * std::sin(2.0 * 3.14159265358979323846 * 440.0 * i / sampleRate)));
+            const auto s = static_cast<std::int16_t>(std::lround(
+                12000 * std::sin(2.0 * 3.14159265358979323846 * 440.0 * i / sampleRate)));
             std::fwrite(&s, 2, 1, f);
         }
         std::fclose(f);
@@ -279,16 +279,17 @@ TEST_F(SliceWorkspaceTest, ExportErrorCancelOverwriteAndContinue) {
     touchFile(dir / "slice_000.wav", "OLD000");
     touchFile(dir / "slice_001.wav", "OLD001");
 
-    auto denied = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                          0.0, false, QStringLiteral("error"));
+    auto denied = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                          false, QStringLiteral("error"));
     EXPECT_FALSE(denied.value(QStringLiteral("ok")).toBool());
     EXPECT_EQ(readFile(dir / "slice_000.wav"), "OLD000");
     EXPECT_EQ(readFile(dir / "slice_001.wav"), "OLD001");
     EXPECT_FALSE(std::filesystem::exists(dir / "slice_002.wav"));
 
-    auto continued = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                             0.0, false, QStringLiteral("continue"));
-    ASSERT_TRUE(continued.value(QStringLiteral("ok")).toBool()) << continued.value("error").toString().toStdString();
+    auto continued = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                             false, QStringLiteral("continue"));
+    ASSERT_TRUE(continued.value(QStringLiteral("ok")).toBool())
+        << continued.value("error").toString().toStdString();
     EXPECT_EQ(readFile(dir / "slice_000.wav"), "OLD000");
     EXPECT_EQ(readFile(dir / "slice_001.wav"), "OLD001");
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_002.wav"));
@@ -296,11 +297,14 @@ TEST_F(SliceWorkspaceTest, ExportErrorCancelOverwriteAndContinue) {
     const auto files = continued.value(QStringLiteral("files")).toStringList();
     EXPECT_TRUE(files.contains(QStringLiteral("slice_002.wav")));
     EXPECT_TRUE(files.contains(QStringLiteral("slice_003.wav")));
-    EXPECT_NE(continued.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("slice_002.wav")), -1);
+    EXPECT_NE(
+        continued.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("slice_002.wav")),
+        -1);
 
     auto overwritten = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
                                                0.0, false, QStringLiteral("overwrite"));
-    ASSERT_TRUE(overwritten.value(QStringLiteral("ok")).toBool()) << overwritten.value("error").toString().toStdString();
+    ASSERT_TRUE(overwritten.value(QStringLiteral("ok")).toBool())
+        << overwritten.value("error").toString().toStdString();
     EXPECT_NE(readFile(dir / "slice_000.wav"), "OLD000");
     EXPECT_NE(readFile(dir / "slice_001.wav"), "OLD001");
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_002.wav"));
@@ -321,15 +325,17 @@ TEST_F(SliceWorkspaceTest, ExportFileNumbersStayIndependentFromWavIds) {
     a.kind = "grid";
     workspace_.setSlicesForTest({a}, {true});
     const QString outDir = QString::fromStdString(dir.string());
-    auto first = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                         0.0, false, QStringLiteral("overwrite"));
-    ASSERT_TRUE(first.value(QStringLiteral("ok")).toBool()) << first.value("error").toString().toStdString();
+    auto first = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                         false, QStringLiteral("overwrite"));
+    ASSERT_TRUE(first.value(QStringLiteral("ok")).toBool())
+        << first.value("error").toString().toStdString();
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_000.wav"));
     EXPECT_NE(first.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("#WAV03")), -1);
 
-    auto second = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                          0.0, false, QStringLiteral("continue"));
-    ASSERT_TRUE(second.value(QStringLiteral("ok")).toBool()) << second.value("error").toString().toStdString();
+    auto second = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                          false, QStringLiteral("continue"));
+    ASSERT_TRUE(second.value(QStringLiteral("ok")).toBool())
+        << second.value("error").toString().toStdString();
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_000.wav"));
     EXPECT_TRUE(std::filesystem::exists(dir / "slice_001.wav"));
     EXPECT_NE(second.value(QStringLiteral("raw")).toString().indexOf(QStringLiteral("#WAV03")), -1);
@@ -388,8 +394,8 @@ TEST_F(SliceWorkspaceTest, PlaceIntoChartAppliesAndReportsNotes) {
     a.kind = "grid";
     workspace_.setSlicesForTest({a}, {true});
     const QString outDir = QString::fromStdString(dir.string());
-    const auto r = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"),
-                                           0.0, true, QStringLiteral("overwrite"));
+    const auto r = workspace_.exportSlices(120, 4, 4, 1, 1, outDir, QStringLiteral("slice"), 0.0,
+                                           true, QStringLiteral("overwrite"));
     ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
         << r.value(QStringLiteral("error")).toString().toStdString();
     EXPECT_TRUE(r.value(QStringLiteral("placed")).toBool())

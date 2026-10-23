@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 切片位置规划实现（M6.2）。纯计算；见 Slice.hpp 头注释。
-#include "beatbench/core/slice/Slice.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <iterator>
 #include <limits>
 #include <map>
+
+#include "beatbench/core/slice/Slice.hpp"
 
 namespace beatbench::slice {
 
@@ -46,8 +46,8 @@ SlicePlan plan_from_grid(const GridConfig& cfg) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)——MIDI 切片规划：通道聚合与边界分支
-SlicePlan plan_from_midi(const midi::MidiFile& midi, double offsetSec,
-                         double durationSec, bool extendToNextOnset) {
+SlicePlan plan_from_midi(const midi::MidiFile& midi, double offsetSec, double durationSec,
+                         bool extendToNextOnset) {
     SlicePlan plan;
     plan.durationSec = durationSec;
 

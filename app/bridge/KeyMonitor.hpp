@@ -15,17 +15,17 @@ class KeyMonitor : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool ctrlHeld READ ctrlHeld NOTIFY ctrlHeldChanged)
 
-public:
+   public:
     explicit KeyMonitor(QObject* parent = nullptr);
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
     bool ctrlHeld() const { return m_ctrlHeld; }
 
-signals:
+   signals:
     void ctrlHeldChanged();
 
-private:
+   private:
     void setCtrlHeld(bool v);
 
     bool m_ctrlHeld = false;

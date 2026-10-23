@@ -10,7 +10,7 @@ namespace beatbench::app {
 
 class CommandDispatcher : public QObject {
     Q_OBJECT
-public:
+   public:
     explicit CommandDispatcher(QObject* parent = nullptr);
 
     /// 请求/响应均为 JSON 信封字符串（UTF-8）。dispatch 自身不抛异常：

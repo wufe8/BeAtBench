@@ -3,14 +3,14 @@
 // 失效取消 / clear。全部用注入解码器（无磁盘 I/O，确定性）：
 // 解码器返回合成的 DecodedSample（计数 1 = 解码器创建者持有，与真实解码一致）。
 // 验证引用计数协议：每次 get 恰给调用方 1 份；缓存持有 1 份；释放后无泄漏。
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "beatbench/audio/SampleCache.hpp"
 
@@ -29,7 +29,7 @@ DecodedSample* makeSample(double rate, std::size_t frames) {
 }
 
 class SampleCacheTest : public ::testing::Test {
-protected:
+   protected:
     /// 注入计数器解码器；每次调用 +1 并返回新采样。
     void installCountingDecoder(SampleCache& cache, std::atomic<int>& calls) {
         cache.setDecoders(
@@ -193,7 +193,7 @@ TEST_F(SampleCacheTest, ConcurrentSameKeyDecodesOnce) {
     }
     for (auto& t : threads) t.join();
 
-    EXPECT_EQ(calls.load(), 1);   // 只解码一次
+    EXPECT_EQ(calls.load(), 1);  // 只解码一次
     EXPECT_EQ(ok.load(), kThreads);
     // 所有调用者拿到同一实例
     auto* p = shared.load();

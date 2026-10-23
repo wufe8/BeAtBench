@@ -14,12 +14,12 @@ namespace beatbench::cmd {
 /// 命令执行失败：code = 稳定机器码（协议用，如 "unknown_command"），
 /// what() = 人类可读消息（当前为中文）。
 class CommandError : public std::runtime_error {
-public:
+   public:
     CommandError(std::string code, const std::string& message)
         : std::runtime_error(message), code_(std::move(code)) {}
     const std::string& code() const noexcept { return code_; }
 
-private:
+   private:
     std::string code_;
 };
 
@@ -28,7 +28,7 @@ private:
 /// run 为 const：命令应无状态（可并发、可缓存结果）；有状态场景用命令内部
 /// 的自有存储（按请求参数寻址），不要在注册表里留可变状态。
 class Command {
-public:
+   public:
     virtual ~Command() = default;
     virtual std::string_view name() const = 0;
     /// 执行命令。参数校验/执行失败抛 CommandError；args 结构非法（类型不符、
@@ -40,7 +40,7 @@ public:
 /// 内建命令见 register_builtin_commands；未来插件在加载时向
 /// global_registry() 注册自己的命令（doc/command-protocol.md 二、）。
 class Registry {
-public:
+   public:
     void add(std::unique_ptr<Command> command);
     const Command* find(std::string_view name) const;
     std::vector<std::string> names() const;  ///< 按字典序
@@ -53,7 +53,7 @@ public:
     /// 仅不可预期的异常会向上传播。
     json::Json dispatch(const json::Json& request) const;
 
-private:
+   private:
     std::map<std::string, std::unique_ptr<Command>, std::less<>> commands_;
 };
 

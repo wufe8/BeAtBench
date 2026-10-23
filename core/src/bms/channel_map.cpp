@@ -8,13 +8,13 @@
 //   51-59=1P LN 通道（LNTYPE 1 在同一通道内按时间序交替头尾）；
 //   61-69=2P LN 通道（同上，玩家侧不同）；
 //   D1-D9=1P 地雷、E1-E9=2P 地雷（槽位与 11-19/21-29 同构）。
-#include "beatbench/core/bms/ChannelMap.hpp"
-
 #include <array>
 #include <cctype>
 #include <cstddef>
 #include <string>
 #include <string_view>
+
+#include "beatbench/core/bms/ChannelMap.hpp"
 
 namespace beatbench::bms {
 namespace {
@@ -36,11 +36,11 @@ struct Rule {
 // （5/7key SP/DP 定义；9key PMS 的 11-19=键1-9 是另一张表，.pms 支持时注册。）
 constexpr std::uint8_t kKeyIndex[9] = {1, 2, 3, 4, 5, 0, 0, 6, 7};
 constexpr LaneKind kLaneKinds[9] = {
-    LaneKind::Key, LaneKind::Key, LaneKind::Key, LaneKind::Key, LaneKind::Key,
+    LaneKind::Key,     LaneKind::Key,   LaneKind::Key, LaneKind::Key, LaneKind::Key,
     LaneKind::Scratch, LaneKind::Pedal, LaneKind::Key, LaneKind::Key,
 };
 
-constexpr std::size_t kSpecialCount = 14;  // "01".."0E"
+constexpr std::size_t kSpecialCount = 14;                                   // "01".."0E"
 constexpr std::size_t kGroupCount = static_cast<const std::size_t>(6 * 9);  // 11/21/51/61/D/E 六组
 constexpr std::size_t kTotal = kSpecialCount + kGroupCount;
 
@@ -52,14 +52,28 @@ struct Table {
         constexpr Rule specials[kSpecialCount] = {
             // ch01 = 背景音/BGM：到达即自动播放，游戏不可见（BMS 笔记「通道」节）。
             // allow_sub_lines=true：同小节多行 = 多个背景音子行（sub_line 泛化，2026-09）。
-            {{'0', '1'}, ChannelSemantics::Note, LaneKind::Bgm, 0, NoteKind::Normal,
-             false, 0, 0, true},
+            {{'0', '1'},
+             ChannelSemantics::Note,
+             LaneKind::Bgm,
+             0,
+             NoteKind::Normal,
+             false,
+             0,
+             0,
+             true},
             {{'0', '2'}, ChannelSemantics::MeasureLen},
             {{'0', '3'}, ChannelSemantics::BpmInline},
             {{'0', '4'}, ChannelSemantics::Bga},
             // ch05 未在笔记定义（保留）
             {{'0', '5'}, ChannelSemantics::KeepRaw},
-            {{'0', '6'}, ChannelSemantics::BgaPoor, LaneKind::Key, 0, NoteKind::Normal, false, 0, 1},
+            {{'0', '6'},
+             ChannelSemantics::BgaPoor,
+             LaneKind::Key,
+             0,
+             NoteKind::Normal,
+             false,
+             0,
+             1},
             // ch07 = BGA Layer（#BMPxx；比 ch04 高一层）
             {{'0', '7'}, ChannelSemantics::Bga, LaneKind::Key, 0, NoteKind::Normal, false, 0, 2},
             {{'0', '8'}, ChannelSemantics::BpmRef},
@@ -73,12 +87,12 @@ struct Table {
             {{'0', 'E'}, ChannelSemantics::KeepRaw},
         };
         for (const auto& r : specials) rules[count++] = r;
-        add_group('1', 0, false, NoteKind::Normal);   // 11-19（1P 游玩轨）
-        add_group('2', 1, false, NoteKind::Normal);   // 21-29（2P 游玩轨）
-        add_group('5', 0, true, NoteKind::Normal);    // 51-59（1P LN 通道，LNTYPE 1 交替头尾）
-        add_group('6', 1, true, NoteKind::Normal);    // 61-69（2P LN 通道）
-        add_group('D', 0, false, NoteKind::Landmine); // D1-D9 地雷（1P）
-        add_group('E', 1, false, NoteKind::Landmine); // E1-E9 地雷（2P）
+        add_group('1', 0, false, NoteKind::Normal);    // 11-19（1P 游玩轨）
+        add_group('2', 1, false, NoteKind::Normal);    // 21-29（2P 游玩轨）
+        add_group('5', 0, true, NoteKind::Normal);     // 51-59（1P LN 通道，LNTYPE 1 交替头尾）
+        add_group('6', 1, true, NoteKind::Normal);     // 61-69（2P LN 通道）
+        add_group('D', 0, false, NoteKind::Landmine);  // D1-D9 地雷（1P）
+        add_group('E', 1, false, NoteKind::Landmine);  // E1-E9 地雷（2P）
     }
 
     constexpr void add_group(char ten, std::uint8_t player, bool ln_channel, NoteKind nk) {
@@ -123,9 +137,9 @@ std::optional<BmsChannelRule> bms_channel_rule(std::string_view channel) {
         const auto& r = t.rules[i];
         if (r.ch[0] == up[0] && r.ch[1] == up[1]) {
             if (r.sem == ChannelSemantics::Note) {
-                return BmsChannelRule{ChannelSemantics::Note,
-                                      Lane{r.player, r.kind, r.index}, r.nk,
-                                      r.ln_channel, 0, r.allow_sub_lines};
+                return BmsChannelRule{
+                    ChannelSemantics::Note, Lane{r.player, r.kind, r.index}, r.nk, r.ln_channel, 0,
+                    r.allow_sub_lines};
             }
             return BmsChannelRule{r.sem, {}, NoteKind::Normal, false, r.bga_layer};
         }

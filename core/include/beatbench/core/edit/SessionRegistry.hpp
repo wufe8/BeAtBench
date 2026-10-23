@@ -17,7 +17,7 @@ namespace beatbench::edit {
 /// 协议命令寻址：args 带可选 session_id，缺省 = active() 会话（单会话行为不变，
 /// 向后兼容——global_editor_session 保留为兼容别名 = 默认会话）。
 class SessionRegistry {
-public:
+   public:
     SessionRegistry();
 
     /// 创建新会话（空文档）。id 重复 → 返回 false（调用方换 id 或先 close）。
@@ -41,7 +41,7 @@ public:
     std::string active_id() const { return m_active; }
     std::vector<std::string> ids() const;
 
-private:
+   private:
     std::map<std::string, std::unique_ptr<EditorSession>, std::less<>> m_sessions;
     std::string m_active;
 };

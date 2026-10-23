@@ -13,22 +13,21 @@
 #include "bridge/CommandDispatcher.hpp"
 
 using beatbench::app::CommandDispatcher;
-using beatbench::cmd::Registry;
 using beatbench::cmd::register_builtin_commands;
+using beatbench::cmd::Registry;
 using beatbench::json::Json;
 
 namespace {
 
-Json parse_response(const QString& text) {
-    return Json::parse(text.toStdString());
-}
+Json parse_response(const QString& text) { return Json::parse(text.toStdString()); }
 
 }  // namespace
 
 // GUI 入口：合法 version 请求 → 与 CLI 相同的成功信封。
 TEST(CommandDispatcher, VersionEnvelopeMatchesProtocol) {
     CommandDispatcher dispatcher;
-    const Json resp = parse_response(dispatcher.dispatch(QStringLiteral(R"({"command":"version"})")));
+    const Json resp =
+        parse_response(dispatcher.dispatch(QStringLiteral(R"({"command":"version"})")));
     ASSERT_TRUE(resp.is_object());
     EXPECT_TRUE(resp.at("ok").as_bool());
     const auto& result = resp.at("result");
@@ -91,10 +90,10 @@ TEST(CommandDispatcher, CliAndGuiEnvelopesMatch) {
         R"({"command":"version","id":7})",
         R"({"command":"version","id":"req-1"})",
         R"({"command":"capabilities"})",
-        R"({"command":"frobnicate"})",   // unknown_command
-        R"({})",                         // 缺 command → bad_request
-        R"({"command":42})",             // command 类型错误 → bad_request
-        R"({"command":"info"})",         // args 缺省 → bad_args
+        R"({"command":"frobnicate"})",     // unknown_command
+        R"({})",                           // 缺 command → bad_request
+        R"({"command":42})",               // command 类型错误 → bad_request
+        R"({"command":"info"})",           // args 缺省 → bad_args
         R"({"command":"info","args":{}})"  // 缺 path → bad_args
     };
     for (const char* text : requests) {

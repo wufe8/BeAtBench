@@ -15,20 +15,20 @@ namespace beatbench::edit {
 /// 时间轴事件种类（BPM / STOP / 节拍），命令协议 timing.* 的 kind 参数。
 /// 三种事件模型值不同（Bpm/Stop/MeasureLen），编辑语义统一：按 (measure,pos) 定位。
 enum class TimingKind : std::uint8_t {
-    Bpm,   ///< BPM 事件（ch03/ch08；值 = BPM 数值）
-    Stop,  ///< STOP 事件（ch09；值 = 时长微秒）
+    Bpm,      ///< BPM 事件（ch03/ch08；值 = BPM 数值）
+    Stop,     ///< STOP 事件（ch09；值 = 时长微秒）
     Measure,  ///< 节拍事件（ch02；值 = 每小节拍数，4/4 = 4）
 };
 
 /// note → 跨命名空间事件的目标种类（BGA 层 / BPM / STOP）。
 /// 与 TimingKind 平行但语义不同：BGA 用 image.id、BPM/STOP 用 ref_id + 定义值。
 enum class ConvertTarget : std::uint8_t {
-    BgaBase = 0,  ///< BGA base 层（ch04）
-    BgaPoor = 1,  ///< BGA poor 层（ch06）
-    BgaLayer = 2, ///< BGA layer 层（ch07）
-    BgaLayer2 = 3,///< BGA layer2 层（ch0A）
-    Bpm = 4,      ///< BPM 事件（ch03；id → #BPMxx 引用）
-    Stop = 5,     ///< STOP 事件（ch09；id → #STOPxx 引用）
+    BgaBase = 0,    ///< BGA base 层（ch04）
+    BgaPoor = 1,    ///< BGA poor 层（ch06）
+    BgaLayer = 2,   ///< BGA layer 层（ch07）
+    BgaLayer2 = 3,  ///< BGA layer2 层（ch0A）
+    Bpm = 4,        ///< BPM 事件（ch03；id → #BPMxx 引用）
+    Stop = 5,       ///< STOP 事件（ch09；id → #STOPxx 引用）
 };
 
 /// 把 TimingKind 转协议字符串（"bpm"/"stop"/"measure"）。未知 → 空串。
@@ -43,7 +43,7 @@ std::optional<TimingKind> timing_kind_from_name(std::string_view name);
 /// 编辑命令内部可被协议命令包装（如 note.put 的 dispatch 入口），
 /// GUI/CLI/脚本共用同一批编辑原语。
 class EditCommand {
-public:
+   public:
     virtual ~EditCommand() = default;
 
     /// 命令名（诊断/日志/协议映射用，如 "note.put"）。
@@ -60,7 +60,10 @@ public:
     /// next 尚未应用；若可合并，把 next 并入自身并返回 true（调用方不再单独入栈），
     /// 否则返回 false（调用方把 next 作为新栈项）。
     /// 默认不合并。
-    virtual bool merge_with(const EditCommand& next) { (void)next; return false; }
+    virtual bool merge_with(const EditCommand& next) {
+        (void)next;
+        return false;
+    }
 
     /// 人类可读描述（undo 菜单/诊断显示）。
     virtual std::string describe() const { return name(); }
@@ -69,7 +72,7 @@ public:
 /// 复合命令：一组子命令按序 apply/invert（逆序反转），整体 = 一个 undo 步。
 /// 批量编辑（框选删除/粘贴/变换）用它组合单 note 命令，不重复实现批量逻辑。
 class CompositeCommand : public EditCommand {
-public:
+   public:
     /// 追加子命令（所有权转移；追加后命令不可再被外部修改）。
     void add(std::unique_ptr<EditCommand> cmd);
 
@@ -81,7 +84,7 @@ public:
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     std::vector<std::unique_ptr<EditCommand>> m_commands;
 };
 
@@ -95,7 +98,7 @@ private:
 /// 节拍事件（Measure）约定 pos = 0（BMS ch02 作用于整小节，parser 恒 pos 0）；
 /// 传入非 0 pos 时归一为 0（命令自身保证，调用方无需处理）。
 class PutTimingCommand : public EditCommand {
-public:
+   public:
     PutTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos, double value,
                      std::optional<std::uint32_t> ref = std::nullopt);
     std::string name() const override { return "timing.put"; }
@@ -103,7 +106,7 @@ public:
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     TimingKind m_kind;
     std::uint32_t m_measure;
     Rational m_pos;
@@ -119,12 +122,12 @@ private:
     std::optional<std::size_t> m_applied_index;
     /// 交叉同步（共享 id 语义 2026-09：ref 绑定事件改值 = 改该 #BPMxx/#STOPxx **定义值**，
     /// 所有引用者同步；与 SetSampleValueCommand 一致）。仅定义实际变化时记录，invert 恢复。
-    std::optional<std::uint32_t> m_sync_ref;   ///< 实际同步的定义 id
-    bool m_def_existed = false;                ///< 定义 apply 前存在
-    std::string m_old_def_text;                ///< 定义旧文本
-    std::vector<std::pair<std::size_t, double>> m_sync_bpm;        ///< 引用者旧值（Bpm）
-    std::vector<std::pair<std::size_t, std::int64_t>> m_sync_stop; ///< 引用者旧值（Stop）
-    std::size_t m_edited_index = 0;            ///< 被替换事件下标（传播时跳过——do_invert 恢复其值）
+    std::optional<std::uint32_t> m_sync_ref;                        ///< 实际同步的定义 id
+    bool m_def_existed = false;                                     ///< 定义 apply 前存在
+    std::string m_old_def_text;                                     ///< 定义旧文本
+    std::vector<std::pair<std::size_t, double>> m_sync_bpm;         ///< 引用者旧值（Bpm）
+    std::vector<std::pair<std::size_t, std::int64_t>> m_sync_stop;  ///< 引用者旧值（Stop）
+    std::size_t m_edited_index = 0;  ///< 被替换事件下标（传播时跳过——do_invert 恢复其值）
 };
 
 /// 删除时间轴事件（BPM/STOP/节拍 → timing.delete）。
@@ -132,14 +135,14 @@ private:
 /// 同 pos 后者覆盖，编辑语义只认位置）。不存在 → 无操作（命令成功）。
 /// 逆操作：按快照精确恢复（含原容器位置近似）。
 class DeleteTimingCommand : public EditCommand {
-public:
+   public:
     DeleteTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos);
     std::string name() const override { return "timing.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     TimingKind m_kind;
     std::uint32_t m_measure;
     Rational m_pos;
@@ -163,23 +166,23 @@ private:
 /// 逆操作：反向转换（事件 → note；id 回填 note.sample.id，位置回到 (measure,pos)）。
 /// 单个 undo 步；批量 = CompositeCommand（与 note.move 同族）。
 class ConvertNoteCommand : public EditCommand {
-public:
+   public:
     ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                       std::uint32_t sub_line, ConvertTarget target,
-                       std::uint32_t to_measure = 0, Rational to_pos = Rational(0, 1));
+                       std::uint32_t sub_line, ConvertTarget target, std::uint32_t to_measure = 0,
+                       Rational to_pos = Rational(0, 1));
     std::string name() const override { return "note.convert"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
-    std::uint32_t m_measure;      ///< 源 (measure, pos)
+   private:
+    std::uint32_t m_measure;  ///< 源 (measure, pos)
     Rational m_pos;
     Lane m_lane;
     std::uint32_t m_sample;
     std::uint32_t m_sub_line;
     ConvertTarget m_target;
-    std::uint32_t m_to_measure;   ///< 目标位置（转换后事件落点；可同一 position）
+    std::uint32_t m_to_measure;  ///< 目标位置（转换后事件落点；可同一 position）
     Rational m_to_pos;
     /// apply 删除的 note 快照（invert 恢复）
     std::optional<Event<Note>> m_removed;
@@ -204,7 +207,7 @@ private:
 /// invert：精确恢复（断开 → 恢复互指；配对 → 清除互指）。
 /// 批量 = CompositeCommand（一个 undo 步）；单选 = 本命令。
 class ToggleLnCommand : public EditCommand {
-public:
+   public:
     ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
                     std::uint32_t sub_line = 0);
     std::string name() const override { return "note.toggleLn"; }
@@ -212,7 +215,7 @@ public:
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     std::uint32_t m_measure;
     Rational m_pos;
     Lane m_lane;
@@ -233,42 +236,42 @@ private:
 /// 逆操作：反向重映射（to → from），精确恢复（含碰撞时原 to_id 的定义与引用）。
 /// 单个 undo 步。
 class RenameSampleCommand : public EditCommand {
-public:
+   public:
     RenameSampleCommand(SampleKind kind, std::uint32_t from_id, std::uint32_t to_id);
     std::string name() const override { return "sample.rename"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     SampleKind m_kind;
     std::uint32_t m_from_id;
     std::uint32_t m_to_id;
     /// apply 前 (kind, from_id) 是否存在（invert：存在→还回，不存在→维持移除）
     bool m_had_from = false;
-    SampleDef m_old_def;               ///< apply 前 (kind, from_id) 的定义
-    bool m_had_to = false;             ///< apply 前 (kind, to_id) 已有不同定义（碰撞）
-    SampleDef m_old_to_def;            ///< 碰撞时原目标定义（invert 恢复）
+    SampleDef m_old_def;     ///< apply 前 (kind, from_id) 的定义
+    bool m_had_to = false;   ///< apply 前 (kind, to_id) 已有不同定义（碰撞）
+    SampleDef m_old_to_def;  ///< 碰撞时原目标定义（invert 恢复）
     /// 引用 from_id 的对象下标（invert 精确还原；按 kind 只用对应容器）
     std::vector<std::size_t> m_note_idx;
     std::vector<std::size_t> m_bga_idx;
     std::vector<std::size_t> m_bpm_idx;
     std::vector<std::size_t> m_stop_idx;
-    bool m_changed = false;            ///< apply 实际执行了重映射
+    bool m_changed = false;  ///< apply 实际执行了重映射
 };
 
 /// 设置「定义表」条目的文件路径（切音工作区手工版：双击采样行改绑定的文件，sample.setFile）。
 /// 语义：samples[(kind, id)].file = file；键不存在则创建（含空文件）。
 /// 逆操作：恢复到 apply 前（存在→还回旧值；不存在→移除新键）。单个 undo 步。
 class SetSampleFileCommand : public EditCommand {
-public:
+   public:
     SetSampleFileCommand(SampleKind kind, std::uint32_t id, std::string file);
     std::string name() const override { return "sample.setFile"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     SampleKind m_kind;
     std::uint32_t m_id;
     std::string m_file;
@@ -283,14 +286,14 @@ private:
 /// ⚠️ 这是定义表层面的「id → 值」绑定——与事件层面的 timing.put（在 (measure,pos) 放事件，
 /// 值可自动派生 #BPMxx）正交；两者共同把「创建 id+绑定值」与「在时间轴使用 id」分离。
 class SetSampleValueCommand : public EditCommand {
-public:
+   public:
     SetSampleValueCommand(SampleKind kind, std::uint32_t id, std::string value);
     std::string name() const override { return "sample.setValue"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     SampleKind m_kind;
     std::uint32_t m_id;
     std::string m_value;
@@ -308,7 +311,7 @@ private:
 /// 仅改这一条 note 的引用（不重命名定义表；音频文件不变）。找不到 → 无操作。
 /// 逆操作：恢复原 sample 引用。单个 undo 步。
 class SetNoteSampleCommand : public EditCommand {
-public:
+   public:
     SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
                          std::uint32_t sub_line, std::uint32_t to);
     std::string name() const override { return "note.setSample"; }
@@ -316,7 +319,7 @@ public:
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     std::uint32_t m_measure;
     Rational m_pos;
     Lane m_lane;
@@ -332,19 +335,19 @@ private:
 /// 与文件管理器「解绑文件」语义一致（引用保留 id，但无文件/值定义 → 之后写回派生）。
 /// 逆操作：恢复被移除的定义（存在时还回）。单个 undo 步。
 class DeleteSampleCommand : public EditCommand {
-public:
+   public:
     DeleteSampleCommand(SampleKind kind, std::uint32_t id);
     std::string name() const override { return "sample.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
-private:
+   private:
     SampleKind m_kind;
     std::uint32_t m_id;
-    bool m_existed = false;      ///< apply 前存在（invert 还回）
-    SampleDef m_old_def;         ///< apply 前的定义
-    bool m_changed = false;      ///< apply 实际删除了定义
+    bool m_existed = false;  ///< apply 前存在（invert 还回）
+    SampleDef m_old_def;     ///< apply 前的定义
+    bool m_changed = false;  ///< apply 实际删除了定义
 };
 
 }  // namespace beatbench::edit

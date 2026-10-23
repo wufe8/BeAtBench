@@ -21,8 +21,8 @@
 
 using namespace beatbench;
 using namespace beatbench::edit;
-using beatbench::json::Json;
 using beatbench::cmd::global_registry;
+using beatbench::json::Json;
 
 namespace {
 
@@ -74,8 +74,8 @@ TEST(EditCommands, PutThenUndoRestores) {
     s.load(make_chart());
     const auto before = s.chart();
 
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1),
-                                                        Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
     ASSERT_EQ(s.chart().notes.size(), before.notes.size() + 1);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 
@@ -87,8 +87,8 @@ TEST(EditCommands, PutThenUndoRestores) {
 TEST(EditCommands, PutRedoReapplies) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1),
-                                                        Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
     ASSERT_TRUE(s.undo());
     ASSERT_TRUE(s.redo());
     EXPECT_EQ(s.chart().notes.size(), 3u);
@@ -99,8 +99,8 @@ TEST(EditCommands, DeleteThenUndoRestores) {
     EditorSession s;
     s.load(make_chart());
     // 删 m1 pos0 key1 sample1
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(1, Rational(0, 1),
-                                                           Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<DeleteNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_EQ(s.chart().notes.size(), 1u);
     ASSERT_TRUE(s.undo());
     EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(make_chart().notes));
@@ -111,8 +111,8 @@ TEST(EditCommands, DeleteMissingNoteNoop) {
     s.load(make_chart());
     const auto before = norm_notes(s.chart().notes);
     // 不存在的 note → 命令成功但无变化
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(9, Rational(0, 1),
-                                                           Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<DeleteNoteCommand>(9, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     EXPECT_EQ(norm_notes(s.chart().notes), before);
     // undo 也无变化（空命令）
     ASSERT_TRUE(s.undo());
@@ -126,9 +126,8 @@ TEST(EditCommands, MoveThenUndoRestores) {
     s.load(make_chart());
     const auto before = norm_notes(s.chart().notes);
     // 移 m1 pos0 key1 → m2 pos1/4
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1),
-                                                         Lane{0, LaneKind::Key, 1}, 1, 2,
-                                                         Rational(1, 4))));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 2, Rational(1, 4))));
     EXPECT_EQ(s.chart().notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     ASSERT_TRUE(s.undo());
@@ -137,7 +136,8 @@ TEST(EditCommands, MoveThenUndoRestores) {
     // 重做后 note 在目标位置
     bool found = false;
     for (const auto& e : s.chart().notes) {
-        if (e.measure == 2 && e.pos == Rational(1, 4) && e.value.lane == (Lane{0, LaneKind::Key, 1})) {
+        if (e.measure == 2 && e.pos == Rational(1, 4) &&
+            e.value.lane == (Lane{0, LaneKind::Key, 1})) {
             found = true;
         }
     }
@@ -148,12 +148,10 @@ TEST(EditCommands, MoveMergeConsecutiveDrags) {
     EditorSession s;
     s.load(make_chart());
     // 连续拖动同一 note：m1 pos0 → m1 pos1/4 → m1 pos1/2，应合并为一个 undo 步
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1),
-                                                         Lane{0, LaneKind::Key, 1}, 1, 1,
-                                                         Rational(1, 4))));
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(1, 4),
-                                                         Lane{0, LaneKind::Key, 1}, 1, 1,
-                                                         Rational(1, 2))));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(1, 4))));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(1, 2))));
     EXPECT_EQ(s.undo_depth(), 1u);  // 合并成一个 undo 步
     // undo 一次直接回到原位
     ASSERT_TRUE(s.undo());
@@ -163,13 +161,11 @@ TEST(EditCommands, MoveMergeConsecutiveDrags) {
 TEST(EditCommands, MoveDoesNotMergeDifferentNote) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1),
-                                                         Lane{0, LaneKind::Key, 1}, 1, 1,
-                                                         Rational(1, 4))));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(1, 4))));
     // 不同 note（key2）→ 不合并
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(1, 2),
-                                                         Lane{0, LaneKind::Key, 2}, 2, 1,
-                                                         Rational(3, 4))));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, 1, Rational(3, 4))));
     EXPECT_EQ(s.undo_depth(), 2u);
 }
 
@@ -189,8 +185,8 @@ TEST(EditCommands, DeleteLnBreaksPair) {
     s.load(std::move(c));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 删头 → 尾配对清空
-    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(1, Rational(0, 1),
-                                                           Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(s.exec(
+        std::make_unique<DeleteNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
     ASSERT_EQ(s.chart().notes.size(), 1u);
     EXPECT_FALSE(s.chart().notes[0].value.ln_pair.has_value());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
@@ -215,9 +211,8 @@ TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
     c.notes[0].value.ln_pair = 1;
     c.notes[1].value.ln_pair = 0;
     s.load(std::move(c));
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1),
-                                                         Lane{0, LaneKind::Key, 1}, 1, 3,
-                                                         Rational(0, 1))));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3, Rational(0, 1))));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 只有 1 个 note 到 m3（配对端留在 m1 pos1/2，未随动）
     std::size_t in_m3 = 0;
@@ -249,9 +244,8 @@ TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
     c.notes[0].value.ln_pair = 1;
     c.notes[1].value.ln_pair = 0;
     s.load(std::move(c));
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1),
-                                                         Lane{0, LaneKind::Key, 1}, 1, 3,
-                                                         Rational(0, 1), true)));
+    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
+        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3, Rational(0, 1), true)));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 头在 m3（pos0），尾留 m1（pos1/2）；两者仍互指
     bool head_at_m3 = false, tail_at_m1 = false;
@@ -270,8 +264,12 @@ TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     bool at_m1 = false, at_m2 = false;
     for (const auto& e : s.chart().notes) {
-        if (e.measure == 1 && e.pos == Rational(0, 1) && e.value.lane == (Lane{0, LaneKind::Key, 1})) at_m1 = true;
-        if (e.measure == 1 && e.pos == Rational(1, 2) && e.value.lane == (Lane{0, LaneKind::Key, 1})) at_m2 = true;
+        if (e.measure == 1 && e.pos == Rational(0, 1) &&
+            e.value.lane == (Lane{0, LaneKind::Key, 1}))
+            at_m1 = true;
+        if (e.measure == 1 && e.pos == Rational(1, 2) &&
+            e.value.lane == (Lane{0, LaneKind::Key, 1}))
+            at_m2 = true;
     }
     EXPECT_TRUE(at_m1);
     EXPECT_TRUE(at_m2);
@@ -345,8 +343,8 @@ TEST(EditCommands, DirtyFlagTracksEditUndoSave) {
     s.load(make_chart());
     EXPECT_FALSE(s.is_dirty());
 
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
     EXPECT_TRUE(s.is_dirty());
 
     ASSERT_TRUE(s.undo());
@@ -367,17 +365,17 @@ TEST(EditCommands, DirtyAfterSaveUndoThenNewEdit) {
     // 保存 → 撤销一步 → 再编辑：新内容与保存点不同，必须仍脏（代际不得复用清洁点号）。
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        3, Rational(0, 1), Lane{0, LaneKind::Key, 4}, 8)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(3, Rational(0, 1), Lane{0, LaneKind::Key, 4}, 8)));
     EXPECT_EQ(s.undo_depth(), 2u);
     s.mark_clean();
     EXPECT_FALSE(s.is_dirty());
     ASSERT_TRUE(s.undo());
     EXPECT_TRUE(s.is_dirty());
-    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
-        4, Rational(0, 1), Lane{0, LaneKind::Key, 5}, 9)));
+    ASSERT_TRUE(
+        s.exec(std::make_unique<PutNoteCommand>(4, Rational(0, 1), Lane{0, LaneKind::Key, 5}, 9)));
     EXPECT_TRUE(s.is_dirty());
     EXPECT_EQ(s.undo_depth(), 2u);  // 新编辑独立一步，不并入保存点前的命令
 }
@@ -581,9 +579,9 @@ TEST(EditCommands, ClipboardCopyRoundtrip) {
     const Json resp = global_registry().dispatch(req);
     ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
     const auto& lines = resp.at("result").at("lines").as_array();
-    ASSERT_EQ(lines.size(), 2u);  // key1 一行 + key2 一行
-    EXPECT_EQ(lines[0].as_str(), "#00111:01");      // key1 pos0 sample1（n=1 槽位）
-    EXPECT_EQ(lines[1].as_str(), "#00112:0002");    // key2 pos1/2 sample2（n=2 槽位）
+    ASSERT_EQ(lines.size(), 2u);                  // key1 一行 + key2 一行
+    EXPECT_EQ(lines[0].as_str(), "#00111:01");    // key1 pos0 sample1（n=1 槽位）
+    EXPECT_EQ(lines[1].as_str(), "#00112:0002");  // key2 pos1/2 sample2（n=2 槽位）
 }
 
 TEST(EditCommands, ClipboardPasteInsertsAtTarget) {
@@ -741,8 +739,8 @@ TEST(EditCommands, ClipboardPasteSubLineContinueUniform) {
 
     std::array<int, 4> perSubLine{};
     for (const auto& e : session.chart().notes) {
-        if (e.measure == 0 && e.value.lane.kind == LaneKind::Bgm &&
-            e.pos == Rational(0, 1) && e.value.sub_line < 4)
+        if (e.measure == 0 && e.value.lane.kind == LaneKind::Bgm && e.pos == Rational(0, 1) &&
+            e.value.sub_line < 4)
             ++perSubLine[e.value.sub_line];
     }
     EXPECT_EQ(perSubLine[0], 1) << "旧行 0 应保留";
@@ -774,8 +772,7 @@ TEST(EditCommands, ClipboardPasteSubLineContinueUniformEmptyAndOverflow) {
     ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
     std::array<int, 2> perSubLine{};
     for (const auto& e : session.chart().notes)
-        if (e.measure == 0 && e.value.lane.kind == LaneKind::Bgm &&
-            e.value.sub_line < 2)
+        if (e.measure == 0 && e.value.lane.kind == LaneKind::Bgm && e.value.sub_line < 2)
             ++perSubLine[e.value.sub_line];
     EXPECT_EQ(perSubLine[0], 1);
     EXPECT_EQ(perSubLine[1], 1);
@@ -806,8 +803,7 @@ TEST(EditCommands, ClipboardPasteSubLineContinueUniformEmptyAndOverflow) {
     ASSERT_TRUE(resp3.at("ok").as_bool()) << resp3.dump();
     bool saw63 = false;
     for (const auto& e : session.chart().notes)
-        if (e.measure == 0 && e.value.lane.kind == LaneKind::Bgm &&
-            e.value.sub_line == 63)
+        if (e.measure == 0 && e.value.lane.kind == LaneKind::Bgm && e.value.sub_line == 63)
             saw63 = true;
     EXPECT_TRUE(saw63) << "第 64 行（sub_line 63）应存在";
 
@@ -845,9 +841,12 @@ Json note_sel_item(const Event<Note>& e) {
     lane.set("player", static_cast<std::int64_t>(e.value.lane.player));
     lane.set("index", static_cast<std::int64_t>(e.value.lane.index));
     const char* kind = "key";
-    if (e.value.lane.kind == LaneKind::Bgm) kind = "bgm";
-    else if (e.value.lane.kind == LaneKind::Scratch) kind = "scratch";
-    else if (e.value.lane.kind == LaneKind::Pedal) kind = "pedal";
+    if (e.value.lane.kind == LaneKind::Bgm)
+        kind = "bgm";
+    else if (e.value.lane.kind == LaneKind::Scratch)
+        kind = "scratch";
+    else if (e.value.lane.kind == LaneKind::Pedal)
+        kind = "pedal";
     lane.set("kind", kind);
     item.set("lane", std::move(lane));
     item.set("sample", static_cast<std::int64_t>(e.value.sample.id));
@@ -929,10 +928,10 @@ TEST(EditCommands, ClipboardCopyRejectsHalfSelectedLn) {
     c.meta["BPM"] = "130";
     c.meta["LNTYPE"] = "1";
     session.load(std::move(c));
-    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
-    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(session.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(session.exec(
+        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
     ASSERT_EQ(session.chart().notes.size(), 2u);
     const auto before = session.chart();
 
@@ -955,10 +954,10 @@ TEST(EditCommands, ClipboardCopyPasteLnPairRoundtrip) {
     c.meta["BPM"] = "130";
     c.meta["LNTYPE"] = "1";
     session.load(std::move(c));
-    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7, true)));
-    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
-        2, Rational(1, 2), Lane{0, LaneKind::Key, 3}, 7, true)));
+    ASSERT_TRUE(session.exec(
+        std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7, true)));
+    ASSERT_TRUE(session.exec(
+        std::make_unique<PutNoteCommand>(2, Rational(1, 2), Lane{0, LaneKind::Key, 3}, 7, true)));
     Json args = Json::object();
     Json sel = Json::array();
     for (const auto& e : session.chart().notes) sel.push_back(note_sel_item(e));

@@ -9,10 +9,10 @@
 #include <string>
 
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/Selection.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
-#include "beatbench/core/command/Command.hpp"
 
 using namespace beatbench;
 using namespace beatbench::edit;
@@ -57,7 +57,7 @@ TEST(SessionRegistry, CreateActivateClose) {
     auto& reg = session_registry();
     // 清理可能的残留（测试独立运行时 default 存在）
     EXPECT_TRUE(reg.create("tab1"));
-    EXPECT_FALSE(reg.create("tab1"));  // 重复 → false
+    EXPECT_FALSE(reg.create("tab1"));    // 重复 → false
     EXPECT_EQ(reg.active_id(), "tab1");  // 创建后自动激活
     EXPECT_TRUE(reg.activate("default"));
     EXPECT_EQ(reg.active_id(), "default");
@@ -78,8 +78,8 @@ TEST(SessionRegistry, SessionsIsolated) {
     // a 放 note
     reg.by_id("a")->load(make_chart(1));
     reg.by_id("b")->load(make_chart(2));
-    ASSERT_TRUE(reg.by_id("a")->exec(std::make_unique<PutNoteCommand>(
-        2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 9)));
+    ASSERT_TRUE(reg.by_id("a")->exec(
+        std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 9)));
     EXPECT_EQ(reg.by_id("a")->chart().notes.size(), 2u);
     EXPECT_EQ(reg.by_id("b")->chart().notes.size(), 1u);  // b 不受影响
     EXPECT_EQ(reg.by_id("b")->undo_depth(), 0u);

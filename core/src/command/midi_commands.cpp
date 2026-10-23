@@ -2,8 +2,6 @@
 // MIDI 命令（M6.1）：midi.parse —— 解析 .mid → note/tempo/拍号 JSON。
 // 逻辑与人类 CLI/测试共用 core 的 parse_midi_bytes；JSON 层只做参数校验与结果装配。
 // headless 可测：不碰 Qt/音频；GUI 工作台导入走同一命令（进程内 dispatch）。
-#include "beatbench/core/command/Midi.hpp"
-
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -11,6 +9,7 @@
 #include <vector>
 
 #include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/command/Midi.hpp"
 #include "beatbench/core/json/Json.hpp"
 #include "beatbench/core/midi/MidiFile.hpp"
 
@@ -21,20 +20,18 @@ namespace {
 using json::Json;
 
 class MidiParseCommand : public Command {
-public:
+   public:
     std::string_view name() const override { return "midi.parse"; }
 
     Json run(const Json& args) const override {
-        if (!args.is_object())
-            throw CommandError("bad_args", "args 必须是对象");
+        if (!args.is_object()) throw CommandError("bad_args", "args 必须是对象");
         const Json* fp = args.find("file");
         if (!fp || !fp->is_string())
             throw CommandError("bad_args", "缺少参数: file（MIDI 文件路径字符串）");
         const std::string& path = fp->as_str();
 
         std::ifstream in(path, std::ios::binary);
-        if (!in)
-            throw CommandError("bad_midi", "无法读取 MIDI 文件: " + path);
+        if (!in) throw CommandError("bad_midi", "无法读取 MIDI 文件: " + path);
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
                                         std::istreambuf_iterator<char>());
         try {
@@ -44,7 +41,7 @@ public:
         }
     }
 
-private:
+   private:
     static Json midi_result(const midi::MidiFile& m, const std::string& path) {
         Json out = Json::object();
         out.set("path", path);

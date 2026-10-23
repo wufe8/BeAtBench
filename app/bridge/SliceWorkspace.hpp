@@ -15,7 +15,6 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
-
 #include <memory>
 #include <vector>
 
@@ -48,7 +47,7 @@ class SliceWorkspace : public QObject {
     /// MIDI tempo（首个 tempo 事件 → BPM；无 MIDI/无 tempo → 120）。网格参数默认值。
     Q_PROPERTY(qreal midiTempoBpm READ midiTempoBpm NOTIFY midiChanged)
 
-public:
+   public:
     explicit SliceWorkspace(QObject* parent = nullptr);
 
     /// 播放/seek 委托目标（main.cpp 接线；不拥有）。
@@ -80,18 +79,16 @@ public:
     /// 不挤旧行、新内容跨小节同列），单 CompositeCommand = 一个撤销步；需已加载谱面。
     /// 返回 {ok, raw, count, error, startMeasure, endMeasure, placementText, nextStartId,
     ///       placed, placedNotes, placeError, outDir, collisions, conflictPolicy}。
-    Q_INVOKABLE QVariantMap exportSlices(qreal bpm, int subdivision,
-                                         int beatsPerMeasure, int startId,
-                                         int startMeasure,
-                                         const QString& outDir, const QString& prefix,
-                                         qreal fadeMs, bool placeIntoChart = false,
+    Q_INVOKABLE QVariantMap exportSlices(qreal bpm, int subdivision, int beatsPerMeasure,
+                                         int startId, int startMeasure, const QString& outDir,
+                                         const QString& prefix, qreal fadeMs,
+                                         bool placeIntoChart = false,
                                          const QString& conflictPolicy = QStringLiteral("error"),
                                          int idBaseMode = 0, bool independentExport = false);
     /// 测试入口：同步装载参考音频（不经 QThreadPool / 不碰声卡）。生产路径仍用 loadAudioFile。
     bool loadAudioFileSyncForTest(const QString& path);
     /// 测试入口：直接注入切片表（绕过 detectSlices）。
-    void setSlicesForTest(std::vector<beatbench::slice::Slice> slices,
-                          std::vector<bool> enabled);
+    void setSlicesForTest(std::vector<beatbench::slice::Slice> slices, std::vector<bool> enabled);
     /// 建议的铺放起始小节（1-based）：当前谱面已用小节数 + 1（下一空小节；
     /// 无谱面 → 1）。「起始小节」SpinBox 默认值用；夹逼 [1,999]。
     Q_INVOKABLE int suggestedStartMeasure() const;
@@ -187,7 +184,7 @@ public:
     bool busy() const { return m_busy; }
     QString statusText() const { return m_statusText; }
 
-signals:
+   signals:
     void audioChanged();
     void midiChanged();
     void offsetChanged();
@@ -201,7 +198,7 @@ signals:
     /// 波形刷新，定义表需显式重拉 session.samples）。
     void samplesPlaced();
 
-private:
+   private:
     void setStatus(const QString& text);
     /// M6.4c 手动切分点：命中内部边界（startSec ≈ t，i>=1）的切片序号；无 → -1。
     int findBoundaryIndex(double t) const;
@@ -224,8 +221,7 @@ private:
     void restoreSliceSnapshot(const SliceSnapshot& snap);
     /// 解码完成（UI 线程）：ok 且 track 有效 → 移入 m_track + 交 AudioEngine 预览；
     /// 失败 → statusText（原参考音轨保留）。
-    void audioDecoded(bool ok, beatbench::audio::ReferenceTrack* track,
-                      const QString& path);
+    void audioDecoded(bool ok, beatbench::audio::ReferenceTrack* track, const QString& path);
 
     AudioEngine* m_engine = nullptr;
     ChartSession* m_chartSession = nullptr;  ///< 当前谱面（#WAV 占用/输出目录；不拥有）

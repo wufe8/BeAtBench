@@ -38,16 +38,16 @@ std::string write_temp(const std::string& name, const std::string& content) {
 
 constexpr const char* kChart =
     "*----- HEADER\n"
-    "#PLAYER 3\n"          // DP
+    "#PLAYER 3\n"  // DP
     "#TITLE 注册表测试\n"
     "#BPM 150\n"
     "#RANK 3\n"
     "#TOTAL 300\n"
     "#WAV01 kick.wav\n"
-    "#00111:0100\n"        // 1P 键1
-    "#00121:0100\n"        // 2P 键1
-    "#00151:0100\n"        // 1P LN 头（LNTYPE 1）
-    "#00251:0100\n";       // LN 尾
+    "#00111:0100\n"   // 1P 键1
+    "#00121:0100\n"   // 2P 键1
+    "#00151:0100\n"   // 1P LN 头（LNTYPE 1）
+    "#00251:0100\n";  // LN 尾
 
 }  // namespace
 
@@ -88,7 +88,7 @@ TEST(CodecRegistry, FindByExtensionCaseInsensitive) {
 TEST(CodecRegistry, DuplicateIdAndExtensionThrow) {
     CodecRegistry reg;
     class Dummy : public Codec {
-    public:
+       public:
         std::string_view id() const override { return "dummy"; }
         std::vector<std::string_view> extensions() const override { return {".xyz"}; }
         std::vector<std::string_view> modes() const override { return {}; }
@@ -102,7 +102,7 @@ TEST(CodecRegistry, DuplicateIdAndExtensionThrow) {
     reg.add(std::make_unique<Dummy>());
     EXPECT_THROW(reg.add(std::make_unique<Dummy>()), std::invalid_argument);  // 重复 id
     class Other : public Codec {
-    public:
+       public:
         std::string_view id() const override { return "other"; }
         std::vector<std::string_view> extensions() const override { return {".xyz"}; }
         std::vector<std::string_view> modes() const override { return {}; }
@@ -125,11 +125,10 @@ TEST(CodecRegistry, BmsReadThroughRegistry) {
     const std::string path = write_temp("dp.bms", kChart);
     ReadOptions opts;
     const auto res = bms->read(path, opts);
-    ASSERT_TRUE(res.diagnostics.empty() ||
-                std::none_of(res.diagnostics.begin(), res.diagnostics.end(),
-                             [](const auto& d) {
-                                 return d.severity == beatbench::codec::Severity::Error;
-                             }))
+    ASSERT_TRUE(
+        res.diagnostics.empty() ||
+        std::none_of(res.diagnostics.begin(), res.diagnostics.end(),
+                     [](const auto& d) { return d.severity == beatbench::codec::Severity::Error; }))
         << "读失败: " << (res.diagnostics.empty() ? "" : res.diagnostics.front().message);
     // DP 推断（#PLAYER 3）
     ASSERT_TRUE(res.chart.mode_id.has_value());
@@ -145,7 +144,8 @@ TEST(CodecRegistry, BmsReadThroughRegistry) {
 
 TEST(CodecRegistry, BmsPmsExtensionInfersMode) {
     const auto& reg = beatbench::codec::global_codec_registry();
-    const std::string path = write_temp("x.pms", "*----- HEADER\n#TITLE PMS\n#BPM 130\n#00111:0100\n");
+    const std::string path =
+        write_temp("x.pms", "*----- HEADER\n#TITLE PMS\n#BPM 130\n#00111:0100\n");
     const Codec* bms = reg.by_path(path);
     ASSERT_NE(bms, nullptr);
     ReadOptions opts;
@@ -162,9 +162,9 @@ TEST(CodecRegistry, PmsExtensionBeatsPlayerForMode) {
     // 均为 9key 非 DP（它们的 2P 侧通道 22-25 是键6-9，不是玩家2）；DP 谱用 .bms 表示。
     // 故后缀语义优先于 #PLAYER。
     const auto& reg = beatbench::codec::global_codec_registry();
-    const std::string path = write_temp(
-        "dp.pms", "*----- HEADER\n#PLAYER 3\n#BPM 130\n"
-                  "#00111:0100\n#00121:0100\n#00122:0100\n");
+    const std::string path = write_temp("dp.pms",
+                                        "*----- HEADER\n#PLAYER 3\n#BPM 130\n"
+                                        "#00111:0100\n#00121:0100\n#00122:0100\n");
     const Codec* bms = reg.by_path(path);
     ASSERT_NE(bms, nullptr);
     ReadOptions opts;
@@ -181,13 +181,14 @@ TEST(CodecRegistry, PmsExtensionBeatsPlayerForMode) {
             has_key6 = true;
     }
     EXPECT_TRUE(has_key1);
-    EXPECT_TRUE(has_key6);   // 22 → 键6（旧兼容约定读取）
-    EXPECT_FALSE(has_2p);    // 不再被推断为 DP 2P
+    EXPECT_TRUE(has_key6);  // 22 → 键6（旧兼容约定读取）
+    EXPECT_FALSE(has_2p);   // 不再被推断为 DP 2P
 }
 
 TEST(CodecRegistry, BmsModeOverrideWins) {
     const auto& reg = beatbench::codec::global_codec_registry();
-    const std::string path = write_temp("x.bms", "*----- HEADER\n#PLAYER 1\n#BPM 130\n#00111:0100\n");
+    const std::string path =
+        write_temp("x.bms", "*----- HEADER\n#PLAYER 1\n#BPM 130\n#00111:0100\n");
     ReadOptions opts;
     opts.mode = "pms9k";  // 显式覆盖 #PLAYER 推断
     const auto res = reg.by_id("bms")->read(path, opts);

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bridge/CommandDispatcher.hpp"
 
+#include <QString>
+
 #include "beatbench/core/Version.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/json/Json.hpp"
-
-#include <QString>
 
 namespace beatbench::app {
 

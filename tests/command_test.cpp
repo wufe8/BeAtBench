@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 命令框架测试：注册表 / 信封分发 / 内建命令（version/capabilities/info/check/convert）。
 // 全部用临时文件与合成谱面，不依赖 local/ 资产。
+#include "beatbench/core/command/Command.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -10,14 +12,13 @@
 #include <fstream>
 #include <string>
 
+#include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Builtins.hpp"
-#include "beatbench/core/Version.hpp"
-#include "beatbench/core/command/Command.hpp"
 
 using beatbench::cmd::CommandError;
-using beatbench::cmd::Registry;
 using beatbench::cmd::register_builtin_commands;
+using beatbench::cmd::Registry;
 using beatbench::json::Json;
 
 namespace {
@@ -56,11 +57,11 @@ constexpr const char* kSmallChart =
     "#BPM 150\n"
     "#WAV01 kick.wav\n"
     "#BPM01 150\n"
-    "#00002:1\n"          // 2/4 小节
-    "#00008:01\n"         // BPM → 槽位引用
-    "#00101:01000000\n"   // 两个 1/4 note
-    "#00103:01\n"         // LN 头
-    "#00111:01000000\n"   // 普通 note + BGA？(01 = WAV01)
+    "#00002:1\n"         // 2/4 小节
+    "#00008:01\n"        // BPM → 槽位引用
+    "#00101:01000000\n"  // 两个 1/4 note
+    "#00103:01\n"        // LN 头
+    "#00111:01000000\n"  // 普通 note + BGA？(01 = WAV01)
     ;
 
 // 需要真实存在的 WAV 才能过 lint 的 missing_wav 检查
@@ -86,7 +87,7 @@ TEST(Command, RegistryAddFindNames) {
 
     // 重复注册抛错
     class Dup : public beatbench::cmd::Command {
-    public:
+       public:
         std::string_view name() const override { return "info"; }
         Json run(const Json&) const override { return Json(); }
     };
@@ -197,11 +198,11 @@ TEST(Command, CapabilitiesListsCommandsAndFormats) {
     const auto& commands = result.at("commands").as_array();
     EXPECT_GE(commands.size(), 5);
     // 代表性命令覆盖三类入口：基础查询 / 会话编辑 / M6 导入与切分。
-    for (const char* name : {"version", "capabilities", "info", "check", "convert",
-                             "session.load", "note.put", "midi.parse", "slice.detect"}) {
-        const bool found = std::find_if(commands.begin(), commands.end(),
-                                        [&](const Json& v) { return v.as_str() == name; }) !=
-                           commands.end();
+    for (const char* name : {"version", "capabilities", "info", "check", "convert", "session.load",
+                             "note.put", "midi.parse", "slice.detect"}) {
+        const bool found = std::find_if(commands.begin(), commands.end(), [&](const Json& v) {
+                               return v.as_str() == name;
+                           }) != commands.end();
         EXPECT_TRUE(found) << "capabilities 缺少命令: " << name;
     }
     const auto& formats = result.at("formats").as_array();
@@ -511,15 +512,13 @@ TEST(Command, PlayerDerivedFromModeOnSave) {
         Json op = Json::object();
         op.set("path", path);
         ASSERT_TRUE(reg.dispatch(request("session.load", std::move(op))).at("ok").as_bool());
-        const auto path2 =
-            (temp_dir() / (std::string("player-reopen-") + c.mode + ext)).string();
+        const auto path2 = (temp_dir() / (std::string("player-reopen-") + c.mode + ext)).string();
         Json sv2 = Json::object();
         sv2.set("path", path2);
         sv2.set("overwrite", true);
         ASSERT_TRUE(reg.dispatch(request("session.save", std::move(sv2))).at("ok").as_bool());
         std::ifstream in2(path2, std::ios::binary);
-        std::string text2((std::istreambuf_iterator<char>(in2)),
-                          std::istreambuf_iterator<char>());
+        std::string text2((std::istreambuf_iterator<char>(in2)), std::istreambuf_iterator<char>());
         if (c.player_line) {
             EXPECT_NE(text2.find(c.player_line), std::string::npos)
                 << "mode=" << c.mode << " 保存重开后再保存，PLAYER 不应退回";
@@ -570,6 +569,5 @@ TEST(Command, TransformReturnsModeAwareSelection) {
     ASSERT_TRUE(r.at("result").find("selection") != nullptr);
     const auto& sel = r.at("result").at("selection").as_array();
     ASSERT_EQ(sel.size(), 1u);
-    EXPECT_EQ(sel[0].at("lane").at("index").as_i64(), 9)
-        << "pms9k 镜像键1 应得键9";
+    EXPECT_EQ(sel[0].at("lane").at("index").as_i64(), 9) << "pms9k 镜像键1 应得键9";
 }

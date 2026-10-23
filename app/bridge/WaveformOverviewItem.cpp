@@ -3,16 +3,15 @@
 // 方向：0 = 水平（底部条）；1 = 垂直（右侧条，当前布局——时间轴与视口同向）。
 #include "bridge/WaveformOverviewItem.hpp"
 
+#include <QCursor>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QCursor>
-
 #include <algorithm>
 #include <cmath>
 
+#include "beatbench/audio/WaveformPyramid.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/ThemeManager.hpp"
-#include "beatbench/audio/WaveformPyramid.hpp"
 
 namespace beatbench::app {
 
@@ -128,8 +127,7 @@ WaveformOverviewItem::ViewWindow WaveformOverviewItem::viewWindow() const {
     // 内容坐标（拍位）：topHigh 下内容自下而上 → 视口上下缘对应内容坐标区间。
     // ✂️ M5.2 开头留白：contentCoord → 拍位须扣 lead（contentHeight 已含 lead；
     //    与 ChartViewItem::measureAt 同构）。未扣则视口窗整体偏往未来（用顶/底基准都不准）。
-    const qreal cLo = m_topHigh ? (m_contentHeight - (m_scrollY + m_viewportHeight))
-                                : m_scrollY;
+    const qreal cLo = m_topHigh ? (m_contentHeight - (m_scrollY + m_viewportHeight)) : m_scrollY;
     const qreal cHi = m_topHigh ? (m_contentHeight - m_scrollY) : (m_scrollY + m_viewportHeight);
     const qreal mfLo = cLo / m_measureHeight - m_leadMeasures;
     const qreal mfHi = cHi / m_measureHeight - m_leadMeasures;
@@ -139,8 +137,7 @@ WaveformOverviewItem::ViewWindow WaveformOverviewItem::viewWindow() const {
         const std::uint32_t msec = static_cast<std::uint32_t>(mf);
         const double frac = mf - msec;
         // Rational(num, den)：frac 乘 1e6 取整（近似足够；BPM 变化在小节内线性段）
-        const beatbench::Rational pos(static_cast<std::int64_t>(std::lround(frac * 1e6)),
-                                      1000000);
+        const beatbench::Rational pos(static_cast<std::int64_t>(std::lround(frac * 1e6)), 1000000);
         const beatbench::Position p{msec, pos};
         return static_cast<double>(cs->timing()->time_us(p)) / 1e6;
     };
@@ -213,7 +210,8 @@ void WaveformOverviewItem::paint(QPainter* p) {
         // 未渲染：提示（旋转 90° 的文本在垂直条上太挤 → 用短文本 + 方向感知）
         p->setPen(th ? th->textFaint() : QColor(QStringLiteral("#6b7484")));
         p->drawText(QRectF(0, 0, w, h), Qt::AlignCenter,
-                    m_orientation == 1 ? QStringLiteral("波形") : QStringLiteral("波形（Space 渲染后显示）"));
+                    m_orientation == 1 ? QStringLiteral("波形")
+                                       : QStringLiteral("波形（Space 渲染后显示）"));
         return;
     }
 
@@ -252,8 +250,7 @@ void WaveformOverviewItem::paint(QPainter* p) {
         const qlonglong f0 = static_cast<qlonglong>(t0s * sr);
         const qlonglong f1 = static_cast<qlonglong>(t1s * sr);
         if (f1 <= f0) continue;
-        const auto r = wf ? wf->range(static_cast<std::size_t>(f0),
-                                      static_cast<std::size_t>(f1))
+        const auto r = wf ? wf->range(static_cast<std::size_t>(f0), static_cast<std::size_t>(f1))
                           : beatbench::audio::WaveformPyramid::Range{};
         const double mn = r.min;
         const double mx = r.max;
@@ -263,7 +260,8 @@ void WaveformOverviewItem::paint(QPainter* p) {
             // 垂直：幅度向左/右铺（center ± scale）；时间轴 = i（y 方向）
             const qreal xLeft = center - mx * scale;
             const qreal xRight = center - mn * scale;
-            p->fillRect(QRectF(std::min(xLeft, xRight), i, std::max<qreal>(1.0, std::abs(xRight - xLeft)), 1.0),
+            p->fillRect(QRectF(std::min(xLeft, xRight), i,
+                               std::max<qreal>(1.0, std::abs(xRight - xLeft)), 1.0),
                         waveCol);
         } else {
             // 水平：幅度向上/下铺（center ± scale）；时间轴 = i（x 方向）

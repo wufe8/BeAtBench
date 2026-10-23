@@ -28,8 +28,11 @@ bool set_color(ThemeManager& th, const QString& key, const QString& value) {
     // 只有合法色值才覆写；非法值跳过（防 skin 手滑写错导致整界面黑）
     const QColor c(value);
     if (!c.isValid()) return false;
-#define BB_THEME_SET(name) \
-    if (key == QLatin1String(#name)) { th.set_##name(c); return true; }
+#define BB_THEME_SET(name)             \
+    if (key == QLatin1String(#name)) { \
+        th.set_##name(c);              \
+        return true;                   \
+    }
     BB_THEME_SET(bg)
     BB_THEME_SET(surface)
     BB_THEME_SET(surface2)
@@ -73,15 +76,17 @@ bool set_color(ThemeManager& th, const QString& key, const QString& value) {
 bool set_number(ThemeManager& th, const QString& key, const double v) {
     // fs* 须 > 0；radiusSm/radius/noteRadius/buttonRadius/boxRadius 允许 0（直角风）；
     // keyLaneTintAlpha 允许 0（无键轨底色）
-    const bool isRadius = (key == QLatin1String("radiusSm"))
-                       || (key == QLatin1String("radius"))
-                       || (key == QLatin1String("noteRadius"))
-                       || (key == QLatin1String("buttonRadius"))
-                       || (key == QLatin1String("boxRadius"));
+    const bool isRadius = (key == QLatin1String("radiusSm")) || (key == QLatin1String("radius")) ||
+                          (key == QLatin1String("noteRadius")) ||
+                          (key == QLatin1String("buttonRadius")) ||
+                          (key == QLatin1String("boxRadius"));
     const bool isAlpha = (key == QLatin1String("keyLaneTintAlpha"));
     if (!(v > 0.0) && !((isRadius || isAlpha) && v == 0.0)) return false;
-#define BB_THEME_NUM_SET(name) \
-    if (key == QLatin1String(#name)) { th.set_##name(static_cast<qreal>(v)); return true; }
+#define BB_THEME_NUM_SET(name)                \
+    if (key == QLatin1String(#name)) {        \
+        th.set_##name(static_cast<qreal>(v)); \
+        return true;                          \
+    }
     BB_THEME_NUM_SET(radiusSm)
     BB_THEME_NUM_SET(radius)
     BB_THEME_NUM_SET(noteRadius)
@@ -97,8 +102,14 @@ bool set_number(ThemeManager& th, const QString& key, const double v) {
 
 bool set_font(ThemeManager& th, const QString& key, const QString& value) {
     if (value.trimmed().isEmpty()) return false;
-    if (key == QLatin1String("fontSans")) { th.set_fontSans(value); return true; }
-    if (key == QLatin1String("fontMono")) { th.set_fontMono(value); return true; }
+    if (key == QLatin1String("fontSans")) {
+        th.set_fontSans(value);
+        return true;
+    }
+    if (key == QLatin1String("fontMono")) {
+        th.set_fontMono(value);
+        return true;
+    }
     return false;
 }
 
@@ -146,13 +157,14 @@ int ThemeManager::loadTheme(const QString& path, QString* error) {
             }
         }
         if (skipped > 0) {
-            qWarning() << "theme.json 未知/非法 token 跳过" << skipped << "个:"
-                       << unknown.join(',');
+            qWarning() << "theme.json 未知/非法 token 跳过" << skipped
+                       << "个:" << unknown.join(',');
         }
         return n;
     } catch (const JsonError& e) {
-        if (error) *error = QStringLiteral("theme.json 解析失败: ") + path +
-                            QStringLiteral(" — ") + QString::fromUtf8(e.what());
+        if (error)
+            *error = QStringLiteral("theme.json 解析失败: ") + path + QStringLiteral(" — ") +
+                     QString::fromUtf8(e.what());
         return -1;
     }
 }
@@ -202,7 +214,7 @@ void ThemeManager::resetDefault() {
     BB_THEME_RESET_COLOR(ln, "#428b9cf8")
     BB_THEME_RESET_COLOR(wave, "#1f8b9cf8")
     BB_THEME_RESET_COLOR(accent2, "#22d3ee")
-    BB_THEME_RESET_COLOR(focusRing, "#22d3ee")   // 默认 = accent 同系（皮肤可独立改）
+    BB_THEME_RESET_COLOR(focusRing, "#22d3ee")  // 默认 = accent 同系（皮肤可独立改）
     BB_THEME_RESET_COLOR(keyOdd, "#ffffff")
     BB_THEME_RESET_COLOR(scratchNote, "#ef5350")
     BB_THEME_RESET_COLOR(bgmNote, "#4ade80")
@@ -231,14 +243,17 @@ void ThemeManager::resetDefault() {
 // 每项 {name, dir}，dir 是**相对目录**（相对皮肤搜索基准，见 skinSearchBases）；name 唯一；
 // "默认"在 skinNames 之外（resetDefault 语义）。
 namespace {
-struct SkinEntry { const char* name; const char* dir; };
-const SkinEntry kBuiltinSkins[] = {
-    { "Aurora", "skins/Aurora" },
-    { "Linear", "skins/Linear" },
-    { "OsuLight", "skins/OsuLight" },
-    { "Win10", "skins/Win10" },
+struct SkinEntry {
+    const char* name;
+    const char* dir;
 };
-}
+const SkinEntry kBuiltinSkins[] = {
+    {"Aurora", "skins/Aurora"},
+    {"Linear", "skins/Linear"},
+    {"OsuLight", "skins/OsuLight"},
+    {"Win10", "skins/Win10"},
+};
+}  // namespace
 
 QStringList ThemeManager::skinNames() const {
     QStringList names;
@@ -285,9 +300,10 @@ QStringList ThemeManager::skinSearchBases(const QString& dataDir) {
 }
 
 QString ThemeManager::skinDirResolvedIn(const QString& name, const QStringList& bases) const {
-    const QString dirPath = skinDir(name);   // "skins/<Name>"；未知皮肤名为空
+    const QString dirPath = skinDir(name);  // "skins/<Name>"；未知皮肤名为空
     if (dirPath.isEmpty()) return QString();
-    const QString rel = QDir(dirPath).filePath(QStringLiteral("theme.json"));  // skins/<Name>/theme.json
+    const QString rel =
+        QDir(dirPath).filePath(QStringLiteral("theme.json"));  // skins/<Name>/theme.json
     for (const QString& b : bases) {
         const QString cand = QDir(b).filePath(rel);
         if (QFile::exists(cand)) return QFileInfo(cand).absolutePath();

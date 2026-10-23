@@ -11,8 +11,9 @@
 // 皮肤边界：QPainter 自绘 + Theme token（wave/border/textFaint…），默认皮肤组件库成员。
 #pragma once
 
-#include <QQuickPaintedItem>
 #include <QtQml/qqmlregistration.h>
+
+#include <QQuickPaintedItem>
 
 namespace beatbench::app {
 
@@ -28,19 +29,23 @@ class WaveformOverviewItem : public QQuickPaintedItem {
     /// 方向：0 = 水平（底部条）；1 = 垂直（右侧条，2026-09 用户布局）。
     Q_PROPERTY(int orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
     // —— 视口状态（ChartView.qml 绑定传入；换算可见时间窗） ——
-    Q_PROPERTY(qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
+    Q_PROPERTY(
+        qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollYChanged)
-    Q_PROPERTY(qreal contentHeight READ contentHeight WRITE setContentHeight NOTIFY contentHeightChanged)
+    Q_PROPERTY(
+        qreal contentHeight READ contentHeight WRITE setContentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
-    Q_PROPERTY(qreal viewportHeight READ viewportHeight WRITE setViewportHeight NOTIFY viewportHeightChanged)
+    Q_PROPERTY(qreal viewportHeight READ viewportHeight WRITE setViewportHeight NOTIFY
+                   viewportHeightChanged)
     /// 开头留白小节数（M5.2；数值方向与 ChartView 同源）。内容坐标换算拍位须扣它，
     /// 否则视口窗整体往未来偏移（用视口顶/底基准都不准；2026-09 用户）。
-    Q_PROPERTY(qreal leadMeasures READ leadMeasures WRITE setLeadMeasures NOTIFY leadMeasuresChanged)
+    Q_PROPERTY(
+        qreal leadMeasures READ leadMeasures WRITE setLeadMeasures NOTIFY leadMeasuresChanged)
     /// 是否正在拖动 scrub（M5 收尾 2026-09）：拖动中 → ChartView 门控 audioEngine.seek（静音定位，
     /// 只滚红线，release 落音频）；单点（无位移）= 未进入 scrub，正常 seek。
     Q_PROPERTY(bool scrubbing READ scrubbing WRITE setScrubbing NOTIFY scrubbingChanged)
 
-public:
+   public:
     explicit WaveformOverviewItem(QQuickItem* parent = nullptr);
 
     void paint(QPainter* painter) override;
@@ -67,9 +72,11 @@ public:
     void setScrubbing(bool v);
 
     /// 视口窗（秒，可能 topHigh 逆序 → 归一 [t0, t1]）。
-    struct ViewWindow { double t0 = 0.0, t1 = 0.0; };
+    struct ViewWindow {
+        double t0 = 0.0, t1 = 0.0;
+    };
 
-signals:
+   signals:
     void sessionChanged();
     void themeChanged();
     void orientationChanged();
@@ -83,12 +90,12 @@ signals:
     /// 点击/拖动总览条 → 目标时间（秒）→ QML 滚动视口（ChartView.scrollToTime）。
     void seekRequested(double seconds);
 
-protected:
+   protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
 
-private:
+   private:
     ChartSession* sessionObj() const;
     ThemeManager* themeObj() const;
     void requestSeek(qreal pos);

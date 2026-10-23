@@ -77,9 +77,7 @@ struct Stop {
     friend bool operator==(const Stop& a, const Stop& b) {
         return a.count == b.count;  // 排除 ref_id
     }
-    friend bool operator<(const Stop& a, const Stop& b) {
-        return a.count < b.count;
-    }
+    friend bool operator<(const Stop& a, const Stop& b) { return a.count < b.count; }
 };
 
 /// 节拍事件（BMS ch02：每小节拍数，4/4 = 4；0.5 = 半拍小节）。
@@ -88,9 +86,7 @@ struct MeasureLen {
     double beats = 4.0;
 
     friend bool operator==(const MeasureLen&, const MeasureLen&) = default;
-    friend bool operator<(const MeasureLen& a, const MeasureLen& b) {
-        return a.beats < b.beats;
-    }
+    friend bool operator<(const MeasureLen& a, const MeasureLen& b) { return a.beats < b.beats; }
 };
 
 /// BGA 对象（#BMPxx 引用 + 图层 + 不透明度，最小骨架；ARGB 滤镜后续加）。

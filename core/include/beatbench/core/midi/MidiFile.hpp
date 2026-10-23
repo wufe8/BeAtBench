@@ -25,17 +25,17 @@ namespace beatbench::midi {
 
 /// 解析失败（结构性损坏）；命令层转 CommandError("bad_midi")。
 class MidiError : public std::runtime_error {
-public:
+   public:
     explicit MidiError(const std::string& message) : std::runtime_error(message) {}
 };
 
 /// 一个配对完成的音符（同轨/同通道/同音高 on→off）。
 struct MidiNote {
-    int track = 0;        ///< 轨道序号（0 起）
-    int channel = 0;      ///< MIDI 通道 0-15
-    int pitch = 0;        ///< MIDI 音高 0-127（60 = C4）
-    int velocity = 0;     ///< Note On 力度（1-127）
-    int startTick = 0;    ///< 起止 tick（绝对，PPQ 基准）
+    int track = 0;      ///< 轨道序号（0 起）
+    int channel = 0;    ///< MIDI 通道 0-15
+    int pitch = 0;      ///< MIDI 音高 0-127（60 = C4）
+    int velocity = 0;   ///< Note On 力度（1-127）
+    int startTick = 0;  ///< 起止 tick（绝对，PPQ 基准）
     int endTick = 0;
     double startSec = 0.0;  ///< 经 tempo 表换算的秒
     double endSec = 0.0;
@@ -59,7 +59,7 @@ struct MidiTimeSig {
 
 /// 解析产物（全部值，无文件路径引用）。
 struct MidiFile {
-    int format = 0;            ///< 0 单轨 / 1 多轨同步 / 2 顺序
+    int format = 0;  ///< 0 单轨 / 1 多轨同步 / 2 顺序
     int ntrks = 0;
     int division = 0;          ///< raw 16 位（PPQ 或 SMPTE 编码）
     bool isSMPTE = false;      ///< true = division 高位为 1（帧率时间基）

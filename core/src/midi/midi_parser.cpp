@@ -2,11 +2,11 @@
 // MIDI 文件解析器实现（M6.1）：字节流 → MidiFile。
 // 结构：Reader（大端/变长读取）→ 头块 → 逐轨道事件循环（含 running status、
 // meta 处理）→ tempo 表换算（tick→秒）→ note 换算 + 排序 + warnings 汇总。
-#include "beatbench/core/midi/MidiFile.hpp"
-
 #include <algorithm>
 #include <cstddef>
 #include <utility>
+
+#include "beatbench/core/midi/MidiFile.hpp"
 
 namespace beatbench::midi {
 
@@ -33,8 +33,8 @@ struct Reader {
 
     std::uint16_t u16be(const char* what) {
         require(2, what);
-        std::uint16_t v = static_cast<std::uint16_t>(
-            (static_cast<std::uint16_t>(d[p]) << 8) | static_cast<std::uint16_t>(d[p + 1]));
+        std::uint16_t v = static_cast<std::uint16_t>((static_cast<std::uint16_t>(d[p]) << 8) |
+                                                     static_cast<std::uint16_t>(d[p + 1]));
         p += 2;
         return v;
     }
@@ -93,8 +93,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
     // ---- MThd 头块 ----
     if (r.remaining() < 8) throw MidiError("MIDI 文件过短（缺头块）");
     const auto hdrType = r.bytes(4, "MThd");
-    if (!is_chunk(hdrType, 'M', 'T', 'h', 'd'))
-        throw MidiError("不是 MIDI 文件（缺少 MThd 头）");
+    if (!is_chunk(hdrType, 'M', 'T', 'h', 'd')) throw MidiError("不是 MIDI 文件（缺少 MThd 头）");
     const std::uint32_t hdrLen = r.u32be("头块长度");
     if (hdrLen < 6) throw MidiError("MThd 长度非法（<6）");
 
@@ -106,16 +105,13 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
 
     if (out.format < 0 || out.format > 2)
         throw MidiError("不支持的 MIDI format: " + std::to_string(out.format));
-    if (out.ntrks == 0)
-        out.warnings.push_back("轨道数为 0（文件无事件）");
-    if (out.format == 2)
-        out.warnings.push_back("format 2 按各轨同时展开（顺序曲目按同轨处理）");
+    if (out.ntrks == 0) out.warnings.push_back("轨道数为 0（文件无事件）");
+    if (out.format == 2) out.warnings.push_back("format 2 按各轨同时展开（顺序曲目按同轨处理）");
 
     if ((out.division & 0x8000) != 0) {
         // SMPTE 时间基：高位 = 负帧率，低位 = 每帧 tick。
         out.isSMPTE = true;
-        out.framesPerSecond =
-            -static_cast<int>(static_cast<std::int8_t>(out.division >> 8));
+        out.framesPerSecond = -static_cast<int>(static_cast<std::int8_t>(out.division >> 8));
         out.ticksPerFrame = out.division & 0xFF;
         if (out.framesPerSecond <= 0 || out.ticksPerFrame <= 0)
             throw MidiError("SMPTE division 非法（帧率/每帧 tick ≤ 0）");
@@ -130,9 +126,8 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
     bool smpteTempo = false;  // SMPTE 基下出现 tempo 事件 → 警告
 
     // NOLINTNEXTLINE(readability-function-cognitive-complexity)——note-off 配对扫描（与 note-on 对称）
-    auto handle_channel = [&](Reader& tr, int& tick, int status, bool hasFirst,
-                              std::uint8_t first, int track,
-                              std::vector<PendingNote>& pending, int& unmatchedOff,
+    auto handle_channel = [&](Reader& tr, int& tick, int status, bool hasFirst, std::uint8_t first,
+                              int track, std::vector<PendingNote>& pending, int& unmatchedOff,
                               std::vector<MidiNote>& emit) {
         const int kind = status & 0xF0;
         const int channel = status & 0x0F;
@@ -150,8 +145,8 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
                 const std::uint8_t note = data();
                 const std::uint8_t vel = data();
                 if (vel > 0) {
-                    pending.push_back({track, channel, static_cast<int>(note),
-                                       static_cast<int>(vel), tick});
+                    pending.push_back(
+                        {track, channel, static_cast<int>(note), static_cast<int>(vel), tick});
                 } else {
                     bool matched = false;
                     for (std::size_t i = 0; i < pending.size(); ++i) {
@@ -218,8 +213,8 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
     int parsedTracks = 0;
     while (parsedTracks < out.ntrks) {
         if (r.remaining() < 8)
-            throw MidiError("轨道块不足（声明 " + std::to_string(out.ntrks) +
-                            " 轨，实际读到 " + std::to_string(parsedTracks) + "）");
+            throw MidiError("轨道块不足（声明 " + std::to_string(out.ntrks) + " 轨，实际读到 " +
+                            std::to_string(parsedTracks) + "）");
         const auto chunkId = r.bytes(4, "块类型");
         const std::uint32_t chunkLen = r.u32be("块长度");
         if (!is_chunk(chunkId, 'M', 'T', 'r', 'k')) {
@@ -247,8 +242,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
                 if (running == 0)
                     throw MidiError("运行状态缺失（数据字节无前置状态，轨道 " +
                                     std::to_string(track) + "）");
-                handle_channel(tr, tick, running, true, b, track, pending, unmatchedOff,
-                               rawNotes);
+                handle_channel(tr, tick, running, true, b, track, pending, unmatchedOff, rawNotes);
             } else if (b == 0xFF) {
                 // ---- meta 事件（running status 被清除） ----
                 running = 0;
@@ -266,14 +260,13 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
                         smpteTempo = true;
                     } else {
                         const int us = (static_cast<int>(data[0]) << 16) |
-                                       (static_cast<int>(data[1]) << 8) |
-                                       static_cast<int>(data[2]);
+                                       (static_cast<int>(data[1]) << 8) | static_cast<int>(data[2]);
                         out.tempos.push_back({tick, us, 0.0});
                     }
                 } else if (type == 0x58 && !out.isSMPTE) {  // Time Signature
                     if (data.size() >= 2) {
-                        out.timeSigs.push_back({tick, static_cast<int>(data[0]),
-                                               1 << data[1], 0.0});
+                        out.timeSigs.push_back(
+                            {tick, static_cast<int>(data[0]), 1 << data[1], 0.0});
                     }
                 }
                 // 其它 meta（文本/轨道名/版权…）：跳过。
@@ -285,8 +278,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
             } else if (b >= 0x80 && b <= 0xEF) {
                 // ---- 通道消息（设置 running status） ----
                 running = b;
-                handle_channel(tr, tick, running, false, 0, track, pending, unmatchedOff,
-                               rawNotes);
+                handle_channel(tr, tick, running, false, 0, track, pending, unmatchedOff, rawNotes);
             } else {
                 throw MidiError("非法事件状态 0x" + std::to_string(b));
             }
@@ -321,8 +313,8 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
             segTick = t.tick;
             segUs = t.usPerQuarter;
         }
-        return sec + static_cast<double>(tick - segTick) * segUs /
-                         (static_cast<double>(out.ppq) * 1e6);
+        return sec +
+               static_cast<double>(tick - segTick) * segUs / (static_cast<double>(out.ppq) * 1e6);
     };
 
     if (!out.isSMPTE) {
@@ -342,8 +334,7 @@ MidiFile parse_midi_bytes(const std::vector<std::uint8_t>& bytes) {
             prevUs = t.usPerQuarter;
         }
     }
-    if (smpteTempo)
-        out.warnings.push_back("SMPTE 时间基下 tempo 事件无意义，已忽略");
+    if (smpteTempo) out.warnings.push_back("SMPTE 时间基下 tempo 事件无意义，已忽略");
 
     // ---- note/拍号换算秒 ----
     for (auto& n : rawNotes) {

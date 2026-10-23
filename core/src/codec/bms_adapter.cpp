@@ -2,21 +2,20 @@
 // bms 格式 → Codec 接口适配：把现有 read_bms_file/write_bms 包装成统一 Codec。
 // 现有 bms codec（core/src/bms/*）零改动——适配层只做诊断类型转换与参数映射。
 // 扩展名注册 bms/bml/bme/pms（历史遗留同一语法）；模式见 ChartMode/BmsChannelMaps。
-#include "beatbench/core/codec/Codec.hpp"
-#include "beatbench/core/codec/CodecRegistry.hpp"
-
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "beatbench/core/bms/BmsCodec.hpp"
+#include "beatbench/core/codec/Codec.hpp"
+#include "beatbench/core/codec/CodecRegistry.hpp"
 
 namespace beatbench::codec {
 namespace {
 
 class BmsCodec : public Codec {
-public:
+   public:
     std::string_view id() const override { return "bms"; }
 
     std::vector<std::string_view> extensions() const override {
@@ -50,9 +49,8 @@ public:
             Diagnostic od;
             od.severity = d.severity == beatbench::bms::Severity::Error
                               ? Severity::Error
-                              : (d.severity == beatbench::bms::Severity::Warning
-                                     ? Severity::Warning
-                                     : Severity::Info);
+                              : (d.severity == beatbench::bms::Severity::Warning ? Severity::Warning
+                                                                                 : Severity::Info);
             od.message = d.message;
             od.line = d.line;
             out.diagnostics.push_back(std::move(od));

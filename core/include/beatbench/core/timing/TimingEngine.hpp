@@ -22,7 +22,7 @@ struct Position {
 /// M1 采用全量 rebuild（10 万 note 谱 < 2s 验收线仍有充足余量）。
 /// 黄金测试锚点：Doppelganger[Eb] 等真实变速谱（见 tests/bms_codec_test.cpp）。
 class TimingEngine {
-public:
+   public:
     TimingEngine();
     ~TimingEngine();
     TimingEngine(TimingEngine&&) noexcept;
@@ -44,7 +44,7 @@ public:
     /// 微秒 → 拍位（时间超出谱面末尾时返回末尾附近位置）。
     std::optional<Position> position_at(std::int64_t time_us) const;
 
-private:
+   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
