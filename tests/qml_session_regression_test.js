@@ -66,9 +66,11 @@ function mf(value) { return value.measure + value.pos.num / value.pos.den; }
 const ghostExpression = view.match(/const qreal mf = (qFuzzyIsNull\(m_moveDeltaF\)[^;]+);/)?.[1];
 const snapBody = view.match(/qreal ChartViewItem::snapMf\(qreal mf\) const \{([^]*?)\n}/)?.[1];
 assert.ok(ghostExpression && snapBody, 'production ghost/snap expressions exist');
-const slotsExpression = snapBody.match(/const int nslots = (.+);/)[1]
+// 同样压平空白后再抽取：格式化会把 const int nslots = / return 拆行（2026-10 实测）。
+const snapFlat = snapBody.replace(/\s+/g, ' ');
+const slotsExpression = snapFlat.match(/const int nslots = (.+?);/)[1]
     .replace('std::max', 'Math.max').replace('m_snapDen / m_snapNum', 'Math.trunc(m_snapDen / m_snapNum)');
-const snapExpression = snapBody.match(/return (.+);/)[1].replace('std::round', 'cppRound');
+const snapExpression = snapFlat.match(/return (.+?);/)[1].replace('std::round', 'cppRound');
 function ghostPosition(value, deltaF, snapNum = 1, snapDen = 4) {
     const env = {
         tBase: mf(value), m_moveDeltaF: deltaF, m_snapNum: snapNum, m_snapDen: snapDen,
