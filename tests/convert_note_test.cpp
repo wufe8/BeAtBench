@@ -208,3 +208,53 @@ TEST(ConvertNote, MoveRegionWithTarget) {
     EXPECT_EQ(session.chart().bpm_events[0].measure, 3u);
     EXPECT_EQ(session.chart().bpm_events[0].pos, Rational(1, 2));
 }
+
+// —— 悬挂 ln_pair（指向 size 或更大下标）不得越界读：转换应安全跳过断开 ——
+// 2026-10 复审：clang-tidy 改写曾把范围检查挪到解引用之后（越界 UB），此用例锁定回归。
+
+namespace {
+
+Chart make_dangling_chart(std::uint32_t bad_pair) {
+    Chart c;
+    Event<Note> head{0, Rational(0, 1), {}};
+    head.value.lane = {0, LaneKind::Key, 1};
+    head.value.sample.id = 1;
+    head.value.ln_channel = true;
+    head.value.ln_pair = bad_pair;
+    Event<Note> tail{0, Rational(1, 2), {}};
+    tail.value.lane = {0, LaneKind::Key, 1};
+    tail.value.sample.id = 1;
+    tail.value.ln_channel = true;
+    tail.value.ln_pair = 0;
+    c.notes = {head, tail};
+    return c;
+}
+
+}  // namespace
+
+TEST(ConvertNote, DanglingPairEqualToSizeIsSafe) {
+    Chart c = make_dangling_chart(2);  // ln_pair == notes.size()
+    ConvertNoteCommand cmd(0, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 0,
+                           ConvertTarget::BgaBase, 0, Rational(0, 1));
+    EXPECT_NO_THROW(cmd.apply(c));
+    EXPECT_EQ(c.notes.size(), 1u);
+    EXPECT_EQ(c.bga_events.size(), 1u);
+}
+
+TEST(ConvertNote, DanglingPairBeyondSizeIsSafe) {
+    Chart c = make_dangling_chart(7);  // ln_pair > notes.size()
+    ConvertNoteCommand cmd(0, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 0,
+                           ConvertTarget::BgaBase, 0, Rational(0, 1));
+    EXPECT_NO_THROW(cmd.apply(c));
+    EXPECT_EQ(c.notes.size(), 1u);
+    EXPECT_EQ(c.bga_events.size(), 1u);
+}
+
+TEST(ConvertNote, ValidPairStillDisconnectsPartner) {
+    Chart c = make_dangling_chart(1);  // 合法互指（head→tail）
+    ConvertNoteCommand cmd(0, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 0,
+                           ConvertTarget::BgaBase, 0, Rational(0, 1));
+    cmd.apply(c);
+    ASSERT_EQ(c.notes.size(), 1u);
+    EXPECT_FALSE(c.notes[0].value.ln_pair.has_value());  // 伙伴的配对已清除
+}

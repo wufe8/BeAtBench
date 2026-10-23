@@ -692,10 +692,12 @@ void ConvertNoteCommand::apply(Chart& chart) {
     m_partner.reset();
     // 移除 note（LN 配对若存在：断开伙伴 ln_pair，快照保存供 invert 恢复）
     if (const auto p = m_removed->value.ln_pair) {
-        const auto pp = chart.notes[*p].value.ln_pair;
-        if (*p < chart.notes.size() && pp && *pp == *idx) {
-            m_partner = chart.notes[*p];
-            chart.notes[*p].value.ln_pair.reset();
+        if (*p < chart.notes.size()) {  // 先验范围，再解引用（悬挂 ln_pair 不得越界读）
+            const auto pp = chart.notes[*p].value.ln_pair;
+            if (pp && *pp == *idx) {
+                m_partner = chart.notes[*p];
+                chart.notes[*p].value.ln_pair.reset();
+            }
         }
     }
     chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(*idx));
