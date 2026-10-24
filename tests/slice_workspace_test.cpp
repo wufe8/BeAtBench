@@ -529,6 +529,35 @@ TEST_F(SliceWorkspaceTest, DocumentSwitchDropsRenderedAudio) {
     EXPECT_FALSE(chartSession_.hasRendered());
 }
 
+TEST_F(SliceWorkspaceTest, AuditionRejectsSelectionBeforeStart) {
+    beatbench::Chart c;
+    c.mode_id = "sp7k";
+    c.meta["BPM"] = "130";
+    beatbench::Event<beatbench::Note> n{1, beatbench::Rational(0, 1), {}};
+    n.value.lane = {0, beatbench::LaneKind::Key, 1};
+    n.value.sample.id = 1;
+    c.notes.push_back(n);
+    loadChart(std::move(c));
+
+    QVariantMap item;
+    item.insert("measure", 1);
+    QVariantMap pos;
+    pos.insert("num", 0);
+    pos.insert("den", 1);
+    item.insert("pos", pos);
+    QVariantMap lane;
+    lane.insert("player", 0);
+    lane.insert("kind", "key");
+    lane.insert("index", 1);
+    item.insert("lane", lane);
+    item.insert("sample", 1);
+    item.insert("sub_line", 0);
+    QVariantList selection;
+    selection.push_back(item);
+
+    EXPECT_FALSE(chartSession_.renderAudition(selection, 10.0, 44100.0));
+}
+
 TEST_F(SliceWorkspaceTest, SliceUndoDoesNotTouchChartSession) {
     beatbench::Chart chart;
     addWav(chart, 1);

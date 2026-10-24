@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "beatbench/audio/SampleCache.hpp"
@@ -38,8 +39,9 @@ struct RenderedAudio {
 /// 渲染结果（含错误信息；中文面向 UI/CLI）。
 struct RenderResult {
     bool ok = false;
-    RenderedAudio audio;  ///< ok 时有效
-    std::string message;  ///< 失败原因
+    bool cancelled = false;  ///< 协作式取消中止（非错误；调用方静默丢弃）
+    RenderedAudio audio;     ///< ok 时有效
+    std::string message;     ///< 失败原因
 };
 
 /// 16-bit PCM WAV 写出（渲染结果 → 文件；供 CLI save 与编辑器导出）。
@@ -67,14 +69,18 @@ RenderResult render_chart_w(const beatbench::Chart& chart, const beatbench::Timi
 
 /// 区间渲染（[t0, t1) 秒；t1 ≤ 0 = 到曲末）。render_chart 的底层实现，
 /// 也供 M5 任意起播/循环区间复用。t0/0 ≤ t1；越界自动夹逼。
+/// cancelled：协作式取消轮询（每个待混 note 检查一次；返回 true 则中止并返回
+/// ok=false 的部分结果；空 = 不取消）。后台线程长渲染的取消点。
 RenderResult render_chart_range(const beatbench::Chart& chart,
                                 const beatbench::TimingEngine& timing, SampleCache& cache,
                                 double sampleRate, double t0, double t1,
-                                const std::string& sourceDir = "");
+                                const std::string& sourceDir = "",
+                                const std::function<bool()>& cancelled = {});
 /// 宽字符版。
 RenderResult render_chart_range_w(const beatbench::Chart& chart,
                                   const beatbench::TimingEngine& timing, SampleCache& cache,
                                   double sampleRate, double t0, double t1,
-                                  const std::wstring& sourceDir);
+                                  const std::wstring& sourceDir,
+                                  const std::function<bool()>& cancelled = {});
 
 }  // namespace beatbench::audio

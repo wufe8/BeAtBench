@@ -35,6 +35,10 @@ class ChartViewItem : public QQuickPaintedItem {
 
     Q_PROPERTY(QObject* session READ session WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QObject* theme READ theme WRITE setTheme NOTIFY themeChanged)
+    Q_PROPERTY(QObject* audioEngine READ audioEngine WRITE setAudioEngine NOTIFY audioEngineChanged)
+    /// 选中 note 的采样波形（#49；默认开）。
+    Q_PROPERTY(bool showNoteWaveforms READ showNoteWaveforms WRITE setShowNoteWaveforms NOTIFY
+                   showNoteWaveformsChanged)
     Q_PROPERTY(
         qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
     Q_PROPERTY(qreal rulerWidth READ rulerWidth WRITE setRulerWidth NOTIFY rulerWidthChanged)
@@ -116,6 +120,10 @@ class ChartViewItem : public QQuickPaintedItem {
     void setSession(QObject* session);
     QObject* theme() const { return m_theme; }
     void setTheme(QObject* theme);
+    QObject* audioEngine() const { return m_audioEngine; }
+    void setAudioEngine(QObject* engine);
+    bool showNoteWaveforms() const { return m_showNoteWaveforms; }
+    void setShowNoteWaveforms(bool v);
 
     qreal measureHeight() const { return m_measureHeight; }
     void setMeasureHeight(qreal v);
@@ -279,6 +287,8 @@ class ChartViewItem : public QQuickPaintedItem {
    signals:
     void sessionChanged();
     void themeChanged();
+    void audioEngineChanged();
+    void showNoteWaveformsChanged();
     void measureHeightChanged();
     void rulerWidthChanged();
     void laneWidthChanged();
@@ -339,6 +349,8 @@ class ChartViewItem : public QQuickPaintedItem {
     };
 
     void onSessionChartChanged();
+    /// #49：选中 note 的采样波形（画在 note 下层；只画可见选中 note）。
+    void drawNoteWaveforms(QPainter* p, const beatbench::Chart& chart, int first, int last) const;
     void onSessionContentChanged();
     void updateHover(const QPointF& pos);
     ChartSession* sessionObj() const;
@@ -421,6 +433,8 @@ class ChartViewItem : public QQuickPaintedItem {
 
     QObject* m_session = nullptr;
     QObject* m_theme = nullptr;
+    QObject* m_audioEngine = nullptr;
+    bool m_showNoteWaveforms = true;
     qreal m_measureHeight = 96.0;
     // —— 02 通道小节长度：每小节高度按拍数等比（base=4/4；变拍/长小节视觉可见） ——
     // 缓存：m_measureH[i]=小节 i 高度；m_measureCum[i]=∑ h[0..i-1]；m_measureSum=∑ h 总。

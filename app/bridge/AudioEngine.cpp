@@ -48,7 +48,8 @@ beatbench::audio::DecodedSample* makeTestToneSample() {
 AudioEngine::AudioEngine(QObject* parent)
     : QObject(parent),
       m_playback(&m_player, 44100.0),
-      m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot) {
+      m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot),
+      m_auditionPlayback(&m_player, 44100.0, beatbench::audio::kAuditionPcmSlot) {
     // 1) 加载持久化设置（设备/采样率/缓冲/音量）
     loadSettings();
     m_player.setMasterVolume(static_cast<float>(masterVolume()));
@@ -68,6 +69,8 @@ AudioEngine::AudioEngine(QObject* parent)
             m_renderCtx.deviceRate.store(static_cast<double>(m_backend->streamInfo().sampleRate));
             m_playback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
             m_refPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
+            m_auditionPlayback.setDeviceRate(
+                static_cast<double>(m_backend->streamInfo().sampleRate));
             m_initialized = true;
         } else {
             // 启动失败（可能设置里设备/采样率不可用）：回退默认（手动再试一次）
@@ -85,6 +88,8 @@ AudioEngine::AudioEngine(QObject* parent)
                     static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_playback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_refPlayback.setDeviceRate(
+                    static_cast<double>(m_backend->streamInfo().sampleRate));
+                m_auditionPlayback.setDeviceRate(
                     static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_initialized = true;
                 m_statusText = QStringLiteral("指定设备不可用，已回退默认设备");
@@ -118,6 +123,7 @@ AudioEngine::AudioEngine(QObject* parent)
                 emit playbackChanged();
                 emit playbackFinished();  // 完成信号（QML 状态栏/后续）
             }
+            if (slot == beatbench::audio::kAuditionPcmSlot) emit auditionChanged();
         }
         // M5 播放时钟：播放中 positionSec 持续变化 → playbackChanged（20Hz 状态栏刷新）。
         // 自然播完检测：reachedEnd → notifyEnded 复位状态机（否则状态卡 Playing →
@@ -138,6 +144,10 @@ AudioEngine::AudioEngine(QObject* parent)
         if (m_refPlayback.playing()) {
             if (m_refPlayback.reachedEnd()) m_refPlayback.notifyEnded();
             emit refPlaybackChanged();
+        }
+        if (m_auditionPlayback.playing()) {
+            if (m_auditionPlayback.reachedEnd()) m_auditionPlayback.notifyEnded();
+            emit auditionChanged();
         }
     });
     poll->start();
@@ -227,6 +237,10 @@ void AudioEngine::stopAll() {
         m_refPlayback.stop();
         emit refPlaybackChanged();
     }
+    if (m_auditionPlayback.playing()) {
+        m_auditionPlayback.stop();
+        emit auditionChanged();
+    }
     m_busy = false;
     emit busyChanged();
 }
@@ -294,6 +308,7 @@ bool AudioEngine::reopenStream() {
         m_renderCtx.deviceRate.store(static_cast<double>(m_backend->streamInfo().sampleRate));
         m_playback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
         m_refPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
+        m_auditionPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
         return true;
     }
     // 失败：回退旧设置重开
@@ -306,6 +321,7 @@ bool AudioEngine::reopenStream() {
         m_settings = old;
         m_renderCtx.deviceRate.store(static_cast<double>(m_backend->streamInfo().sampleRate));
         m_refPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
+        m_auditionPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
         return false;  // 回退成功但应用失败
     }
     // 回退也失败：保持未启动（不崩溃；playPreview 会提示不可用）
@@ -318,11 +334,65 @@ void AudioEngine::setSourceDir(const QString& dir) { m_sourceDir = dir; }
 
 /// 设置谱面路径（AudioEngine 内部解析目录；QML 传 r.result.path）。
 void AudioEngine::setChartPath(const QString& path) {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
     if (path.isEmpty()) {
         m_sourceDir.clear();
         return;
     }
     m_sourceDir = QFileInfo(path).absoluteDir().path();
+}
+
+void AudioEngine::requestSampleWaveform(const QString& file) {
+    if (file.isEmpty()) return;
+    QString resolved = file;
+    if (QDir::isRelativePath(file) && !m_sourceDir.isEmpty())
+        resolved = QDir(m_sourceDir).filePath(file);
+    const QString path = resolveAudioPath(resolved);
+    if (path.isEmpty()) return;
+    if (m_waveforms.count(path)) return;
+    // 线程模型：m_waveforms 是 UI 线程容器（sampleWaveform/count 在 UI 线程读）——
+    // work（worker 线程）只解码并经槽移交结果，写入与 emit 全在 done（UI 线程）。
+    // 解码失败也缓存空 pyramid：会话内不重试（避免坏文件反复解码）；
+    // 采样重绑定走 invalidateSampleWaveforms 统一清缓存。
+    auto slot = std::make_shared<std::shared_ptr<const beatbench::audio::WaveformPyramid>>();
+    m_waveformTasks.submit(
+        path,
+        [this, path, slot](AudioTaskRunner::Generation gen) {
+            if (m_waveformTasks.cancelled(gen)) return;
+#ifdef _WIN32
+            const beatbench::audio::SampleCacheResult r = m_cache.get_w(path.toStdWString());
+#else
+            const beatbench::audio::SampleCacheResult r = m_cache.get(path.toStdString());
+#endif
+            auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
+            if (r.ok && r.sample) {
+                wf->build(r.sample->pcm().data(), r.sample->frameCount(), 2, r.sample->sampleRate);
+                beatbench::audio::decoded_sample_release(r.sample);
+            }
+            *slot = std::move(wf);
+        },
+        [this, path, slot](AudioTaskRunner::Generation) {
+            if (!slot || !*slot) return;  // 旧代际 done 不回调；空槽防御
+            m_waveforms[path] = *slot;
+            emit sampleWaveformReady(path);
+        });
+}
+
+void AudioEngine::invalidateSampleWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+}
+
+std::shared_ptr<const beatbench::audio::WaveformPyramid> AudioEngine::sampleWaveform(
+    const QString& file) const {
+    QString resolved = file;
+    if (QDir::isRelativePath(file) && !m_sourceDir.isEmpty())
+        resolved = QDir(m_sourceDir).filePath(file);
+    const QString path = resolveAudioPath(resolved);
+    if (path.isEmpty()) return nullptr;
+    const auto it = m_waveforms.find(path);
+    return it == m_waveforms.end() ? nullptr : it->second;
 }
 
 // —— M5 播放（PCM 渲染代理；零拷贝经 SamplePlayer 播出） ——
@@ -364,11 +434,20 @@ void AudioEngine::setChartSession(QObject* session) {
                     play();
                 }
             });
+    // 整轨试听：筛选渲染完成 → 装载独立 PCM 槽（#50）
+    connect(m_chartSession, &ChartSession::auditionReady, this, [this] {
+        if (m_chartSession)
+            setAuditionPcm(m_chartSession->auditionPcm(), m_chartSession->auditionSampleRate());
+    });
     // 编辑即停（M5 决策）：内容变化 → 停止播放（计划/渲染过期；下次起播用新版）
     connect(m_chartSession, &ChartSession::contentChanged, this, [this] {
         if (m_playback.playing()) {
             m_playback.stop();
             emit playbackChanged();
+        }
+        if (m_auditionPlayback.playing()) {
+            m_auditionPlayback.stop();
+            emit auditionChanged();
         }
         m_waitRender = false;
         emit waitRenderChanged();
@@ -529,6 +608,49 @@ void AudioEngine::rebuildDevices() {
         }
     }
     emit devicesChanged();
+}
+
+// —— 整轨试听（#50；独立 PCM 槽） ——
+
+void AudioEngine::setAuditionPcm(std::shared_ptr<const std::vector<float>> pcm, double sampleRate) {
+    m_auditionPlayback.load(std::move(pcm), sampleRate);
+    emit auditionChanged();
+}
+
+bool AudioEngine::auditionPlay() {
+    if (!m_initialized) {
+        m_statusText = QStringLiteral("音频不可用（后端初始化失败）");
+        emit statusTextChanged();
+        return false;
+    }
+    if (m_playback.playing()) {
+        m_playback.pause();
+        emit playbackChanged();
+    }
+    if (m_refPlayback.playing()) {
+        m_refPlayback.stop();
+        emit refPlaybackChanged();
+    }
+    if (!m_auditionPlayback.play(m_player.masterVolume())) {
+        m_statusText = QStringLiteral("试听尚无有效 PCM");
+        emit statusTextChanged();
+        return false;
+    }
+    emit auditionChanged();
+    return true;
+}
+
+void AudioEngine::auditionStop() {
+    m_auditionPlayback.stop();
+    emit auditionChanged();
+}
+
+bool AudioEngine::auditionToggle() {
+    if (m_auditionPlayback.playing()) {
+        auditionStop();
+        return false;
+    }
+    return auditionPlay();
 }
 
 // —— M6.1 参考音频（切音工作台预览；独立于谱面播放） ——
