@@ -79,6 +79,10 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 ## 五、关键交互（不变）
 
 - 键盘：LR2 布局（`1-7` + 皿键 + 备用 `F1-F7`），编辑态抑制 IME；工具键占位 `V N L M H Z`，`Del` 删除、`Esc` 取消。
+- 快速摆音：先选中已有 note，再按轨键逐个换轨（只改轨道、不改时间、不复制）；默认单手
+  `B S X D C F V` + `A` 皿（`B` 避开工具键预留位 `Z`，其余沿用 LR2 演奏位），DP 用 `G` 换边、
+  按住 Shift 临时换边；双手预设与 PMS9K 键位见 `app/bridge/QuickPlaceController.hpp`。
+  工具键预留 `V N M H` 中 `V` 已被切音页复制切分点占用；编辑页字母键 `N/M/H` 继续预留。
 - 鼠标：点放（`note.put`）/ 框选（会话状态）/ 拖动（`note.move`，`merge_with` 合并 undo）/ 滚轮微调。
 - snap / 量化：只作用于落点换算，不改数据精度。
 - QML 侧键盘 / IME 方案见 doc/skin-system.md 五、 待办。

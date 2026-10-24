@@ -20,7 +20,7 @@ add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.
     meta_lint_test.cpp ln_mine_put_test.cpp move_region_test.cpp
     convert_note_test.cpp sub_line_move_test.cpp ln_move_region_test.cpp
     toggle_ln_test.cpp sample_rename_test.cpp bga_test.cpp midi_parse_test.cpp
-    slice_test.cpp slice_export_test.cpp atomic_write_test.cpp)
+    slice_test.cpp slice_export_test.cpp atomic_write_test.cpp lane_plan_test.cpp)
 target_link_libraries(beatbench_tests PRIVATE beatbench_core GTest::gtest_main)
 target_compile_definitions(beatbench_tests PRIVATE
     BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -150,6 +150,24 @@ if (Qt6Core_FOUND)
     beatbench_set_warnings(slice_workspace_test)
     add_test(NAME slice_workspace_tests COMMAND slice_workspace_test)
     set_tests_properties(slice_workspace_tests PROPERTIES TIMEOUT 20)
+
+    # 键盘快速摆音（issue #46）：控件桥 + 活动 EditorSession；不启 GUI/音频设备。
+    find_package(Qt6 COMPONENTS Gui QUIET)
+    if(Qt6Gui_FOUND)
+    add_executable(quick_place_controller_test quick_place_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/QuickPlaceController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/QuickPlaceController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(quick_place_controller_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/app ${CMAKE_SOURCE_DIR}/core/include)
+    target_link_libraries(quick_place_controller_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core Qt6::Gui GTest::gtest_main)
+    set_target_properties(quick_place_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(quick_place_controller_test)
+    add_test(NAME quick_place_controller_tests COMMAND quick_place_controller_test)
+    set_tests_properties(quick_place_controller_tests PROPERTIES TIMEOUT 20)
+    endif()
 
     add_executable(ui_action_registry_test ui_action_registry_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.cpp

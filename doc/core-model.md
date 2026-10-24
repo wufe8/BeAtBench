@@ -140,6 +140,9 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
 
 ### 5. ghost 预览 / 后端命令
 
+- 键盘快速摆音（`QuickPlaceController`）：选中集按（拍位，原轨）快照排序，每次轨键移动一个
+  逻辑对象（LN 头尾成组）；只改 lane，不改时间/采样，不新建/复制。目标占用或活动视口隐藏时
+  阻止且不消耗；每次按键一个 undo 步。键位预设（单手换边 / 双手固定）见该桥头注释。
 - `ChartViewItem::drawPreview` 与 `moveSelection` 镜像同一套分派分支，拖拽中先见落点。
 - 后端：note 空间内用 `note.move`（逐个 + Composite = 一个 undo 步；`to.sub_line` 显式给，否则按
   `(measure,pos)` 自动分配不冲突行）；跨命名空间用 `note.convert`。

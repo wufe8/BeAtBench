@@ -8,6 +8,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 #include <atomic>
 #include <cstdint>
 #include <map>

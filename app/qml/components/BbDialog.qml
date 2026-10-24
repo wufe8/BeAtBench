@@ -11,6 +11,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 Dialog {
     id: root
@@ -18,6 +19,15 @@ Dialog {
     modal: true
     anchors.centerIn: parent
     padding: 0
+
+    onOpened: {
+        const w = Window.window
+        if (w) w.modalDepth = (w.modalDepth || 0) + 1
+    }
+    onClosed: {
+        const w = Window.window
+        if (w) w.modalDepth = Math.max(0, (w.modalDepth || 1) - 1)
+    }
 
     /// 是否显示「取消」（关于类对话框只留确定）。
     property bool showCancel: true

@@ -38,6 +38,8 @@ ApplicationWindow {
     property bool metaDraftDirty: false
     /// 菜单/工具条 enabled 绑定重算（uiActions.stateChanged +1）。Shortcut.sequence 直接读 shortcut()。
     property int uiStateTick: 0
+    property int modalDepth: 0
+    readonly property bool modalOpen: modalDepth > 0
     property string statusText: qsTr("就绪")
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
     property string currentBmpId: ""     // 当前 #BMP（视口 BGA 列放置用；BGA 面板行点击设置）
@@ -214,6 +216,7 @@ ApplicationWindow {
     /// 改用 TextInput/TextField 特有的 inputMethodHints 属性判断。
     readonly property bool textInputFocused:
         window.activeFocusItem && "inputMethodHints" in window.activeFocusItem
+    onTextInputFocusedChanged: syncQuickPlaceState()
 
     /// 释放文本框焦点（2026-09）：点击编辑区/空白时，把焦点从文本框移走，避免快捷键被文本框吞掉。
     function clearTextFocus() {
@@ -638,6 +641,16 @@ ApplicationWindow {
                     ToolTip.text: qsTr("勾选=按方向轴锁定移动（纵向→时间/通道不变，横向→通道/时间不变）；"
                                      + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
                 }
+                Label { text: qsTr("摆音"); color: Theme.textFaint
+                        font.pixelSize: Theme.fsTiny; padding: 4 }
+                BbComboBox {
+                    model: [qsTr("单手换边"), qsTr("双手固定")]
+                    currentIndex: typeof quickPlace !== "undefined" && quickPlace ? quickPlace.preset : 0
+                    onActivated: (idx) => { if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.setPreset(idx) }
+                    Layout.preferredWidth: 110
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("快速摆音键位：单手换边 = G 切换 1P/2P；双手固定 = 右手区直接对应 2P")
+                }
                 Item { Layout.fillWidth: true }
                 // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
                 BbCheckBox {
@@ -864,6 +877,17 @@ ApplicationWindow {
                     Layout.minimumWidth: 90
                     Layout.maximumWidth: 320
                 }
+                // 快速摆音目标侧（DP/Battle 单手预设）：状态栏常驻，避免按错边。
+                Label {
+                    visible: typeof quickPlace !== "undefined" && quickPlace && chartMeta !== null &&
+                             quickPlace.preset === 0 &&
+                             (window.chartMode === "dp" || window.chartMode === "battle")
+                    text: quickPlace.side === 0 ? "1P" : "2P"
+                    color: Theme.accent
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    font.bold: true
+                }
                 // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
                 // M5 收尾 2026-09：有播放头（已渲染/已播放，playheadSec>=0）→ 时间/小节 = **播放头**
                 // （随播放推进；暂停停在播放位置，无视"跟随"开关）；未渲染（playheadSec<0）→ 视口光标。
@@ -917,6 +941,18 @@ ApplicationWindow {
     function setStatus(msg) {
         window.statusText = msg
         statusClearTimer.restart()
+    }
+    /// 快速摆音门控：编辑页 + 有谱面；文本焦点让行。selection 变化由 onSelectionRefsChanged 同步。
+    function syncQuickPlaceState() {
+        if (typeof quickPlace === "undefined" || !quickPlace) return
+        quickPlace.setEnabled(currentPage === 0 && chartMeta !== null)
+        quickPlace.setInputBlocked(window.textInputFocused || window.modalOpen)
+    }
+    Connections {
+        target: typeof quickPlace !== "undefined" ? quickPlace : null
+        function onStatusMessage(msg) { window.setStatus(msg) }
+        function onSelectionUpdated(refs) { window.selectionRefs = refs }
+        function onEdited() { refreshLint() }
     }
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
@@ -1610,6 +1646,7 @@ ApplicationWindow {
             window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
+            if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.cancel()
             window.pendingLnHead = null  // 换谱面：清除可能的未完成 LN 头
             window.selectionRefs = []
             window.metaSelection = []
@@ -1810,6 +1847,7 @@ ApplicationWindow {
                              "BPM": "130", "PLAYLEVEL": "", "RANK": "",
                              "TOTAL": "", "DIFFICULTY": "" }
         window.currentBpmValue = 130
+        if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.cancel()
         window.pendingLnHead = null
         window.selectionRefs = []
         window.metaSelection = []
@@ -1982,12 +2020,17 @@ ApplicationWindow {
         uiActions.setChecked("view.page.slice", currentPage === 1)
         uiActions.setChecked("view.page.test", currentPage === 2)
     }
-    onChartMetaChanged: { updateActionStates(); updateCheckedStates() }
-    onSelectionRefsChanged: { updateActionStates(); updateCheckedStates() }
+    onChartMetaChanged: { updateActionStates(); updateCheckedStates(); syncQuickPlaceState() }
+    onSelectionRefsChanged: {
+        updateActionStates()
+        updateCheckedStates()
+        if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.setSelection(window.selectionRefs)
+    }
     onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
     onCurrentPageChanged: {
         updateActionStates()
         updateCheckedStates()
+        syncQuickPlaceState()
         // M6.1 页切换音频协调：进切音页 → 谱面播放暂停（共用内核 kPcmSlot，互斥）；
         // 离开切音页 → 参考播放停止（退出切音页即静音）
         if (typeof audioEngine === "undefined" || !audioEngine) return

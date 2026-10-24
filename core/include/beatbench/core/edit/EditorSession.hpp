@@ -129,22 +129,16 @@ class EditorSession {
 ///   LNTYPE 决定通道（LNTYPE 1 → 5x/6x；LNTYPE 2 → 普通通道 + #LNOBJ 尾值）。
 class PutNoteCommand : public EditCommand {
    public:
-    PutNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                   bool ln_kind = false, NoteKind kind = NoteKind::Normal,
-                   std::uint32_t sub_line = 0);
+    PutNoteCommand(NoteRef at, bool ln_kind = false, NoteKind kind = NoteKind::Normal);
     std::string name() const override { return "note.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;
-    Rational m_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
-    bool m_ln_kind;            ///< LN 放置（自动配对）
-    NoteKind m_kind;           ///< Normal / Landmine
-    std::uint32_t m_sub_line;  ///< BGM 行序号（放置到指定 ch01 行；非 BGM = 0）
+    NoteRef m_at;     ///< 放置位置五元组
+    bool m_ln_kind;   ///< LN 放置（自动配对）
+    NoteKind m_kind;  ///< Normal / Landmine
     /// apply 实际插入的 note 下标（invert 用它精确删除；同 pos 冲突分裂等场景）
     std::optional<std::size_t> m_applied_index;
     /// apply 自动配对到的头下标（invert 恢复：解除该头配对）
@@ -158,32 +152,26 @@ class PutNoteCommand : public EditCommand {
 /// 跨通道（2026-09，M2 自由 2D 拖动）：`to_lane` 可选——传了 = 移动同时改到目标轨道
 /// （时间 + 通道一起动）；缺省 nullopt = 纯时间移动（向后兼容，行为与旧版完全一致）。
 ///
-/// LN 处理（2026-08 对齐 BMS 编辑器惯例，用户确认）：
-/// - move_ln_pair = false（默认）：LN 当作单个 note 处理——只移动该 note，
-///   配对解除（伙伴 ln_pair 清空）。配对断了由解析器自然延续/ lint 告警，
-///   编辑器不主动修复（BMS 编辑器常见行为）。
-/// - move_ln_pair = true：识别到 LN 则整体头尾一起移动（保持相对位置），配对保留；
-///   跨通道时伙伴 lane 同步改为 to_lane（LN 头尾恒同轨道）。
+/// LN 处理（2026-09 用户最终确认）：LN 当作单个 note 处理——只移动该 note，
+/// 配对互指保持（不随动、不断开）；LN 整体换轨走 MoveLnPairCommand。
 class MoveNoteCommand : public EditCommand {
    public:
-    MoveNoteCommand(std::uint32_t from_measure, Rational from_pos, Lane lane, std::uint32_t sample,
-                    std::uint32_t to_measure, Rational to_pos, bool move_ln_pair = false,
-                    std::optional<Lane> to_lane = std::nullopt, std::uint32_t from_sub_line = 0,
+    MoveNoteCommand(NoteRef from, std::uint32_t to_measure, Rational to_pos,
+                    std::optional<Lane> to_lane = std::nullopt,
                     std::optional<std::uint32_t> to_sub_line = std::nullopt);
     std::string name() const override { return "note.move"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    bool changes_time() const override {
+        return m_from.measure != m_to_measure || m_from.pos != m_to_pos;
+    }
     bool merge_with(const EditCommand& next) override;
     std::string describe() const override;
 
    private:
-    std::uint32_t m_from_measure;
-    Rational m_from_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
+    NoteRef m_from;  ///< 源五元组
     std::uint32_t m_to_measure;
     Rational m_to_pos;
-    bool m_move_ln_pair;
     /// 目标轨道（可选；nullopt = 纯时间移动，不换轨）
     std::optional<Lane> m_to_lane;
     /// 源 BGM 行序号（消歧：同 (measure,pos,lane,sample) 的 Bgm note 靠它定位）
@@ -200,24 +188,39 @@ class MoveNoteCommand : public EditCommand {
     Rational m_last_delta{0, 1};
 };
 
+/// 整体移动 LN 头尾：两端同时改到目标轨道，时间/采样不变。
+/// 与 MoveNoteCommand（单端移动、配对互指保持）互补：本命令确实移动两端并保留配对。
+/// 前置条件：源 note 必须已有 ln_pair；否则 apply 无操作。
+/// 单个 undo 步；目标只能是 lane（不提供时间位移）。
+class MoveLnPairCommand : public EditCommand {
+   public:
+    MoveLnPairCommand(NoteRef from, Lane to_lane);
+    std::string name() const override { return "note.moveLnPair"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+   private:
+    NoteRef m_from;
+    Lane m_to_lane;
+    bool m_applied = false;
+    std::optional<Event<Note>> m_a;
+    std::optional<Event<Note>> m_b;
+};
+
 /// 删除 note（doc/ui-design.md 九、「选择集删除」→ note.delete）。
 /// 语义：删除 (measure, pos, lane) 处匹配 sample 的 note。
 /// 逆操作：精确恢复该 note（含原容器位置近似——重插同 (measure,pos,lane,sample)）。
 class DeleteNoteCommand : public EditCommand {
    public:
-    DeleteNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                      std::uint32_t sub_line = 0);
+    explicit DeleteNoteCommand(NoteRef ref);
     std::string name() const override { return "note.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;
-    Rational m_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
-    std::uint32_t m_sub_line;  ///< BGM 行序号（消歧；非 Bgm = 0）
+    NoteRef m_ref;
     /// apply 删除的 note 的完整拷贝（invert 恢复；含 ln_pair 等）
     std::optional<Event<Note>> m_removed;
     /// 原容器位置（invert 尽量原位恢复；同 (measure,pos,lane) 冲突时退化为追加）
@@ -233,18 +236,15 @@ class DeleteNoteCommand : public EditCommand {
 /// 逆操作：精确恢复原 pos。批量 = CompositeCommand 包装多个（一个 undo 步）。
 class QuantizeNoteCommand : public EditCommand {
    public:
-    QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                        std::int64_t snap_num, std::int64_t snap_den);
+    QuantizeNoteCommand(NoteRef ref, std::int64_t snap_num, std::int64_t snap_den);
     std::string name() const override { return "note.quantize"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    bool changes_time() const override { return true; }
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;
-    Rational m_pos;  ///< 原始 pos（命令目标 = 量化后；invert 恢复此值）
-    Lane m_lane;
-    std::uint32_t m_sample;
+    NoteRef m_ref;  ///< 原始位置（命令目标 = 量化后；invert 恢复此值）
     std::int64_t m_snap_num;
     std::int64_t m_snap_den;
     /// apply 实际执行时是否发生了改变（pos 已在网格上 → false，invert 无操作）
@@ -260,8 +260,7 @@ class QuantizeNoteCommand : public EditCommand {
 /// 逆操作：反向变换恢复原轨道。批量 = CompositeCommand 包装多个（一个 undo 步）。
 class TransformNoteCommand : public EditCommand {
    public:
-    TransformNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                         bool mirror, int rotate, std::uint32_t sub_line = 0);
+    TransformNoteCommand(NoteRef ref, bool mirror, int rotate);
     /// Validate targets against an unchanged chart; throws invalid_argument if unwritable.
     /// Shared claimed set gives protocol preflight the same duplicate-source semantics as apply.
     void preflight(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
@@ -273,13 +272,9 @@ class TransformNoteCommand : public EditCommand {
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;
-    Rational m_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
+    NoteRef m_ref;
     bool m_mirror;
     int m_rotate;
-    std::uint32_t m_sub_line;
     friend class CompositeCommand;
     /// 批次先统一定位源；每个原物件最多认领一次，不会命中先前写入的目标。
     void bind_source(const Chart& chart, std::unordered_set<std::size_t>& claimed);
@@ -394,6 +389,7 @@ class ConvertMetaToNoteCommand : public EditCommand {
     std::string name() const override { return "note.convertBack"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    bool changes_time() const override { return m_measure != m_to_measure || m_pos != m_to_pos; }
     std::string describe() const override;
 
    private:
