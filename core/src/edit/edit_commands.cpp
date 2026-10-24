@@ -1330,11 +1330,12 @@ std::string ConvertMetaToNoteCommand::describe() const {
 
 QuantizeNoteCommand::QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
                                          std::uint32_t sample, std::int64_t snap_num,
-                                         std::int64_t snap_den)
+                                         std::int64_t snap_den, std::uint32_t sub_line)
     : m_measure(measure),
       m_pos(pos),
       m_lane(lane),
       m_sample(sample),
+      m_sub_line(sub_line),
       m_snap_num(snap_num),
       m_snap_den(snap_den) {
     if (m_snap_num <= 0) m_snap_num = 1;
@@ -1342,7 +1343,7 @@ QuantizeNoteCommand::QuantizeNoteCommand(std::uint32_t measure, Rational pos, La
 }
 
 void QuantizeNoteCommand::apply(Chart& chart) {
-    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, 0,
+    const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
                                m_source_ln_channel, m_source_kind);
     if (!idx) return;  // 找不到 → 无操作
     // 量化：k = round(pos * snapDen / snapNum)，目标 pos = k*snapNum/snapDen
@@ -1357,7 +1358,7 @@ void QuantizeNoteCommand::apply(Chart& chart) {
 
 void QuantizeNoteCommand::invert(Chart& chart) {
     if (!m_changed) return;  // 未改变 → 无操作
-    const auto idx = find_note(chart.notes, m_measure, m_new_pos, m_lane, m_sample, 0,
+    const auto idx = find_note(chart.notes, m_measure, m_new_pos, m_lane, m_sample, m_sub_line,
                                m_source_ln_channel, m_source_kind);
     if (idx) chart.notes[*idx].pos = m_pos;  // 恢复原 pos
     m_changed = false;

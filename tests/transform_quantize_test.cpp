@@ -223,6 +223,42 @@ TEST(TransformQuantize, ProtocolQuantize) {
     EXPECT_TRUE(found);
 }
 
+TEST(TransformQuantize, ProtocolQuantizePreservesBgmSubLineAndSourceKind) {
+    Chart chart;
+    for (const auto line : {0u, 4u}) {
+        Event<Note> note{1, Rational(1, 3), {}};
+        note.value.lane = {0, LaneKind::Bgm, 0};
+        note.value.sample.id = 1;
+        note.value.sub_line = line;
+        chart.notes.push_back(note);
+        if (line == 4) {
+            note.value.kind = NoteKind::Landmine;
+            chart.notes.push_back(note);
+        }
+    }
+    auto& session = global_editor_session();
+    session.load(std::move(chart));
+    const auto request = Json::parse(
+        R"({"command":"note.quantize","args":{"selection":[{"measure":1,"pos":{"num":1,"den":3},"lane":{"player":0,"kind":"bgm","index":0},"sample":1,"sub_line":4,"ln_channel":false,"note_kind":"normal"}],"snap":{"num":1,"den":16}}})");
+    const auto response = global_registry().dispatch(request);
+    ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
+    EXPECT_EQ(session.undo_depth(), 1u);
+    const auto check = [&](bool quantized) {
+        ASSERT_EQ(session.chart().notes.size(), 3u);
+        for (const auto& note : session.chart().notes) {
+            const bool selected = note.value.sub_line == 4 && note.value.kind == NoteKind::Normal;
+            EXPECT_EQ(note.pos, quantized && selected ? Rational(5, 16) : Rational(1, 3));
+            EXPECT_EQ(note.value.sample.id, 1u);
+            EXPECT_FALSE(note.value.ln_channel);
+        }
+    };
+    check(true);
+    ASSERT_TRUE(session.undo());
+    check(false);
+    ASSERT_TRUE(session.redo());
+    check(true);
+}
+
 TEST(TransformQuantize, ProtocolTransformMirror) {
     using beatbench::cmd::global_registry;
     auto& session = beatbench::edit::global_editor_session();

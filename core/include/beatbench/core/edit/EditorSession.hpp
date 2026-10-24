@@ -246,7 +246,7 @@ class DeleteNoteCommand : public EditCommand {
 class QuantizeNoteCommand : public EditCommand {
    public:
     QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                        std::int64_t snap_num, std::int64_t snap_den);
+                        std::int64_t snap_num, std::int64_t snap_den, std::uint32_t sub_line = 0);
     std::string name() const override { return "note.quantize"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -257,6 +257,7 @@ class QuantizeNoteCommand : public EditCommand {
     Rational m_pos;  ///< 原始 pos（命令目标 = 量化后；invert 恢复此值）
     Lane m_lane;
     std::uint32_t m_sample;
+    std::uint32_t m_sub_line;  ///< BGM 源子通道身份，量化和撤销均须保留
     std::int64_t m_snap_num;
     std::int64_t m_snap_den;
     /// apply 实际执行时是否发生了改变（pos 已在网格上 → false，invert 无操作）

@@ -1901,10 +1901,10 @@ class NoteQuantizeCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(
-                with_source_identity(std::make_unique<edit::QuantizeNoteCommand>(
-                                         r.measure, r.pos, r.lane, r.sample, snap_num, snap_den),
-                                     r));
+            comp->add(with_source_identity(
+                std::make_unique<edit::QuantizeNoteCommand>(r.measure, r.pos, r.lane, r.sample,
+                                                            snap_num, snap_den, r.sub_line),
+                r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
