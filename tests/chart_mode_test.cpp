@@ -57,28 +57,34 @@ TEST(ChartMode, Sp7kContainsScratchAndPedal) {
 
 // —— 通道映射表按模式（7key 与默认表一致是硬约束，M2 会话依赖） ——
 
-TEST(BmsChannelMaps, SevenKeyMatchesDefaultTable) {
-    // 抽查一组通道：bms_channel_rule_for("sp7k", ch) 必须与 bms_channel_rule_for("sp7k", ch) 完全一致
-    const char* chs[] = {"01", "02", "03", "04", "06", "07", "0A", "08", "09", "11",
-                         "15", "16", "17", "18", "19", "21", "26", "28", "29", "51",
-                         "56", "59", "61", "68", "D3", "D7", "E3", "99"};
-    for (const auto* ch : chs) {
-        const auto def = bms::bms_channel_rule_for("sp7k", ch);
-        const auto for7 = bms::bms_channel_rule_for("sp7k", ch);
-        ASSERT_EQ(for7.has_value(), def.has_value()) << "通道 " << ch;
-        if (def.has_value()) {
-            EXPECT_EQ(for7->semantics, def->semantics) << "通道 " << ch;
-            EXPECT_EQ(for7->lane, def->lane) << "通道 " << ch;
-            EXPECT_EQ(for7->note_kind, def->note_kind) << "通道 " << ch;
-            EXPECT_EQ(for7->ln_channel, def->ln_channel) << "通道 " << ch;
-            EXPECT_EQ(for7->bga_layer, def->bga_layer) << "通道 " << ch;
+TEST(BmsChannelMaps, SevenKeyModesShareGoldenTable) {
+    // 冻结期望：sp7k/dp/battle 共用同一张 7key 表；不再与已删除的旧入口自比较。
+    struct Expect {
+        const char* ch;
+        Lane lane;
+        bool ln;
+        NoteKind kind;
+    };
+    const Expect expected[] = {
+        {"01", {0, LaneKind::Bgm, 0}, false, NoteKind::Normal},
+        {"16", {0, LaneKind::Scratch, 0}, false, NoteKind::Normal},
+        {"19", {0, LaneKind::Key, 7}, false, NoteKind::Normal},
+        {"21", {1, LaneKind::Key, 1}, false, NoteKind::Normal},
+        {"56", {0, LaneKind::Scratch, 0}, true, NoteKind::Normal},
+        {"D7", {0, LaneKind::Pedal, 0}, false, NoteKind::Landmine},
+    };
+    for (const auto* mode : {"sp7k", "dp", "battle"}) {
+        for (const auto& e : expected) {
+            const auto r = bms::bms_channel_rule_for(mode, e.ch);
+            ASSERT_TRUE(r.has_value()) << mode << " " << e.ch;
+            EXPECT_EQ(r->lane, e.lane) << mode << " " << e.ch;
+            EXPECT_EQ(r->ln_channel, e.ln) << mode << " " << e.ch;
+            EXPECT_EQ(r->note_kind, e.kind) << mode << " " << e.ch;
         }
     }
-    // dp/battle 与 sp7k 同表（7key 语义；只是模式呈现不同）
-    for (const auto* mode : {"sp7k", "dp", "battle"}) {
-        EXPECT_EQ(bms::bms_channel_rule_for(mode, "16")->lane, (Lane{0, LaneKind::Scratch, 0}));
-        EXPECT_EQ(bms::bms_channel_rule_for(mode, "29")->lane, (Lane{1, LaneKind::Key, 7}));
-    }
+    EXPECT_EQ(bms::bms_channel_rule_for("dp", "26")->lane, (Lane{1, LaneKind::Scratch, 0}));
+    EXPECT_EQ(bms::bms_channel_rule_for("battle", "29")->lane, (Lane{1, LaneKind::Key, 7}));
+    EXPECT_FALSE(bms::bms_channel_rule_for("sp7k", "99").has_value());
 }
 
 TEST(BmsChannelMaps, Pms9kTableNoScratchPedal) {
