@@ -327,7 +327,7 @@ TEST(SessionRegistry, SaveNoPathFails) {
 }
 
 TEST(SessionRegistry, FindByPathAddressesDocumentNotActiveSession) {
-    // doc/07 §9.3：项目页/切音目标要"按文件寻址"，不能靠活动会话。
+    // doc/project-workflow.md §9.3：项目页/切音目标要"按文件寻址"，不能靠活动会话。
     auto& reg = session_registry();
     reg.activate("default");
     const std::string a = "H:/tmp/bb_find_by_path/A.bms";

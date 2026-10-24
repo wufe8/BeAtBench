@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // M7 项目命令：project.scan（文件夹 → 谱面索引 + 资源索引 + 引用出处）。
-// core 层只读文本、不加载音频（doc/07 §2/§5）；JSON 形状供 GUI 项目页与 CLI --json 共用。
+// core 层只读文本、不加载音频（doc/project-workflow.md §2/§5）；JSON 形状供 GUI 项目页与 CLI --json 共用。
 #include <cstdint>
 #include <string>
 #include <utility>

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 项目页（M7 阶段①「只读索引版」，doc/07 §9.1）：谱面表 + 资源表 + 筛选，
+// 项目页（doc/project-workflow.md §9.1）：谱面表 + 资源表 + 筛选，
 // 选中 → 在编辑页打开 / 设为切音目标。数据来自 `project`（ProjectController，
 // 两段式：先枚举出表，再后台补元信息/统计/引用）。
 //

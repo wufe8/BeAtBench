@@ -294,7 +294,7 @@ int main(int argc, char** argv) {
     // 纯函数回抽（2026-09；SessionController.qml 减肥第一刀）：gcd/refEquals/addPosDelta +
     // 剪贴板文本判定（Base62 粘贴警告前置）。QML 经 editUtils 访问。
     beatbench::app::EditUtils editUtils;
-    // M7 项目页（doc/07 §9.1 阶段①）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
+    // 项目页（doc/project-workflow.md §9.1）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
     beatbench::app::ResourceBindingController resourceBindingController(&documentService);
@@ -392,7 +392,7 @@ int main(int argc, char** argv) {
                                   nullptr, qml("newChart")});
         uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file",
                                   nullptr, qml("uiActionOpen")});
-        // M7：打开歌曲文件夹（项目页只读索引版，doc/07 §9.1 阶段①）
+        // 打开歌曲文件夹（项目页索引，doc/project-workflow.md §9.1）
         uiActions.add(UiActionDef{"file.openFolder", QCoreApplication::tr("打开歌曲文件夹…"),
                                   "Ctrl+Shift+O", "file", nullptr, qml("uiActionOpenFolder")});
         uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file",

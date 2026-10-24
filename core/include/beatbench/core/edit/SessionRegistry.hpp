@@ -36,7 +36,7 @@ class SessionRegistry {
     const EditorSession* by_id(std::string_view id) const;
 
     /// 按文档路径查找会话 id（未打开该文件 → 空串）。路径按 UTF-8 原样比较。
-    /// 用途：项目页/切音目标要"按文件寻址"而不是"按活动会话寻址"（doc/07 §9.3）。
+    /// 用途：项目页/切音目标要"按文件寻址"而不是"按活动会话寻址"（doc/project-workflow.md §9.3）。
     std::string find_by_path(std::string_view path) const;
 
     /// 当前活动会话（恒非空；首次访问惰性创建默认会话 "default"）。
