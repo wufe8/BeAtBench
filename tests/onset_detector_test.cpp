@@ -105,6 +105,24 @@ TEST(OnsetDetectorTest, MonoInputDetectsToo) {
     EXPECT_NEAR(onsets[0], 1.0, 0.040);
 }
 
+TEST(OnsetDetectorTest, EqualFluxPeaksUseDeterministicOrder) {
+    // 平局打破（frame 升序）：等幅周期脉冲的谱通量位级相等时，输出仍确定
+    //（minGap 贪心按 frame 升序接受，而非不稳定排序的实现定义顺序）。
+    std::vector<float> pcm(static_cast<std::size_t>(3.0 * kSr), 0.0f);
+    // 同频同幅、严格等间隔（1 hop 对齐）的 4 个脉冲 → flux 逐峰相等
+    for (const double t : {0.5, 1.0, 1.5, 2.0}) addBurst(pcm, t, 440.0, 0.3);
+    const auto st = stereoFromMono(pcm);
+
+    const beatbench::audio::OnsetConfig cfg;  // minGap 0.06s → 允许全部 4 峰存活
+    const auto a = beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr, cfg);
+    const auto b = beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr, cfg);
+    ASSERT_EQ(a.size(), b.size());
+    for (std::size_t i = 0; i < a.size(); ++i) EXPECT_EQ(a[i], b[i]);
+    // 全部检出且升序（贪心平局按 frame 升序 → 时间序保留）
+    EXPECT_GE(a.size(), 3u);
+    for (std::size_t i = 1; i < a.size(); ++i) EXPECT_LT(a[i - 1], a[i]);
+}
+
 TEST(OnsetDetectorTest, InvalidInputsYieldEmpty) {
     const std::vector<float> pcm(4096, 0.0f);
     EXPECT_TRUE(beatbench::audio::detect_onsets(nullptr, 100, 2, kSr).empty());
