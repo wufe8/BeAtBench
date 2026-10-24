@@ -2378,11 +2378,8 @@ ApplicationWindow {
     /// 运行中切换模式：先 dry-run 统计；有不可表示 note 直接拒绝（raw 降级尚未实现）。
     function requestModeSwitch(mode) {
         if (!chartMeta) return
-        var resp = JSON.parse(beatbench.dispatch(JSON.stringify({
-            command: "chart.set_mode", args: { mode: mode, dry_run: true }
-        })))
-        if (!resp.ok) { setStatus(resp.error.code + ": " + resp.error.message); return }
-        var r = resp.result
+        var r = sessionCmd("chart.set_mode", { mode: mode, dry_run: true })
+        if (!r) return
         if (r.mode === r.current) { setStatus(qsTr("已经是该模式")); return }
         if (r.unsupported > 0) {
             setStatus(qsTr("切换失败：有 %1 个 note 无法在 %2 下表示（raw 降级未实现）")
@@ -2396,15 +2393,9 @@ ApplicationWindow {
     function applyModeSwitch() {
         var mode = modeSwitchDialog.pendingMode
         modeSwitchDialog.close()
-        var resp = JSON.parse(beatbench.dispatch(JSON.stringify({
-            command: "chart.set_mode", args: { mode: mode }
-        })))
-        if (!resp.ok) {
-            setStatus(resp.error.code + ": " + resp.error.message)
-            return
-        }
-        window.chartMode = mode
-        chartSession.refresh()
+        var r = sessionCmd("chart.set_mode", { mode: mode })
+        if (!r) return
+        window.chartMode = r.mode || mode
         refreshTiming()
         setStatus(qsTr("已切换为 %1（保存后按新表写通道）").arg(window.modeDisplayName(mode)))
     }

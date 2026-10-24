@@ -739,8 +739,13 @@ QtObject {
             refreshTiming()  // 撤销可能恢复/移除 BPM/STOP 事件 → 时间轴面板列表须重取
             refreshSamples()  // 撤销可能回退 sample.setFile/rename → 采样面板须刷新
             if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()  // BGA/BMP 面板同刷新
-            if (r.ok)
+            if (r.ok) {
+                if (typeof chartSession !== "undefined" && chartSession) {
+                    const m = chartSession.modeId()
+                    if (m) window.chartMode = m
+                }
                 setStatus(qsTr("已撤销（可重做 %1 步）").arg(r.redo_depth))
+            }
             else
                 setStatus(qsTr("无可撤销"))
         }
@@ -751,8 +756,13 @@ QtObject {
             refreshTiming()  // 同上：重做改变时间轴事件 → 重取列表
             refreshSamples()  // 同上：重做改变采样/文件名 → 采样面板须刷新
             if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()  // BGA/BMP 面板同刷新
-            if (r.ok)
+            if (r.ok) {
+                if (typeof chartSession !== "undefined" && chartSession) {
+                    const m = chartSession.modeId()
+                    if (m) window.chartMode = m
+                }
                 setStatus(qsTr("已重做（可撤销 %1 步）").arg(r.undo_depth))
+            }
             else
                 setStatus(qsTr("无可重做"))
         }

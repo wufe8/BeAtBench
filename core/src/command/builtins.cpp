@@ -1589,6 +1589,18 @@ class ChartSetModeCommand : public Command {
             out.set("notes", static_cast<std::int64_t>(chart.notes.size()));
             out.set("unsupported", unsupported);
             out.set("supported", static_cast<std::int64_t>(chart.notes.size()) - unsupported);
+            out.set("unchanged", mode == current);
+            return out;
+        }
+        if (mode == current) {
+            Json out = Json::object();
+            out.set("ok", true);
+            out.set("current", current);
+            out.set("mode", mode);
+            out.set("notes", static_cast<std::int64_t>(chart.notes.size()));
+            out.set("unsupported", static_cast<std::int64_t>(0));
+            out.set("unchanged", true);
+            out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
             return out;
         }
         if (unsupported > 0) {

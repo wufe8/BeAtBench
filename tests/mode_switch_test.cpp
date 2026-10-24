@@ -72,3 +72,47 @@ TEST(ModeSwitch, UnrepresentableIsRejectedAtomically) {
     EXPECT_EQ(global_editor_session().chart().mode_id.value_or(""), before_mode);
     EXPECT_EQ(global_editor_session().undo_depth(), undo_before);
 }
+
+TEST(ModeSwitch, UpdatesPlayerAndUndoRestores) {
+    Chart c = chart_with({0, LaneKind::Key, 7});
+    c.meta["PLAYER"] = "1";
+    global_editor_session().load(std::move(c));
+    Json args = Json::object();
+    args.set("mode", "dp");
+    const Json resp = global_registry().dispatch(req("chart.set_mode", std::move(args)));
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(global_editor_session().chart().meta.at("PLAYER"), std::string("3"));
+    ASSERT_TRUE(global_editor_session().undo());
+    EXPECT_EQ(global_editor_session().chart().meta.at("PLAYER"), std::string("1"));
+    EXPECT_EQ(global_editor_session().chart().mode_id.value_or(""), std::string("sp7k"));
+
+    Json battle = Json::object();
+    battle.set("mode", "battle");
+    const Json bresp = global_registry().dispatch(req("chart.set_mode", std::move(battle)));
+    ASSERT_TRUE(bresp.at("ok").as_bool()) << bresp.dump();
+    EXPECT_EQ(global_editor_session().chart().meta.at("PLAYER"), std::string("4"));
+}
+
+TEST(ModeSwitch, RestoresMissingPlayerOnUndo) {
+    Chart c = chart_with({0, LaneKind::Key, 7});
+    c.meta.erase("PLAYER");
+    global_editor_session().load(std::move(c));
+    Json args = Json::object();
+    args.set("mode", "dp");
+    ASSERT_TRUE(
+        global_registry().dispatch(req("chart.set_mode", std::move(args))).at("ok").as_bool());
+    EXPECT_EQ(global_editor_session().chart().meta.at("PLAYER"), std::string("3"));
+    ASSERT_TRUE(global_editor_session().undo());
+    EXPECT_EQ(global_editor_session().chart().meta.count("PLAYER"), 0u);
+}
+
+TEST(ModeSwitch, NoOpDoesNotPushUndo) {
+    global_editor_session().load(chart_with({0, LaneKind::Key, 7}));
+    const auto undo_before = global_editor_session().undo_depth();
+    Json args = Json::object();
+    args.set("mode", "sp7k");
+    const Json resp = global_registry().dispatch(req("chart.set_mode", std::move(args)));
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_TRUE(resp.at("result").at("unchanged").as_bool());
+    EXPECT_EQ(global_editor_session().undo_depth(), undo_before);
+}

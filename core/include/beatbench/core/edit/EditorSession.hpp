@@ -371,6 +371,8 @@ class SetChartModeCommand : public EditCommand {
    private:
     std::string m_mode;
     std::optional<std::string> m_old;
+    bool m_had_player = false;
+    std::optional<std::string> m_old_player;
 };
 
 /// 原始控制行整体替换（「扩展代码」格式兜底，2026-09）：把 chart.raw_lines 整组换成新值。
