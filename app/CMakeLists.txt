@@ -31,6 +31,8 @@ add_executable(beatbench
     bridge/DocumentService.hpp   # Q_OBJECT：显式列入
     bridge/ResourceBindingController.cpp
     bridge/ResourceBindingController.hpp
+    bridge/ResourceRelocationController.cpp
+    bridge/ResourceRelocationController.hpp
     bridge/ProjectController.cpp
     bridge/ProjectController.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
@@ -94,6 +96,7 @@ qt_add_qml_module(beatbench
         qml/components/ChartHistoryDialog.qml
         qml/components/ChartHistoryPanel.qml
         qml/components/ResourceBindingDialog.qml
+        qml/components/ResourceRelocationDialog.qml
         qml/components/InlineWavBinding.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml

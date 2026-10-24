@@ -118,6 +118,27 @@ Item {
         }
     }
 
+    function openRelocation(resourcePath) {
+        if (window.metaDraftDirty) {
+            root.saveText = qsTr("请先提交或取消面板草稿，再修复资源引用")
+            return
+        }
+        if (project.state !== "ready") return
+        relocationDialog.openFor(resourcePath)
+    }
+
+    ResourceRelocationDialog {
+        id: relocationDialog
+        parent: Overlay.overlay
+        controller: resourceRelocationController
+        projectRoot: project.root
+        targetPaths: project.sliceTargets.map(path => project.absolutePath(path))
+        onApplied: (message) => {
+            root.saveText = message
+            window.setStatus(message)
+        }
+    }
+
     ResourceBindingDialog {
         id: bindingDialog
         parent: Overlay.overlay
@@ -481,6 +502,27 @@ Item {
                     visible: root.detailTab === 0
                     spacing: 0
 
+                    Flow {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: implicitHeight
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        Layout.topMargin: 6
+                        spacing: 8
+                        BbToolButton {
+                            objectName: "projectRepairMissingButton"
+                            text: qsTr("修复缺失 (%1)…").arg(project.missingCount)
+                            enabled: project.state === "ready" && project.missingCount > 0
+                            onClicked: root.openRelocation("")
+                        }
+                        BbToolButton {
+                            objectName: "projectRepairSelectedButton"
+                            text: qsTr("修复此资源…")
+                            enabled: project.state === "ready" && root.selectedResource !== null
+                                     && !root.selectedResource.onDisk
+                            onClicked: root.openRelocation(root.selectedResource.path)
+                        }
+                    }
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.leftMargin: 10

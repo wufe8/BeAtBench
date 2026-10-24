@@ -1241,30 +1241,36 @@ ApplicationWindow {
         function onSlicesChanged() { updateActionStates() }
         function onAudioChanged() { updateActionStates() }
     }
+    // Both operations change explicit in-memory documents, never the disk index.
+    function refreshResourceEdits(changedTargets) {
+        if (changedTargets.indexOf(window.chartPath) >= 0) {
+            window.selectionRefs = []
+            window.metaSelection = []
+            window.pendingLnHead = null
+        }
+        documents.refresh()
+        session.refreshSamples()
+        session.refreshTiming()
+        session.refreshLint()
+        if (!window.metaDraftDirty) {
+            const metadata = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.list", args: {}})))
+            if (metadata.ok) {
+                window.chartMeta = metadata.result.meta
+                const bpm = parseFloat(window.chartMeta.BPM)
+                if (isFinite(bpm) && bpm > 0) window.currentBpmValue = bpm
+            }
+            editPage.reloadMeta()
+        }
+        editPage.reloadBga()
+        project.refreshOpenStates()
+    }
     Connections {
         target: typeof resourceBindingController !== "undefined" ? resourceBindingController : null
-        function onBindingsApplied(changedTargets) {
-            if (changedTargets.indexOf(window.chartPath) >= 0) {
-                window.selectionRefs = []
-                window.metaSelection = []
-                window.pendingLnHead = null
-            }
-            documents.refresh()
-            session.refreshSamples()
-            session.refreshTiming()
-            session.refreshLint()
-            if (!window.metaDraftDirty) {
-                const metadata = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.list", args: {}})))
-                if (metadata.ok) {
-                    window.chartMeta = metadata.result.meta
-                    const bpm = parseFloat(window.chartMeta.BPM)
-                    if (isFinite(bpm) && bpm > 0) window.currentBpmValue = bpm
-                }
-                editPage.reloadMeta()
-            }
-            editPage.reloadBga()
-            project.refreshOpenStates()
-        }
+        function onBindingsApplied(changedTargets) { window.refreshResourceEdits(changedTargets) }
+    }
+    Connections {
+        target: typeof resourceRelocationController !== "undefined" ? resourceRelocationController : null
+        function onRelocated(changedTargets) { window.refreshResourceEdits(changedTargets) }
     }
     Timer { id: sliceExportRetry; interval: 300; repeat: true; onTriggered: doDebugSliceExport() }
     function doDebugSliceExport() {

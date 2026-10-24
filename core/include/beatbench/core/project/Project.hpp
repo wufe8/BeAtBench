@@ -44,6 +44,10 @@ struct ResourceUse {
     std::string id;        ///< 定义 ID 原文本（如 "01"）；头部字段来源为空
     std::string field;     ///< 头部字段名（如 "STAGEFILE"）；定义来源为空
     std::size_t refs = 0;  ///< 该谱面内的事件引用数（0 = 定义了但无事件使用）
+    // 扫描时的定义身份和值：供非激活式修复验证，不从后来打开的脏会话反推。
+    std::string original_value;
+    std::uint32_t definition_id = 0;
+    unsigned id_base = 36;
 };
 
 /// 谱面条目（索引快照，不含事件容器）。

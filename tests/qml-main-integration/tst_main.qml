@@ -169,6 +169,216 @@ TestCase {
         compare(mainFixture.disk(a), disk)
     }
 
+    function relocationSetup(data) {
+        start(true)
+        if (data) { main.width = data.width; main.height = data.height }
+        const fixture = mainFixture.prepareRelocationProject()
+        tryCompare(project, "state", "ready")
+        main.adoptChart(fixture.aPath)
+        main.currentPage = 3
+        project.clearSliceTargets()
+        const page = mainFixture.objectNamed(main, "projectPage")
+        verify(page !== null)
+        compare(project.missingCount, 2)
+        return {fixture: fixture, page: page}
+    }
+    function relocationOpen(page, single) {
+        const name = single ? "projectRepairSelectedButton" : "projectRepairMissingButton"
+        const button = mainFixture.objectNamed(page, name)
+        verify(button !== null && button.enabled)
+        mouseClick(button, button.width / 2, button.height / 2)
+        const dialog = mainFixture.dialog(main, "修复缺失资源")
+        verify(dialog !== null)
+        tryCompare(dialog, "opened", true)
+        tryCompare(resourceRelocationController, "busy", false)
+        return dialog
+    }
+    function relocationClick(dialog, name) {
+        const button = mainFixture.objectNamed(dialog, name)
+        verify(button !== null && button.enabled, name)
+        const scroll = mainFixture.objectNamed(dialog, "resourceRelocationScroll")
+        const flickable = scroll.contentItem
+        const point = button.mapToItem(flickable.contentItem, 0, 0)
+        flickable.contentY = Math.max(0, Math.min(flickable.contentHeight - flickable.height,
+                                                point.y - flickable.height / 2))
+        wait(0)
+        mouseClick(button, button.width / 2, button.height / 2)
+    }
+    function relocationRow(suffix) {
+        const rows = resourceRelocationController.rows
+        for (let i = 0; i < rows.length; ++i)
+            if (rows[i].oldPath.endsWith(suffix)) return rows[i]
+        fail("Missing relocation row: " + suffix)
+        return null
+    }
+    function relocationSearch(dialog, fixture) {
+        dialog.searchFolder = fixture.searchFolder
+        dialog.recursive = true
+        relocationClick(dialog, "resourceRelocationSearchButton")
+        tryCompare(resourceRelocationController, "busy", false)
+        tryVerify(function() {
+            return resourceRelocationController.rows.length > 0
+                   && resourceRelocationController.rows.every(row => row.replacement !== "")
+        })
+    }
+    function test_resourceRelocation_allReferences_preview_memoryOnly_andUndo_data() {
+        return [{tag: "default", width: 1280, height: 800},
+                {tag: "narrow-short", width: 800, height: 480}]
+    }
+    function test_resourceRelocation_allReferences_preview_memoryOnly_andUndo(data) {
+        const setup = relocationSetup(data), page = setup.page, fixture = setup.fixture
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        const referenceId = split.referenceDocumentId
+        const dialog = relocationOpen(page, false)
+        compare(dialog.checkedOnly, false) // Empty checked set explicitly means ALL only in this mode.
+        compare(resourceRelocationController.rows.length, 2)
+        compare(relocationRow("/old/kick.wav").uses.length, 2)
+        compare(relocationRow("/old/bg.png").uses.length, 2)
+        verify(dialog.width <= main.width && dialog.height <= main.height)
+        relocationSearch(dialog, fixture)
+        relocationClick(dialog, "resourceRelocationPreviewButton")
+        compare(dialog.preview.ok, true)
+        compare(dialog.preview.targetCount, 2)
+        compare(dialog.preview.changedCount, 4)
+        verify(dialog.preview.rows.every(row => row.old.startsWith("old/")
+                                               && (row.new === "samples/kick.wav" || row.new === "images/bg.png")))
+        unchanged(sa, sb)
+        compare(mainFixture.disk(a), diskA); compare(mainFixture.disk(b), diskB)
+        const preview = mainFixture.objectNamed(dialog, "resourceRelocationPreviewList")
+        verify(preview !== null && preview.clip && preview.count === 4)
+        preview.positionViewAtBeginning()
+        tryVerify(function() { return preview.itemAtIndex(0) !== null })
+        const previewText = preview.itemAtIndex(0).text
+        verify(previewText.indexOf(fixture.root) < 0)
+        verify(previewText.indexOf("|") < 0) // Internal identity keys are not user-facing labels.
+        verify(previewText.indexOf("#") >= 0 && previewText.indexOf(" → ") >= 0)
+        const apply = mainFixture.objectNamed(dialog, "resourceRelocationApplyButton")
+        verify(apply.enabled)
+        const top = apply.mapToItem(main.contentItem, 0, 0)
+        const bottom = apply.mapToItem(main.contentItem, apply.width, apply.height)
+        verify(top.x >= 0 && top.y >= 0 && bottom.x <= main.width && bottom.y <= main.height)
+        verify(mainFixture.screenshot())
+        clickButton(dialog, "应用引用更新")
+        tryCompare(dialog, "visible", false)
+        const aa = mainFixture.snapshot(a), bb = mainFixture.snapshot(b)
+        compare(aa.undo, sa.undo + 1); compare(bb.undo, sb.undo + 1)
+        compare(aa.notes, sa.notes); compare(bb.notes, sb.notes)
+        compare(aa.meta.STAGEFILE, "images/bg.png")
+        compare(documents.currentSession.wavFileOfId(1), "samples/kick.wav")
+        compare(documents.session(b).wavFileOfId(2), "samples/kick.wav")
+        compare(documents.activeId(), a); compare(split.referenceDocumentId, referenceId)
+        verify(project.openStates[fixture.aPath].dirty && project.openStates[fixture.bPath].dirty)
+        verify(page.saveText.indexOf("待保存") >= 0)
+        compare(project.missingCount, 2) // Disk index is not a claim that unsaved edits reached disk.
+        compare(mainFixture.disk(a), diskA); compare(mainFixture.disk(b), diskB)
+        for (const id of [a, b]) {
+            const result = JSON.parse(beatbench.dispatch(JSON.stringify({command: "session.undo", args: {session_id: id}})))
+            verify(result.ok)
+        }
+        documents.refresh()
+        compare(mainFixture.snapshot(a).definitions, sa.definitions)
+        compare(mainFixture.snapshot(a).meta, sa.meta)
+        compare(mainFixture.snapshot(b).definitions, sb.definitions)
+    }
+    function test_resourceRelocation_checkedOnly_emptyRefuses_andDoesNotWiden() {
+        const setup = relocationSetup(), page = setup.page, fixture = setup.fixture
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const dialog = relocationOpen(page, false)
+        dialog.checkedOnly = true
+        compare(dialog.scopeAllowed, false)
+        compare(resourceRelocationController.rows.length, 0)
+        verify(!mainFixture.objectNamed(dialog, "resourceRelocationPreviewButton").enabled)
+        verify(!mainFixture.objectNamed(dialog, "resourceRelocationApplyButton").enabled)
+        verify(dialog.localMessage.indexOf("不会自动") >= 0)
+        dialog.prepare(); dialog.applyPreview()
+        unchanged(sa, sb)
+        project.setSliceTargetChecked("main-integration-b.bms", true)
+        tryCompare(dialog, "scopeAllowed", true)
+        relocationSearch(dialog, fixture)
+        relocationClick(dialog, "resourceRelocationSelectResolvedButton")
+        verify(resourceRelocationController.rows.every(row => row.uses.every(use => !use.selected || use.chartPath === fixture.bPath)))
+        relocationClick(dialog, "resourceRelocationPreviewButton")
+        compare(dialog.preview.ok, true)
+        compare(dialog.preview.targetCount, 1)
+        compare(dialog.preview.changedCount, 2)
+        verify(dialog.preview.rows.every(row => row.chart === fixture.bPath))
+        clickButton(dialog, "应用引用更新")
+        tryCompare(dialog, "visible", false)
+        compare(mainFixture.snapshot(a), sa)
+        compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+    }
+    function test_resourceRelocation_singleMissing_mapping_cancel_andUseCheckbox() {
+        const setup = relocationSetup(), page = setup.page, fixture = setup.fixture
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
+        page.selectedResource = project.selectResource("old/kick.wav")
+        const dialog = relocationOpen(page, true)
+        compare(dialog.onlyResource, "old/kick.wav")
+        compare(resourceRelocationController.rows.length, 1)
+        dialog.oldDirectory = "old"
+        dialog.newDirectory = "samples"
+        relocationClick(dialog, "resourceRelocationMapButton")
+        compare(relocationRow("/old/kick.wav").replacement, fixture.kickPath)
+        const row = relocationRow("/old/kick.wav")
+        const groups = mainFixture.objectNamed(dialog, "resourceRelocationGroups")
+        const scroll = mainFixture.objectNamed(dialog, "resourceRelocationScroll").contentItem
+        scroll.contentY = groups.mapToItem(scroll.contentItem, 0, 0).y
+        groups.positionViewAtBeginning()
+        wait(0)
+        const use = mainFixture.objectNamed(groups, "resourceRelocationUse:" + row.uses[0].key)
+        verify(use !== null && use.checked)
+        const point = use.mapToItem(groups.contentItem, 0, 0)
+        groups.contentY = Math.max(0, point.y - groups.height / 2)
+        wait(0)
+        mouseClick(use, use.width / 2, use.height / 2)
+        compare(relocationRow("/old/kick.wav").selectedCount, 1)
+        relocationClick(dialog, "resourceRelocationPreviewButton")
+        compare(dialog.preview.changedCount, 1)
+        unchanged(sa, sb)
+        clickButton(dialog, "取消")
+        tryCompare(dialog, "visible", false)
+        unchanged(sa, sb)
+        compare(mainFixture.disk(a), diskA); compare(mainFixture.disk(b), diskB)
+        compare(resourceRelocationController.rows.length, 0)
+    }
+    function test_resourceRelocation_manualCandidate_partialSelection_andInvalidation() {
+        const setup = relocationSetup(), page = setup.page, fixture = setup.fixture
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const dialog = relocationOpen(page, false)
+        const kick = relocationRow("/old/kick.wav")
+        dialog.chooseCandidate(kick.key, fixture.kickPath)
+        relocationClick(dialog, "resourceRelocationPreviewButton")
+        verify(!dialog.preview.ok) // A still-selected unresolved image must not be silently skipped.
+        relocationClick(dialog, "resourceRelocationSelectResolvedButton")
+        compare(relocationRow("/old/bg.png").selectedCount, 0)
+        relocationClick(dialog, "resourceRelocationPreviewButton")
+        compare(dialog.preview.changedCount, 2)
+        verify(dialog.canApply)
+        dialog.searchFolder = fixture.root + "/samples"
+        verify(!dialog.canApply) // Input edits invalidate visible authorization even before a new search.
+        relocationClick(dialog, "resourceRelocationClearSelectionButton")
+        relocationClick(dialog, "resourceRelocationPreviewButton")
+        compare(dialog.preview.changedCount, 0)
+        verify(!dialog.canApply)
+        dialog.applyPreview()
+        unchanged(sa, sb)
+        clickButton(dialog, "取消")
+    }
+    function test_resourceRelocation_panelDraftRefusesOpening() {
+        const setup = relocationSetup(), page = setup.page
+        main.currentPage = 0
+        draft()
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        main.currentPage = 3
+        const button = mainFixture.objectNamed(page, "projectRepairMissingButton")
+        verify(button !== null && button.enabled)
+        mouseClick(button, button.width / 2, button.height / 2)
+        compare(mainFixture.dialog(main, "修复缺失资源"), null)
+        verify(page.saveText.indexOf("草稿") >= 0)
+        unchanged(sa, sb)
+    }
+
     function bindingSetup(data) {
         start(true)
         if (data) { main.width = data.width; main.height = data.height }

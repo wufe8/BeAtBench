@@ -46,6 +46,7 @@
 #include "bridge/LintListModel.hpp"
 #include "bridge/ProjectController.hpp"
 #include "bridge/ResourceBindingController.hpp"
+#include "bridge/ResourceRelocationController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWorkspace.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -297,6 +298,14 @@ int main(int argc, char** argv) {
     // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
     beatbench::app::ProjectController projectController;
     beatbench::app::ResourceBindingController resourceBindingController(&documentService);
+    beatbench::app::ResourceRelocationController resourceRelocationController(&documentService,
+                                                                              &projectController);
+    QObject::connect(&resourceRelocationController,
+                     &beatbench::app::ResourceRelocationController::relocated, &documentService,
+                     [&] {
+                         documentService.refresh();
+                         projectController.refreshOpenStates();
+                     });
     QObject::connect(&resourceBindingController,
                      &beatbench::app::ResourceBindingController::bindingsApplied, &documentService,
                      [&] {
@@ -328,6 +337,8 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
     engine.rootContext()->setContextProperty(QStringLiteral("resourceBindingController"),
                                              &resourceBindingController);
+    engine.rootContext()->setContextProperty(QStringLiteral("resourceRelocationController"),
+                                             &resourceRelocationController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
     engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"),
                                              &chartHistoryController);

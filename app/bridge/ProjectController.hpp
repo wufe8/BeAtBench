@@ -69,6 +69,8 @@ class ProjectController : public QObject {
     QString errorText() const { return m_errorText; }
     QVariantList charts() const { return m_charts; }
     QVariantList resources() const { return m_resources; }
+    /// Immutable disk-reference view plus scan identity; never consults active/dirty sessions.
+    QVariantMap missingResourceSnapshot(bool includeReferences = true) const;
     int chartCount() const { return static_cast<int>(m_charts.size()); }
     int resourceCount() const { return static_cast<int>(m_resources.size()); }
     QAbstractItemModel* chartModel() const;

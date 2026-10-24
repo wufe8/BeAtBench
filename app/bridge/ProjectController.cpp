@@ -100,6 +100,9 @@ QVariantMap resourceToMap(const beatbench::project::ResourceRef& r,
         um["id"] = qs(u.id);
         um["field"] = qs(u.field);
         um["refs"] = static_cast<qlonglong>(u.refs);
+        um["oldValue"] = qs(u.original_value);
+        um["number"] = u.definition_id;
+        um["base"] = u.id_base;
         uses.push_back(um);
     }
     m["uses"] = uses;
@@ -253,6 +256,16 @@ ProjectController::~ProjectController() {
     // Workers only post to this receiver. Keep it alive until posting has stopped;
     // QObject then removes all undelivered callbacks. Never pump a nested event loop.
     m_scanPool.waitForDone();
+}
+
+QVariantMap ProjectController::missingResourceSnapshot(bool includeReferences) const {
+    if (m_state != "ready" || !m_snapshot) return {};
+    QVariantMap out{{"root", m_root}, {"generation", QString::number(m_generation)}};
+    if (includeReferences) {
+        out["charts"] = m_snapshot->charts;
+        out["resources"] = m_snapshot->resources;
+    }
+    return out;
 }
 
 QAbstractItemModel* ProjectController::chartModel() const { return m_chartFilter.get(); }

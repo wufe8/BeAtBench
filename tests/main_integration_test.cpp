@@ -34,6 +34,7 @@
 #include "bridge/PlayheadOverlayItem.hpp"
 #include "bridge/ProjectController.hpp"
 #include "bridge/ResourceBindingController.hpp"
+#include "bridge/ResourceRelocationController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWaveformItem.hpp"
 #include "bridge/SliceWorkspace.hpp"
@@ -131,6 +132,7 @@ class MainIntegrationSetup : public QObject {
     Q_INVOKABLE void reset(bool named) {
         root = nullptr;
         releaseProjectScan();
+        relocation.cancel();
         project.clear();
         project.setChartFilter(false, {});
         project.setResourceFilter({}, false, false, {});
@@ -212,6 +214,40 @@ class MainIntegrationSetup : public QObject {
                                             QStringLiteral("slice"), 0.0, true);
         plan.insert("outputFile", temp->filePath("audio/slice_000.wav"));
         return plan;
+    }
+    Q_INVOKABLE QVariantMap prepareRelocationProject() {
+        const QString folder = temp->path();
+        if (!QDir{}.mkpath(folder + "/samples") || !QDir{}.mkpath(folder + "/images"))
+            qFatal("Cannot create relocation fixture directories");
+        for (const auto& relative : {QString("samples/kick.wav"), QString("images/bg.png")}) {
+            QFile media(folder + "/" + relative);
+            if (!media.open(QIODevice::WriteOnly) || media.write("fixture") != 7)
+                qFatal("Cannot write relocation fixture media");
+        }
+        auto& registry = beatbench::edit::session_registry();
+        for (const auto* id : {aId, bId}) {
+            auto* s = registry.by_id(id);
+            auto c = s->chart();
+            c.samples[{beatbench::SampleKind::Wav, id == aId ? 1u : 2u}] = {"old/kick.wav", {}};
+            if (id == aId)
+                c.meta["STAGEFILE"] = "old/bg.png";
+            else
+                c.samples[{beatbench::SampleKind::Bmp, 1u}] = {"old/bg.png", {}};
+            s->load(std::move(c));
+            s->set_backup_enabled(false);
+            const auto result = documents.save(QString::fromLatin1(id),
+                                               temp->filePath(QString::fromLatin1(id) + ".bms"));
+            if (!result.value("ok").toBool()) qFatal("Cannot save relocation fixture");
+        }
+        documents.activate(QString::fromLatin1(aId));
+        documents.refresh();
+        project.scan(folder);
+        return {{"root", folder},
+                {"searchFolder", folder},
+                {"kickPath", folder + "/samples/kick.wav"},
+                {"imagePath", folder + "/images/bg.png"},
+                {"aPath", temp->filePath(QString::fromLatin1(aId) + ".bms")},
+                {"bPath", temp->filePath(QString::fromLatin1(bId) + ".bms")}};
     }
     Q_INVOKABLE QVariantMap bridgeState(QObject* object) const {
         // Observe the exact bridge held by the existing reference, never refresh it here.
@@ -389,6 +425,11 @@ class MainIntegrationSetup : public QObject {
         ctx->setContextProperty("editUtils", &utils);
         ctx->setContextProperty("project", &project);
         ctx->setContextProperty("resourceBindingController", &bindings);
+        ctx->setContextProperty("resourceRelocationController", &relocation);
+        connect(&relocation, &ResourceRelocationController::relocated, engine, [this] {
+            documents.refresh();
+            project.refreshOpenStates();
+        });
         connect(&bindings, &ResourceBindingController::bindingsApplied, engine, [this] {
             documents.refresh();
             project.refreshOpenStates();
@@ -479,6 +520,7 @@ class MainIntegrationSetup : public QObject {
     std::atomic_bool stressPending{false};
     QSemaphore stressParseGate;
     ProjectController project{projectScanFunctions()};
+    ResourceRelocationController relocation{&documents, &project};
     QPointer<QObject> root, audio;
     std::unique_ptr<QTemporaryDir> temp;
     std::unique_ptr<QTemporaryDir> historyTemp;
