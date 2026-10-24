@@ -539,8 +539,10 @@ SetChartModeCommand::SetChartModeCommand(std::string mode) : m_mode(std::move(mo
 
 void SetChartModeCommand::apply(Chart& chart) {
     m_old = chart.mode_id;
-    m_had_player = chart.meta.find("PLAYER") != chart.meta.end();
-    if (m_had_player) m_old_player = chart.meta["PLAYER"];
+    if (const auto it = chart.meta.find("PLAYER"); it != chart.meta.end())
+        m_old_player = it->second;
+    else
+        m_old_player.reset();
     chart.mode_id = m_mode;
     // 写回 #PLAYER：dp=3、battle=4、sp7k/pms9k=1；writer 的显式优先规则不变。
     chart.meta["PLAYER"] = m_mode == "dp" ? "3" : (m_mode == "battle" ? "4" : "1");
@@ -548,7 +550,7 @@ void SetChartModeCommand::apply(Chart& chart) {
 
 void SetChartModeCommand::invert(Chart& chart) {
     chart.mode_id = m_old;
-    if (m_had_player)
+    if (m_old_player)
         chart.meta["PLAYER"] = *m_old_player;
     else
         chart.meta.erase("PLAYER");
