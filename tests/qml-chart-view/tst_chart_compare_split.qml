@@ -666,9 +666,52 @@ Item {
             compare(split.referenceSession, split.primarySession)
             boundTo(split.referenceView, split.primarySession)
             compare(split.referenceView.editable, false)
+            compare(split.referenceView.primaryPlaybackRole, false)
+            split.synchronizeViewports = false
+            split.referenceView.editable = true
             compare(split.referenceView.ownsPlayback, false)
+            bindingFixture.resetAudioProbe(true)
+            split.referenceView.seekTo(1)
+            compare(audioEngine.seekCount, 0)
+            flushSync()
+            split.referenceView.viewportItem.playheadSec = 7
+            split.primaryView.viewportItem.playheadSec = 9
+            audioEngine.playbackChanged()
+            compare(split.primaryView.playheadSec, audioEngine.positionSec)
+            compare(split.referenceView.playheadSec, 7, "Editable same-document B ignores the clock")
             split.requestSwap()
             compare(swapSpy.count, 0) // same-document swap is a no-op
+        }
+
+        function test_primary_playback_role_is_independent_of_editability() {
+            const av = split.primaryView
+            compare(av.primaryPlaybackRole, true) // single-view callers retain A compatibility
+            av.editable = false
+            compare(av.ownsPlayback, true)
+            bindingFixture.resetAudioProbe(true)
+            av.seekTo(1)
+            compare(audioEngine.seekCount, 1, "Read-only A still controls transport seek")
+            av.viewportItem.playheadSec = 9
+            audioEngine.playbackChanged()
+            compare(av.playheadSec, audioEngine.positionSec)
+
+            av.primaryPlaybackRole = false
+            compare(av.ownsPlayback, false)
+            av.seekTo(2)
+            compare(audioEngine.seekCount, 1)
+            av.viewportItem.playheadSec = 7
+            audioEngine.playbackChanged()
+            compare(av.playheadSec, 7)
+
+            av.primaryPlaybackRole = true
+            av.documentSession = compareDocuments.session(bId)
+            flushSync()
+            compare(av.ownsPlayback, false, "A role alone cannot seek another document PCM")
+            av.seekTo(1)
+            compare(audioEngine.seekCount, 1)
+            av.viewportItem.playheadSec = 5
+            audioEngine.playbackChanged()
+            compare(av.playheadSec, 5)
         }
 
         function test_swap_signal_then_explicit_activation_preserves_documents() {

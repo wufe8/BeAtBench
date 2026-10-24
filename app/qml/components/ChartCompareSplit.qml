@@ -376,6 +376,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     documentSession: root.referenceSession
+                    primaryPlaybackRole: false
                     editable: false
                     editorTool: root.editorTool
                     hideSecondaryChannels: root.hideSecondaryChannels

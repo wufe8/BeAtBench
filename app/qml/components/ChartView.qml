@@ -29,8 +29,11 @@ Item {
     property real referenceOverlayOpacity: 0.45
     property bool referenceOverlayHideSecondaryChannels: true
     readonly property var referenceOverlayInfo: view.referenceOverlayInfo
-    // 只有当前文档视图接全局播放时钟；固定副谱不跟随另一谱的 PCM/seek。
-    readonly property bool ownsPlayback: root.editable && typeof chartSession !== "undefined"
+    // 播放角色独立于编辑权限：A 默认保留单视图兼容，B 必须显式关闭；
+    // 即使 A/B 显示同一文档，B 也不能接全局时钟或 seek。文档身份再防旧 A 接错 PCM。
+    property bool primaryPlaybackRole: true
+    readonly property bool ownsPlayback: root.primaryPlaybackRole && root.documentSession !== null
+                                        && typeof chartSession !== "undefined"
                                         && root.documentSession === chartSession
     function restoreDocumentVisuals() {
         const info = root.documentSession ? root.documentSession.waveformInfo() : ({})
