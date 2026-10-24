@@ -3,9 +3,12 @@
 //
 // 约束：
 // - 有界并发（默认 2），避免大选择集一次占满全局线程池；
-// - 同一 key 在途去重（同一采样不重复解码）；
+// - 同一 key 在途去重：key 非空且在途时，新 submit（含不同 work/done）被静默忽略——
+//   调用方须保证同 key 的请求语义等价（同 key 异构请求会丢失后者的回调）；
 // - cancelAll 递增代际号；旧代际的 work 结果不再回调；
-// - 析构等待在途任务结束，调用方可以在 work 里安全访问自己的成员。
+// - 析构路径：waitForDone 保证 worker 线程的 work 全部返回，work 内访问调用方成员安全；
+//   已排队未执行的 done 事件随对象销毁被 Qt 丢弃（不回调）——done 内不要放置必需的
+//   资源释放，资源释放属析构方自己。
 //
 // 线程模型：submit/cancelAll/waitForDone 只在 UI 线程调用；work 在 worker 线程执行，
 // 不得直接碰 QObject；done 在 UI 线程（queued）执行。
@@ -59,7 +62,6 @@ class AudioTaskRunner : public QObject {
     friend class Task;
 
     void finish(const QString& key, Generation gen, const Done& done);
-    void dropPending(const QString& key) { m_pending.remove(key); }
 
     QThreadPool m_pool;
     std::atomic<Generation> m_generation{0};
