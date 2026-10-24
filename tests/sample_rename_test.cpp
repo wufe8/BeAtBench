@@ -230,8 +230,8 @@ TEST(SampleRename, SetNoteSampleChangesOne) {
     EditorSession s;
     s.load(make_chart());
     // m1 key1 pos0 的 s1 note → s5
-    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(1, Rational(0, 1),
-                                                              Lane{0, LaneKind::Key, 1}, 1, 0, 5)));
+    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 0}, 5)));
     int s5 = 0, s2 = 0;
     for (const auto& e : s.chart().notes) {
         if (e.value.sample.id == 5) s5++;
@@ -250,8 +250,8 @@ TEST(SampleRename, SetNoteSampleNoMatchNoOp) {
     EditorSession s;
     s.load(make_chart());
     // 不存在 (measure 9, pos0, lane key9, sample 7) → 无操作
-    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(9, Rational(0, 1),
-                                                              Lane{0, LaneKind::Key, 9}, 7, 0, 5)));
+    ASSERT_TRUE(s.exec(std::make_unique<SetNoteSampleCommand>(
+        NoteRef{9, Rational(0, 1), Lane{0, LaneKind::Key, 9}, 7, 0}, 5)));
     for (const auto& e : s.chart().notes) EXPECT_FALSE(e.value.sample.id == 5);
 }
 

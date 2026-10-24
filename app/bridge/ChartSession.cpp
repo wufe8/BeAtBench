@@ -115,7 +115,8 @@ QStringList ChartSession::codecModes() const {
 
 int ChartSession::playKeyCount() const {
     if (!m_chart) return 7;
-    return beatbench::chart_mode_key_count(m_chart->mode_id.value_or("sp7k"));
+    // 未知模式显式降级 7 键；非法放置由 chart_mode_has_lane 白名单另行拦截。
+    return beatbench::chart_mode_key_count(m_chart->mode_id.value_or("sp7k")).value_or(7);
 }
 
 void ChartSession::refresh() {

@@ -62,8 +62,8 @@ TEST(TransformQuantize, QuantizeSnapsToGrid) {
     EditorSession s;
     s.load(make_chart());
     // 量化 m1 pos1/3 → 1/16 网格：1/3 ≈ 0.333，round(0.333*16)=5 → 5/16
-    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(1, Rational(1, 3),
-                                                             Lane{0, LaneKind::Key, 1}, 1, 1, 16)));
+    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(
+        NoteRef{1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1}, 1, 16)));
     // 找到该 note（值定位：新 pos 5/16）
     bool found = false;
     for (const auto& e : s.chart().notes) {
@@ -84,8 +84,8 @@ TEST(TransformQuantize, QuantizeAlreadyOnGridNoop) {
     EditorSession s;
     s.load(make_chart());
     // pos 1/2 已在 1/16 网格 → 无变化
-    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(1, Rational(1, 2),
-                                                             Lane{0, LaneKind::Key, 2}, 2, 1, 16)));
+    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2}, 1, 16)));
     EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(make_chart().notes));
     // undo 也无变化（空命令）
     ASSERT_TRUE(s.undo());
@@ -96,8 +96,8 @@ TEST(TransformQuantize, QuantizeCustomSnap) {
     EditorSession s;
     s.load(make_chart());
     // snap 3/16：1/3 ≈ 0.333，round(0.333*16/3)=round(1.777)=2 → 6/16 = 3/8
-    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(1, Rational(1, 3),
-                                                             Lane{0, LaneKind::Key, 1}, 1, 3, 16)));
+    ASSERT_TRUE(s.exec(std::make_unique<QuantizeNoteCommand>(
+        NoteRef{1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1}, 3, 16)));
     bool found = false;
     for (const auto& e : s.chart().notes) {
         if (e.value.lane == Lane{0, LaneKind::Key, 1} && e.value.sample.id == 1) {
@@ -115,12 +115,12 @@ TEST(TransformQuantize, MirrorFlipsKeys) {
     s.load(make_chart());
     // 镜像全部 3 个 note
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 3), Lane{0, LaneKind::Key, 1},
-                                                     1, true, 0));
-    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2},
-                                                     2, true, 0));
-    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 7},
-                                                     3, true, 0));
+    comp->add(std::make_unique<TransformNoteCommand>(
+        NoteRef{1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1}, true, 0));
+    comp->add(std::make_unique<TransformNoteCommand>(
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2}, true, 0));
+    comp->add(std::make_unique<TransformNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 7}, 3}, true, 0));
     ASSERT_TRUE(s.exec(std::move(comp)));
     EXPECT_EQ(s.undo_depth(), 1u);
     // key1→key7, key2→key6, key7→key1
@@ -152,12 +152,12 @@ TEST(TransformQuantize, RotateCyclesKeys) {
     s.load(make_chart());
     // 旋转 +1：key1→key2, key2→key3, key7→key1
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 3), Lane{0, LaneKind::Key, 1},
-                                                     1, false, 1));
-    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2},
-                                                     2, false, 1));
-    comp->add(std::make_unique<TransformNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 7},
-                                                     3, false, 1));
+    comp->add(std::make_unique<TransformNoteCommand>(
+        NoteRef{1, Rational(1, 3), Lane{0, LaneKind::Key, 1}, 1}, false, 1));
+    comp->add(std::make_unique<TransformNoteCommand>(
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2}, false, 1));
+    comp->add(std::make_unique<TransformNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 7}, 3}, false, 1));
     ASSERT_TRUE(s.exec(std::move(comp)));
     const auto& notes = s.chart().notes;
     bool a = false, b = false, c_ok = false;
@@ -355,8 +355,8 @@ Json transform_request(const Chart& chart, const std::vector<int>& order, bool m
 }
 
 std::unique_ptr<TransformNoteCommand> mirror_note(const Event<Note>& e) {
-    return std::make_unique<TransformNoteCommand>(e.measure, e.pos, e.value.lane, e.value.sample.id,
-                                                  true, 0, e.value.sub_line);
+    return std::make_unique<TransformNoteCommand>(
+        NoteRef{e.measure, e.pos, e.value.lane, e.value.sample.id, e.value.sub_line}, true, 0);
 }
 
 class FailingTransformBatchCommand : public EditCommand {
@@ -425,9 +425,10 @@ TEST(TransformQuantize, DetectedBmespUsesNineKeysWithoutBecomingCreationMode) {
     opts.mode = "pms9k";
     const auto read = bms::read_bms("#BPM 120\n#00016:01\n", opts);
     ASSERT_EQ(read.chart.mode_id.value_or(""), "pms9k-bmesp");
-    EXPECT_EQ(chart_mode_key_count(*read.chart.mode_id), 9);
+    ASSERT_TRUE(chart_mode_key_count(*read.chart.mode_id).has_value());
+    EXPECT_EQ(*chart_mode_key_count(*read.chart.mode_id), 9);
     EXPECT_FALSE(chart_mode_by_id("pms9k-bmesp").has_value());
-    EXPECT_EQ(chart_mode_key_count("unknown"), 7);
+    EXPECT_FALSE(chart_mode_key_count("unknown").has_value());
     auto& session = global_editor_session();
     session.load(read.chart);
     const auto response = global_registry().dispatch(transform_request(read.chart, {0}, true, 0));
@@ -465,7 +466,8 @@ TEST(TransformQuantize, MixedNestedCompositeRebindsAfterInsertion) {
     auto batch = std::make_unique<CompositeCommand>();
     for (const auto& e : chart.notes) batch->add(mirror_note(e));
     // 插入位于所有原音之前；后续嵌套批次必须看到新容器，不可沿用旧索引。
-    batch->add(std::make_unique<PutNoteCommand>(0, Rational(0, 1), Lane{0, LaneKind::Key, 5}, 2));
+    batch->add(
+        std::make_unique<PutNoteCommand>(NoteRef{0, Rational(0, 1), Lane{0, LaneKind::Key, 5}, 2}));
     auto nested = std::make_unique<CompositeCommand>();
     for (auto e : chart.notes) {
         e.value.lane = transform_lane(e.value.lane, true, 0, 9);
@@ -497,7 +499,7 @@ TEST(TransformQuantize, TransformUndoRebindsAfterLaterMoveUndoReordersNotes) {
     ASSERT_TRUE(session.exec(std::move(batch)));
     const auto transformed = full_notes(session.chart());
     ASSERT_TRUE(session.exec(std::make_unique<MoveNoteCommand>(
-        0, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(0, 1))));
+        NoteRef{0, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1}, 1, Rational(0, 1))));
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(full_notes(session.chart()), transformed);
     // Move 撤销在同拍段首重插，此时原 Transform 的索引已过期。
