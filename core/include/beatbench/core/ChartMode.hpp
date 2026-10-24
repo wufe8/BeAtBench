@@ -25,7 +25,19 @@ struct ChartMode {
 std::optional<ChartMode> chart_mode_by_id(std::string_view id);
 
 /// 模式的 1P 键轨数（sp7k/dp/battle=7、pms9k=9）：lanes 中 player 0 的 Key lane
-/// 最大 index。未知 id 返回 7（sp7k 兑底）。拖动/变换等键号上限的单一事实源。
-int chart_mode_key_count(std::string_view id);
+/// 最大 index。未知 id 返回 nullopt（无表可查；调用方显式决定降级，core 不静默兜底）。
+/// pms9k-bmesp 写回变体按 pms9k 归一。拖动/变换等键号上限的单一事实源。
+std::optional<int> chart_mode_key_count(std::string_view id);
+
+/// lane 是否在该模式的 lanes 表内（定位/显示合法性；单一事实源 = 模式配置表）。
+/// 未知 id 返回 false（无表可查）。pms9k-bmesp 变体按家族归一。
+bool chart_mode_has_lane(std::string_view id, const Lane& lane);
+
+/// lane 是否为可摆音的游玩轨（表内且 kind 为 Key/Scratch；player 范围由表保证）。
+/// 编辑策略谓词：键盘快速摆音与配置重排共用的目标轨判定。踏板/BGM/元轨不在此列。
+inline bool is_playable_lane(std::string_view id, const Lane& lane) {
+    if (lane.kind != LaneKind::Key && lane.kind != LaneKind::Scratch) return false;
+    return chart_mode_has_lane(id, lane);
+}
 
 }  // namespace beatbench

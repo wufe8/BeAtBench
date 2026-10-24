@@ -242,8 +242,9 @@ TEST(PmsIntegrity, TransformRejectsUnwritableSecondSideAtomically) {
                 // Direct EditCommand callers must not bypass the safety check.
                 const auto& source = chart.notes.back();
                 EXPECT_FALSE(session.exec(std::make_unique<edit::TransformNoteCommand>(
-                    source.measure, source.pos, source.value.lane, source.value.sample.id, mirror,
-                    rotate, source.value.sub_line)));
+                    edit::NoteRef{source.measure, source.pos, source.value.lane,
+                                  source.value.sample.id, source.value.sub_line},
+                    mirror, rotate)));
                 EXPECT_EQ(bms::write_bms(session.chart()), before);
                 EXPECT_EQ(session.undo_depth(), undo);
                 EXPECT_EQ(session.redo_depth(), redo);

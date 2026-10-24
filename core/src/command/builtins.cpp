@@ -118,7 +118,7 @@ std::string mode_arg(const Json& args) {
 /// mode 从会话 chart 取；非 BMS 格式各自映射（格式无关原则：值域检查在格式层）。
 bool lane_can_ln(const Chart& chart, const Lane& lane) {
     const auto mode = chart.mode_id.value_or("sp7k");
-    return !bms::bms_channel_for_mode(mode, lane, true, NoteKind::Normal).empty();
+    return bms::bms_can_represent(mode, lane, true, NoteKind::Normal);
 }
 
 std::string severity_str(beatbench::codec::Severity s) {
@@ -513,6 +513,18 @@ edit::EditorSession& session_from_args(const Json& args) {
 
 namespace {
 
+// 统一执行编辑命令：纵向锁拒绝时映射为稳定协议错误码。
+bool exec_or_throw(edit::EditorSession& session, std::unique_ptr<edit::EditCommand> cmd) {
+    const bool ok = session.exec(std::move(cmd));
+    if (!ok && session.last_error() == edit::EditError::TimeLocked) {
+        throw CommandError("time_locked", session.last_error_message());
+    }
+    if (!ok && session.last_error() == edit::EditError::LaneLocked) {
+        throw CommandError("lane_locked", session.last_error_message());
+    }
+    return ok;
+}
+
 // JSON → Lane：{player, kind, index}；kind 字符串 "key"/"scratch"/"pedal"/"bgm"
 Lane lane_from_json(const Json& j) {
     if (!j.is_object()) throw CommandError("bad_args", "lane 应为对象");
@@ -544,19 +556,8 @@ Lane lane_from_json(const Json& j) {
     return l;
 }
 
-// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）
-const char* lane_kind_str(LaneKind k) {
-    switch (k) {
-        case LaneKind::Scratch:
-            return "scratch";
-        case LaneKind::Pedal:
-            return "pedal";
-        case LaneKind::Bgm:
-            return "bgm";
-        default:
-            return "key";
-    }
-}
+// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）。
+// 单一实现见 core/include/beatbench/core/Lane.hpp。
 
 // 从 args 读 (measure, pos)（"measure": int, "pos": {"num":n,"den":d} 或 [n,d]）
 Rational pos_from_json(const Json& args) {
@@ -789,8 +790,8 @@ class TimingPutCommand : public Command {
             const std::string s = r->as_str();
             ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         }
-        const bool ok =
-            session.exec(std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
+        const bool ok = exec_or_throw(
+            session, std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
@@ -809,7 +810,7 @@ class TimingDeleteCommand : public Command {
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
         const bool ok =
-            session.exec(std::make_unique<edit::DeleteTimingCommand>(kind, measure, pos));
+            exec_or_throw(session, std::make_unique<edit::DeleteTimingCommand>(kind, measure, pos));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
@@ -866,8 +867,8 @@ class BgaPutCommandCmd : public Command {
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
         const std::uint32_t sample = u32_arg(args, "sample");
-        const bool ok =
-            session.exec(std::make_unique<edit::BgaPutCommand>(measure, pos, layer, sample));
+        const bool ok = exec_or_throw(
+            session, std::make_unique<edit::BgaPutCommand>(measure, pos, layer, sample));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("layer", static_cast<std::int64_t>(layer));
@@ -885,7 +886,8 @@ class BgaDeleteCommandCmd : public Command {
         const int layer = bga_layer_arg(args);
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
-        const bool ok = session.exec(std::make_unique<edit::BgaDeleteCommand>(measure, pos, layer));
+        const bool ok =
+            exec_or_throw(session, std::make_unique<edit::BgaDeleteCommand>(measure, pos, layer));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("layer", static_cast<std::int64_t>(layer));
@@ -927,7 +929,11 @@ class BgaMoveCommandCmd : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         comp->add(std::make_unique<edit::BgaDeleteCommand>(fm, fp, fl));
         comp->add(std::make_unique<edit::BgaPutCommand>(tm, tp, tl, sample));
-        const bool ok = session.exec(std::move(comp));
+        std::unique_ptr<edit::EditCommand> exec_cmd = std::move(comp);
+        if (tm != fm || tp != fp || tl != fl)
+            exec_cmd = std::make_unique<edit::ShiftMarkerCommand>(std::move(exec_cmd),
+                                                                  tm != fm || tp != fp, tl != fl);
+        const bool ok = exec_or_throw(session, std::move(exec_cmd));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -976,7 +982,10 @@ class TimingMoveCommandCmd : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         comp->add(std::make_unique<edit::DeleteTimingCommand>(kind, fm, fp));
         comp->add(std::make_unique<edit::PutTimingCommand>(kind, tm, tp, value));
-        const bool ok = session.exec(std::move(comp));
+        std::unique_ptr<edit::EditCommand> exec_cmd = std::move(comp);
+        if (tm != fm || tp != fp)
+            exec_cmd = std::make_unique<edit::ShiftMarkerCommand>(std::move(exec_cmd), true, false);
+        const bool ok = exec_or_throw(session, std::move(exec_cmd));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -1307,10 +1316,16 @@ class ClipboardPasteCommand : public Command {
             const bool ln_kind = i < parsed_ln.size() && parsed_ln[i];
             const NoteKind kind = (i < parsed_kind.size()) ? parsed_kind[i] : NoteKind::Normal;
             comp->add(std::make_unique<edit::PutNoteCommand>(
-                static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset), r.pos,
-                r.lane, r.sample, ln_kind, kind, r.sub_line));
+                edit::NoteRef{
+                    static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset),
+                    r.pos, r.lane, r.sample, r.sub_line},
+                ln_kind, kind));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool has_notes = !parsed.empty();
+        std::unique_ptr<edit::EditCommand> exec_cmd = std::move(comp);
+        if (has_notes)
+            exec_cmd = std::make_unique<edit::ShiftMarkerCommand>(std::move(exec_cmd), true, false);
+        const bool ok = exec_or_throw(session, std::move(exec_cmd));
         Json placed = Json::array();
         for (const auto& r : parsed) {
             Json item = Json::object();
@@ -1636,15 +1651,16 @@ class NotePutCommand : public Command {
         // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
         // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
         // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
-        if (bms::bms_channel_for_mode(session.chart().mode_id.value_or("sp7k"), lane, ln_kind, kind)
-                .empty()) {
+        if (!bms::bms_can_represent(session.chart().mode_id.value_or("sp7k"), lane, ln_kind,
+                                    kind)) {
             throw CommandError("bad_args", "该轨道/音符类型无法表示为当前模式的 BMS 通道");
         }
         if (ln_kind && !lane_can_ln(session.chart(), lane)) {
             throw CommandError("bad_args", "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
         }
-        const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
-            measure, pos, lane, sample, ln_kind, kind, sub_line));
+        const bool ok = exec_or_throw(
+            session, std::make_unique<edit::PutNoteCommand>(
+                         edit::NoteRef{measure, pos, lane, sample, sub_line}, ln_kind, kind));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", ln_kind ? "ln" : (kind == NoteKind::Landmine ? "mine" : "normal"));
@@ -1700,8 +1716,9 @@ class NoteMoveCommand : public Command {
             if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
             to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
-        return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m, to_pos,
-                                                       false, to_lane, from_sub_line, to_sub_line);
+        return std::make_unique<edit::MoveNoteCommand>(
+            edit::NoteRef{from_m, from_pos, lane, sample, from_sub_line}, to_m, to_pos, to_lane,
+            to_sub_line);
     }
 
     Json run(const Json& args) const override {
@@ -1709,6 +1726,7 @@ class NoteMoveCommand : public Command {
         if (!session.has_chart()) {
             throw CommandError("no_chart", "未加载谱面（先 session.load）");
         }
+        // 纵向锁：只拦时间坐标变化；换轨（to 时间 = from 时间）仍允许。
         // Y1（2026）：`moves` 数组（1..N 项，每项 {from,to}）优先；
         // 兼容旧顶层 `{from,to}`（无 moves 时回退，视为单元素数组）。
         // 多 note 移动 = CompositeCommand 包 N 个 MoveNoteCommand（一个 undo 步）；
@@ -1728,7 +1746,7 @@ class NoteMoveCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (auto& c : cmds) comp->add(std::move(c));
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("moved", static_cast<std::int64_t>(cmds.size()));
@@ -1765,7 +1783,8 @@ class NoteDeleteCommand : public Command {
                 if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
                 sub_line = static_cast<std::uint32_t>(bl->as_i64());
             }
-            return std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line);
+            return std::make_unique<edit::DeleteNoteCommand>(
+                edit::NoteRef{measure, pos, lane, sample, sub_line});
         };
         // selection 数组 = 批量删除（一个 CompositeCommand / 一次备份）；单对象路径保持兼容。
         if (args.find("selection")) {
@@ -1776,14 +1795,14 @@ class NoteDeleteCommand : public Command {
                 if (!item.is_object()) throw CommandError("bad_args", "selection 元素应为对象");
                 comp->add(make_one(item));
             }
-            const bool ok = session.exec(std::move(comp));
+            const bool ok = exec_or_throw(session, std::move(comp));
             Json out = Json::object();
             out.set("ok", ok);
             out.set("deleted", static_cast<std::int64_t>(refs.size()));
             out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
             return out;
         }
-        const bool ok = session.exec(make_one(args));
+        const bool ok = exec_or_throw(session, make_one(args));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("deleted", ok ? 1 : 0);
@@ -1823,10 +1842,9 @@ class NoteQuantizeCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::QuantizeNoteCommand>(r.measure, r.pos, r.lane,
-                                                                  r.sample, snap_num, snap_den));
+            comp->add(std::make_unique<edit::QuantizeNoteCommand>(r, snap_num, snap_den));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
@@ -1857,8 +1875,7 @@ class NoteTransformCommand : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         std::unordered_set<std::size_t> claimed;
         for (const auto& r : refs) {
-            auto command = std::make_unique<edit::TransformNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line);
+            auto command = std::make_unique<edit::TransformNoteCommand>(r, mirror, rotate);
             // Preflight against the unchanged chart. Invalid targets must return
             // a protocol error, not success with a replacement selection.
             try {
@@ -1868,12 +1885,13 @@ class NoteTransformCommand : public Command {
             }
             comp->add(std::move(command));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         // 返回变换后的选择引用（QML 直接采用，不再独立计算映射——单一事实源在 core；
         // 键号上限按谱面模式，与命令 apply 同一 transform_lane）。
         const std::string mode =
             session.has_chart() ? session.chart().mode_id.value_or("sp7k") : "sp7k";
-        const int max_key = chart_mode_key_count(mode);
+        // exec 已通过 bind_source 校验模式已知；value_or 仅为回显防御。
+        const int max_key = chart_mode_key_count(mode).value_or(7);
         Json sel = Json::array();
         for (const auto& r : refs) {
             const Lane nl = edit::transform_lane(r.lane, mirror, rotate, max_key);
@@ -1925,10 +1943,9 @@ class NoteToggleLnCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::ToggleLnCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                              r.sub_line));
+            comp->add(std::make_unique<edit::ToggleLnCommand>(r));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
@@ -2013,12 +2030,11 @@ class NoteConvertCommand : public Command {
                 tm = r.measure;
                 tp = r.pos;
             }
-            comp->add(std::make_unique<edit::ConvertNoteCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                                 r.sub_line, target, tm, tp));
+            comp->add(std::make_unique<edit::ConvertNoteCommand>(r, target, tm, tp));
         }
         if (comp->size() == 0)
             throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
@@ -2057,8 +2073,8 @@ class NoteConvertBackCommand : public Command {
             if (top->find("measure")) to_m = u32_arg(*top, "measure");
             if (top->find("pos")) to_p = pos_from_json(*top);
         }
-        const bool ok = session.exec(std::make_unique<edit::ConvertMetaToNoteCommand>(
-            kind, measure, pos, layer, lane, to_m, to_p));
+        const bool ok = exec_or_throw(session, std::make_unique<edit::ConvertMetaToNoteCommand>(
+                                                   kind, measure, pos, layer, lane, to_m, to_p));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -2134,18 +2150,16 @@ class NoteMoveRegionCommand : public Command {
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
                 comp->add(std::make_unique<edit::ConvertNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
-                    static_cast<std::uint32_t>(to_m), to_pos));
+                    r, *convert_target, static_cast<std::uint32_t>(to_m), to_pos));
             } else {
                 comp->add(std::make_unique<edit::MoveNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, static_cast<std::uint32_t>(to_m), to_pos,
-                    false, to_lane, r.sub_line, to_sub_line));
+                    r, static_cast<std::uint32_t>(to_m), to_pos, to_lane, to_sub_line));
             }
         }
         if (comp->size() == 0) {
             throw CommandError("bad_args", "平移后无有效 note（全部移到负小节）");
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
@@ -2205,7 +2219,7 @@ class MetaEditCommand : public Command {
             if (!val || !val->is_string()) throw CommandError("bad_args", "edits 元素缺 value");
             comp->add(std::make_unique<edit::MetaEditCommand>(key->as_str(), val->as_str()));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = exec_or_throw(session, std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("edits", static_cast<std::int64_t>(edits->as_array().size()));
@@ -2245,7 +2259,7 @@ class MetaRawEditCommand : public Command {
             if (!e.is_string()) throw CommandError("bad_args", "lines 元素应为字符串");
             lv.push_back(e.as_str());
         }
-        session.exec(std::make_unique<edit::RawLinesEditCommand>(std::move(lv)));
+        exec_or_throw(session, std::make_unique<edit::RawLinesEditCommand>(std::move(lv)));
         Json out = Json::object();
         out.set("ok", true);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -2374,7 +2388,7 @@ class SampleRenameCommand : public Command {
         const std::uint32_t to_id = decode(to);
         if (from_id == to_id) throw CommandError("same_id", "from 与 to 相同");
         const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp
-        session.exec(std::make_unique<edit::RenameSampleCommand>(kind, from_id, to_id));
+        exec_or_throw(session, std::make_unique<edit::RenameSampleCommand>(kind, from_id, to_id));
         Json out = Json::object();
         out.set("ok", true);
         out.set("from", static_cast<std::int64_t>(from_id));
@@ -2417,7 +2431,7 @@ class SampleSetFileCommand : public Command {
         };
         const std::uint32_t id_num = decode(id);
         const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp（BGA 图像）
-        session.exec(std::make_unique<edit::SetSampleFileCommand>(kind, id_num, file));
+        exec_or_throw(session, std::make_unique<edit::SetSampleFileCommand>(kind, id_num, file));
         Json out = Json::object();
         out.set("ok", true);
         out.set("id", static_cast<std::int64_t>(id_num));
@@ -2442,7 +2456,7 @@ class SampleSetValueCommand : public Command {
         };
         const std::uint32_t id_num = decode(id);
         const auto kind = sample_kind_arg(args);  // bpm / stop（BMS 数值定义表）
-        session.exec(std::make_unique<edit::SetSampleValueCommand>(kind, id_num, value));
+        exec_or_throw(session, std::make_unique<edit::SetSampleValueCommand>(kind, id_num, value));
         Json out = Json::object();
         out.set("ok", true);
         out.set("id", static_cast<std::int64_t>(id_num));
@@ -2466,7 +2480,7 @@ class SampleDeleteCommand : public Command {
         };
         const std::uint32_t id_num = decode(id);
         const auto kind = sample_kind_arg(args);  // wav 默认（向后兼容）/ bmp / bpm / stop
-        session.exec(std::make_unique<edit::DeleteSampleCommand>(kind, id_num));
+        exec_or_throw(session, std::make_unique<edit::DeleteSampleCommand>(kind, id_num));
         Json out = Json::object();
         out.set("ok", true);
         out.set("id", static_cast<std::int64_t>(id_num));
@@ -2502,8 +2516,9 @@ class NoteSetSampleCommand : public Command {
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t to_id = decode(to);
-        const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(
-            measure, pos, lane, sample, sub_line, to_id));
+        const bool ok =
+            exec_or_throw(session, std::make_unique<edit::SetNoteSampleCommand>(
+                                       edit::NoteRef{measure, pos, lane, sample, sub_line}, to_id));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));

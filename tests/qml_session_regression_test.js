@@ -26,7 +26,9 @@ function makeContext(refs = [], mode = 'pms9k') {
     const statuses = [];
     const context = vm.createContext({
         window: { selectionRefs: structuredClone(refs), snapNum: 1, snapDen: 4,
-                  chartMode: mode, isPmsChart: isPms(mode) },
+                  chartMode: mode, isPmsChart: isPms(mode), verticalMoveMode: 2,
+                  // SessionController 读 Main 的派生别名（readonly：mode === 0）
+                  get verticalMoveLocked() { return this.verticalMoveMode === 0; } },
         root: { editPage: null },
         chartSession: { playKeyCount: () => isPms(mode) ? 9 : 7 },
         qsTr: text => text,
@@ -117,6 +119,19 @@ test('pure horizontal playable-note move preserves mixed-lane multi-selection ti
     assert.equal(moves[0].to.lane.index, 8);
     assert.equal(moves[1].to.lane, undefined); // 无关轨道不能被压到拖起轨
     assert.deepEqual(plain(context.window.selectionRefs[1].lane), refs[1].lane);
+});
+
+test('vertical lock zeroes time delta but keeps the target lane', () => {
+    const source = ref(1, 8);
+    const { context, calls } = makeContext([source]);
+    context.window.verticalMoveMode = 0;
+    context.moveSelection(1 / 8,
+                          { valid: true, laneKind: 'key', lanePlayer: 0, laneIndex: 3 },
+                          source.lane, 0);
+    const move = plain(calls[0].args.moves[0]);
+    assert.deepEqual(move.to.pos, source.pos);
+    assert.equal(move.to.measure, source.measure);
+    assert.equal(move.to.lane.index, 3);
 });
 
 test('near-zero horizontal delta uses the same threshold as ghost', () => {

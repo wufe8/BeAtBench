@@ -49,6 +49,11 @@ class ChartSession : public QObject {
     /// 滚动）或「内容变化」（contentChanged，视图保持滚动），必要时重建 TimingEngine。
     Q_INVOKABLE void refresh();
 
+    /// 纵向移动三态（GUI 编辑策略）：0=仅横向 1=仅纵向 2=自由；写入活动 EditorSession。
+    /// 打开/新建谱面后由 QML 重置 0（每个文档默认仅横向）。
+    Q_INVOKABLE int verticalMoveMode() const;
+    Q_INVOKABLE void setVerticalMoveMode(int mode);
+
     /// 当前活动会话相对最近一次 load/save 是否未保存。
     bool dirty() const { return m_dirty; }
 
@@ -161,6 +166,8 @@ class ChartSession : public QObject {
     void documentChanged();  ///< 活动会话/文档切换（QML 应重置视图滚动）
     void contentChanged();   ///< 同文档内容变化（QML 保持视图滚动）
     void dirtyChanged();     ///< 未保存状态变化
+    /// 活动会话切换后三态可能变化（QML 整体回读）。
+    void verticalMoveModeChanged();
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
 

@@ -362,9 +362,10 @@ QtObject {
     /// 拖动移动 BGA/BPM/STOP 对象（时间 + 图层[仅 bga]；单 undo 步）。deltaF = 拍位位移。
     /// 拖回游玩轨（key/scratch/pedal）→ note.convertBack（反转换：元事件 → note）。
     function moveMetaObject(kind, obj, deltaF, targetLane) {
+        const effectiveDeltaF = window.verticalMoveLocked ? 0 : deltaF
         const num = window.snapNum, den = window.snapDen
         const slots = Math.max(1, Math.floor(den / num))
-        const snappedF = Math.round(deltaF * slots) / slots
+        const snappedF = Math.round(effectiveDeltaF * slots) / slots
         const m = Math.floor(snappedF)
         const delta = { measure: m, pos: { num: Math.round((snappedF - m) * den), den: den } }
         const target = metaTargetPos(obj.measure, obj.pos, delta)
@@ -397,6 +398,11 @@ QtObject {
             let layer = obj.layer
             if (targetLane && targetLane.valid && targetLane.bgaLayer !== undefined && targetLane.bgaLayer >= 0)
                 layer = targetLane.bgaLayer
+            if (m === 0 && delta.pos.num === 0 && layer === obj.layer) {
+                if (window.verticalMoveLocked)
+                    setStatus(qsTr("仅横向：BGA 只能换图层（Ctrl+L 切到自由）"))
+                return
+            }
             const r = sessionCmd("bga.move", {
                 from: { layer: obj.layer, measure: obj.measure, pos: obj.pos },
                 to: { layer: layer, measure: target.measure, pos: target.pos }
@@ -407,6 +413,11 @@ QtObject {
                           .arg(layer).arg(target.measure).arg(target.pos.num).arg(target.pos.den))
             }
         } else if (kind === "bpm" || kind === "stop") {
+            if (m === 0 && delta.pos.num === 0) {
+                if (window.verticalMoveLocked)
+                    setStatus(qsTr("仅横向：BPM/STOP 只能改值（Ctrl+L 切到自由）"))
+                return
+            }
             const r = sessionCmd("timing.move", {
                 kind: kind,
                 from: { measure: obj.measure, pos: obj.pos },
@@ -438,11 +449,13 @@ QtObject {
             return
         }
         const refs = window.selectionRefs.slice()
+        // 纵向锁：时间位移归零，但保留横向 targetLane（跨命名空间转换也走这里）。
+        const effectiveDeltaF = window.verticalMoveLocked ? 0 : deltaF
         // delta snap：把连续拍位位移吸附到当前槽（snapNum/snapDen 小节），再拆成
         // {measure(int 小节分量), pos(节内分数分量)}。BMS 槽位为离散步长，吸附后对齐网格。
         const num = window.snapNum, den = window.snapDen
         const slots = Math.max(1, Math.floor(den / num))
-        const snappedF = Math.round(deltaF * slots) / slots
+        const snappedF = Math.round(effectiveDeltaF * slots) / slots
         const m = Math.floor(snappedF)
         const frac = snappedF - m
         const delta = { measure: m, pos: { num: Math.round(frac * den), den: den } }
@@ -508,10 +521,10 @@ QtObject {
             // 纵向直接以整数槽表示绝对目标，再由现有有理数工具归一化；
             // 不把「吸附目标 - 离网源」按 snap 分母再量化（会产生二次位移）。
             const origMf = ref.measure + ref.pos.num / ref.pos.den
-            const targetSlotF = (origMf + deltaF) * slots
+            const targetSlotF = (origMf + effectiveDeltaF) * slots
             // 与 ghost 的 std::round 一致，负半槽也向远离零方向舍入。
             const targetSlot = targetSlotF < 0 ? -Math.round(-targetSlotF) : Math.round(targetSlotF)
-            const to = Math.abs(deltaF) <= 1e-12
+            const to = Math.abs(effectiveDeltaF) <= 1e-12
                 ? { measure: ref.measure, pos: ref.pos }
                 : addPosDelta({ measure: 0, pos: { num: 0, den: 1 } },
                               { measure: 0, pos: { num: targetSlot, den: slots } })
@@ -572,9 +585,9 @@ QtObject {
         const r = sessionCmd("note.move", { moves: moves })
         if (r) {
             window.selectionRefs = newRefs   // 保持选中（新位置）
-            const chan = targetLane && targetLane.valid && Math.abs(deltaF) < 0.0001
+            const chan = targetLane && targetLane.valid && Math.abs(effectiveDeltaF) < 0.0001
             setStatus(chan ? qsTr("已移动 %1 个 note（改通道）").arg(r.moved)
-                           : qsTr("已移动 %1 个 note（+%2 拍）").arg(r.moved).arg(deltaF.toFixed(3)))
+                           : qsTr("已移动 %1 个 note（+%2 拍）").arg(r.moved).arg(effectiveDeltaF.toFixed(3)))
         }
     }
     /// 源位置 + 位移增量 → 绝对目标位置（2026-09：实现迁 C++ EditUtils.addPosDelta）。
@@ -610,6 +623,10 @@ QtObject {
     function quantizeSelection() {
         if (!window.selectionRefs || window.selectionRefs.length === 0) {
             setStatus(qsTr("先选中 note（点击/框选）再量化"))
+            return
+        }
+        if (window.verticalMoveLocked) {
+            setStatus(qsTr("仅横向：量化会改时间；先按 Ctrl+L 切到自由"))
             return
         }
         const sn = window.snapNum, sd = window.snapDen
@@ -681,6 +698,10 @@ QtObject {
     function looksLikeBmsText(t) { return editUtils.looksLikeBmsText(t) }
     /// 系统剪贴板 BMS 文本 → 谱面（Ctrl+V 与 Base62 确认对话框共用落点；2026-09）。
     function pasteRawText(sysText, target) {
+        if (window.verticalMoveLocked) {
+            setStatus(qsTr("仅横向：粘贴会按目标小节放置；先按 Ctrl+L 切到自由"))
+            return
+        }
         var r = sessionCmd("clipboard.paste", {
             text: sysText,
             target_measure: target
@@ -699,6 +720,10 @@ QtObject {
         }
     }
     function pasteClipboard() {
+        if (window.verticalMoveLocked) {
+            setStatus(qsTr("仅横向：粘贴会按目标小节放置；先按 Ctrl+L 切到自由"))
+            return
+        }
         // 2026-09 修复：编辑页 Ctrl+V 先读系统剪贴板（切音页「复制 raw」/手写/外部工具复制的
         // BMS 原始行）→ 直接粘贴进谱面；内部剪贴板（框选 Ctrl+C 的 note 行）作兜底。
         var target = 0

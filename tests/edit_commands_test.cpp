@@ -74,8 +74,8 @@ TEST(EditCommands, PutThenUndoRestores) {
     s.load(make_chart());
     const auto before = s.chart();
 
-    ASSERT_TRUE(
-        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7})));
     ASSERT_EQ(s.chart().notes.size(), before.notes.size() + 1);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
 
@@ -87,8 +87,8 @@ TEST(EditCommands, PutThenUndoRestores) {
 TEST(EditCommands, PutRedoReapplies) {
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(
-        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7})));
     ASSERT_TRUE(s.undo());
     ASSERT_TRUE(s.redo());
     EXPECT_EQ(s.chart().notes.size(), 3u);
@@ -99,8 +99,8 @@ TEST(EditCommands, DeleteThenUndoRestores) {
     EditorSession s;
     s.load(make_chart());
     // 删 m1 pos0 key1 sample1
-    ASSERT_TRUE(s.exec(
-        std::make_unique<DeleteNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1})));
     EXPECT_EQ(s.chart().notes.size(), 1u);
     ASSERT_TRUE(s.undo());
     EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(make_chart().notes));
@@ -111,8 +111,8 @@ TEST(EditCommands, DeleteMissingNoteNoop) {
     s.load(make_chart());
     const auto before = norm_notes(s.chart().notes);
     // 不存在的 note → 命令成功但无变化
-    ASSERT_TRUE(s.exec(
-        std::make_unique<DeleteNoteCommand>(9, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(
+        NoteRef{9, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1})));
     EXPECT_EQ(norm_notes(s.chart().notes), before);
     // undo 也无变化（空命令）
     ASSERT_TRUE(s.undo());
@@ -127,7 +127,7 @@ TEST(EditCommands, MoveThenUndoRestores) {
     const auto before = norm_notes(s.chart().notes);
     // 移 m1 pos0 key1 → m2 pos1/4
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 2, Rational(1, 4))));
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}, 2, Rational(1, 4))));
     EXPECT_EQ(s.chart().notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     ASSERT_TRUE(s.undo());
@@ -149,9 +149,9 @@ TEST(EditCommands, MoveMergeConsecutiveDrags) {
     s.load(make_chart());
     // 连续拖动同一 note：m1 pos0 → m1 pos1/4 → m1 pos1/2，应合并为一个 undo 步
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(1, 4))));
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}, 1, Rational(1, 4))));
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(1, 2))));
+        NoteRef{1, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1}, 1, Rational(1, 2))));
     EXPECT_EQ(s.undo_depth(), 1u);  // 合并成一个 undo 步
     // undo 一次直接回到原位
     ASSERT_TRUE(s.undo());
@@ -162,10 +162,10 @@ TEST(EditCommands, MoveDoesNotMergeDifferentNote) {
     EditorSession s;
     s.load(make_chart());
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(1, 4))));
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}, 1, Rational(1, 4))));
     // 不同 note（key2）→ 不合并
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, 1, Rational(3, 4))));
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2}, 1, Rational(3, 4))));
     EXPECT_EQ(s.undo_depth(), 2u);
 }
 
@@ -185,8 +185,8 @@ TEST(EditCommands, DeleteLnBreaksPair) {
     s.load(std::move(c));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 删头 → 尾配对清空
-    ASSERT_TRUE(s.exec(
-        std::make_unique<DeleteNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1)));
+    ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1})));
     ASSERT_EQ(s.chart().notes.size(), 1u);
     EXPECT_FALSE(s.chart().notes[0].value.ln_pair.has_value());
     EXPECT_TRUE(ln_consistent(s.chart().notes));
@@ -199,7 +199,7 @@ TEST(EditCommands, DeleteLnBreaksPair) {
 
 TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
     // 2026-09 用户最终确认：移动只移动选中 note，ln_pair 保持（不自动重连也不断开）。
-    // 默认（move_ln_pair=false）：只移主 note 到 m3，配对端留原位，互指按伙伴值保持。
+    // 只移主 note 到 m3，配对端留原位，互指按伙伴值保持；LN 整体换轨走 MoveLnPairCommand。
     // ⚠️ n1/n2 须同 sample（rebuild 按 (lane,sample) 分组交替配对）。
     EditorSession s;
     Chart c = make_chart();
@@ -212,7 +212,7 @@ TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
     c.notes[1].value.ln_pair = 0;
     s.load(std::move(c));
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3, Rational(0, 1))));
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}, 3, Rational(0, 1))));
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     // 只有 1 个 note 到 m3（配对端留在 m1 pos1/2，未随动）
     std::size_t in_m3 = 0;
@@ -229,50 +229,6 @@ TEST(EditCommands, MoveLnDefaultSingleNoteBreaksPair) {
     EXPECT_TRUE(ln_consistent(s.chart().notes));
     EXPECT_TRUE(s.chart().notes[0].value.ln_pair.has_value());
     EXPECT_TRUE(s.chart().notes[1].value.ln_pair.has_value());
-}
-
-TEST(EditCommands, MoveLnPairModeMovesBothEnds) {
-    // 2026-09 用户最终确认：移动只移动选中 note，ln_pair 保持（不成对随动）。
-    // move_ln_pair=true 参数保留（旧 API），但只移主 note、配对互指按伙伴值保持。
-    EditorSession s;
-    Chart c = make_chart();
-    c.notes[0].value.lane = {0, LaneKind::Key, 1};
-    c.notes[1].value.lane = {0, LaneKind::Key, 1};
-    c.notes[1].value.sample.id = 1;  // 与 n1 同 sample
-    c.notes[0].value.ln_channel = true;
-    c.notes[1].value.ln_channel = true;
-    c.notes[0].value.ln_pair = 1;
-    c.notes[1].value.ln_pair = 0;
-    s.load(std::move(c));
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3, Rational(0, 1), true)));
-    EXPECT_TRUE(ln_consistent(s.chart().notes));
-    // 头在 m3（pos0），尾留 m1（pos1/2）；两者仍互指
-    bool head_at_m3 = false, tail_at_m1 = false;
-    for (const auto& e : s.chart().notes) {
-        if (e.measure == 3 && e.pos == Rational(0, 1) &&
-            e.value.lane == (Lane{0, LaneKind::Key, 1}))
-            head_at_m3 = true;
-        if (e.measure == 1 && e.pos == Rational(1, 2) &&
-            e.value.lane == (Lane{0, LaneKind::Key, 1}))
-            tail_at_m1 = true;
-    }
-    EXPECT_TRUE(head_at_m3);
-    EXPECT_TRUE(tail_at_m1);
-    // undo → 完全还原（含配对）
-    ASSERT_TRUE(s.undo());
-    EXPECT_TRUE(ln_consistent(s.chart().notes));
-    bool at_m1 = false, at_m2 = false;
-    for (const auto& e : s.chart().notes) {
-        if (e.measure == 1 && e.pos == Rational(0, 1) &&
-            e.value.lane == (Lane{0, LaneKind::Key, 1}))
-            at_m1 = true;
-        if (e.measure == 1 && e.pos == Rational(1, 2) &&
-            e.value.lane == (Lane{0, LaneKind::Key, 1}))
-            at_m2 = true;
-    }
-    EXPECT_TRUE(at_m1);
-    EXPECT_TRUE(at_m2);
 }
 
 // —— 随机序列可逆性 ——
@@ -297,14 +253,15 @@ TEST(EditCommands, RandomSequenceReversible) {
         const int o = op(rng);
         switch (o) {
             case 0:
-                ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(m, pos, lane, smp)));
+                ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(NoteRef{m, pos, lane, smp})));
                 break;
             case 1: {
                 // move 需要 from 存在：找容器里第一个 note 移走
                 if (!s.chart().notes.empty()) {
                     const auto& src = s.chart().notes.front();
                     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-                        src.measure, src.pos, src.value.lane, src.value.sample.id, m, pos)));
+                        NoteRef{src.measure, src.pos, src.value.lane, src.value.sample.id}, m,
+                        pos)));
                 }
                 break;
             }
@@ -312,7 +269,7 @@ TEST(EditCommands, RandomSequenceReversible) {
                 if (!s.chart().notes.empty()) {
                     const auto& src = s.chart().notes.front();
                     ASSERT_TRUE(s.exec(std::make_unique<DeleteNoteCommand>(
-                        src.measure, src.pos, src.value.lane, src.value.sample.id)));
+                        NoteRef{src.measure, src.pos, src.value.lane, src.value.sample.id})));
                 }
                 break;
         }
@@ -343,8 +300,8 @@ TEST(EditCommands, DirtyFlagTracksEditUndoSave) {
     s.load(make_chart());
     EXPECT_FALSE(s.is_dirty());
 
-    ASSERT_TRUE(
-        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7})));
     EXPECT_TRUE(s.is_dirty());
 
     ASSERT_TRUE(s.undo());
@@ -365,17 +322,17 @@ TEST(EditCommands, DirtyAfterSaveUndoThenNewEdit) {
     // 保存 → 撤销一步 → 再编辑：新内容与保存点不同，必须仍脏（代际不得复用清洁点号）。
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(
-        s.exec(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7)));
-    ASSERT_TRUE(
-        s.exec(std::make_unique<PutNoteCommand>(3, Rational(0, 1), Lane{0, LaneKind::Key, 4}, 8)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7})));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{3, Rational(0, 1), Lane{0, LaneKind::Key, 4}, 8})));
     EXPECT_EQ(s.undo_depth(), 2u);
     s.mark_clean();
     EXPECT_FALSE(s.is_dirty());
     ASSERT_TRUE(s.undo());
     EXPECT_TRUE(s.is_dirty());
-    ASSERT_TRUE(
-        s.exec(std::make_unique<PutNoteCommand>(4, Rational(0, 1), Lane{0, LaneKind::Key, 5}, 9)));
+    ASSERT_TRUE(s.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{4, Rational(0, 1), Lane{0, LaneKind::Key, 5}, 9})));
     EXPECT_TRUE(s.is_dirty());
     EXPECT_EQ(s.undo_depth(), 2u);  // 新编辑独立一步，不并入保存点前的命令
 }
@@ -522,8 +479,10 @@ TEST(EditCommands, CompositeBatchDeleteOneUndoStep) {
     s.load(make_chart());  // 2 notes
     // 批量删除两个 note（Composite → 一个 undo 步）
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<DeleteNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1));
-    comp->add(std::make_unique<DeleteNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2));
+    comp->add(std::make_unique<DeleteNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}));
+    comp->add(std::make_unique<DeleteNoteCommand>(
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2}));
     ASSERT_TRUE(s.exec(std::move(comp)));
     EXPECT_TRUE(s.chart().notes.empty());
     EXPECT_EQ(s.undo_depth(), 1u);
@@ -537,8 +496,10 @@ TEST(EditCommands, CompositeInvertReverseOrder) {
     EditorSession s;
     s.load(make_chart());
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7));
-    comp->add(std::make_unique<DeleteNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1));
+    comp->add(
+        std::make_unique<PutNoteCommand>(NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7}));
+    comp->add(std::make_unique<DeleteNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}));
     ASSERT_TRUE(s.exec(std::move(comp)));
     ASSERT_EQ(s.chart().notes.size(), 2u);  // 删 1 放 1
     ASSERT_TRUE(s.undo());
@@ -928,10 +889,10 @@ TEST(EditCommands, ClipboardCopyRejectsHalfSelectedLn) {
     c.meta["BPM"] = "130";
     c.meta["LNTYPE"] = "1";
     session.load(std::move(c));
-    ASSERT_TRUE(session.exec(
-        std::make_unique<PutNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, true)));
-    ASSERT_TRUE(session.exec(
-        std::make_unique<PutNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, true)));
+    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1}, true)));
+    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1}, true)));
     ASSERT_EQ(session.chart().notes.size(), 2u);
     const auto before = session.chart();
 
@@ -954,10 +915,10 @@ TEST(EditCommands, ClipboardCopyPasteLnPairRoundtrip) {
     c.meta["BPM"] = "130";
     c.meta["LNTYPE"] = "1";
     session.load(std::move(c));
-    ASSERT_TRUE(session.exec(
-        std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7, true)));
-    ASSERT_TRUE(session.exec(
-        std::make_unique<PutNoteCommand>(2, Rational(1, 2), Lane{0, LaneKind::Key, 3}, 7, true)));
+    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 7}, true)));
+    ASSERT_TRUE(session.exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(1, 2), Lane{0, LaneKind::Key, 3}, 7}, true)));
     Json args = Json::object();
     Json sel = Json::array();
     for (const auto& e : session.chart().notes) sel.push_back(note_sel_item(e));
@@ -1008,4 +969,289 @@ TEST(EditCommands, NoteDeleteSelectionIsSingleUndo) {
     EXPECT_EQ(session.undo_depth(), undo_before + 1);
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(session.chart().notes.size(), before);
+}
+
+// —— 纵向移动锁（GUI 策略；命令层只拦时间变化） ——
+
+TEST(EditCommands, VerticalMoveLockRejectsTimeChangesButAllowsLaneChange) {
+    auto& session = global_editor_session();
+    session.load(make_chart());
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+
+    // 纯换轨（时间不变）允许
+    Json lane_move = Json::object();
+    lane_move.set("from", note_sel_item(session.chart().notes[0]));
+    Json to_lane = Json::object();
+    to_lane.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    to_lane.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "key");
+    lane.set("index", 4);
+    to_lane.set("lane", std::move(lane));
+    lane_move.set("to", std::move(to_lane));
+    Json moves = Json::array();
+    moves.push_back(std::move(lane_move));
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+    Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(session.chart().notes[0].value.lane.index, 4);
+
+    // 改时间（时间坐标变化）拒绝
+    Json time_move = Json::object();
+    time_move.set("from", note_sel_item(session.chart().notes[1]));
+    Json to_time = Json::object();
+    to_time.set("measure", 2);
+    Json pos2 = Json::object();
+    pos2.set("num", 0);
+    pos2.set("den", 1);
+    to_time.set("pos", std::move(pos2));
+    time_move.set("to", std::move(to_time));
+    Json moves2 = Json::array();
+    moves2.push_back(std::move(time_move));
+    Json req2 = Json::object();
+    req2.set("command", "note.move");
+    Json args2 = Json::object();
+    args2.set("moves", std::move(moves2));
+    req2.set("args", std::move(args2));
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_FALSE(resp2.at("ok").as_bool()) << resp2.dump();
+    EXPECT_EQ(resp2.at("error").at("code").as_str(), "time_locked");
+
+    // 解锁后同一移动允许
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::Free);
+    const Json resp3 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp3.at("ok").as_bool()) << resp3.dump();
+}
+
+TEST(EditCommands, VerticalMoveLockBlocksPasteAndQuantize) {
+    auto& session = global_editor_session();
+    session.load(make_chart());
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+    const std::size_t before = session.chart().notes.size();
+    const std::size_t undo_before = session.undo_depth();
+
+    Json paste_args = Json::object();
+    Json lines = Json::array();
+    lines.push_back("#00111:01000000");
+    paste_args.set("lines", std::move(lines));
+    paste_args.set("target_measure", 3);
+    Json paste_req = Json::object();
+    paste_req.set("command", "clipboard.paste");
+    paste_req.set("args", std::move(paste_args));
+    const Json paste_resp = global_registry().dispatch(paste_req);
+    ASSERT_FALSE(paste_resp.at("ok").as_bool()) << paste_resp.dump();
+    EXPECT_EQ(paste_resp.at("error").at("code").as_str(), "time_locked");
+    EXPECT_EQ(session.chart().notes.size(), before);
+    EXPECT_EQ(session.undo_depth(), undo_before);
+
+    Json quant_args = Json::object();
+    Json sel = Json::array();
+    sel.push_back(note_sel_item(session.chart().notes[0]));
+    quant_args.set("selection", std::move(sel));
+    Json snap = Json::object();
+    snap.set("num", 1);
+    snap.set("den", 4);
+    quant_args.set("snap", std::move(snap));
+    Json quant_req = Json::object();
+    quant_req.set("command", "note.quantize");
+    quant_req.set("args", std::move(quant_args));
+    const Json quant_resp = global_registry().dispatch(quant_req);
+    ASSERT_FALSE(quant_resp.at("ok").as_bool()) << quant_resp.dump();
+    EXPECT_EQ(quant_resp.at("error").at("code").as_str(), "time_locked");
+    EXPECT_EQ(session.undo_depth(), undo_before);
+}
+
+TEST(EditCommands, LoadResetsVerticalMoveMode) {
+    EditorSession s;
+    s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+    s.load(make_chart());
+    // core 默认自由（CLI/脚本兼容）；GUI 在 openChart/new 后自行置 LaneOnly
+    EXPECT_EQ(s.vertical_move_mode(), beatbench::edit::VerticalMoveMode::Free);
+    s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+    s.load(make_chart());
+    EXPECT_EQ(s.vertical_move_mode(), beatbench::edit::VerticalMoveMode::Free);
+}
+
+TEST(EditCommands, VerticalMoveLockAllowsBgaLayerButBlocksTime) {
+    Chart c = make_chart();
+    Event<Bga> bga{1, Rational(0, 1), {}};
+    bga.value.layer = 0;
+    bga.value.image.id = 5;
+    c.bga_events.push_back(bga);
+    auto& session = global_editor_session();
+    session.load(std::move(c));
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+
+    auto move = [&](int from_layer, std::uint32_t to_measure, int to_layer) {
+        Json args = Json::object();
+        Json from = Json::object();
+        from.set("layer", static_cast<std::int64_t>(from_layer));
+        from.set("measure", static_cast<std::int64_t>(1));
+        Json pos = Json::object();
+        pos.set("num", static_cast<std::int64_t>(0));
+        pos.set("den", static_cast<std::int64_t>(1));
+        from.set("pos", std::move(pos));
+        args.set("from", std::move(from));
+        Json to = Json::object();
+        to.set("layer", static_cast<std::int64_t>(to_layer));
+        to.set("measure", static_cast<std::int64_t>(to_measure));
+        Json tpos = Json::object();
+        tpos.set("num", static_cast<std::int64_t>(0));
+        tpos.set("den", static_cast<std::int64_t>(1));
+        to.set("pos", std::move(tpos));
+        args.set("to", std::move(to));
+        Json req = Json::object();
+        req.set("command", "bga.move");
+        req.set("args", std::move(args));
+        return global_registry().dispatch(req);
+    };
+
+    // 同时间换图层：允许
+    const Json layer_resp = move(0, 1, 1);
+    ASSERT_TRUE(layer_resp.at("ok").as_bool()) << layer_resp.dump();
+    ASSERT_EQ(session.chart().bga_events.size(), 1u);
+    EXPECT_EQ(session.chart().bga_events[0].value.layer, 1);
+
+    // 改时间：拒绝
+    const auto undo_before = session.undo_depth();
+    const Json time_resp = move(1, 2, 2);
+    ASSERT_FALSE(time_resp.at("ok").as_bool()) << time_resp.dump();
+    EXPECT_EQ(time_resp.at("error").at("code").as_str(), "time_locked");
+    EXPECT_EQ(session.undo_depth(), undo_before);
+}
+
+TEST(EditCommands, TimeOnlyModeBlocksLaneChanges) {
+    auto& session = global_editor_session();
+    session.load(make_chart());
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+
+    // 纯换轨：拒绝（lane_locked）
+    Json lane_move = Json::object();
+    lane_move.set("from", note_sel_item(session.chart().notes[0]));
+    Json to = Json::object();
+    to.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    to.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "key");
+    lane.set("index", 4);
+    to.set("lane", std::move(lane));
+    lane_move.set("to", std::move(to));
+    Json moves = Json::array();
+    moves.push_back(std::move(lane_move));
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_FALSE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("error").at("code").as_str(), "lane_locked");
+    EXPECT_EQ(session.chart().notes[0].value.lane.index, 1);
+
+    // 改时间：放行（TimeOnly 语义）——移 notes[0] 到 m2
+    Json time_move = Json::object();
+    time_move.set("from", note_sel_item(session.chart().notes[0]));
+    Json to_time = Json::object();
+    to_time.set("measure", 2);
+    Json pos2 = Json::object();
+    pos2.set("num", 0);
+    pos2.set("den", 1);
+    to_time.set("pos", std::move(pos2));
+    time_move.set("to", std::move(to_time));
+    Json moves2 = Json::array();
+    moves2.push_back(std::move(time_move));
+    Json req2 = Json::object();
+    req2.set("command", "note.move");
+    Json args2 = Json::object();
+    args2.set("moves", std::move(moves2));
+    req2.set("args", std::move(args2));
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp2.at("ok").as_bool()) << resp2.dump();
+    // move 后容器按 (measure,pos) 重排：按集合性质断言（存在 m2 pos0 的 note）
+    bool moved_to_m2 = false;
+    for (const auto& e : session.chart().notes) {
+        if (e.measure == 2 && e.pos == Rational(0, 1)) moved_to_m2 = true;
+    }
+    EXPECT_TRUE(moved_to_m2);
+
+    // 切回仅横向：纯换轨放行（from 取当前容器首位；同位换轨 = 时间不变）
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+    Json lane_move2 = Json::object();
+    lane_move2.set("from", note_sel_item(session.chart().notes[0]));
+    Json to2 = Json::object();
+    to2.set("measure", 1);
+    Json pos3 = Json::object();
+    pos3.set("num", 1);
+    pos3.set("den", 2);
+    to2.set("pos", std::move(pos3));
+    Json lane2 = Json::object();
+    lane2.set("player", 0);
+    lane2.set("kind", "key");
+    lane2.set("index", 4);
+    to2.set("lane", std::move(lane2));
+    lane_move2.set("to", std::move(to2));
+    Json moves3 = Json::array();
+    moves3.push_back(std::move(lane_move2));
+    Json req3 = Json::object();
+    req3.set("command", "note.move");
+    Json args3 = Json::object();
+    args3.set("moves", std::move(moves3));
+    req3.set("args", std::move(args3));
+    const Json resp3 = global_registry().dispatch(req3);
+    ASSERT_TRUE(resp3.at("ok").as_bool()) << resp3.dump();
+    // move 后容器重排：按集合性质断言（存在 lane key4 的 note）
+    bool lane4_present = false;
+    for (const auto& e : session.chart().notes) {
+        if (e.value.lane.kind == beatbench::LaneKind::Key && e.value.lane.index == 4)
+            lane4_present = true;
+    }
+    EXPECT_TRUE(lane4_present);
+}
+
+TEST(EditCommands, TimeOnlyModeBlocksBgaLayerMove) {
+    Chart c = make_chart();
+    Event<Bga> bga{1, Rational(0, 1), {}};
+    bga.value.layer = 0;
+    bga.value.image.id = 5;
+    c.bga_events.push_back(bga);
+    auto& session = global_editor_session();
+    session.load(std::move(c));
+    // 仅纵向（TimeOnly）：BGA 同时间换图层 = 横向变更，拒绝（lane_locked）
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+    Json args = Json::object();
+    Json from = Json::object();
+    from.set("layer", static_cast<std::int64_t>(0));
+    from.set("measure", static_cast<std::int64_t>(1));
+    Json fpos = Json::object();
+    fpos.set("num", 0);
+    fpos.set("den", 1);
+    from.set("pos", std::move(fpos));
+    args.set("from", std::move(from));
+    Json to = Json::object();
+    to.set("layer", static_cast<std::int64_t>(1));
+    to.set("measure", static_cast<std::int64_t>(1));
+    Json tpos = Json::object();
+    tpos.set("num", 0);
+    tpos.set("den", 1);
+    to.set("pos", std::move(tpos));
+    args.set("to", std::move(to));
+    Json req = Json::object();
+    req.set("command", "bga.move");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_FALSE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("error").at("code").as_str(), "lane_locked");
+    EXPECT_EQ(session.chart().bga_events[0].value.layer, 0);
 }

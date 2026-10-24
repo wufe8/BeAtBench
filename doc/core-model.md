@@ -140,6 +140,16 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
 
 ### 5. ghost 预览 / 后端命令
 
+- **纵向移动三态**：编辑页默认“仅横向”（只换轨/换图层），可切“仅纵向”（只改时间）或“自由”；
+  `Ctrl+L` 在仅横向与自由之间切换。拦截权威在 core 命令层（`EditorSession::exec`），两把方向锁
+  对称：仅横向拦 `EditCommand::changes_time()`（`note.move`、`note.quantize`、`clipboard.paste`、
+  `note.moveRegion`、`note.convert`、`bga.move`、`timing.move`），仅纵向拦 `changes_lane()`
+  （换轨、LN 整体换轨、镜像/旋转、跨命名空间转换、BGA 图层变更）；QML 拖拽只做 ghost 预览，
+  拦截判定以命令层为准。纯放置/删除/改值不受两锁影响（放置是新输入，落点即意愿位置）。
+  协议错误码：`time_locked` / `lane_locked`。core 默认自由（CLI/脚本兼容）；GUI 打开/新建谱面
+  置仅横向，会话切换回读活动文档三态（状态单一事实源在 core）。
+- **锁边界**：`meta.rawEdit` 只替换原始控制行（#RANDOM/#IF 块与未知指令），不碰结构化字段，
+  因此不受两锁拦截——若未来向 raw 行写入数据行（`#mmmcc:`），即绕过两锁，属契约禁止项。
 - `ChartViewItem::drawPreview` 与 `moveSelection` 镜像同一套分派分支，拖拽中先见落点。
 - 后端：note 空间内用 `note.move`（逐个 + Composite = 一个 undo 步；`to.sub_line` 显式给，否则按
   `(measure,pos)` 自动分配不冲突行）；跨命名空间用 `note.convert`。

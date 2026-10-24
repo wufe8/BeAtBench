@@ -94,8 +94,8 @@
 - **已落地**：注册表 + `invoke` 迁移包装（惰性取 QML 根并调用方法）+ `setEnabled`/`setChecked` +
   菜单/工具条枚举（`idsByCategory`/`idsByToolbar` + 分隔线建模）+ `keymap.json` 覆写 +
   快捷键三层（注册默认 < 皮肤 keymap < 用户 QSettings，运行时改绑）；
-  Space / Ctrl+R / Ctrl+, / Esc 进注册表（`edit.playPause` / `edit.render` /
-  `edit.cancel` / `app.settings`）；`UiActionDef.scope` + `conflictId` 作用域隔离（编辑页/切音页
+  Space / Ctrl+R / Ctrl+L / Ctrl+, / Esc 进注册表（`edit.playPause` / `edit.render` /
+  `edit.toggleVerticalMove` / `edit.cancel` / `app.settings`）；`UiActionDef.scope` + `conflictId` 作用域隔离（编辑页/切音页
   同键位不冲突，全局 ↔ 一切互斥）；设置页可改绑（含 Ctrl+, 录键）。
 - **未做**：业务处理全部下沉 C++、Shortcut 元素自动生成（当前仅 `sequence` 查表）、L2 `layout.json` / L3 整壳。
 - 动作装配见 `app/main.cpp`，快捷键消费及启用条件见 `app/qml/Main.qml`。

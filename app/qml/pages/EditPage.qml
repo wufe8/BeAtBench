@@ -67,8 +67,9 @@ Item {
     }
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
     property string editorTool: "pan"
-    /// 平移开关（拖拽选中 note；默认关=自由 2D，勾选=轴锁定）
-    property bool moveMode: false
+    /// 纵向移动三态：0=仅横向，1=仅纵向，2=自由；默认仅横向。
+    property int verticalMoveMode: 0
+    readonly property bool verticalMoveLocked: verticalMoveMode === 0
     /// 放置用采样数值 id（chartSession.sampleValueOf；-1 = 未选）
     property int sampleId: -1
     /// 当前采样展示文本（提示用）
@@ -360,8 +361,11 @@ Item {
                 anchors.fill: parent
                 z: 10
                 color: "transparent"
-                border.width: root.focusRegionId === "editCenter" ? 2 : 1
-                border.color: root.focusRegionId === "editCenter" ? Theme.focusRing : Theme.border
+                border.width: root.focusRegionId === "editCenter" ? 2
+                              : (root.verticalMoveMode === 0 ? 1 : 2)
+                border.color: root.verticalMoveMode !== 0 ? Theme.warning
+                              : (root.focusRegionId === "editCenter" ? Theme.focusRing
+                                                                     : Theme.border)
             }
 
             ColumnLayout {
@@ -417,7 +421,7 @@ Item {
                     showExtras: root.showExtras
                     showGrid: root.showGrid
                     editorTool: root.editorTool
-                    moveMode: root.moveMode
+                    verticalMoveMode: root.verticalMoveMode
                     // M5.2 播放头跟随：单向绑定（root.followPlayhead = chartView 的值；
                     // 用户滚动 ChartView 内部改——此处不设值，只让 root 读）
                     followPlayhead: root.followPlayhead

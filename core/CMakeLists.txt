@@ -23,6 +23,7 @@ add_library(beatbench_core STATIC
     src/codec/bms_channel_maps.cpp
     src/codec/chart_modes.cpp
     src/edit/edit_commands.cpp
+    src/edit/lane_plan.cpp
     src/edit/session_registry.cpp
 )
 target_include_directories(beatbench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

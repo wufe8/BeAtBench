@@ -33,9 +33,9 @@ Item {
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
     // ---- 编辑接线（M3） ----
     property string editorTool: "pan" // select/note/ln/mine/pan（Main 会话状态）
-    property bool moveMode: false          // 平移开关（默认关，2026-09 用户确认：
-                                           // 「默认关闭 note 平移限制」→ 自由 2D 拖动，
-                                           // 时间+通道可同时动；勾选后按轴锁定）
+    /// 纵向移动三态：0=仅横向，1=仅纵向，2=自由；默认仅横向。
+    property int verticalMoveMode: 0
+    readonly property bool verticalMoveLocked: verticalMoveMode === 0
     property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
     property string sampleText: ""       // 当前采样展示（无放置采样时提示）
     property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
@@ -355,6 +355,15 @@ Item {
         }
         return false
     }
+    /// 目标列是否就是拖起 note 的源列（含 BGM 子行）——纵向锁定下纯纵向拖动不应触发移动。
+    function laneHitSameAsSource(hit, src, srcSubLine) {
+        if (!hit || !hit.valid || !src) return false
+        if (hit.lanePlayer !== src.player || hit.laneKind !== src.kind ||
+                hit.laneIndex !== src.index) return false
+        if (src.kind === "bgm" && srcSubLine >= 0 && hit.sub_line !== undefined)
+            return hit.sub_line === srcSubLine
+        return true
+    }
 
     function handlePress(x, y, shift, ctrl) {
         if (y <= 18 && view.bgmHeaderIndexAt(x) >= 0) {
@@ -465,17 +474,9 @@ Item {
                             index: laneHit.laneIndex,
                             sub_line: laneHit.sub_line }
                         : ({})
-                    // 2026-09 平移钳制：ghost 与实际释放逻辑同源（moveMode 单轴）——否则预览
-                    // 显示自由 2D 落点、松开却只走单轴，虚影与实际脱节。
-                    if (root.moveMode) {
-                        const gdx = x - _pressX
-                        const gdy = y - _pressY
-                        if (Math.abs(gdx) > Math.abs(gdy)) {
-                            gDeltaF = 0            // 横向：只改通道，时间不变
-                        } else {
-                            gTargetLane = {}       // 纵向：只改时间，通道不变
-                        }
-                    }
+                    // ghost 与实际释放同源：仅横向时时间归零，仅纵向时目标轨清空。
+                    if (root.verticalMoveMode === 0) gDeltaF = 0
+                    else if (root.verticalMoveMode === 1) gTargetLane = ({})
                     view.movePreview = true
                     view.moveDeltaF = gDeltaF
                     view.moveTargetLane = gTargetLane
@@ -522,23 +523,18 @@ Item {
             let deltaF = 0
             let targetLane = null
             if (_dragged && moved > 4) {
-                const dy = y - _pressY
-                const dx = x - _pressX
-                // 「平移」= 轴锁定（方向主轴）；未勾 = 自由 2D（时间+通道都动）
-                if (root.moveMode) {
-                    // 轴锁定：主导轴决定改什么
-                    if (Math.abs(dx) > Math.abs(dy)) {
-                        // 横向：改通道，时间不变
-                        const laneHit = view.laneAtX(x)
-                        targetLane = laneHit && laneHit.valid ? laneHit : null
-                        deltaF = 0
-                    } else {
-                        // 纵向：改时间，通道不变
-                        deltaF = _moveDeltaF
-                        targetLane = null
-                    }
+                // 三态：仅横向只换轨；仅纵向只改时间；自由两者都动。
+                if (root.verticalMoveMode === 0) {
+                    deltaF = 0
+                    const laneHit = view.laneAtX(x)
+                    targetLane = (laneHit && laneHit.valid &&
+                                  !laneHitSameAsSource(laneHit, root._moveSourceLane,
+                                                       root._moveSourceSubLine))
+                                 ? laneHit : null
+                } else if (root.verticalMoveMode === 1) {
+                    deltaF = _moveDeltaF
+                    targetLane = null
                 } else {
-                    // 自由 2D：时间 + 通道都动
                     deltaF = _moveDeltaF
                     const laneHit = view.laneAtX(x)
                     targetLane = laneHit && laneHit.valid ? laneHit : null
