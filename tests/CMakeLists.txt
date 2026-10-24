@@ -151,6 +151,16 @@ if (Qt6Core_FOUND)
     add_test(NAME slice_workspace_tests COMMAND slice_workspace_test)
     set_tests_properties(slice_workspace_tests PROPERTIES TIMEOUT 20)
 
+    add_executable(audio_task_runner_test audio_task_runner_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp)
+    target_include_directories(audio_task_runner_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(audio_task_runner_test PRIVATE Qt6::Core GTest::gtest_main)
+    set_target_properties(audio_task_runner_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(audio_task_runner_test)
+    add_test(NAME audio_task_runner_tests COMMAND audio_task_runner_test)
+    set_tests_properties(audio_task_runner_tests PROPERTIES TIMEOUT 20)
+
     add_executable(ui_action_registry_test ui_action_registry_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.hpp)  # Q_OBJECT 头须显式列入（AUTOMOC 扫描不可靠）

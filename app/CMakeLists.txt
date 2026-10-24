@@ -17,6 +17,8 @@ add_executable(beatbench
     bridge/EditUtils.cpp
     bridge/EditUtils.hpp         # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/AudioEngine.cpp
+    bridge/AudioTaskRunner.cpp
+    bridge/AudioTaskRunner.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/WaveformOverviewItem.cpp
     bridge/PlayheadOverlayItem.cpp
     bridge/SliceWorkspace.cpp
