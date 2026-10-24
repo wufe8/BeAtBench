@@ -15,9 +15,11 @@
 #include <mutex>
 #include <string>
 
+#include "beatbench/audio/SampleCache.hpp"
 #include "beatbench/audio/WaveformPyramid.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/timing/TimingEngine.hpp"
+#include "bridge/AudioTaskRunner.hpp"
 
 namespace beatbench::app {
 
@@ -125,6 +127,14 @@ class ChartSession : public QObject {
     /// 渲染完成后更新 note 快照（全量渲染后调用；供下次 diff）。
     void updateNoteSnapshot(const beatbench::Chart& chart, const beatbench::TimingEngine& timing);
 
+    /// #50 整轨试听：筛选选中 note 后，从 startSec 渲染到曲末（异步）。
+    /// 结果通过 auditionReady / auditionFinished 通知；不覆盖普通播放渲染。
+    Q_INVOKABLE bool renderAudition(const QVariantList& selection, double startSec,
+                                    qreal sampleRate = 44100.0);
+    std::shared_ptr<const std::vector<float>> auditionPcm() const { return m_auditionPcm; }
+    double auditionSampleRate() const { return m_auditionRate; }
+    double auditionDurationSec() const { return m_auditionDuration; }
+
     /// M4.3c 波形显示：最近渲染的 min/max 金字塔查询。
     /// 帧区间 [frameLo, frameHi)（已夹逼）→ {min, max}（mono 混音）。
     /// 无渲染结果 → {min:0, max:0}。QML 波形组件逐列查询用。
@@ -163,6 +173,9 @@ class ChartSession : public QObject {
     void dirtyChanged();     ///< 未保存状态变化
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
+    /// #50 整轨试听渲染完成（PCM 已可被 AudioEngine 装载）。
+    void auditionReady();
+    void auditionFinished(bool ok, const QString& error);
 
    private:
     void attachActive(bool rebuildTiming);
@@ -190,6 +203,13 @@ class ChartSession : public QObject {
 
     /// M4.3c 波形：最近渲染的 min/max 金字塔（渲染线程构建，UI 线程只读查询）。
     std::shared_ptr<const beatbench::audio::WaveformPyramid> m_waveform;
+    // —— #50 整轨试听 ——
+    beatbench::audio::SampleCache m_auditionCache;
+    // 单线程：试听取消靠渲染循环轮询代际；并发渲染只会白烧 CPU 与内存
+    AudioTaskRunner m_auditionTasks{nullptr, 1};
+    std::shared_ptr<const std::vector<float>> m_auditionPcm;
+    double m_auditionRate = 0.0;
+    double m_auditionDuration = 0.0;
 
     // —— M4.3c 增量重渲染 ——
     /// 渲染时 notes 快照（key → {sampleId, triggerUs}；diff 脏区间用）。

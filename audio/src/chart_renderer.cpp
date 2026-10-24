@@ -160,17 +160,18 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate, dou
 
 RenderResult render_chart_range(
     const beatbench::Chart& chart, const beatbench::TimingEngine& timing, SampleCache& cache,
-    double sampleRate, double t0, double t1,
-    const std::string&
-        sourceDir) {  // 窄版：UTF-8 → UTF-16（Windows 原生；ASCII 路径无损，非 ASCII 走宽版）
+    double sampleRate, double t0, double t1, const std::string& sourceDir,
+    const std::function<bool()>&
+        cancelled) {  // 窄版：UTF-8 → UTF-16（Windows 原生；ASCII 路径无损，非 ASCII 走宽版）
     return render_chart_range_w(chart, timing, cache, sampleRate, t0, t1,
-                                std::filesystem::u8path(sourceDir).wstring());
+                                std::filesystem::u8path(sourceDir).wstring(), cancelled);
 }
 
 RenderResult render_chart_range_w(const beatbench::Chart& chart,
                                   const beatbench::TimingEngine& timing, SampleCache& cache,
                                   double sampleRate, double t0, double t1,
-                                  const std::wstring& sourceDir) {
+                                  const std::wstring& sourceDir,
+                                  const std::function<bool()>& cancelled) {
     RenderResult res;
     res.audio.sampleRate = sampleRate;
     if (sampleRate <= 0.0) {
@@ -219,8 +220,13 @@ RenderResult render_chart_range_w(const beatbench::Chart& chart,
     std::sort(notes.begin(), notes.end(),
               [](const auto& a, const auto& b) { return a.triggerSec < b.triggerSec; });
 
-    // 渲染 [t0,t1)：单遍混入
+    // 渲染 [t0,t1)：单遍混入；协作式取消（后台长渲染的取消点，调用方轮询）
     for (const auto& ev : notes) {
+        if (cancelled && cancelled()) {
+            res.cancelled = true;
+            res.message = "已取消";
+            return res;  // ok=false：调用方丢弃部分结果
+        }
         // 覆盖判定：触发秒 + 采样长 必须 ≥ t0 且 触发秒 ≤ t1
         if (ev.file.empty()) continue;
         // 解码（cache 持有；宽字符路径——Windows 日文目录）

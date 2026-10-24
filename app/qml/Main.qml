@@ -201,6 +201,7 @@ ApplicationWindow {
     // 平移模式（checkbox 开关，默认关）：拖拽选中 note = 移动；勾选=按方向轴锁定
     // （纵向→时间/通道不变；横向→通道/时间不变）。未勾=自由 2D（时间+通道都动）。
     property bool moveMode: false
+    property bool showNoteWaveforms: true
     // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
     property bool lnSelectMode: false
     // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
@@ -376,6 +377,19 @@ ApplicationWindow {
                         required property string modelData
                         text: window.modeDisplayName(modelData)
                         onTriggered: window.newChartAs(modelData)
+                    }
+                }
+            }
+            Menu {
+                title: qsTr("切换为模式")
+                enabled: chartMeta !== null
+                Repeater {
+                    model: chartSession.codecModes()
+                    delegate: MenuItem {
+                        required property string modelData
+                        text: window.modeDisplayName(modelData)
+                        enabled: chartMeta !== null
+                        onTriggered: window.requestModeSwitch(modelData)
                     }
                 }
             }
@@ -638,6 +652,13 @@ ApplicationWindow {
                     ToolTip.text: qsTr("勾选=按方向轴锁定移动（纵向→时间/通道不变，横向→通道/时间不变）；"
                                      + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
                 }
+                BbCheckBox {
+                    text: qsTr("波形")
+                    checked: window.showNoteWaveforms
+                    onToggled: window.showNoteWaveforms = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("选中 note 的采样波形（按采样时长展开；异步解码）")
+                }
                 Item { Layout.fillWidth: true }
                 // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
                 BbCheckBox {
@@ -741,6 +762,7 @@ ApplicationWindow {
                 showGrid: window.showGrid
                 editorTool: window.editorTool
                 moveMode: window.moveMode
+                showNoteWaveforms: window.showNoteWaveforms
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs
@@ -917,6 +939,17 @@ ApplicationWindow {
     function setStatus(msg) {
         window.statusText = msg
         statusClearTimer.restart()
+    }
+    Connections {
+        target: typeof chartSession !== "undefined" ? chartSession : null
+        function onAuditionFinished(ok, error) {
+            if (ok) {
+                if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.auditionPlay()
+                setStatus(qsTr("整轨试听：选中 %1 个 note").arg(window.selectionRefs.length))
+            } else {
+                setStatus(qsTr("整轨试听失败：%1").arg(error))
+            }
+        }
     }
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
@@ -1451,6 +1484,25 @@ ApplicationWindow {
     // 声明或小写 id）→ 先确认。两位 id 在两种进制下数值不同（如 10：Base62=62 / Base36=36），
     // 可能按错误 id 覆盖 #WAV 定义。取消可先去元信息设置 #BASE 62 或重新导出。
     BbDialog {
+        id: modeSwitchDialog
+        title: qsTr("切换谱面模式")
+        width: 460
+        height: 190
+        property string pendingMode: ""
+        property int pendingNotes: 0
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("切换为 %1？\n\n当前 %2 个 note 都能在新模式下表示。保存后通道号将按新表改写；此操作可撤销。")
+                  .arg(window.modeDisplayName(modeSwitchDialog.pendingMode))
+                  .arg(modeSwitchDialog.pendingNotes)
+            color: Theme.text
+            wrapMode: Text.WordWrap
+            font.pixelSize: Theme.fsSmall
+        }
+        onAccepted: window.applyModeSwitch()
+    }
+
+    BbDialog {
         id: base62PasteDialog
         title: qsTr("Base62 粘贴提醒")
         width: 470
@@ -1684,6 +1736,30 @@ ApplicationWindow {
     // 「没有 A 点则从播放线开始播放」）。点击 A/B 的 setLoopA/B 也传入当前红线位置（编辑处即循环点）。
     function togglePlayback() {
         if (typeof audioEngine === "undefined" || !audioEngine) return
+        // #50：有选中 → 试听选中集；无选中 → 现有谱面播放。
+        if (window.selectionRefs && window.selectionRefs.length > 0) {
+            if (audioEngine.auditionPlaying && window.selectionRefs.length === 1)
+                audioEngine.auditionStop()
+            if (window.selectionRefs.length === 1) {
+                if (audioEngine.playing) audioEngine.pause()
+                session.playNoteSample(window.selectionRefs[0])
+                return
+            }
+            if (audioEngine.auditionPlaying) {
+                audioEngine.auditionStop()
+                setStatus(qsTr("已停止整轨试听"))
+                return
+            }
+            if (audioEngine.playing) audioEngine.pause()
+            if (typeof chartSession !== "undefined" && chartSession &&
+                    chartSession.renderAudition(window.selectionRefs, window.currentPosSec(), 44100.0)) {
+                setStatus(qsTr("整轨试听：渲染中（选中 %1 个 note）").arg(window.selectionRefs.length))
+            } else {
+                setStatus(qsTr("整轨试听失败：选中 note 都在红线之前或无可试听内容"))
+            }
+            return
+        }
+        if (audioEngine.auditionPlaying) audioEngine.auditionStop()
         if (audioEngine.playing) { audioEngine.pause(); return }
         var start = (audioEngine.loopA >= 0) ? audioEngine.loopA : window.currentPosSec()
         if (audioEngine.hasPcm) audioEngine.seekSeconds(start)
@@ -1778,6 +1854,30 @@ ApplicationWindow {
         if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "") return
         window.pendingNewMode = ""
         requestDocumentAction("new")
+    }
+    /// 运行中切换模式：先 dry-run 统计；有不可表示 note 直接拒绝（raw 降级尚未实现）。
+    function requestModeSwitch(mode) {
+        if (!chartMeta) return
+        var r = sessionCmd("chart.set_mode", { mode: mode, dry_run: true })
+        if (!r) return
+        if (r.mode === r.current) { setStatus(qsTr("已经是该模式")); return }
+        if (r.unsupported > 0) {
+            setStatus(qsTr("切换失败：有 %1 个 note 无法在 %2 下表示（raw 降级未实现）")
+                      .arg(r.unsupported).arg(window.modeDisplayName(mode)))
+            return
+        }
+        modeSwitchDialog.pendingMode = mode
+        modeSwitchDialog.pendingNotes = r.notes
+        modeSwitchDialog.open()
+    }
+    function applyModeSwitch() {
+        var mode = modeSwitchDialog.pendingMode
+        modeSwitchDialog.close()
+        var r = sessionCmd("chart.set_mode", { mode: mode })
+        if (!r) return
+        window.chartMode = r.mode || mode
+        refreshTiming()
+        setStatus(qsTr("已切换为 %1（保存后按新表写通道）").arg(window.modeDisplayName(mode)))
     }
     /// 「新建为模式」子菜单直建：跳过模式对话框（模式已定），未保存确认仍走。
     function newChartAs(mode) {

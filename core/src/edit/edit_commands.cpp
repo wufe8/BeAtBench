@@ -640,6 +640,31 @@ std::string MoveNoteCommand::describe() const {
     return s;
 }
 
+// ---------- SetChartModeCommand（issue #26 阶段二安全子集） ----------
+
+SetChartModeCommand::SetChartModeCommand(std::string mode) : m_mode(std::move(mode)) {}
+
+void SetChartModeCommand::apply(Chart& chart) {
+    m_old = chart.mode_id;
+    if (const auto it = chart.meta.find("PLAYER"); it != chart.meta.end())
+        m_old_player = it->second;
+    else
+        m_old_player.reset();
+    chart.mode_id = m_mode;
+    // 写回 #PLAYER：dp=3、battle=4、sp7k/pms9k=1；writer 的显式优先规则不变。
+    chart.meta["PLAYER"] = m_mode == "dp" ? "3" : (m_mode == "battle" ? "4" : "1");
+}
+
+void SetChartModeCommand::invert(Chart& chart) {
+    chart.mode_id = m_old;
+    if (m_old_player)
+        chart.meta["PLAYER"] = *m_old_player;
+    else
+        chart.meta.erase("PLAYER");
+}
+
+std::string SetChartModeCommand::describe() const { return "切换谱面模式 → " + m_mode; }
+
 // ---------- ToggleLnCommand（单点 ↔ LN；只改 ln_channel，rebuild 接管配对） ----------
 
 ToggleLnCommand::ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane,

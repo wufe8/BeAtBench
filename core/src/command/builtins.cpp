@@ -1381,6 +1381,64 @@ class SessionLoadCommand : public Command {
     }
 };
 
+// chart.set_mode：运行中切换谱面模式（issue #26 阶段二安全子集）。
+// 预检新模式下每个 note 仍可写出（bms_channel_for_mode 非空）；有不可表示项 → 拒绝，
+// 不丢数据（raw 降级/重吸收尚未实现，完整阶段二后续补）。dry_run 返回统计，供 UI 确认。
+class ChartSetModeCommand : public Command {
+   public:
+    std::string_view name() const override { return "chart.set_mode"; }
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const std::string& mode = arg_str(args, "mode");
+        if (!chart_mode_by_id(mode)) throw CommandError("bad_args", "未知模式: " + mode);
+        const auto& chart = session.chart();
+        std::int64_t unsupported = 0;
+        for (const auto& ev : chart.notes) {
+            const auto ch =
+                bms::bms_channel_for_mode(mode, ev.value.lane, ev.value.ln_channel, ev.value.kind);
+            if (ch.empty()) ++unsupported;
+        }
+        const auto current = chart.mode_id.value_or("sp7k");
+        if (arg_bool(args, "dry_run", false)) {
+            Json out = Json::object();
+            out.set("ok", true);
+            out.set("current", current);
+            out.set("mode", mode);
+            out.set("notes", static_cast<std::int64_t>(chart.notes.size()));
+            out.set("unsupported", unsupported);
+            out.set("supported", static_cast<std::int64_t>(chart.notes.size()) - unsupported);
+            out.set("unchanged", mode == current);
+            return out;
+        }
+        if (mode == current) {
+            Json out = Json::object();
+            out.set("ok", true);
+            out.set("current", current);
+            out.set("mode", mode);
+            out.set("notes", static_cast<std::int64_t>(chart.notes.size()));
+            out.set("unsupported", static_cast<std::int64_t>(0));
+            out.set("unchanged", true);
+            out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+            return out;
+        }
+        if (unsupported > 0) {
+            throw CommandError("mode_unrepresentable",
+                               "有 " + std::to_string(unsupported) +
+                                   " 个 note 无法在新模式下表示；raw 降级尚未实现（未修改谱面）");
+        }
+        const bool ok = session.exec(std::make_unique<beatbench::edit::SetChartModeCommand>(mode));
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("current", current);
+        out.set("mode", mode);
+        out.set("notes", static_cast<std::int64_t>(chart.notes.size()));
+        out.set("unsupported", static_cast<std::int64_t>(0));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
+    }
+};
+
 // session.new：新建空谱面（2026-09）。创建 0 小节的空 Chart 载入会话；前端把编辑 floor seed 到
 // 1（渲染/可放小节 0）。放进 note 即长真实小节数；空小节保存时被 BMS 丢弃。路径空 → 保存走另存为。
 class SessionNewCommand : public Command {
@@ -2525,6 +2583,7 @@ void register_builtin_commands(Registry& registry) {
     // M3 编辑命令（追加；会话命令，作用在 args.session_id 或活动会话）
     registry.add(std::make_unique<SessionLoadCommand>());
     registry.add(std::make_unique<SessionNewCommand>());  // 新建空谱面（2026-09 编辑态小节数）
+    registry.add(std::make_unique<ChartSetModeCommand>());
     registry.add(std::make_unique<SessionSaveCommand>());
     registry.add(std::make_unique<SessionDirtyCommand>());
     registry.add(std::make_unique<NotePutCommand>());

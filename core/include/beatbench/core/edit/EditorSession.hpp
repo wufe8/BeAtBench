@@ -325,6 +325,23 @@ class MetaEditCommand : public EditCommand {
     std::optional<IdBase> m_old_id_base;
 };
 
+/// 切换谱面模式（issue #26 阶段二的安全子集）：只改 mode_id，不动 note。
+/// 调用方（chart.set_mode 协议命令）负责预检新模式下所有 note 都可表示；本命令不做
+/// 格式相关的映射判断。applied/invert 精确恢复旧 mode_id；单个 undo 步。
+class SetChartModeCommand : public EditCommand {
+   public:
+    explicit SetChartModeCommand(std::string mode);
+    std::string name() const override { return "chart.set_mode"; }
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    std::string describe() const override;
+
+   private:
+    std::string m_mode;
+    std::optional<std::string> m_old;
+    std::optional<std::string> m_old_player;
+};
+
 /// 原始控制行整体替换（「扩展代码」格式兜底，2026-09）：把 chart.raw_lines 整组换成新值。
 /// 只替换「原始行」（#RANDOM/#IF/#SWITCH 块、未知控制指令；写回时原样输出），
 /// 不触碰结构化字段（meta/notes/timing）。原子 undo（快照旧/新整组）。
