@@ -159,8 +159,12 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
         1, static_cast<std::size_t>(
                std::ceil(cfg.minGapSec * sampleRate / static_cast<double>(hop) - 1e-9)));
     std::vector<std::size_t> accepted;
-    std::sort(candidates.begin(), candidates.end(),
-              [](const Candidate& a, const Candidate& b) { return a.value > b.value; });
+    // flux 降序 + frame 升序平局打破：flux 位级相等（合成音/静音段常见）时
+    // 不稳定排序的顺序随标准库实现漂移，破坏「同输入必同输出」的确定性承诺。
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.value != b.value) return a.value > b.value;
+        return a.frame < b.frame;
+    });
     for (const auto& c : candidates) {
         bool ok = true;
         for (const std::size_t a : accepted) {
