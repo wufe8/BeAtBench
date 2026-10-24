@@ -5,7 +5,7 @@
 // **不加载/解码任何音频**。资源是否存在只做文件系统查询（含「同名异扩展」与
 // 大小写回退，与 bms lint 的 missing_wav 口径一致）。
 //
-// 遍历无条件（子目录属于这首歌，doc/07 §1/§2）；目录排除只作用于"枚举"，
+// 遍历无条件（子目录属于这首歌，doc/project-workflow.md §1/§2）；目录排除只作用于"枚举"，
 // **已解析引用优先**——被引用的文件一定出现在资源表里（切音导出目录的成品切片
 // 正是资源更新的操作对象）。
 #include <algorithm>
@@ -72,7 +72,7 @@ bool is_video_ext(const std::string& e) {
     return e == "mpg" || e == "mpeg" || e == "avi" || e == "mp4" || e == "wmv" || e == "mov";
 }
 
-/// 资源表收录的相关文件类型（doc/07 §2：音频、图片、视频）。
+/// 资源表收录的相关文件类型（doc/project-workflow.md §2：音频、图片、视频）。
 bool is_relevant_resource_ext(const std::string& e) {
     return is_audio_ext(e) || is_image_ext(e) || is_video_ext(e);
 }
@@ -213,7 +213,7 @@ std::optional<Position> last_position(const Chart& chart) {
 }
 
 /// 含 #RANDOM/#IF 等分支块（parser 把控制指令原样放进 raw_lines）。
-/// 项目页据此显示徽标、lint 提示"该谱不要做保存操作"（doc/07 §9.7）。
+/// 项目页据此显示徽标、lint 提示"该谱不要做保存操作"（doc/project-workflow.md §9.7）。
 bool has_random_blocks(const Chart& chart) {
     static const std::set<std::string> kDirectives = {"RANDOM", "IF",        "ELSEIF", "ELSE",
                                                       "ENDIF",  "SETRANDOM", "SWITCH"};

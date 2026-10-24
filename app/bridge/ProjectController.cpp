@@ -72,7 +72,7 @@ QVariantMap resourceToMap(const beatbench::project::ResourceRef& r,
     m["referenced"] = r.referenced();
     m["used"] = r.used();
     m["refs"] = static_cast<qlonglong>(r.total_refs);
-    // 状态标签（项目页直接用；口径见 doc/07 §9.7）
+    // 状态标签（项目页直接用；口径见 doc/project-workflow.md §9.7）
     QString state;
     if (!r.on_disk && r.referenced())
         state = QStringLiteral("缺失");

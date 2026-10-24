@@ -20,9 +20,9 @@ class ProjectRowsModel;
 class ProjectFilterModel;
 struct ProjectSnapshot;
 
-/// M7 项目页桥层（doc/07 §9.1 阶段①）：把 `project.scan` 的结果喂给 QML。
+/// 项目页桥层（doc/project-workflow.md §9.1）：把 `project.scan` 的结果喂给 QML。
 ///
-/// 两段式（doc/07 §2"基础信息尽早出现"）：
+/// 两段式（doc/project-workflow.md §2"基础信息尽早出现"）：
 ///   1. 枚举（快，实测 50 谱包 ≈0.1s）→ charts 先出路径/大小，state = "parsing"；
 ///   2. 后台解析（≈4.7s）→ 补元信息/统计/资源引用，state = "ready"。
 /// 扫描跑在 QThreadPool；重复 scan() 会把旧任务标记为过期（回调丢弃）。
@@ -46,7 +46,7 @@ class ProjectController : public QObject {
     Q_PROPERTY(int missingCount READ missingCount NOTIFY summaryChanged)
     Q_PROPERTY(int unreferencedCount READ unreferencedCount NOTIFY summaryChanged)
     /// 切音目标集合（项目页勾选；相对项目根路径）
-    /// 已打开文档状态：绝对路径 → {dirty, active, id}（doc/07 §9.2 项目页兼任已打开视图）
+    /// 已打开文档状态：绝对路径 → {dirty, active, id}（doc/project-workflow.md §9.2 项目页兼任已打开视图）
     Q_PROPERTY(QVariantMap openStates READ openStates NOTIFY openStatesChanged)
     Q_PROPERTY(QStringList sliceTargets READ sliceTargets NOTIFY sliceTargetsChanged)
     Q_PROPERTY(int sliceTargetCount READ sliceTargetCount NOTIFY sliceTargetsChanged)

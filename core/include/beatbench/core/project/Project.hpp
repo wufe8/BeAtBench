@@ -7,16 +7,16 @@
 #include <string_view>
 #include <vector>
 
-/// 项目域模型（M7，doc/07 §2）：**一个文件夹 = 一首歌的项目**，内部子目录属于它
+/// 项目域模型（doc/project-workflow.md §2）：**一个文件夹 = 一首歌的项目**，内部子目录属于它
 /// （遍历无条件，不由扫描拆成多曲合集）。
 ///
 /// 原则：
 ///  - Project 只做**索引与分析**，不拥有文档；打开谱面仍走 session.load。
 ///  - 扫描只读**文本**，不加载/解码音频——"打开一首歌的文件夹"必须可用。
 ///  - 基础信息尽早出现：`ScanOptions::parse = false` 只枚举（路径/大小/时间），
-///    解析（元信息/统计/引用）由 `scan_parse` 在后台补齐（doc/07 §2/§9.7）。
+///    解析（元信息/统计/引用）由 `scan_parse` 在后台补齐（doc/project-workflow.md §2/§9.7）。
 ///  - **引用优先于目录排除**：任何被谱面引用到的文件都出现在资源表里
-///    （切音导出目录里的成品切片正是资源更新的操作对象，doc/07 §2）。
+///    （切音导出目录里的成品切片正是资源更新的操作对象，doc/project-workflow.md §2）。
 namespace beatbench::project {
 
 /// 扫描失败（根路径非法等）。code = 稳定机器码（协议用），what() = 中文消息。
@@ -29,7 +29,7 @@ class ProjectError : public std::runtime_error {
     std::string code_;
 };
 
-/// 引用来源：文件 ← 谱面 / 定义 ID / 头部字段（doc/07 §2）。
+/// 引用来源：文件 ← 谱面 / 定义 ID / 头部字段（doc/project-workflow.md §2）。
 /// 保留出处而非只记计数——"同一文件被多谱不同 ID 使用"要能准确列出。
 enum class RefSource : std::uint8_t {
     Define,       ///< #WAVxx / #BMPxx 定义表条目
@@ -87,7 +87,7 @@ struct ChartRef {
     std::string read_error;             ///< 非空 = 该文件读取失败（仍列出，便于面板标红）
 };
 
-/// 资源条目：**以文件为单位**（doc/07 §2），不是以槽位为单位。
+/// 资源条目：**以文件为单位**（doc/project-workflow.md §2），不是以槽位为单位。
 /// 状态维度（§9.7）：实际缺失 / 扩展名回退 / 大小写差异 / 项目外 / 已定义未使用。
 struct ResourceRef {
     std::string path;               ///< 实际文件的项目根相对路径；缺失时 = 声明的归一路径；
@@ -141,7 +141,7 @@ Project scan(const std::string& root, const ScanOptions& opts = {});
 
 /// 对 `scan(parse=false)` 的结果补解析（元信息/统计/引用来源）。
 /// 可对同一 Project 重复调用：已 parsed 的条目跳过；资源表按引用合并。
-/// 供 GUI 先枚举、再后台补齐（doc/07 §2"基础信息尽早出现"）。
+/// 供 GUI 先枚举、再后台补齐（doc/project-workflow.md §2"基础信息尽早出现"）。
 void scan_parse(Project& proj, const ScanOptions& opts = {});
 
 }  // namespace beatbench::project

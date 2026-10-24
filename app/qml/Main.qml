@@ -1130,7 +1130,7 @@ ApplicationWindow {
         onRejected: { /* 用户取消 */ }
     }
 
-    // ---------- M7 项目页：打开歌曲文件夹 + 选中动作接线（doc/07 §9.1 阶段①） ----------
+    // ---------- 项目页：打开歌曲文件夹 + 选中动作接线（doc/project-workflow.md §9.1） ----------
     FolderDialog {
         id: folderDialog
         title: qsTr("打开歌曲文件夹（一首歌的项目）")
