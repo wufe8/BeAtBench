@@ -9,8 +9,8 @@
   一切格式细节收敛在 bms codec 的映射表（`BmsChannelRule`）。
 - **事件容器按 (measure, pos) 升序**保持（乱序会破坏二分查找与时序换算）。
 - **命令对象 = 唯一操作面**：`core/include/beatbench/core/command/`（单数，命名空间 `beatbench::cmd`）；
-  M0 遗留的复数 `commands/` 目录已删除，不存在。
+  复数 `commands/` 目录不存在。
 - 命名空间 `beatbench::<模块>`；文件 snake_case、类型 PascalCase；注释中文；
   每文件带 SPDX 头 `// SPDX-License-Identifier: GPL-3.0-only`。
 - `core/include/beatbench/core/json/` 是最小 JSON 实现（零依赖，命令协议用），不引第三方 JSON 库。
-- `#RANDOM/#IF` 块为 raw 兜底（播放/时序走 `expand_variants`）；结构化 AST 是 M9 规划（doc/development.md 六、）。
+- `#RANDOM/#IF` 块为 raw 兜底（播放/时序走 `expand_variants`）；结构化 AST 是已拍板方向，见 `doc/roadmap.md`。

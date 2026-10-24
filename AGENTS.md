@@ -1,12 +1,12 @@
 # AGENTS.md — 协作者 / AI 新会话入口
 
 > 本文件只回答三件事：**去哪找文件**、**新文件放哪**、**文档怎么维护**。
-> 项目介绍见 `README.md`；当前状态、构建、代码约定见 `doc/development.md`。
+> 项目介绍见 `README.md`；构建、代码约定与行为边界见 `doc/development.md`。
 
 ## 1. 新会话三步
 
 1. **本文件**（落点与维护约定）；
-2. `doc/development.md` —— 现状 / 构建 / 代码约定；
+2. `doc/development.md` —— 构建 / 代码约定 / 行为边界；
 3. 按任务查 §6 文档地图。
 
 ## 2. 仓库布局
@@ -91,14 +91,15 @@ markdown 内仓库路径指针有效性、中文弯引号。
 
 | 文档 | 什么时候读 |
 |---|---|
-| `doc/development.md` | **新会话必读**：现状/构建/约定/里程碑速览 |
+| `doc/development.md` | **新会话必读**：构建/约定/行为边界 |
+| `doc/roadmap.md` | 已拍板方向与顺序（不记录进度） |
 | `doc/core-model.md` | 模型/调用架构/切音工作台/note 移动机制设计 |
 | `doc/command-protocol.md` | 命令 JSON 协议正式规格、插件三层漏斗、时间单位边界 |
-| `doc/project-workflow.md` | M7 项目化：多谱面导入/会话/对比/批量/打包 |
+| `doc/project-workflow.md` | 项目与资源工作流：多谱面导入/会话/对比/批量/打包 |
 | `doc/skin-system.md` | GUI 栈决策、分层皮肤系统（L1/L2/L3）、surface 清单 |
 | `doc/action-registry.md` | UI 动作注册表：id 命名、元数据、快捷键/皮肤触发 |
 | `doc/dev-workflow.md` | 分支模型、日常门禁、tag→发布放行、备份 |
-| [ASIO 音频输出](<doc/12-ASIO音频输出.md>) | Windows 可选 ASIO 构建、SDK/许可、打包与运行恢复、待人工验收矩阵 |
+| [ASIO 音频输出](<doc/12-ASIO音频输出.md>) | Windows 可选 ASIO 构建、SDK/许可、打包与运行恢复、硬件验收边界 |
 | `doc/packaging.md` | 打包流水线、deb/rpm/arch 与 Windows 产物、安装布局、发布流程 |
 | `doc/ui-design.md` | 页面式信息架构、区域设计、设计 token、术语约定 |
 | `doc/bms-format-notes.md` | BMS 格式逆向笔记（头部/定义/通道/长音/随机） |

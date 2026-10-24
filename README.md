@@ -45,16 +45,16 @@ sudo pacman -U ./beatbench-v0.4.2<!-- x-release-please-version -->-1-x86_64.pkg.
 音频与 MIDI 自动进入“切音 / 对音”工作台。
 
 
-## 状态
+## 功能
 
-**M1–M6 已完成**：“谱面编辑 → 试听 → 发布”全链路可用。
+“谱面编辑 → 试听 → 发布”全链路可用。
 
 - **核心 / 工具**：格式无关模型 + BMS codec / timing；CLI `info` / `check` / `convert` / `version`（支持 `--json`）
 - **编辑器**：编辑、时间轴、元信息、采样、BGA、lint、剪贴板、多文档、动作注册表、皮肤（L1）；note 编辑增强
   （鼠标预览 ghost、多选拖动、BGM 相对距离、`bgm_line→sub_line` 泛化）、小节编辑（02 小节长度、变拍高、加一小节、新建谱面）
 - **音频**：单发试听、解码缓存、波形（秒标尺、增量重渲染）、离线渲染、随时播放（Space、PcmEngine 零拷贝、
   播放时钟、编辑即停）、播放头红线与视口跟随、A-B 循环、seek
-- **切音工作台**：导入、切分（含 M6.5 瞬态检测自动选切音点）、导出、手动切分点、切片编辑、剪贴板整段粘贴
+- **切音工作台**：导入、切分（含瞬态检测自动选切音点）、导出、手动切分点、切片编辑、剪贴板整段粘贴
 
 **版本与完整变更历史**：[`CHANGELOG.md`](CHANGELOG.md) · [Releases](https://github.com/wufe8/BeAtBench/releases)
 （0.3.x 起提供 Linux deb/rpm/arch 与 Windows zip；CHANGELOG 自 0.4.0 起由 release-please 依据 Conventional Commits 自动生成）
@@ -65,11 +65,10 @@ sudo pacman -U ./beatbench-v0.4.2<!-- x-release-please-version -->-1-x86_64.pkg.
 
 - **LN 边界**：LN 通道按同轨时间相邻端点配对，不要求头尾采样 ID 相同；LNOBJ 独立连接，编辑器不自动补删/移动音符或改源通道、采样。孤立端点仅 lint，保留 LN 通道身份；真正 LNTYPE2（废弃 MGQ）未实现且不计划实现，详见 [BMS 笔记](<doc/bms-format-notes.md#长音>)。
 
-### 计划中
+## 路线图
 
-- **M7 项目化工作流**：单曲文件夹、多文档、资源管理与 A/B 对照。当前 B 只读；B 编辑、同文档跨窗格编排及缺失重定位属于设计目标，不代表已交付。目标与安全边界见 [M7 工作流](<doc/project-workflow.md>)。
-- **M8 边界与协议**：SliceWorkspace 边界拆分、CSV 时标导出、MIDI tempo 接入、codec 能力声明、跨平台 CI。
-- **M9 / M10+**：bmson、项目/工作区持久化、`#RANDOM/#IF` 结构化 AST；i18n、试玩判定、性能基准、外部预览适配器、L2 布局皮肤。
+已拍板的方向与顺序见 [路线图](doc/roadmap.md)。路线图只记录方向，不记录进度；
+当前可用功能以上文“功能”与“已知问题”为准。
 
 ## 平台支持
 
@@ -82,7 +81,7 @@ sudo pacman -U ./beatbench-v0.4.2<!-- x-release-please-version -->-1-x86_64.pkg.
 架构保持跨平台（`core/` 零 Qt 且不引入 Win 专有 API；GUI/CLI 的平台相关代码均有 `#ifdef`
 守卫）。三平台的“能编译、测得过、GUI 能起画”由 CI 持续钉住
 （`.github/workflows/ci.yml`，详见 `doc/development.md` 四、）；Linux deb/rpm/arch 由 `package.yml`
-产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/packaging.md`），macOS 发布产物与实时音频输出的人工验证未排期。
+产出、Windows zip 由 `release.yml` 产出并挂 GitHub Release（见 `doc/packaging.md`），macOS 发布产物与实时音频输出尚未验证。
 
 当前边界：① macOS 产物的 `.app` 内不含 `BeatBench/` QML 模块目录，双击
 `.app` 无法启动——需 `QML2_IMPORT_PATH` 指向构建树（见上方冒烟命令），模块入包属
@@ -93,10 +92,11 @@ macOS 打包范畴；② GUI 交互中悬停高亮可自动化验证（X11 指�
 
 | 文档 | 内容 |
 |---|---|
-| [`doc/development.md`](doc/development.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、当前状态 |
+| [`doc/development.md`](doc/development.md) | **新会话引导（简版）**：仓库布局、构建命令、代码约定、行为边界 |
+| [`doc/roadmap.md`](doc/roadmap.md) | 已拍板的方向与顺序（只记录方向，不记录进度） |
 | [`doc/core-model.md`](doc/core-model.md) | **模型/架构权威**：格式无关模型、命令即接口、切音工作台设计、note 移动机制 |
 | [`doc/command-protocol.md`](doc/command-protocol.md) | **命令 JSON 协议正式规格**、插件分层、时间单位边界 |
-| [`doc/project-workflow.md`](doc/project-workflow.md) | **M7 设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
+| [`doc/project-workflow.md`](doc/project-workflow.md) | **项目与资源工作流设计**：文件夹即项目、多谱面对比/批量/打包、`project.*` 命令 |
 | [`doc/skin-system.md`](doc/skin-system.md) | GUI 栈决策（Qt Quick/QML）+ 分层皮肤系统（L1/L2/L3） |
 | [`doc/action-registry.md`](doc/action-registry.md) | UI 动作注册表（换肤/快捷键前置） |
 | [`doc/dev-workflow.md`](doc/dev-workflow.md) | **开发工作流**：分支模型、日常门禁、tag→发布放行、备份 |
