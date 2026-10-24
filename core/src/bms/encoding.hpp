@@ -14,7 +14,7 @@ DetectedEncoding detect_encoding(std::string_view bytes);
 bool is_valid_utf8(std::string_view in);
 
 /// SJIS(CP932) → UTF-8。无效序列 → U+FFFD。
-/// 表见 sjis_table.hpp（tools/gen_sjis_table.ps1 生成，三平台一致）。
+/// 表见 sjis_table.hpp（tools/gen_sjis_table.py 生成（数据源 cp932_map.tsv，三平台一致））。
 std::string shiftjis_to_utf8(std::string_view in);
 
 /// UTF-8 → SJIS(CP932)。不可映射码点 → '?'（BMSE 写回惯例）。
