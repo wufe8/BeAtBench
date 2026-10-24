@@ -533,6 +533,19 @@ std::string MoveNoteCommand::describe() const {
     return s;
 }
 
+// ---------- SetChartModeCommand（issue #26 阶段二安全子集） ----------
+
+SetChartModeCommand::SetChartModeCommand(std::string mode) : m_mode(std::move(mode)) {}
+
+void SetChartModeCommand::apply(Chart& chart) {
+    m_old = chart.mode_id;
+    chart.mode_id = m_mode;
+}
+
+void SetChartModeCommand::invert(Chart& chart) { chart.mode_id = m_old; }
+
+std::string SetChartModeCommand::describe() const { return "切换谱面模式 → " + m_mode; }
+
 // ---------- ToggleLnCommand（单点 ↔ LN；只改 ln_channel，rebuild 接管配对） ----------
 
 ToggleLnCommand::ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane,

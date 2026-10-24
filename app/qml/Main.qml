@@ -525,6 +525,19 @@ ApplicationWindow {
                     }
                 }
             }
+            Menu {
+                title: qsTr("切换为模式")
+                enabled: chartMeta !== null
+                Repeater {
+                    model: chartSession.codecModes()
+                    delegate: MenuItem {
+                        required property string modelData
+                        text: window.modeDisplayName(modelData)
+                        enabled: chartMeta !== null
+                        onTriggered: window.requestModeSwitch(modelData)
+                    }
+                }
+            }
         }
         Menu {
             delegate: MenuItem {
@@ -1983,6 +1996,25 @@ ApplicationWindow {
     // 声明或小写 id）→ 先确认。两位 id 在两种进制下数值不同（如 10：Base62=62 / Base36=36），
     // 可能按错误 id 覆盖 #WAV 定义。取消可先去元信息设置 #BASE 62 或重新导出。
     BbDialog {
+        id: modeSwitchDialog
+        title: qsTr("切换谱面模式")
+        width: 460
+        height: 190
+        property string pendingMode: ""
+        property int pendingNotes: 0
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("切换为 %1？\n\n当前 %2 个 note 都能在新模式下表示。保存后通道号将按新表改写；此操作可撤销。")
+                  .arg(window.modeDisplayName(modeSwitchDialog.pendingMode))
+                  .arg(modeSwitchDialog.pendingNotes)
+            color: Theme.text
+            wrapMode: Text.WordWrap
+            font.pixelSize: Theme.fsSmall
+        }
+        onAccepted: window.applyModeSwitch()
+    }
+
+    BbDialog {
         id: base62PasteDialog
         objectName: "base62PasteDialog"
         title: qsTr("Base62 粘贴提醒")
@@ -2342,6 +2374,39 @@ ApplicationWindow {
         if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "") return
         window.pendingNewMode = ""
         requestDocumentAction("new")
+    }
+    /// 运行中切换模式：先 dry-run 统计；有不可表示 note 直接拒绝（raw 降级尚未实现）。
+    function requestModeSwitch(mode) {
+        if (!chartMeta) return
+        var resp = JSON.parse(beatbench.dispatch(JSON.stringify({
+            command: "chart.set_mode", args: { mode: mode, dry_run: true }
+        })))
+        if (!resp.ok) { setStatus(resp.error.code + ": " + resp.error.message); return }
+        var r = resp.result
+        if (r.mode === r.current) { setStatus(qsTr("已经是该模式")); return }
+        if (r.unsupported > 0) {
+            setStatus(qsTr("切换失败：有 %1 个 note 无法在 %2 下表示（raw 降级未实现）")
+                      .arg(r.unsupported).arg(window.modeDisplayName(mode)))
+            return
+        }
+        modeSwitchDialog.pendingMode = mode
+        modeSwitchDialog.pendingNotes = r.notes
+        modeSwitchDialog.open()
+    }
+    function applyModeSwitch() {
+        var mode = modeSwitchDialog.pendingMode
+        modeSwitchDialog.close()
+        var resp = JSON.parse(beatbench.dispatch(JSON.stringify({
+            command: "chart.set_mode", args: { mode: mode }
+        })))
+        if (!resp.ok) {
+            setStatus(resp.error.code + ": " + resp.error.message)
+            return
+        }
+        window.chartMode = mode
+        chartSession.refresh()
+        refreshTiming()
+        setStatus(qsTr("已切换为 %1（保存后按新表写通道）").arg(window.modeDisplayName(mode)))
     }
     /// 「新建为模式」子菜单直建：跳过模式对话框（模式已定），未保存确认仍走。
     function newChartAs(mode) {
