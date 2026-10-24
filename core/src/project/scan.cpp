@@ -460,7 +460,8 @@ void scan_parse(Project& proj, const ScanOptions& opts) {
 
         // 文件 ← 谱面 / 定义 ID / 头部字段（保留出处，不只记计数）
         auto add_use = [&](const std::string& declared, RefSource source, std::string use_kind,
-                           std::string id, std::string field, std::size_t refs) {
+                           std::string id, std::string field, std::size_t refs,
+                           std::uint32_t definition_id = 0) {
             if (declared.empty()) return;
             std::string decl_norm = declared;
             for (char& c : decl_norm) {
@@ -509,6 +510,9 @@ void scan_parse(Project& proj, const ScanOptions& opts) {
             u.id = std::move(id);
             u.field = std::move(field);
             u.refs = refs;
+            u.original_value = declared;
+            u.definition_id = definition_id;
+            u.id_base = static_cast<unsigned>(chart.id_base);
             r.uses.push_back(std::move(u));
             r.total_refs += refs;
         };
@@ -520,10 +524,12 @@ void scan_parse(Project& proj, const ScanOptions& opts) {
             const auto uit = usage.find(key);
             const std::size_t refs = uit == usage.end() ? 0 : uit->second.refs;
             add_use(def.file, RefSource::Define, kind == SampleKind::Wav ? "wav" : "bmp",
-                    bms::id_text(chart, key.second), std::string{}, refs);
+                    bms::id_text(chart, key.second), std::string{}, refs, key.second);
         }
         for (const auto& hr : kHeaderRefs) {
-            const std::string value = meta_of(chart, hr.field);
+            const auto found = chart.meta.find(hr.field);
+            if (found == chart.meta.end()) continue;
+            const std::string& value = found->second;
             if (value.empty()) continue;
             // 头部字段本身即一次引用（否则会被误报"已定义未使用"）
             add_use(value, RefSource::HeaderField, hr.category, std::string{}, hr.field, 1);
