@@ -38,7 +38,8 @@ function makeContext(refs = [], mode = 'pms9k') {
         },
         // 只替代现有有理数桥，不替代本次要测的吸附算法。
         // 整数归一化契约另由 edit_utils_test.cpp 验证。
-        editUtils: { addPosDelta: (ref, delta) => {
+        editUtils: { refEquals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+                     addPosDelta: (ref, delta) => {
             const den = ref.pos.den * delta.pos.den;
             const num = ref.pos.num * delta.pos.den + delta.pos.num * ref.pos.den;
             const carry = Math.floor(num / den);
@@ -50,7 +51,7 @@ function makeContext(refs = [], mode = 'pms9k') {
         } }
     });
     vm.runInContext('String.prototype.arg = function(value) { return this.replace(/%[1-9]/, String(value)); };', context);
-    for (const name of ['moveSelection', 'addPosDelta', 'laneEquals', 'pmsSuffixWarning', 'saveChart', 'saveChartAs']) {
+    for (const name of ['moveSelection', 'addPosDelta', 'laneEquals', 'refEquals', 'selectLaneByKey', 'pmsSuffixWarning', 'saveChart', 'saveChartAs']) {
         vm.runInContext(extractFunction(name), context);
     }
     return { context, calls, statuses };
@@ -103,6 +104,18 @@ for (const mode of ['pms9k', 'pms9k-bmesp']) {
         });
     }
 }
+
+test('column header Ctrl toggles a fully selected lane off and on', () => {
+    const laneRefs = [ref(1, 8, 0, 'key', 1), ref(1, 4, 0, 'key', 1)];
+    const { context } = makeContext([]);
+    context.chartSession.notesInLane = () => laneRefs;
+    context.selectLaneByKey('lane:0:key:1', false, false);
+    assert.equal(context.window.selectionRefs.length, 2);
+    context.selectLaneByKey('lane:0:key:1', false, true);
+    assert.equal(context.window.selectionRefs.length, 0);
+    context.selectLaneByKey('lane:0:key:1', false, true);
+    assert.equal(context.window.selectionRefs.length, 2);
+});
 
 test('pure horizontal playable-note move preserves mixed-lane multi-selection timing', () => {
     const refs = [ref(1, 8, 0, 'key', 2), ref(1, 3, 1, 'key', 4)];

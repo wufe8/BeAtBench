@@ -78,11 +78,11 @@ std::optional<ChartMode> chart_mode_by_id(std::string_view id) {
     return std::nullopt;
 }
 
-int chart_mode_key_count(std::string_view id) {
+std::optional<int> chart_mode_key_count(std::string_view id) {
     // 写回 profile 不是新建模式选项；BME-SP 变体沿用 PMS 的九键布局。
     if (id == "pms9k-bmesp") id = "pms9k";
     const auto m = chart_mode_by_id(id);
-    if (!m) return 7;  // 未知 id：sp7k 兑底
+    if (!m) return std::nullopt;  // 未知 id：无表可查，调用方显式降级
     int max_key = 1;
     for (const auto& l : m->lanes) {
         if (l.player == 0 && l.kind == LaneKind::Key) {
@@ -90,6 +90,16 @@ int chart_mode_key_count(std::string_view id) {
         }
     }
     return max_key;
+}
+
+bool chart_mode_has_lane(std::string_view id, const Lane& lane) {
+    // 写回 profile 不是新建模式选项；BME-SP 变体沿用 PMS 的九键布局。
+    if (id == "pms9k-bmesp") id = "pms9k";
+    const auto m = chart_mode_by_id(id);
+    if (!m) return false;
+    for (const auto& l : m->lanes)
+        if (l == lane) return true;
+    return false;
 }
 
 }  // namespace beatbench

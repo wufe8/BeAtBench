@@ -15,6 +15,7 @@
 #include <QFont>
 #include <QImage>
 #include <QQuickPaintedItem>
+#include <QStringList>
 #include <unordered_map>
 #include <vector>
 
@@ -62,6 +63,10 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
     /// 水平滚动（列区；轨道列超宽时用——底部滚动条 / Shift+滚轮 / Shift+拖拽）
     Q_PROPERTY(qreal scrollX READ scrollX WRITE setScrollX NOTIFY scrollXChanged)
+    /// 每视口隐藏列（稳定 key：lane:0:key:1 / bga:0 / bgm:all / bgm:sub:0 / meta:bpm）。
+    /// 隐藏列折叠宽度，数据不动；见 issue #48。
+    Q_PROPERTY(QStringList hiddenColumns READ hiddenColumns WRITE setHiddenColumns NOTIFY
+                   hiddenColumnsChanged)
     Q_PROPERTY(qreal contentWidth READ contentWidth NOTIFY contentWidthChanged)
     /// 鼠标位置 + note 信息（状态栏展示；空 = 未悬停）
     Q_PROPERTY(QString hoverText READ hoverText NOTIFY hoverChanged)
@@ -191,7 +196,13 @@ class ChartViewItem : public QQuickPaintedItem {
     void setShowGrid(bool v);
     qreal scrollX() const { return m_scrollX; }
     void setScrollX(qreal v);
+    QStringList hiddenColumns() const { return m_hiddenColumns; }
+    void setHiddenColumns(const QStringList& keys);
     qreal contentWidth() const;
+    /// 全量列（含隐藏；工具条“轨道”弹层用）：[{key,label,hidden,kind,subLine}]。
+    Q_INVOKABLE QVariantList columnList() const;
+    /// 列头命中：{valid,key,label,action}；action = select / hide / expand。
+    Q_INVOKABLE QVariantMap laneHeaderAt(qreal x, qreal y) const;
     QString hoverText() const { return m_hoverText; }
 
     /// 运行时换肤（doc/skin-system.md 三、3.）：Theme token 变化后强制重绘（repaint）视口。
@@ -296,6 +307,7 @@ class ChartViewItem : public QQuickPaintedItem {
     void showExtrasChanged();
     void showGridChanged();
     void scrollXChanged();
+    void hiddenColumnsChanged();
     void contentWidthChanged();
     void hoverChanged();
     void selectionChanged();
@@ -336,6 +348,7 @@ class ChartViewItem : public QQuickPaintedItem {
         int bgaLayer = -1;        // BGA 图层列（0=base 1=poor 2=layer 3=layer2；-1 = 非 BGA）
         bool bpm = false;         // BPM 元事件轨（窄列，iBMSC 式；不随 scrollX 滚动）
         bool stop = false;        // STOP 元事件轨（同上）
+        QString key;              // 隐藏/恢复用的稳定列 key（见 hiddenColumns）
     };
 
     void onSessionChartChanged();
@@ -471,8 +484,10 @@ class ChartViewItem : public QQuickPaintedItem {
     void invalidateBgTile() { m_bgTileDirty = true; }
     void rebuildBgTile(const beatbench::Chart* chart, const ThemeManager* th, qreal w, qreal h,
                        qreal metaRight);
-    bool m_debugLaneTint = false;  // 调试：打印 key 轨列底色（排查深色皮肤下 key 轨显黑）
-    std::vector<Column> m_columns;
+    bool m_debugLaneTint = false;      // 调试：打印 key 轨列底色（排查深色皮肤下 key 轨显黑）
+    std::vector<Column> m_columns;     // 可见列（paint/hit-test 只用它）
+    std::vector<Column> m_allColumns;  // 全量列（columnList 用）
+    QStringList m_hiddenColumns;
     std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
     QFont m_rulerFont;
     QFont m_noteLabelFont;  // note 内采样标签（9px）

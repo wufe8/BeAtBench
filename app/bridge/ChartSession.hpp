@@ -69,6 +69,11 @@ class ChartSession : public QObject {
         return (m_chart && m_chart->id_base == beatbench::IdBase::Base62) ? 62 : 36;
     }
 
+    /// 轨道 → 该轨全部 note 引用（列头全选 / 整轨试听用，#48/#50）。
+    /// kind = key/scratch/pedal/bgm；BGM 的 subLine >=0 时只取该子行，-1 = 全部 ch01。
+    Q_INVOKABLE QVariantList notesInLane(int player, const QString& kind, int index,
+                                         int subLine = -1) const;
+
     /// 轨道 → 实际 BMS 通道号文本（"11"=键1、"16"=皿…；属性检查器显示用；
     /// 无法表示 / 无文档 → 空串）。kind：key/scratch/pedal/bgm。
     Q_INVOKABLE QString laneChannel(int player, const QString& kind, int index) const;

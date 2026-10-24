@@ -140,6 +140,10 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
 
 ### 5. ghost 预览 / 后端命令
 
+- 双视口（#48）：`ChartView` 作为 pane、`EditPage` 作为 host；共享选择/undo；共享纵向滚动用
+  `sharedVertical`（QML QtObject，`verticalSync` 双向收敛），每 pane 独立
+  `hiddenColumns`/`scrollX`；列头 key 稳定
+  （`lane:…`/`bgm:…`/`bga:…`/`meta:…`），隐藏列折叠但不改数据。
 - `ChartViewItem::drawPreview` 与 `moveSelection` 镜像同一套分派分支，拖拽中先见落点。
 - 后端：note 空间内用 `note.move`（逐个 + Composite = 一个 undo 步；`to.sub_line` 显式给，否则按
   `(measure,pos)` 自动分配不冲突行）；跨命名空间用 `note.convert`。

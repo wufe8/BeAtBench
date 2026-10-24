@@ -605,6 +605,55 @@ QtObject {
             setStatus(qsTr("已转换 %1 个 note（单点↔LN）").arg(r.notes))
         }
     }
+    /// 列头全选（#48/#50）：key = lane:player:kind:index | bgm:all | bgm:sub:N。
+    /// Ctrl：整轨已全选则移除，否则补齐；Shift：加选；普通点击：替换。
+    function selectLaneByKey(key, shift, ctrl) {
+        let player = 0, kind = "key", index = 0, subLine = -1
+        if (key === "bgm:all") {
+            kind = "bgm"
+        } else if (key.indexOf("bgm:sub:") === 0) {
+            kind = "bgm"
+            subLine = parseInt(key.substring(8), 10)
+        } else if (key.indexOf("lane:") === 0) {
+            const parts = key.split(":")
+            player = parseInt(parts[1], 10)
+            kind = parts[2]
+            index = parseInt(parts[3], 10)
+        } else {
+            return
+        }
+        const refs = chartSession.notesInLane(player, kind, index, subLine)
+        if (!refs || refs.length === 0) {
+            setStatus(qsTr("该轨没有 note"))
+            return
+        }
+        const selected = window.selectionRefs || []
+        const hasRef = function (list, r) {
+            return list.some(function (x) { return refEquals(x, r) })
+        }
+        if (ctrl) {
+            const allSelected = refs.every(function (r) { return hasRef(selected, r) })
+            if (allSelected) {
+                window.selectionRefs = selected.filter(function (x) {
+                    return !refs.some(function (r) { return refEquals(x, r) })
+                })
+                setStatus(qsTr("已取消该轨选择"))
+                return
+            }
+            const next = selected.slice()
+            for (let i = 0; i < refs.length; ++i)
+                if (!hasRef(next, refs[i])) next.push(refs[i])
+            window.selectionRefs = next
+        } else if (shift) {
+            const next = selected.slice()
+            for (let i = 0; i < refs.length; ++i)
+                if (!hasRef(next, refs[i])) next.push(refs[i])
+            window.selectionRefs = next
+        } else {
+            window.selectionRefs = refs
+        }
+        setStatus(qsTr("已选该轨 %1 个 note").arg(refs.length))
+    }
     /// 量化：把选中 note 的 pos 吸附到当前 snap 网格（note.quantize；一个 undo 步）。
     /// 量化后**保持选中**（selectionRefs 的 pos 更新到吸附值）。
     function quantizeSelection() {

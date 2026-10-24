@@ -57,18 +57,25 @@ Item {
             mouse.accepted = false
         }
     }
-    /// M5.2 播放头跟随（默认开——用户拍板；**单向绑定**：Main checkbox ↔ 本属性；
-    /// 用户滚动 ChartView 内部 root.followPlayhead=false → 本属性自动跟随（绑定）
-    /// ——无需回写，避免 QML 绑定循环断绑（2026-09 实测：双向回写断绑定 → 默认关+无效果））。
-    /// ⚠️ 写入口 = setFollowPlayhead（checkbox onToggled 走它；直接赋值会断绑定）。
-    property bool followPlayhead: chartView ? chartView.followPlayhead : true
-    function setFollowPlayhead(v) {
-        if (chartView) chartView.followPlayhead = v
-    }
+    /// M5.2 播放头跟随（默认开——用户拍板）：EditPage 单一源，两个 pane 只读绑定。
+    /// 工具条 checkbox 只改本属性；pane 内不反向写，避免 QML 绑定环。
+    property bool followPlayhead: true
+    function setFollowPlayhead(v) { root.followPlayhead = !!v }
     /// 编辑工具（select/note/ln/mine/pan；Main 会话状态）
     property string editorTool: "pan"
     /// 平移开关（拖拽选中 note；默认关=自由 2D，勾选=轴锁定）
     property bool moveMode: false
+    /// 双视口（#48）：默认关；两个 pane 共享选择/undo，每 pane 独立横向滚动与隐藏列。
+    property bool dualView: false
+    property bool independentVertical: false
+    property int activePane: 0
+    property var hiddenColumns1: []
+    property var hiddenColumns2: []
+    property int columnListTick: 0
+    readonly property var activeView: activePane === 0 ? chartView : chartView2
+    /// 共享纵向滚动（QtObject 动态属性；ChartView 内做双向同步）。
+    // 共享纵向状态单一载体：滚动与缩放同源（双 pane 收敛机制对称）
+    QtObject { id: sharedVertical; property real scrollY: 0; property real measureHeight: 96 }
     /// 放置用采样数值 id（chartSession.sampleValueOf；-1 = 未选）
     property int sampleId: -1
     /// 当前采样展示文本（提示用）
@@ -92,16 +99,16 @@ Item {
     /// paint 帧耗时采样（--perf-log）
     property bool perfLog: false
     /// 状态栏：鼠标位置 + note 信息（ChartViewItem.hoverText）
-    readonly property string hoverText: chartView ? chartView.hoverText : ""
+    readonly property string hoverText: activeView ? activeView.hoverText : ""
     /// M5.2 视口光标（红线）读数：秒 + 拍位文本（转发 ChartView；Main 状态栏用，
     /// 红线=视口光标——滚动内容滚过红线，值随视口变；2026-09 用户）。
-    readonly property real cursorSec: chartView ? chartView.cursorSec : 0
-    readonly property string cursorPosText: chartView ? chartView.cursorPosText : ""
+    readonly property real cursorSec: activeView ? activeView.cursorSec : 0
+    readonly property string cursorPosText: activeView ? activeView.cursorPosText : ""
     /// M5 收尾 2026-09：播放头秒（红线标记；-1=未播放）。状态栏时间用它（随播放推进，
     /// 无视"跟随"开关——跟随只控视口是否滚动跟随红线）。
-    readonly property real playheadSec: chartView ? chartView.playheadSec : -1
+    readonly property real playheadSec: activeView ? activeView.playheadSec : -1
     /// M5 收尾 2026-09：播放头所在小节号（播放中状态栏用；非播放 → 空，回落 cursorPosText）。
-    readonly property string playheadPosText: chartView ? chartView.playheadPosText : ""
+    readonly property string playheadPosText: activeView ? activeView.playheadPosText : ""
     /// 暴露采样面板（Main 在文件编辑后 scrollTo 定位，避免列表回到顶部）
     readonly property var samplePanelObj: samplePanel
     /// 暴露 BGA 面板（Main 打开谱面/编辑后调 reloadBga）
@@ -172,6 +179,8 @@ Item {
     signal bmpRenameRequested(string fromId, string toId)
     /// 删除 #BMP 定义 → Main 走 sample.delete(kind=bmp)
     signal bmpDeleteRequested(string id)
+    /// 列头全选（#50 接入 Main：按 key 取 lane 的全部 note）。
+    signal laneSelectRequested(string key, bool shift, bool ctrl)
 
     /// STOP 值显示/填入单位（0=1/192全音符 1=ms；Main 会话状态 → 时间轴面板）
     property int stopUnit: 0
@@ -179,12 +188,12 @@ Item {
     property real stopBpm: 130
     /// 视口中心小节（粘贴 target_measure 用；转发 ChartView）。
     function centerMeasure() {
-        return chartView ? chartView.centerMeasure() : 0
+        return activeView ? activeView.centerMeasure() : 0
     }
 
     /// 秒 → 视口滚动（波形总览 seek；--seek 调试走同一路径）。
     function seekToSeconds(sec) {
-        if (chartView) chartView.seekToSeconds(sec)
+        if (activeView) activeView.seekToSeconds(sec)
     }
 
     /// 元信息载入（Main 打开谱面后调用 → metaPanel.reload()）。
@@ -214,53 +223,108 @@ Item {
 
     /// 诊断探针（--probe）：返回 ChartViewItem（含 probe(x,y)），定位选中/移动命中问题。
     function locateChartView() {
-        return chartView
+        return activeView
     }
 
     /// 调试入口（--click）：ChartView 局部坐标 → 同一手势分发路径。
     /// ⚠️ 坐标语义 = ChartView 局部（probe columns 的 x/w + contentsH 推算；非窗口像素）。
     function clickLocal(x, y) {
-        if (chartView) chartView.clickAt(x, y)
+        if (activeView) activeView.clickAt(x, y)
     }
 
     /// 调试入口（--drag）：ChartView 局部坐标（按下→移动→释放）。
     function dragLocal(x1, y1, x2, y2) {
-        if (chartView) chartView.dragAt(x1, y1, x2, y2)
+        if (activeView) activeView.dragAt(x1, y1, x2, y2)
     }
 
     /// 诊断探针（--probe）：ChartView 局部坐标 → probe。
     function probeLocal(x, y) {
-        if (!chartView) return null
-        return chartView.probe(x, y)
+        if (!activeView) return null
+        return activeView.probe(x, y)
     }
 
     /// 缩放重置（工具条「缩放」按钮）。
     function resetZoom() {
-        if (chartView) chartView.resetZoom()
+        if (activeView) activeView.resetZoom()
     }
     /// 键盘缩放一步（视口中心；与滚轮同档，不跟光标以免无鼠标位置）。
     function zoomStep(up) {
-        if (chartView) chartView.zoomStep(chartView.height / 2, up)
+        if (activeView) activeView.zoomStep(activeView.height / 2, up)
     }
 
     /// 2026-09「加一小节」：透传到 ChartView → ChartViewItem.extendMeasures()。
     function extendMeasures() {
-        if (chartView) chartView.extendMeasures()
+        if (activeView) activeView.extendMeasures()
     }
 
     /// 2026-09 新建谱面：设置编辑态有效小节数下限（seed 到 ChartView → ChartViewItem）。
     function setEditableMeasures(n) {
-        if (chartView) chartView.setEditableMeasures(n)
+        if (activeView) activeView.setEditableMeasures(n)
     }
 
+    /// 切换双视口；打开时共享纵向位置。
+    function toggleDualView() {
+        root.dualView = !root.dualView
+        if (root.dualView) {
+            root.activePane = 0
+            sharedVertical.scrollY = chartView.scrollY
+            sharedVertical.measureHeight = chartView.measureHeight
+        }
+    }
+    /// 共享纵向 ↔ 独立纵向；切回共享时以活动 pane 位置为准。
+    function toggleIndependentVertical() {
+        root.independentVertical = !root.independentVertical
+        if (!root.independentVertical && activeView)
+            sharedVertical.scrollY = activeView.scrollY
+            sharedVertical.measureHeight = activeView.measureHeight
+    }
+    function activeColumnList() { return activeView ? activeView.columnList() : [] }
+    function toggleActiveColumn(key) {
+        const arr = (root.activePane === 0 ? root.hiddenColumns1 : root.hiddenColumns2).slice()
+        const i = arr.indexOf(key)
+        if (i >= 0) arr.splice(i, 1)
+        else arr.push(key)
+        if (root.activePane === 0) root.hiddenColumns1 = arr
+        else root.hiddenColumns2 = arr
+    }
+    onDualViewChanged: {
+        if (root.dualView) {
+            root.activePane = 0
+            sharedVertical.scrollY = chartView.scrollY
+            sharedVertical.measureHeight = chartView.measureHeight
+        } else {
+            root.activePane = 0
+        }
+    }
+    onIndependentVerticalChanged: {
+        if (!root.independentVertical && root.activeView)
+            sharedVertical.scrollY = root.activeView.scrollY
+    }
+    /// 切谱/新建：视口回到默认单 pane，清空每 pane 隐藏列（#48 会话态）。
+    function resetViewportState() {
+        root.dualView = false
+        root.independentVertical = false
+        root.activePane = 0
+        root.hiddenColumns1 = []
+        root.hiddenColumns2 = []
+        root.columnListTick++
+    }
+    Connections {
+        target: chartView
+        function onHiddenColumnsChanged() { root.columnListTick++ }
+    }
+    Connections {
+        target: chartView2
+        function onHiddenColumnsChanged() { root.columnListTick++ }
+    }
     /// 当前缩放百分比（工具条显示）。
-    readonly property int zoomPercent: chartView ? chartView.zoomPercent : 100
+    readonly property int zoomPercent: activeView ? activeView.zoomPercent : 100
 
     /// 调试入口（--click，旧）：本页局部坐标 → ChartView 局部坐标 → 同一手势分发路径。
     function clickAt(x, y) {
-        if (!chartView) return
-        const p = chartView.mapFromItem(root, x, y)
-        chartView.clickAt(p.x, p.y)
+        if (!activeView) return
+        const p = activeView.mapFromItem(root, x, y)
+        activeView.clickAt(p.x, p.y)
     }
 
     SplitView {
@@ -405,44 +469,113 @@ Item {
                     }
                 }
 
-                // 视口主体（M2 第 5 步：竖向时间轴，真数据 ChartSession）
-                ChartView {
-                    id: chartView
+                // 视口主体（#48：单/双 pane；共享选择/undo，各 pane 独立横向滚动与隐藏列）
+                SplitView {
+                    id: viewSplit
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    showChannelIds: root.showChannelIds
-                    bgmExpanded: root.bgmExpanded
-                    noteSampleMode: root.noteSampleMode
-                    lnSelectMode: root.lnSelectMode
-                    showExtras: root.showExtras
-                    showGrid: root.showGrid
-                    editorTool: root.editorTool
-                    moveMode: root.moveMode
-                    // M5.2 播放头跟随：单向绑定（root.followPlayhead = chartView 的值；
-                    // 用户滚动 ChartView 内部改——此处不设值，只让 root 读）
-                    followPlayhead: root.followPlayhead
-                    sampleId: root.sampleId
-                    sampleText: root.sampleText
-                    selection: root.selection
-                    metaSelection: root.metaSelection
-                    snapNum: root.snapNum
-                    snapDen: root.snapDen
-                    zoomToCursor: root.zoomToCursor
-                    perfLog: root.perfLog
-                    onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
-                    onSelectionFinished: (refs) => root.selectionFinished(refs)
-                    onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
-                    onPlayNoteSample: (ref) => root.playNoteSample(ref)
-                    onCanvasClicked: () => root.canvasClicked()
-                    onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
-                    onNoteEditRequested: (ref) => root.noteEditRequested(ref)
-                    onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => root.moveSelectionRequested(deltaF, targetLane, sourceLane, sourceBgmLine)
-                    onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
-                    onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
-                        root.metaMoveRequested(kind, obj, deltaF, targetLane)
-                    onMetaRightDeleted: (obj) => root.metaRightDeleted(obj)
-                    onMetaEditRequested: (obj) => root.metaEditRequested(obj)
-                    onEditAreaPressed: root.editAreaPressed()
+                    orientation: Qt.Horizontal
+                    handle: Rectangle {
+                        implicitWidth: root.dualView ? 4 : 0
+                        color: Theme.border
+                        visible: root.dualView
+                        Rectangle {
+                            anchors.fill: parent
+                            color: splitHover.hovered ? Theme.accent : "transparent"
+                            opacity: 0.35
+                        }
+                        HoverHandler { id: splitHover }
+                    }
+                    ChartView {
+                        id: chartView
+                        SplitView.fillWidth: true
+                        SplitView.minimumWidth: 240
+                        showChannelIds: root.showChannelIds
+                        bgmExpanded: root.bgmExpanded
+                        noteSampleMode: root.noteSampleMode
+                        lnSelectMode: root.lnSelectMode
+                        showExtras: root.showExtras
+                        showGrid: root.showGrid
+                        hiddenColumns: root.hiddenColumns1
+                        active: root.activePane === 0
+                        verticalSync: sharedVertical
+                        syncVertical: root.dualView && !root.independentVertical
+                        editorTool: root.editorTool
+                        moveMode: root.moveMode
+                        followPlayhead: root.followPlayhead
+                        sampleId: root.sampleId
+                        sampleText: root.sampleText
+                        selection: root.selection
+                        metaSelection: root.metaSelection
+                        snapNum: root.snapNum
+                        snapDen: root.snapDen
+                        zoomToCursor: root.zoomToCursor
+                        perfLog: root.perfLog
+                        onActivated: root.activePane = 0
+                        onHideColumnRequested: (key) => root.toggleActiveColumn(key)
+                        onLaneSelectRequested: (key, shift, ctrl) => root.laneSelectRequested(key, shift, ctrl)
+                        onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
+                        onSelectionFinished: (refs) => root.selectionFinished(refs)
+                        onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
+                        onPlayNoteSample: (ref) => root.playNoteSample(ref)
+                        onCanvasClicked: () => root.canvasClicked()
+                        onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
+                        onNoteEditRequested: (ref) => root.noteEditRequested(ref)
+                        onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => root.moveSelectionRequested(deltaF, targetLane, sourceLane, sourceBgmLine)
+                        onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
+                        onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
+                            root.metaMoveRequested(kind, obj, deltaF, targetLane)
+                        onMetaRightDeleted: (obj) => root.metaRightDeleted(obj)
+                        onMetaEditRequested: (obj) => root.metaEditRequested(obj)
+                        onEditAreaPressed: root.editAreaPressed()
+                    }
+                    // 共享缩放不再走单向 Binding：measureHeight 与 scrollY 同走 sharedVertical
+                    // 收敛（ChartView 内双 Connections；主 pane 缩放后副 pane 跟随，值差回写同源）。
+                    ChartView {
+                        id: chartView2
+                        visible: root.dualView
+                        SplitView.preferredWidth: Math.max(240, viewSplit.width / 2)
+                        SplitView.minimumWidth: 200
+                        showChannelIds: root.showChannelIds
+                        bgmExpanded: root.bgmExpanded
+                        noteSampleMode: root.noteSampleMode
+                        lnSelectMode: root.lnSelectMode
+                        showExtras: root.showExtras
+                        showGrid: root.showGrid
+                        hiddenColumns: root.hiddenColumns2
+                        active: root.activePane === 1
+                        verticalSync: sharedVertical
+                        syncVertical: root.dualView && !root.independentVertical
+                        zoomEnabled: !(root.dualView && !root.independentVertical)
+                        editorTool: root.editorTool
+                        moveMode: root.moveMode
+                        followPlayhead: root.followPlayhead
+                        sampleId: root.sampleId
+                        sampleText: root.sampleText
+                        selection: root.selection
+                        metaSelection: root.metaSelection
+                        snapNum: root.snapNum
+                        snapDen: root.snapDen
+                        zoomToCursor: root.zoomToCursor
+                        perfLog: root.perfLog
+                        onActivated: root.activePane = 1
+                        onHideColumnRequested: (key) => root.toggleActiveColumn(key)
+                        onLaneSelectRequested: (key, shift, ctrl) => root.laneSelectRequested(key, shift, ctrl)
+                        onHitPlaceRequested: (hit) => root.hitPlaceRequested(hit)
+                        onSelectionFinished: (refs) => root.selectionFinished(refs)
+                        onNoteClicked: (ref, ctrl) => root.noteClicked(ref, ctrl)
+                        onPlayNoteSample: (ref) => root.playNoteSample(ref)
+                        onCanvasClicked: () => root.canvasClicked()
+                        onNoteRightDeleted: (ref) => root.noteRightDeleted(ref)
+                        onNoteEditRequested: (ref) => root.noteEditRequested(ref)
+                        onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => root.moveSelectionRequested(deltaF, targetLane, sourceLane, sourceBgmLine)
+                        onMetaObjectClicked: (obj, ctrl) => root.metaObjectClicked(obj, ctrl)
+                        onMetaMoveRequested: (kind, obj, deltaF, targetLane) =>
+                            root.metaMoveRequested(kind, obj, deltaF, targetLane)
+                        onMetaRightDeleted: (obj) => root.metaRightDeleted(obj)
+                        onMetaEditRequested: (obj) => root.metaEditRequested(obj)
+                        onEditAreaPressed: root.editAreaPressed()
+                    }
                 }
             }
         }

@@ -638,6 +638,40 @@ ApplicationWindow {
                     ToolTip.text: qsTr("勾选=按方向轴锁定移动（纵向→时间/通道不变，横向→通道/时间不变）；"
                                      + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
                 }
+                BbToolButton {
+                    text: qsTr("双视口")
+                    active: editPage.dualView
+                    onClicked: editPage.toggleDualView()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("左右双视口：共享纵向时间与选择/undo，各自横向滚动与隐藏列")
+                }
+                BbToolButton {
+                    text: qsTr("独立纵向")
+                    visible: editPage.dualView
+                    active: editPage.independentVertical
+                    onClicked: editPage.toggleIndependentVertical()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("关闭=共享纵向时间；打开=两视口各自滚动/缩放")
+                }
+                BbToolButton {
+                    text: qsTr("轨道")
+                    onClicked: columnMenu.popup()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("当前活动视口的轨道显隐")
+                }
+                Menu {
+                    id: columnMenu
+                    Repeater {
+                        model: editPage.columnListTick >= 0 ? editPage.activeColumnList() : []
+                        MenuItem {
+                            required property var modelData
+                            text: modelData.label
+                            checkable: true
+                            checked: modelData.hidden
+                            onTriggered: editPage.toggleActiveColumn(modelData.key)
+                        }
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
                 BbCheckBox {
@@ -785,6 +819,7 @@ ApplicationWindow {
                 onMetaSaveRequested: saveMetaEdits()
                 onModeEditRequested: (key, value) => setModeMeta(key, value)
                 onEditAreaPressed: clearTextFocus()
+                onLaneSelectRequested: (key, shift, ctrl) => selectLaneByKey(key, shift, ctrl)
                 onTimingEditRequested: (kind, measure, num, den, value, ref) =>
                     editTiming(kind, measure, num, den, value, ref)
                 onTimingDeleteRequested: (kind, measure, num, den) =>
@@ -1610,6 +1645,7 @@ ApplicationWindow {
             window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
+            if (typeof editPage !== "undefined" && editPage) editPage.resetViewportState()
             window.pendingLnHead = null  // 换谱面：清除可能的未完成 LN 头
             window.selectionRefs = []
             window.metaSelection = []
@@ -1803,6 +1839,7 @@ ApplicationWindow {
         window.chartFormat = "bms"
         window.chartMode = mode
         window.chartEncoding = "utf8"
+        if (typeof editPage !== "undefined" && editPage) editPage.resetViewportState()
         // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）。
         // ⚠️ 不预设 PLAYER（2026-10 复核）：草稿回填 "1" 会覆盖模式推导——DP/Battle 新建
         // 保存后 PLAYER 由 writer 按 mode_id 推导（dp=3/battle=4），重开不再退回 SP。
@@ -1839,6 +1876,7 @@ ApplicationWindow {
     function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }
     function onSelectionMade(refs) { return session.onSelectionMade(refs) }
     function pasteClipboard() { return session.pasteClipboard() }
+    function selectLaneByKey(key, shift, ctrl) { return session.selectLaneByKey(key, shift, ctrl) }
     /// Base62 粘贴确认（2026-09 数据安全）：SessionController.pasteClipboard 判定「目标谱面
     /// Base36 + 文本含 Base62 id」时调用；确认后走同一 pasteRawText 落点（一个 undo 步）。
     function requestBase62PasteConfirm(text, targetMeasure) {

@@ -115,7 +115,8 @@ QStringList ChartSession::codecModes() const {
 
 int ChartSession::playKeyCount() const {
     if (!m_chart) return 7;
-    return beatbench::chart_mode_key_count(m_chart->mode_id.value_or("sp7k"));
+    // 未知模式显式降级 7 键；非法放置由 chart_mode_has_lane 白名单另行拦截。
+    return beatbench::chart_mode_key_count(m_chart->mode_id.value_or("sp7k")).value_or(7);
 }
 
 void ChartSession::refresh() {
@@ -515,6 +516,46 @@ QVariantMap ChartSession::waveformRange(qlonglong frameLo, qlonglong frameHi) co
     m.insert(QStringLiteral("min"), static_cast<double>(r.min));
     m.insert(QStringLiteral("max"), static_cast<double>(r.max));
     return m;
+}
+
+QVariantList ChartSession::notesInLane(int player, const QString& kind, int index,
+                                       int subLine) const {
+    QVariantList out;
+    if (!m_chart) return out;
+    for (const auto& e : m_chart->notes) {
+        const auto& l = e.value.lane;
+        bool match = false;
+        if (kind == QStringLiteral("bgm")) {
+            match = l.kind == beatbench::LaneKind::Bgm &&
+                    (subLine < 0 || static_cast<int>(e.value.sub_line) == subLine);
+        } else {
+            const auto k = kind == QStringLiteral("scratch") ? beatbench::LaneKind::Scratch
+                           : kind == QStringLiteral("pedal") ? beatbench::LaneKind::Pedal
+                                                             : beatbench::LaneKind::Key;
+            match = l.kind == k && static_cast<int>(l.player) == player &&
+                    static_cast<int>(l.index) == index;
+        }
+        if (!match) continue;
+        QVariantMap m;
+        m.insert(QStringLiteral("measure"), static_cast<int>(e.measure));
+        QVariantMap p;
+        p.insert(QStringLiteral("num"), static_cast<qlonglong>(e.pos.num));
+        p.insert(QStringLiteral("den"), static_cast<qlonglong>(e.pos.den));
+        m.insert(QStringLiteral("pos"), p);
+        QVariantMap lane;
+        lane.insert(QStringLiteral("player"), static_cast<int>(l.player));
+        lane.insert(QStringLiteral("kind"),
+                    l.kind == beatbench::LaneKind::Scratch ? QStringLiteral("scratch")
+                    : l.kind == beatbench::LaneKind::Pedal ? QStringLiteral("pedal")
+                    : l.kind == beatbench::LaneKind::Bgm   ? QStringLiteral("bgm")
+                                                           : QStringLiteral("key"));
+        lane.insert(QStringLiteral("index"), static_cast<int>(l.index));
+        m.insert(QStringLiteral("lane"), lane);
+        m.insert(QStringLiteral("sample"), static_cast<int>(e.value.sample.id));
+        m.insert(QStringLiteral("sub_line"), static_cast<int>(e.value.sub_line));
+        out.push_back(m);
+    }
+    return out;
 }
 
 QString ChartSession::laneChannel(int player, const QString& kindStr, int index) const {

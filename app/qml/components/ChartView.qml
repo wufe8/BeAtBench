@@ -29,6 +29,18 @@ Item {
     property bool lnSelectMode: false    // LN 选取模式（默认关）：点 LN 任一段自动选配对两端
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     property bool showGrid: true         // 槽位弱线显示开关（「网格」按钮；吸附不依赖此开关）
+    /// 是否允许本 pane 改变纵向缩放（双视口共享纵向时，副 pane 禁用；#48）
+    property bool zoomEnabled: true
+    /// 每视口隐藏列（稳定 key；#48）。隐藏列折叠宽度，数据不动。
+    property var hiddenColumns: []
+    /// 活动视口（双视口时边框高亮；#48）
+    property bool active: false
+    /// 共享纵向滚动对象（{scrollY}）；#48 双视口共享模式用
+    property var verticalSync: null
+    property bool syncVertical: false
+    /// 对外滚动位置（双视口宿主读写用）
+    property alias scrollY: view.scrollY
+    property alias scrollX: view.scrollX
     /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
     // ---- 编辑接线（M3） ----
@@ -67,6 +79,9 @@ Item {
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
     signal noteEditRequested(var ref)       // 双击命中 note（切音手工版：改引用采样 id）
     signal editAreaPressed()                // 编辑区任意按下 → Main 释放文本框焦点（2026-09）
+    signal activated()                       // 视口被点击（双视口活动 pane）
+    signal hideColumnRequested(string key)   // 列头眼睛按钮
+    signal laneSelectRequested(string key, bool shift, bool ctrl)  // 列头全选
     // 平移：deltaF = 时间轴位移（拍位小数，0=不动）；targetLane = 横向移动目标列
     // （laneAtX 结果 {valid,lanePlayer,laneKind,laneIndex}；null=纯时间移动）；
     // sourceLane = 拖起的 note 所在轨（{player,kind,index}；跨通道多选只移此轨 note，2026-09）
@@ -101,12 +116,11 @@ Item {
         lnSelectMode: root.lnSelectMode
         showExtras: root.showExtras
         showGrid: root.showGrid
+        hiddenColumns: root.hiddenColumns
         selection: root.selection
         metaSelection: root.metaSelection
         perfLog: root.perfLog
-        // M5.2 播放头跟随（单向：root.followPlayhead → view；用户滚动改 root
-        // （EditPage.followPlayhead 绑定 root → 工具条 checkbox 自动更新）
-        // ⚠️ 不写 onFollowPlayheadChanged 回写——双向回写 QML 会断绑定（2026-09 实测）
+        // M5.2 播放头跟随：EditPage 单一源，pane 只读绑定。
         followPlayhead: root.followPlayhead
         // Ctrl 临时切换已在状态层完成（Main.qml Connections → checkbox.toggle()），
         // 此处纯透传（不 XOR）——checkbox 视觉/视图状态始终一致（2026-09 用户）
@@ -120,6 +134,49 @@ Item {
             // 避免「0-1 小节播放头锁不住 90% → 开始播放跳变」；2026-09 用户）
             view.scrollToStart()
         }
+    }
+
+    // 活动视口边框（双视口；不拦截鼠标）
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        border.width: root.active ? 2 : 0
+        border.color: Theme.focusRing
+        z: 20
+    }
+
+    // 共享纵向（滚动 + 缩放同一收敛机制）：view 写入 sync，sync 回写 view；
+    // 值差小于阈值则跳过，避免绑定环。
+    Connections {
+        target: root.verticalSync
+        function onScrollYChanged() {
+            if (root.syncVertical && root.verticalSync &&
+                    Math.abs(view.scrollY - root.verticalSync.scrollY) > 0.01)
+                view.scrollY = root.verticalSync.scrollY
+        }
+        function onMeasureHeightChanged() {
+            if (root.syncVertical && root.verticalSync &&
+                    Math.abs(view.measureHeight - root.verticalSync.measureHeight) > 0.5)
+                view.measureHeight = root.verticalSync.measureHeight
+        }
+    }
+    Connections {
+        target: view
+        function onScrollYChanged() {
+            if (root.syncVertical && root.verticalSync &&
+                    Math.abs(view.scrollY - root.verticalSync.scrollY) > 0.01)
+                root.verticalSync.scrollY = view.scrollY
+        }
+        function onMeasureHeightChanged() {
+            if (root.syncVertical && root.verticalSync &&
+                    Math.abs(view.measureHeight - root.verticalSync.measureHeight) > 0.5)
+                root.verticalSync.measureHeight = view.measureHeight
+        }
+    }
+    onHiddenColumnsChanged: view.hiddenColumns = root.hiddenColumns
+    onSyncVerticalChanged: if (syncVertical && verticalSync) {
+        verticalSync.scrollY = view.scrollY
+        verticalSync.measureHeight = view.measureHeight
     }
 
     // ---- M5.2 播放头叠层（性能拆层 2026-09）：红线 + A/B 标记只重绘本层（<1ms），
@@ -275,6 +332,7 @@ Item {
     /// 滚轮缩放一步：从当前 measureHeight 所在级别向上/下跳一级。光标锚点分支用
     /// zoomAt(cursor, factor=相邻级别比) 保持鼠标处拍位不动；中心锚点分支直接设新级别。
     function zoomStep(y, up) {
+        if (!root.zoomEnabled) return
         const lv = root._zoomLevels
         const idx = nearestIndex(lv, root.measureHeight)
         const nIdx = up ? Math.min(lv.length - 1, idx + 1) : Math.max(0, idx - 1)
@@ -287,6 +345,10 @@ Item {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         onWheel: (event) => {
             if (event.modifiers & Qt.ControlModifier) {
+                if (!root.zoomEnabled) {
+                    event.accepted = true
+                    return
+                }
                 // 缩放：指小节高度（内容比例不变，仅视口密度）——**离散级别跳步**（等比，无漂移，
                 // 100% 恒可达；2026-09 用户：旧实现连乘除碰顶非整除 → 滚回只能到 107%/97%）。
                 // 锚点 = 鼠标 y（zoomToCursor 开，默认）/ 视口中心（关）。
@@ -357,9 +419,21 @@ Item {
     }
 
     function handlePress(x, y, shift, ctrl) {
-        if (y <= 18 && view.bgmHeaderIndexAt(x) >= 0) {
-            root.bgmExpanded = !root.bgmExpanded
-            return
+        root.activated()
+        if (y <= 18) {
+            const h = view.laneHeaderAt(x, y)
+            if (h.valid) {
+                if (h.action === "expand") {
+                    root.bgmExpanded = !root.bgmExpanded
+                    return
+                }
+                if (h.action === "hide") {
+                    root.hideColumnRequested(h.key)
+                    return
+                }
+                root.laneSelectRequested(h.key, shift, ctrl)
+                return
+            }
         }
         _lastY = y
         _lastX = x
@@ -814,6 +888,8 @@ Item {
         if (!view) return -1
         return view.columnIndexForRef(ref)
     }
+    /// 当前视口全量列（含隐藏）：工具条“轨道”弹层用。
+    function columnList() { return view.columnList() }
     /// 列下标 → 演出轨道（转发 ChartViewItem.laneAtColumn；演出轨连续平移用，2026-09 用户）。
     function laneAtColumn(col) {
         if (!view) return ({ valid: false })
