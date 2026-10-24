@@ -12,17 +12,21 @@
 #pragma once
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QThreadPool>
 #include <QVariantList>
 #include <atomic>
+#include <map>
 #include <memory>
 
 #include "beatbench/audio/AudioBackend.hpp"
 #include "beatbench/audio/PcmPlayback.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 #include "beatbench/audio/SamplePlayer.hpp"
+#include "beatbench/audio/WaveformPyramid.hpp"
+#include "bridge/AudioTaskRunner.hpp"
 
 namespace beatbench::app {
 
@@ -84,6 +88,16 @@ class AudioEngine : public QObject {
     /// 设置谱面完整路径（内部解析目录；QML 传 r.result.path——比手拼目录更稳，
     /// 兼容 Windows `\` 与 `/`）。
     Q_INVOKABLE void setChartPath(const QString& path);
+
+    // ---- 单 note 波形（issue #49）----
+    /// 异步解码一个采样文件并构建 min/max 金字塔；同一文件去重。
+    /// file 为 #WAV 定义里的相对路径（按谱面目录解析；绝对路径直接用）。
+    Q_INVOKABLE void requestSampleWaveform(const QString& file);
+    /// 已缓存的波形（file 同 request 的解析规则）；未完成/失败 → 空。
+    std::shared_ptr<const beatbench::audio::WaveformPyramid> sampleWaveform(
+        const QString& file) const;
+    /// 采样文件重绑/改名后清空波形缓存并取消在途解码。
+    Q_INVOKABLE void invalidateSampleWaveforms();
 
     // ---- M5 播放控制（QML 调用；PcmPlayback 封装在 m_playback） ----
     /// 装载渲染 PCM（ChartSession.renderFinished 后由 QML 或内部调用；见 setChartSession）。
@@ -194,6 +208,8 @@ class AudioEngine : public QObject {
     void waitRenderChanged();
     /// M5 waitRenderSetting 变化（设置面板）。
     void waitRenderSettingChanged();
+    /// 单 note 波形构建完成（key = 解析后的绝对路径；QML/视图刷新用）。
+    void sampleWaveformReady(const QString& file);
 
    private:
     /// 音频路径解析 + **扩展名回退**：原路径存在 → 用它；否则按相同 basename
@@ -220,6 +236,8 @@ class AudioEngine : public QObject {
     QString m_sourceDir;  ///< 谱面目录（绝对路径；空 = 未打开）
     std::atomic<bool> m_busy{false};
     std::atomic<bool> m_initialized{false};
+    std::map<QString, std::shared_ptr<const beatbench::audio::WaveformPyramid>> m_waveforms;
+    AudioTaskRunner m_waveformTasks;
     QString m_statusText;
     beatbench::audio::AudioSettings m_settings;  ///< 当前设置（设备/采样率/缓冲）
     QVariantList m_devices;                      ///< 设备快照（[{index,name,api,sampleRate}]）

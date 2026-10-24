@@ -8,6 +8,7 @@
 #include <QHoverEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QSet>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/codec/BmsChannelMaps.hpp"
+#include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/ThemeManager.hpp"
 
@@ -89,6 +91,109 @@ void ChartViewItem::setTheme(QObject* theme) {
     clearHaloCache();    // M7 性能：halo 文本色缓存随主题失效
     emit themeChanged();
     update();
+}
+
+void ChartViewItem::setAudioEngine(QObject* engine) {
+    if (m_audioEngine == engine) return;
+    if (auto* old = qobject_cast<AudioEngine*>(m_audioEngine))
+        disconnect(old, nullptr, this, nullptr);
+    m_audioEngine = engine;
+    if (auto* ae = qobject_cast<AudioEngine*>(engine))
+        connect(ae, &AudioEngine::sampleWaveformReady, this, [this](const QString&) { update(); });
+    emit audioEngineChanged();
+    update();
+}
+
+void ChartViewItem::setShowNoteWaveforms(bool v) {
+    if (m_showNoteWaveforms == v) return;
+    m_showNoteWaveforms = v;
+    emit showNoteWaveformsChanged();
+    update();
+}
+
+void ChartViewItem::drawNoteWaveforms(QPainter* p, const beatbench::Chart& chart, int first,
+                                      int last) const {
+    if (!m_showNoteWaveforms || !m_audioEngine) return;
+    auto* ae = qobject_cast<AudioEngine*>(m_audioEngine);
+    const ChartSession* cs = sessionObj();
+    if (!ae || !cs || !cs->timing() || m_selection.isEmpty()) return;
+    const ThemeManager* th = themeObj();
+    QColor color = th ? th->wave() : QColor(QStringLiteral("#22d3ee"));
+    color.setAlpha(75);
+    QPen pen(color, 1.0);
+    p->setPen(pen);
+    QSet<QString> selected;
+    for (const auto& v : m_selection) {
+        const QVariantMap m = v.toMap();
+        if (m.isEmpty()) continue;
+        const QVariantMap lane = m.value(QStringLiteral("lane")).toMap();
+        const QVariantMap pos = m.value(QStringLiteral("pos")).toMap();
+        selected.insert(noteRefKey(
+            static_cast<std::uint32_t>(m.value(QStringLiteral("measure")).toInt()),
+            beatbench::Rational(pos.value(QStringLiteral("num")).toLongLong(),
+                                pos.value(QStringLiteral("den")).toLongLong()),
+            beatbench::Lane{
+                static_cast<std::uint8_t>(lane.value(QStringLiteral("player")).toInt()),
+                lane.value(QStringLiteral("kind")).toString() == QStringLiteral("scratch")
+                    ? beatbench::LaneKind::Scratch
+                : lane.value(QStringLiteral("kind")).toString() == QStringLiteral("bgm")
+                    ? beatbench::LaneKind::Bgm
+                : lane.value(QStringLiteral("kind")).toString() == QStringLiteral("pedal")
+                    ? beatbench::LaneKind::Pedal
+                    : beatbench::LaneKind::Key,
+                static_cast<std::uint8_t>(lane.value(QStringLiteral("index")).toInt())},
+            static_cast<std::uint32_t>(m.value(QStringLiteral("sample")).toInt()),
+            static_cast<std::uint32_t>(m.value(QStringLiteral("sub_line")).toInt())));
+    }
+    // notes 按 measure 单调；只扫可视小节段，避免每帧遍历整张谱。
+    auto it = std::lower_bound(chart.notes.begin(), chart.notes.end(), first,
+                               [](const beatbench::Event<beatbench::Note>& e, int m) {
+                                   return static_cast<int>(e.measure) < m;
+                               });
+    for (; it != chart.notes.end(); ++it) {
+        const auto& ev = *it;
+        const int m = static_cast<int>(ev.measure);
+        if (m > last) break;
+        if (ev.value.sample.id == 0 ||
+            !selected.contains(noteRefKey(ev.measure, ev.pos, ev.value.lane, ev.value.sample.id,
+                                          ev.value.sub_line)))
+            continue;
+        const int col =
+            columnFor(ev.value.lane, ev.value.sample.id, static_cast<int>(ev.value.sub_line));
+        if (col < 0 || static_cast<std::size_t>(col) >= m_colRects.size()) continue;
+        const QString file = cs->wavFileOfId(static_cast<int>(ev.value.sample.id));
+        if (file.isEmpty()) continue;
+        const auto wf = ae->sampleWaveform(file);
+        if (!wf || !wf->valid()) {
+            ae->requestSampleWaveform(file);
+            continue;
+        }
+        const double start =
+            static_cast<double>(cs->timing()->time_us(beatbench::Position{ev.measure, ev.pos})) /
+            1e6;
+        const double duration = static_cast<double>(wf->frameCount()) / wf->sampleRate();
+        if (duration <= 0.0) continue;
+        qreal y0 = yForSec(start);
+        qreal y1 = yForSec(start + duration);
+        if (y1 < y0) std::swap(y0, y1);
+        const qreal top = std::max<qreal>(0.0, y0);
+        const qreal bottom = std::min<qreal>(height(), y1);
+        if (bottom <= top) continue;
+        const QRectF& laneRect = m_colRects[static_cast<std::size_t>(col)];
+        const qreal cx = laneRect.center().x();
+        const qreal half = laneRect.width() * 0.45;
+        const qreal framesPerPx = (duration * wf->sampleRate()) / std::max<qreal>(1.0, y1 - y0);
+        for (qreal y = std::floor(top); y <= bottom; y += 1.0) {
+            const double t = timeAtY(y + 0.5);
+            if (t < start || t > start + duration) continue;
+            const std::size_t f0 =
+                static_cast<std::size_t>(std::max(0.0, (t - start) * wf->sampleRate()));
+            const std::size_t f1 =
+                f0 + std::max<std::size_t>(1, static_cast<std::size_t>(framesPerPx));
+            const auto r = wf->range(f0, f1);
+            p->drawLine(QPointF(cx + r.min * half, y), QPointF(cx + r.max * half, y));
+        }
+    }
 }
 
 void ChartViewItem::onSessionChartChanged() {
@@ -2090,6 +2195,9 @@ void ChartViewItem::paint(QPainter* p) {
             }
         }
     }
+
+    // ---- #49：选中 note 的采样波形（在 note 下层） ----
+    drawNoteWaveforms(p, chart, first, last);
 
     // ---- note / LN / 地雷（note 底边 = 实际时间点） ----
     const qreal noteH = noteHeight();
