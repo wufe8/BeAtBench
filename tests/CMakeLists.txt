@@ -231,6 +231,22 @@ if (Qt6Core_FOUND)
     add_test(NAME document_service_tests COMMAND document_service_test)
     target_sources(document_service_test PRIVATE document_instances_test.cpp)
 
+    # 窗格编辑上下文：显式文档寻址、独立选区和模态操作凭证（无窗口/音频设备）。
+    add_executable(pane_edit_context_test pane_edit_context_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(pane_edit_context_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(pane_edit_context_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest_main)
+    set_target_properties(pane_edit_context_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(pane_edit_context_test)
+    add_test(NAME pane_edit_context_tests COMMAND pane_edit_context_test)
+    set_tests_properties(pane_edit_context_tests PROPERTIES TIMEOUT 20)
+
     add_executable(chart_history_controller_test chart_history_controller_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
