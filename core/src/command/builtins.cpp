@@ -29,6 +29,7 @@
 #include "beatbench/core/command/Midi.hpp"
 #include "beatbench/core/command/Slice.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
+#include "beatbench/core/edit/LanePlan.hpp"
 #include "beatbench/core/edit/Selection.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/io/AtomicWrite.hpp"
@@ -118,7 +119,7 @@ std::string mode_arg(const Json& args) {
 /// mode 从会话 chart 取；非 BMS 格式各自映射（格式无关原则：值域检查在格式层）。
 bool lane_can_ln(const Chart& chart, const Lane& lane) {
     const auto mode = chart.mode_id.value_or("sp7k");
-    return !bms::bms_channel_for_mode(mode, lane, true, NoteKind::Normal).empty();
+    return bms::bms_can_represent(mode, lane, true, NoteKind::Normal);
 }
 
 std::string severity_str(beatbench::codec::Severity s) {
@@ -544,19 +545,8 @@ Lane lane_from_json(const Json& j) {
     return l;
 }
 
-// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）
-const char* lane_kind_str(LaneKind k) {
-    switch (k) {
-        case LaneKind::Scratch:
-            return "scratch";
-        case LaneKind::Pedal:
-            return "pedal";
-        case LaneKind::Bgm:
-            return "bgm";
-        default:
-            return "key";
-    }
-}
+// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）。
+// 单一实现见 core/include/beatbench/core/Lane.hpp。
 
 // 从 args 读 (measure, pos)（"measure": int, "pos": {"num":n,"den":d} 或 [n,d]）
 Rational pos_from_json(const Json& args) {
@@ -927,7 +917,7 @@ class BgaMoveCommandCmd : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         comp->add(std::make_unique<edit::BgaDeleteCommand>(fm, fp, fl));
         comp->add(std::make_unique<edit::BgaPutCommand>(tm, tp, tl, sample));
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = session.exec(std::make_unique<edit::TimeShiftCommand>(std::move(comp)));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -976,7 +966,7 @@ class TimingMoveCommandCmd : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         comp->add(std::make_unique<edit::DeleteTimingCommand>(kind, fm, fp));
         comp->add(std::make_unique<edit::PutTimingCommand>(kind, tm, tp, value));
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = session.exec(std::make_unique<edit::TimeShiftCommand>(std::move(comp)));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -992,6 +982,16 @@ class TimingMoveCommandCmd : public Command {
 // 读取兼容：外部工具（BMSE/iBMSC）复制的原始行可直接粘贴解析。
 // 2026-09 扩展（切音导出 raw 整段粘贴）：额外识别 `#WAVxx <file>` 采样定义行与
 // `#NNN02:<值>` 小节长度行（ch01 多行按 sub_line FIFO 与原解析器一致）。
+
+// (measure,pos,lane,sub_line) 共享序：CopyCell（copy 出口）与 PatternSlot（apply 入口）
+// 的排序同源，保证「复制序 = 套用序」往返一致；第三处同构比较器据此收口。
+constexpr bool slot_order(std::uint32_t am, const Rational& ap, const Lane& al, std::uint32_t as,
+                          std::uint32_t bm, const Rational& bp, const Lane& bl, std::uint32_t bs) {
+    if (am != bm) return am < bm;
+    if (ap != bp) return ap < bp;
+    if (al != bl) return al < bl;
+    return as < bs;
+}
 
 class ClipboardCopyCommand : public Command {
    public:
@@ -1083,8 +1083,33 @@ class ClipboardCopyCommand : public Command {
                 lines.push_back(std::move(line));
             }
         }
+        // 配置复制用的轨道序列（与 BMS 行分开）：只记录顺序/轨道/LN 标记，不记录 sample id。
+        std::vector<CopyCell> ordered = cells;
+        std::sort(ordered.begin(), ordered.end(), [](const CopyCell& a, const CopyCell& b) {
+            return slot_order(a.ref.measure, a.ref.pos, a.ref.lane, a.ref.sub_line, b.ref.measure,
+                              b.ref.pos, b.ref.lane, b.ref.sub_line);
+        });
+        Json pattern = Json::array();
+        for (const auto& c : ordered) {
+            Json item = Json::object();
+            item.set("measure", static_cast<std::int64_t>(c.ref.measure));
+            Json p = Json::object();
+            p.set("num", c.ref.pos.num);
+            p.set("den", c.ref.pos.den);
+            item.set("pos", std::move(p));
+            Json lane = Json::object();
+            lane.set("player", static_cast<std::int64_t>(c.ref.lane.player));
+            lane.set("kind", lane_kind_str(c.ref.lane.kind));
+            lane.set("index", static_cast<std::int64_t>(c.ref.lane.index));
+            item.set("lane", std::move(lane));
+            item.set("sub_line", static_cast<std::int64_t>(c.ref.sub_line));
+            item.set("ln", (c.ev->value.ln_channel || c.ev->value.ln_pair.has_value()) &&
+                               c.ref.lane.kind != LaneKind::Bgm);
+            pattern.push_back(std::move(item));
+        }
         Json out = Json::object();
         out.set("lines", std::move(lines));
+        out.set("pattern", std::move(pattern));
         out.set("count", static_cast<std::int64_t>(refs.size()));
         return out;
     }
@@ -1100,6 +1125,100 @@ class ClipboardCopyCommand : public Command {
         return buf;
     }
 };
+
+// —— 配置复制 pattern（issue #47）：只取轨道序列，不取 sample ——
+struct PatternSlot {
+    std::uint32_t measure = 0;
+    Rational pos;
+    Lane lane;
+    std::uint32_t sub_line = 0;
+    bool ln = false;
+};
+
+struct PatternItem {
+    Lane lane;
+    bool ln = false;
+    std::uint32_t sort_measure = 0;
+    Rational sort_pos;
+};
+
+std::vector<PatternSlot> pattern_slots_from_json(const Json& args) {
+    const Json* p = args.find("pattern");
+    if (!p || !p->is_array()) return {};
+    std::vector<PatternSlot> out;
+    for (const auto& item : p->as_array()) {
+        if (!item.is_object()) continue;
+        PatternSlot slot;
+        slot.measure = u32_arg(item, "measure");
+        slot.pos = pos_from_json(item);
+        const Json* lj = item.find("lane");
+        if (!lj || !lj->is_object()) continue;
+        slot.lane = lane_from_json(*lj);
+        if (const Json* bl = item.find("sub_line"); bl && bl->is_int())
+            slot.sub_line = static_cast<std::uint32_t>(bl->as_i64());
+        if (const Json* ln = item.find("ln"); ln && ln->is_bool()) slot.ln = ln->as_bool();
+        out.push_back(slot);
+    }
+    std::sort(out.begin(), out.end(), [](const PatternSlot& a, const PatternSlot& b) {
+        return slot_order(a.measure, a.pos, a.lane, a.sub_line, b.measure, b.pos, b.lane,
+                          b.sub_line);
+    });
+    return out;
+}
+
+std::vector<PatternSlot> pattern_slots_from_text(std::string_view mode, const std::string& text) {
+    // 外部 BMS 文本走 codec parser（issue #47 承诺「外部文本按现有 parser 规则」）：
+    // 小节号任意位数、通道别名/大小写、LNOBJ 隐式 LN 尾、多行 ch01 的 sub_line
+    // 全部由 parser 权威处理，不再维护第二套行解析器。
+    bms::BmsReadOptions opts;
+    opts.mode = std::string(mode);
+    opts.preserve_comments = false;
+    const auto r = bms::read_bms(text, opts);
+    std::vector<PatternSlot> out;
+    for (const auto& ev : r.chart.notes) {
+        PatternSlot ps;
+        ps.measure = ev.measure;
+        ps.pos = ev.pos;
+        ps.lane = ev.value.lane;
+        ps.sub_line = ev.value.sub_line;
+        ps.ln = (ev.value.ln_channel || ev.value.ln_pair.has_value()) &&
+                ev.value.lane.kind != LaneKind::Bgm;
+        out.push_back(std::move(ps));
+    }
+    // parser 输出按 (measure,pos) 升序；lane/sub_line 维度由调用方统一排序。
+    std::sort(out.begin(), out.end(), [](const PatternSlot& a, const PatternSlot& b) {
+        return slot_order(a.measure, a.pos, a.lane, a.sub_line, b.measure, b.pos, b.lane,
+                          b.sub_line);
+    });
+    return out;
+}
+
+std::vector<PatternItem> pattern_items(const std::vector<PatternSlot>& slots) {
+    std::vector<PatternItem> out;
+    std::map<Lane, std::vector<PatternSlot>> ln_by_lane;
+    for (const auto& slot : slots) {
+        if (!slot.ln) {
+            out.push_back(PatternItem{slot.lane, false, slot.measure, slot.pos});
+        } else {
+            ln_by_lane[slot.lane].push_back(slot);
+        }
+    }
+    for (auto& [lane, group] : ln_by_lane) {
+        std::sort(group.begin(), group.end(), [](const PatternSlot& a, const PatternSlot& b) {
+            if (a.measure != b.measure) return a.measure < b.measure;
+            return a.pos < b.pos;
+        });
+        for (std::size_t i = 0; i + 1 < group.size(); i += 2) {
+            out.push_back(PatternItem{lane, true, group[i].measure, group[i].pos});
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const PatternItem& a, const PatternItem& b) {
+        if (a.sort_measure != b.sort_measure) return a.sort_measure < b.sort_measure;
+        if (a.sort_pos != b.sort_pos) return a.sort_pos < b.sort_pos;
+        return a.lane < b.lane;
+    });
+    return out;
+}
 
 class ClipboardPasteCommand : public Command {
    public:
@@ -1307,10 +1426,15 @@ class ClipboardPasteCommand : public Command {
             const bool ln_kind = i < parsed_ln.size() && parsed_ln[i];
             const NoteKind kind = (i < parsed_kind.size()) ? parsed_kind[i] : NoteKind::Normal;
             comp->add(std::make_unique<edit::PutNoteCommand>(
-                static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset), r.pos,
-                r.lane, r.sample, ln_kind, kind, r.sub_line));
+                edit::NoteRef{
+                    static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset),
+                    r.pos, r.lane, r.sample, r.sub_line},
+                ln_kind, kind));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool has_changes = comp->size() > 0;
+        std::unique_ptr<edit::EditCommand> exec_cmd = std::move(comp);
+        if (has_changes) exec_cmd = std::make_unique<edit::TimeShiftCommand>(std::move(exec_cmd));
+        const bool ok = session.exec(std::move(exec_cmd));
         Json placed = Json::array();
         for (const auto& r : parsed) {
             Json item = Json::object();
@@ -1352,6 +1476,128 @@ class ClipboardPasteCommand : public Command {
     static std::uint32_t decode_id_text(const Chart& chart, std::string_view id_text) {
         return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(id_text, 2)
                                                : bms::c36_to_u32(id_text, 2);
+    }
+};
+
+// clipboard.applyPattern：把剪贴板轨道序列套到选中目标上（issue #47）。
+// 只改 lane，不改时间/采样，不新建 note；目标不足时只应用前 N 个；原子预检后一个 undo 步。
+class ClipboardApplyPatternCommand : public Command {
+   public:
+    std::string_view name() const override { return "clipboard.applyPattern"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——协议参数/计划分支表
+    Json run(const Json& args) const override {
+        auto& session = session_from_args(args);
+        if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
+        const auto& chart = session.chart();
+        const std::string mode = chart.mode_id.value_or("sp7k");
+        const auto refs = selection_from_json(args);
+        if (refs.empty()) throw CommandError("empty_selection", "选择集为空（无目标 note）");
+
+        const auto groups = edit::group_selection(chart, refs);
+        if (groups.empty()) throw CommandError("not_found", "目标选择集中的 note 不存在");
+
+        std::vector<PatternSlot> slots = pattern_slots_from_json(args);
+        if (slots.empty()) {
+            const Json* t = args.find("text");
+            if (!t || !t->is_string())
+                throw CommandError("bad_args", "缺少 pattern 或 text（配置复制）");
+            slots = pattern_slots_from_text(mode, t->as_str());
+        }
+        if (slots.empty()) throw CommandError("empty_pattern", "剪贴板没有可用的轨道序列");
+        const auto pitems = pattern_items(slots);
+        if (pitems.empty()) throw CommandError("empty_pattern", "剪贴板没有可用的轨道序列");
+
+        std::vector<edit::LaneTarget> targets;
+        targets.reserve(pitems.size());
+        for (const auto& p : pitems) targets.push_back(edit::LaneTarget{p.lane, p.ln});
+
+        edit::LanePlanOptions options;
+        options.allow_bgm = true;  // issue #47：pattern 含 BGM，目标允许 BGM
+        options.require_ln_match = true;
+        if (const Json* h = args.find("hidden_lanes"); h && h->is_array()) {
+            for (const auto& v : h->as_array())
+                if (v.is_string()) options.hidden_lanes.insert(v.as_str());
+        }
+
+        const auto plan = edit::plan_lane_moves(chart, groups, targets, options);
+        for (const auto& move : plan.moves) {
+            if (move.move) continue;
+            using R = edit::LaneMoveReason;
+            switch (move.reason) {
+                case R::Hidden:
+                    throw CommandError("target_hidden", "目标轨道已隐藏");
+                case R::Occupied:
+                case R::DuplicateTarget:
+                    throw CommandError("target_occupied", "目标位置已有 note");
+                case R::NotFound:
+                    throw CommandError("not_found", "目标 note 不存在");
+                default:
+                    break;  // ln_mismatch：跳过该组（协议返回 skipped），不阻断整批
+            }
+        }
+
+        auto comp = std::make_unique<edit::CompositeCommand>();
+        std::vector<edit::NoteRef> out_refs;
+        std::int64_t moved = 0;
+        std::int64_t skipped = 0;
+        for (const auto& move : plan.moves) {
+            const auto& group = move.group;
+            if (!move.move) {
+                out_refs.push_back(group.a);
+                if (group.b) out_refs.push_back(*group.b);
+                ++skipped;
+                continue;
+            }
+            auto cmd = edit::make_lane_move_command(move);
+            if (!cmd) {
+                out_refs.push_back(group.a);
+                if (group.b) out_refs.push_back(*group.b);
+                ++skipped;
+                continue;
+            }
+            comp->add(std::move(cmd));
+            const std::uint32_t sub = move.lane.kind == LaneKind::Bgm ? move.sub_line : 0;
+            out_refs.push_back(
+                edit::NoteRef{group.a.measure, group.a.pos, move.lane, group.a.sample, sub});
+            if (const auto partner = group.b; partner)
+                out_refs.push_back(
+                    edit::NoteRef{partner->measure, partner->pos, move.lane, partner->sample, 0});
+            ++moved;
+        }
+        // 目标多于 pattern：多余目标保持原样，仍回填 selection。
+        for (std::size_t i = plan.moves.size(); i < groups.size(); ++i) {
+            out_refs.push_back(groups[i].a);
+            if (const auto partner = groups[i].b; partner) out_refs.push_back(*partner);
+        }
+
+        bool ok = true;
+        if (comp->size() > 0) ok = session.exec(std::move(comp));
+        Json sel = Json::array();
+        std::sort(out_refs.begin(), out_refs.end());
+        out_refs.erase(std::unique(out_refs.begin(), out_refs.end()), out_refs.end());
+        for (const auto& r : out_refs) {
+            Json o = Json::object();
+            o.set("measure", static_cast<std::int64_t>(r.measure));
+            Json pos = Json::object();
+            pos.set("num", r.pos.num);
+            pos.set("den", r.pos.den);
+            o.set("pos", std::move(pos));
+            Json lane = Json::object();
+            lane.set("player", static_cast<std::int64_t>(r.lane.player));
+            lane.set("kind", lane_kind_str(r.lane.kind));
+            lane.set("index", static_cast<std::int64_t>(r.lane.index));
+            o.set("lane", std::move(lane));
+            o.set("sample", static_cast<std::int64_t>(r.sample));
+            o.set("sub_line", static_cast<std::int64_t>(r.sub_line));
+            sel.push_back(std::move(o));
+        }
+        Json out = Json::object();
+        out.set("ok", ok);
+        out.set("moved", moved);
+        out.set("skipped", skipped);
+        out.set("selection", std::move(sel));
+        out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
+        return out;
     }
 };
 
@@ -1636,15 +1882,15 @@ class NotePutCommand : public Command {
         // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
         // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
         // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
-        if (bms::bms_channel_for_mode(session.chart().mode_id.value_or("sp7k"), lane, ln_kind, kind)
-                .empty()) {
+        if (!bms::bms_can_represent(session.chart().mode_id.value_or("sp7k"), lane, ln_kind,
+                                    kind)) {
             throw CommandError("bad_args", "该轨道/音符类型无法表示为当前模式的 BMS 通道");
         }
         if (ln_kind && !lane_can_ln(session.chart(), lane)) {
             throw CommandError("bad_args", "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
         }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
-            measure, pos, lane, sample, ln_kind, kind, sub_line));
+            edit::NoteRef{measure, pos, lane, sample, sub_line}, ln_kind, kind));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", ln_kind ? "ln" : (kind == NoteKind::Landmine ? "mine" : "normal"));
@@ -1700,8 +1946,9 @@ class NoteMoveCommand : public Command {
             if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
             to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
-        return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m, to_pos,
-                                                       false, to_lane, from_sub_line, to_sub_line);
+        return std::make_unique<edit::MoveNoteCommand>(
+            edit::NoteRef{from_m, from_pos, lane, sample, from_sub_line}, to_m, to_pos, to_lane,
+            to_sub_line);
     }
 
     Json run(const Json& args) const override {
@@ -1765,7 +2012,8 @@ class NoteDeleteCommand : public Command {
                 if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
                 sub_line = static_cast<std::uint32_t>(bl->as_i64());
             }
-            return std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line);
+            return std::make_unique<edit::DeleteNoteCommand>(
+                edit::NoteRef{measure, pos, lane, sample, sub_line});
         };
         // selection 数组 = 批量删除（一个 CompositeCommand / 一次备份）；单对象路径保持兼容。
         if (args.find("selection")) {
@@ -1823,8 +2071,7 @@ class NoteQuantizeCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::QuantizeNoteCommand>(r.measure, r.pos, r.lane,
-                                                                  r.sample, snap_num, snap_den));
+            comp->add(std::make_unique<edit::QuantizeNoteCommand>(r, snap_num, snap_den));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -1857,8 +2104,7 @@ class NoteTransformCommand : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         std::unordered_set<std::size_t> claimed;
         for (const auto& r : refs) {
-            auto command = std::make_unique<edit::TransformNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line);
+            auto command = std::make_unique<edit::TransformNoteCommand>(r, mirror, rotate);
             // Preflight against the unchanged chart. Invalid targets must return
             // a protocol error, not success with a replacement selection.
             try {
@@ -1873,7 +2119,8 @@ class NoteTransformCommand : public Command {
         // 键号上限按谱面模式，与命令 apply 同一 transform_lane）。
         const std::string mode =
             session.has_chart() ? session.chart().mode_id.value_or("sp7k") : "sp7k";
-        const int max_key = chart_mode_key_count(mode);
+        // exec 已通过 bind_source 校验模式已知；value_or 仅为回显防御。
+        const int max_key = chart_mode_key_count(mode).value_or(7);
         Json sel = Json::array();
         for (const auto& r : refs) {
             const Lane nl = edit::transform_lane(r.lane, mirror, rotate, max_key);
@@ -1925,8 +2172,7 @@ class NoteToggleLnCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::ToggleLnCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                              r.sub_line));
+            comp->add(std::make_unique<edit::ToggleLnCommand>(r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -2013,8 +2259,7 @@ class NoteConvertCommand : public Command {
                 tm = r.measure;
                 tp = r.pos;
             }
-            comp->add(std::make_unique<edit::ConvertNoteCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                                 r.sub_line, target, tm, tp));
+            comp->add(std::make_unique<edit::ConvertNoteCommand>(r, target, tm, tp));
         }
         if (comp->size() == 0)
             throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
@@ -2134,12 +2379,10 @@ class NoteMoveRegionCommand : public Command {
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
                 comp->add(std::make_unique<edit::ConvertNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
-                    static_cast<std::uint32_t>(to_m), to_pos));
+                    r, *convert_target, static_cast<std::uint32_t>(to_m), to_pos));
             } else {
                 comp->add(std::make_unique<edit::MoveNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, static_cast<std::uint32_t>(to_m), to_pos,
-                    false, to_lane, r.sub_line, to_sub_line));
+                    r, static_cast<std::uint32_t>(to_m), to_pos, to_lane, to_sub_line));
             }
         }
         if (comp->size() == 0) {
@@ -2503,7 +2746,7 @@ class NoteSetSampleCommand : public Command {
         };
         const std::uint32_t to_id = decode(to);
         const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(
-            measure, pos, lane, sample, sub_line, to_id));
+            edit::NoteRef{measure, pos, lane, sample, sub_line}, to_id));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));
@@ -2539,6 +2782,7 @@ void register_builtin_commands(Registry& registry) {
     // M3 剪贴板（BMS 原始行文本；外部工具兼容）
     registry.add(std::make_unique<ClipboardCopyCommand>());
     registry.add(std::make_unique<ClipboardPasteCommand>());
+    registry.add(std::make_unique<ClipboardApplyPatternCommand>());
     // M3 时间轴事件（BPM / STOP / 节拍：点放/列表/改值）
     registry.add(std::make_unique<TimingListCommand>());
     registry.add(std::make_unique<TimingPutCommand>());

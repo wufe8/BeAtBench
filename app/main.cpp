@@ -359,6 +359,8 @@ int main(int argc, char** argv) {
                                   nullptr, qml("copySelection")});
         uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit",
                                   nullptr, qml("pasteClipboard")});
+        uiActions.add(UiActionDef{"edit.pastePattern", QCoreApplication::tr("配置复制"),
+                                  "Ctrl+Shift+V", "edit", nullptr, qml("pastePattern")});
         uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit",
                                   nullptr, qml("uiActionDelete")});
         uiActions.addSeparator(QStringLiteral("edit"));  // 分隔线：编辑操作 ↔ 播放/渲染/取消

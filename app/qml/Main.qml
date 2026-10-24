@@ -179,6 +179,8 @@ ApplicationWindow {
     }
     // 剪贴板（BMS 原始行；clipboard.copy 输出 → paste 输入；会话状态）
     property var clipboardLines: []
+    /// 配置复制用的轨道序列（clipboard.copy pattern；与 BMS 原始行分开保存）
+    property var clipboardPattern: []
     // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
     property var selectionRefs: []
     // 选中 BGA/BPM/STOP 对象集合（{kind, measure, pos, ...}；视口点选/拖拽/删除/编辑用）
@@ -257,6 +259,10 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.paste") : ""
                enabled: chartMeta !== null && currentPage === 0 && !window.textInputFocused
                onActivated: uiActions.invoke("edit.paste") }
+    Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.pastePattern") : ""
+               enabled: chartMeta !== null && currentPage === 0 && !window.textInputFocused &&
+                        window.selectionRefs.length > 0
+               onActivated: uiActions.invoke("edit.pastePattern") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
                enabled: chartMeta !== null && currentPage === 0
                onActivated: uiActions.invoke("edit.delete") }
@@ -1839,6 +1845,7 @@ ApplicationWindow {
     function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }
     function onSelectionMade(refs) { return session.onSelectionMade(refs) }
     function pasteClipboard() { return session.pasteClipboard() }
+    function pastePattern() { return session.pastePattern() }
     /// Base62 粘贴确认（2026-09 数据安全）：SessionController.pasteClipboard 判定「目标谱面
     /// Base36 + 文本含 Base62 id」时调用；确认后走同一 pasteRawText 落点（一个 undo 步）。
     function requestBase62PasteConfirm(text, targetMeasure) {
@@ -1948,6 +1955,8 @@ ApplicationWindow {
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
         setActionEnabled("edit.copy", chartMeta !== null && selectionRefs.length > 0)
         setActionEnabled("edit.paste", chartMeta !== null && currentPage === 0)
+        setActionEnabled("edit.pastePattern",
+                         chartMeta !== null && currentPage === 0 && selectionRefs.length > 0)
         setActionEnabled("edit.delete", chartMeta !== null && currentPage === 0 &&
                                            (selectionRefs.length > 0 || metaSelection.length > 0))
         setActionEnabled("tool.quantize", selectionRefs.length > 0)

@@ -671,10 +671,41 @@ QtObject {
         var r = sessionCmd("clipboard.copy", { selection: window.selectionRefs })
         if (r) {
             window.clipboardLines = r.lines
+            window.clipboardPattern = r.pattern !== undefined ? r.pattern : []
             // 镜像到系统剪贴板：Ctrl+V / 外部工具粘贴拿到同一份 BMS 原始行（2026-09）
             if (typeof clipboard !== "undefined" && clipboard)
                 clipboard.setText(r.lines.join("\n"))
             setStatus(qsTr("已复制 %1 个 note（%2 行）").arg(r.count).arg(r.lines.length))
+        }
+    }
+    /// 配置复制（Ctrl+Shift+V）：把剪贴板轨道序列套到当前选中目标；不动时间/采样，不新建。
+    function pastePattern() {
+        if (!window.selectionRefs || window.selectionRefs.length === 0) {
+            setStatus(qsTr("先选中目标 note 再配置复制"))
+            return
+        }
+        var args = { selection: window.selectionRefs.slice() }
+        var sysText = ""
+        if (typeof clipboard !== "undefined" && clipboard)
+            sysText = clipboard.text()
+        if (window.clipboardPattern && window.clipboardPattern.length > 0)
+            args.pattern = window.clipboardPattern
+        else if (sysText && looksLikeBmsText(sysText))
+            args.text = sysText
+        else {
+            setStatus(qsTr("剪贴板没有可用的轨道序列（先 Ctrl+C 复制一段摆键）"))
+            return
+        }
+        // 当前视口隐藏轨由 #48 接入；先传空数组，core 仍做 lane/占用/LN 原子预检。
+        args.hidden_lanes = []
+        var r = sessionCmd("clipboard.applyPattern", args)
+        if (r) {
+            if (r.ok === false) { setStatus(qsTr("配置复制失败：谱面未修改")); return }
+            if (r.selection && r.selection.length > 0)
+                window.selectionRefs = r.selection
+            setStatus(qsTr("配置复制：移动 %1 个 note%2")
+                      .arg(r.moved)
+                      .arg(r.skipped > 0 ? qsTr("（跳过 %1 组不匹配的 LN/目标）").arg(r.skipped) : ""))
         }
     }
     /// 系统剪贴板文本是否含 BMS 原始行（2026-09：实现迁 C++ EditUtils.looksLikeBmsText）。

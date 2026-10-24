@@ -79,6 +79,7 @@ GUI = **QML 声明式表现层 + C++ 桥接引擎**。本稿回答三件事：�
 ## 五、关键交互（不变）
 
 - 键盘：LR2 布局（`1-7` + 皿键 + 备用 `F1-F7`），编辑态抑制 IME；工具键占位 `V N L M H Z`，`Del` 删除、`Esc` 取消。
+- 配置复制：`Ctrl+C` 复制一段摆键，选中目标 note 后 `Ctrl+Shift+V` 按轨道序列重排；不新建、不改时间。
 - 鼠标：点放（`note.put`）/ 框选（会话状态）/ 拖动（`note.move`，`merge_with` 合并 undo）/ 滚轮微调。
 - snap / 量化：只作用于落点换算，不改数据精度。
 - QML 侧键盘 / IME 方案见 doc/skin-system.md 五、 待办。
