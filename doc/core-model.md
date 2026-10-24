@@ -1,7 +1,7 @@
 # BeAtBench — 核心模型与调用架构
 
 > **现行权威**：格式无关模型、命令即接口的调用面、切音工作台设计、note 移动机制。
-> 关联：`doc/development.md`（现状手册）、`doc/command-protocol.md`（命令 JSON 协议规格）、`doc/skin-system.md`（GUI/皮肤）。
+> 关联：`doc/development.md`（手册）、`doc/command-protocol.md`（命令 JSON 协议规格）、`doc/skin-system.md`（GUI/皮肤）。
 
 ## 一、核心模型解耦（格式无关、模式无关）
 
@@ -40,9 +40,9 @@ lane 抽象；未来加 codec 不触碰模型。
 
 - **GUI = 交互式命令执行器**：执行命令 → 入 undo 栈 → 视图刷新（经 `CommandDispatcher.dispatch()`）；
 - **CLI = 批处理命令执行器**：同一套命令 headless 运行（`beatbench-cli info/check/convert/render`）；
-- 未来 **Lua 脚本 = 第三种执行器**（Phase D，P4）。
+- 未来 **Lua 脚本 = 第三种执行器**。
 
-**部署形态（P1，已落地）**：core 静态库 + GUI 进程内链接 + 独立 `beatbench-cli`（无 Qt；查询/编辑使用 core，离线 `render` 还链接 audio，构建仍需 PortAudio）。
+**部署形态**：core 静态库 + GUI 进程内链接 + 独立 `beatbench-cli`（无 Qt；查询/编辑使用 core，离线 `render` 还链接 audio，构建仍需 PortAudio）。
 收益：CI/黄金测试直接跑 CLI；外部工具调用 CLI 无 GUI 依赖；扩展 = 加命令，不动 UI。
 （P2 单二进制 headless 不推荐；P3 常驻守护 + IPC 仅在出现“外部工具驱动运行中的 GUI”真实需求时再设计
 ——命令可序列化已天然预留接口。）
@@ -51,7 +51,7 @@ lane 抽象；未来加 codec 不触碰模型。
 编辑操作 = Command（apply/invert/merge），BPM/STOP 编辑与 note 编辑共用命令栈；同一命令既是 undo 单元，
 也是 CLI 与脚本的调用单元。
 
-## 三、切音工作台设计（M6）
+## 三、切音工作台设计
 
 **定位：工作区/模式切换。** 与编辑模式平级的顶层工作区（`SlicePage`），共享同一文档与音频引擎；
 进入切音 = 切换视图/工具条，不是另起工具。
@@ -63,14 +63,14 @@ offset 对齐（MIDI ↔ audio）
    ↓ 切片位置来源（可切换）
    ├── MIDI notes（推荐：边界 = note on/off，同时给出切分与铺放位置）
    ├── 网格（BPM/拍/细分，确定性、可单测）
-   └── 瞬态检测（M6.5 已实现：complex-domain 谱通量，audio 源；无 MIDI 时的自动切分）
+   └── 瞬态检测（complex-domain 谱通量，audio 源；无 MIDI 时的自动切分）
    ↓
 分片落盘（边界 fade 防爆音）+ #WAV id 分配（冲突检测 / 占用）
    ↓
 ch01 一键铺放（note.put + sub_line）  或  只入库（独立采样库）
 ```
 
-**已拍板决策**：① 网格切分先行、MIDI 驱动为推荐音乐切分源，瞬态检测 M6.5 兑现（audio 源：
+**已拍板决策**：① 网格切分先行、MIDI 驱动为推荐音乐切分源，瞬态检测（audio 源：
 onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替换/追加双模式，异步执行）；② 与谱面关系两者兼顾
 （独立采样库 + 可选对齐铺放）；③ 产物 = 真分片 .wav（BMS 原生可播放）；④ MIDI 一把驱动“切哪 + 放哪”，
 省掉 onset 检测（参考 woslicer 的边界 fade 防 pop）。
@@ -79,9 +79,7 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
 `sub_line`；id = `idTextOf`/`sampleValueOf`；时间↔拍位 = timing 引擎。
 **新增组件**：MIDI 解析器（core 模块 + `midi.parse` 命令，headless 可测）。
 
-**实现状态**：`doc/development.md` 六、。
-
-## 四、note 移动机制与数据模型抽象（M3 权威说明）
+## 四、note 移动机制与数据模型抽象（权威说明）
 
 > note 移动逻辑的单一权威说明；厘清“轨道类别”与“note 类型”的关系，
 > 便于将来导入其它格式时判断扩展点。实现细则（函数行为、参数表）以
@@ -161,7 +159,7 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
   （加枚举值 + 若干分派，受控扩展点）。保持 `Lane{player,kind,index}` 不变；新**属性**走 `NoteKind`
   或新字段（勿往 Lane 塞通道号）；仅新**轨道角色**才扩 `LaneKind`。
 
-### 7. `bgm_line` → `sub_line` 泛化（已实施）
+### 7. `bgm_line` → `sub_line` 泛化
 
 > 把 BGM 专属的 `bgm_line` 泛化成通用的 `sub_line`（子通道/子行），让“任意基础通道同小节多行”被统一建模。
 

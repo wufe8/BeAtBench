@@ -115,13 +115,13 @@ PortAudio 源码/许可也不能因 ASIO OFF 而省略。包 README 链接
 - **PortAudio 会缓存设备/缓冲能力**。面板或外部程序改变驱动能力后，即使流已重开，能力列表也可能过期，
   必须重启 BeAtBench 后重新选择/应用；当前没有完整驱动热插拔/重新枚举保证。
 
-## 5. CI 范围与人工验收
+## 5. CI 范围与验收边界
 
 [CI 工作流](<../.github/workflows/ci.yml>) 保留 Windows MinGW 全量 **OFF** 构建、测试、GUI 冒烟，
 之后才在同一构建树 configure ON，只重建并运行 `audio_backend_capability_test` 与
 `asio_buffer_sizes_test`；MSVC 无 Qt job 同样先全量 OFF、再最小 ON，不增加昂贵 Qt 矩阵。
 CTest 名称分别为 `audio_backend_capability_tests` / `asio_buffer_sizes_tests`。
 预期能力由 CMake 按选项布尔值设置 `BEATBENCH_TEST_EXPECT_ASIO`，OFF/ON 分别断言 false/true；
-不是无条件跳过，也不枚举/加载真实驱动。ON 最小重建后的旧 GUI 仍属 OFF 冒烟证据。
+不是无条件跳过，也不枚举或加载真实驱动。ON 最小重建后的旧 GUI 仍属 OFF 冒烟证据。
 
-原生驱动、实际声音与低延迟仍需人工验收；CI 与无头冒烟不能替代实机验证。
+原生驱动、实际声音与低延迟尚未人工验收；CI 与无头冒烟通过不代表这些路径可用。验收记录模板与待验矩阵属于过程材料，不进入公开文档。
