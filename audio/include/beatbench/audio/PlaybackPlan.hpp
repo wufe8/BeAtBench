@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -36,12 +37,7 @@ class PlaybackPlan {
     /// sourceDir = 谱面目录（相对路径解析基准；空 = 路径原样 → 当作绝对）。
     /// return = 计划（可能为空 = 无 note / 出错——调用方按空处理）。
     static PlaybackPlan build(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
-                              const std::string& sourceDir = "");
-
-    /// 构建（宽字符目录版；Windows 日文路径用）。
-    static PlaybackPlan build_w(const beatbench::Chart& chart,
-                                const beatbench::TimingEngine& timing,
-                                const std::wstring& sourceDir = L"");
+                              const std::filesystem::path& sourceDir = {});
 
     /// 时间 t 的调度位置：第一个 triggerSec >= t 的下标（二分；无 → size()）。
     /// 用于 keysound 调度器游标初始定位。

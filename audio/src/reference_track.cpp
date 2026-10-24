@@ -7,19 +7,15 @@
 #include <cmath>
 
 #include "beatbench/audio/AudioDecoder.hpp"
+#include "beatbench/audio/AudioPath.hpp"
 #include "beatbench/audio/DecodedSample.hpp"
 #include "beatbench/audio/ReferenceTrack.hpp"
 
 namespace beatbench::audio {
 
-bool ReferenceTrack::load(const std::string& path) {
+bool ReferenceTrack::load(const std::filesystem::path& path) {
     const DecodeResult r = decode_audio_file(path);
-    return finish_load(r, path);
-}
-
-bool ReferenceTrack::load_w(const std::wstring& path) {
-    const DecodeResult r = decode_audio_file_w(path);
-    return finish_load(r, std::string());
+    return finish_load(r, u8_string(path));
 }
 
 bool ReferenceTrack::finish_load(const DecodeResult& r, const std::string& displayPath) {

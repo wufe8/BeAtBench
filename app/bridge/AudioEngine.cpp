@@ -185,15 +185,10 @@ bool AudioEngine::playPreview(const QString& file) {
     const QString pathCopy = absPath;
     qInfo("AudioEngine: playPreview %s", qPrintable(pathCopy));  // 冒烟日志
     QThreadPool::globalInstance()->start([this, pathCopy] {
-    // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）——
-    // 窄字符 fopen 走 ANSI 代码页（GBK）打不开日文谱面目录（2026-09 用户实测）。
-    // 跨平台：Windows 用 toStdWString；其它平台窄字符（注释见 AudioDecoder.hpp）。
-    // SampleCache 内部负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
-#ifdef _WIN32
-        const beatbench::audio::SampleCacheResult r = m_cache.get_w(pathCopy.toStdWString());
-#else
-        const beatbench::audio::SampleCacheResult r = m_cache.get(pathCopy.toStdString());
-#endif
+        // path 原生形态（Windows UTF-16）直达缓存——窄/宽分派已收进 audio 层内部
+        //（ma_decoder_init_file_w 的选择在 decode_audio_file 单点）。SampleCache 内部
+        // 负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
+        const beatbench::audio::SampleCacheResult r = m_cache.get(pathCopy.toStdWString());
         QMetaObject::invokeMethod(
             this,
             [this, r] {

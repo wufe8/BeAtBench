@@ -26,6 +26,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <list>
 #include <memory>
@@ -48,9 +49,8 @@ struct SampleCacheResult {
 
 class SampleCache {
    public:
-    /// 解码器覆写（测试注入用；空 = 默认 decode_audio_file / decode_audio_file_w）。
-    using DecodeFn = std::function<DecodeResult(const std::string&)>;
-    using DecodeFnW = std::function<DecodeResult(const std::wstring&)>;
+    /// 解码器覆写（测试注入用；空 = 默认 decode_audio_file）。
+    using DecodeFn = std::function<DecodeResult(const std::filesystem::path&)>;
 
     static constexpr std::size_t kDefaultBudgetBytes =
         static_cast<const std::size_t>(128u * 1024u * 1024u);
@@ -62,19 +62,14 @@ class SampleCache {
     SampleCache& operator=(const SampleCache&) = delete;
 
     /// 覆写解码器（测试用）；反复调用覆盖。空 fn = 恢复默认解码。
-    void setDecoders(DecodeFn fn, DecodeFnW fnW);
+    void setDecoders(DecodeFn fn);
 
-    /// 取采样（POSIX 窄字符；路径须 UTF-8）。**阻塞**（未命中时解码），
-    /// 只允许后台线程调用（UI/回调会卡顿，见类注释）。
-    SampleCacheResult get(const std::string& path);
-
-    /// Windows 宽字符重载（含非 ASCII 路径必须走它，见 AudioDecoder.hpp）。
-    SampleCacheResult get_w(const std::wstring& path);
+    /// 取采样。**阻塞**（未命中时解码），只允许后台线程调用（UI/回调会卡顿，
+    /// 见类注释）。缓存键 = path 的 UTF-8 通用形态（窄/宽构造同路径同键）。
+    SampleCacheResult get(const std::filesystem::path& path);
 
     /// 失效：移除缓存条目（若有）+ 取消 in-flight（完成后不插入）。
-    /// 窄字符路径（UTF-8）与宽字符路径须传同一条路径（内部统一转 UTF-8 键）。
-    void invalidate(const std::string& pathUtf8);
-    void invalidate_w(const std::wstring& path);
+    void invalidate(const std::filesystem::path& path);
 
     /// 清空全部缓存（in-flight 一并取消）。
     void clear();
@@ -107,8 +102,7 @@ class SampleCache {
     std::list<std::string> m_lru;  ///< front = LRU, back = MRU
     std::unordered_map<std::string, Entry> m_cache;
     std::unordered_map<std::string, std::shared_ptr<InFlight>> m_inFlight;
-    DecodeFn m_fn;    ///< 窄字符解码器（空 = 默认）
-    DecodeFnW m_fnW;  ///< 宽字符解码器（空 = 默认）
+    DecodeFn m_fn;  ///< 解码器覆写（空 = 默认）
 };
 
 }  // namespace beatbench::audio

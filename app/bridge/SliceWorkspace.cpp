@@ -198,7 +198,7 @@ QVariantMap SliceWorkspace::previewExportFiles(const QString& outDir, const QStr
 bool SliceWorkspace::loadAudioFileSyncForTest(const QString& path) {
     if (path.isEmpty()) return false;
 #ifdef _WIN32
-    const bool ok = m_track.load_w(path.toStdWString());
+    const bool ok = m_track.load(path.toStdWString());
 #else
     const bool ok = m_track.load(path.toStdString());
 #endif
@@ -331,7 +331,7 @@ QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision, int beatsPe
         ra.sampleRate = sr;
         ra.interleavedStereo = std::move(pcm);
         std::string msg;
-        const bool ok = beatbench::audio::write_wav_file_w(outPath.toStdWString(), ra, &msg);
+        const bool ok = beatbench::audio::write_wav_file(outPath.toStdWString(), ra, &msg);
         if (!ok) {
             errors << outPath + QStringLiteral(": ") + QString::fromStdString(msg);
             continue;
@@ -459,7 +459,7 @@ bool SliceWorkspace::loadAudioFile(const QString& path) {
         // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）。
         auto* track = new beatbench::audio::ReferenceTrack();
 #ifdef _WIN32
-        const bool ok = track->load_w(root.toStdWString());
+        const bool ok = track->load(root.toStdWString());
 #else
         const bool ok = track->load(root.toStdString());
 #endif

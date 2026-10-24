@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "beatbench/audio/AudioPath.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 
 namespace {
@@ -32,23 +33,14 @@ class SampleCacheTest : public ::testing::Test {
    protected:
     /// 注入计数器解码器；每次调用 +1 并返回新采样。
     void installCountingDecoder(SampleCache& cache, std::atomic<int>& calls) {
-        cache.setDecoders(
-            [&](const std::string& path) -> DecodeResult {
-                calls.fetch_add(1);
-                DecodeResult r;
-                r.ok = true;
-                r.sample = makeSample(44100.0, 1000);
-                r.sample->path = path;
-                return r;
-            },
-            [&](const std::wstring& path) -> DecodeResult {
-                calls.fetch_add(1);
-                DecodeResult r;
-                r.ok = true;
-                r.sample = makeSample(44100.0, 1000);
-                r.sample->path = "w:" + std::string(path.begin(), path.end());
-                return r;
-            });
+        cache.setDecoders([&](const std::filesystem::path& path) -> DecodeResult {
+            calls.fetch_add(1);
+            DecodeResult r;
+            r.ok = true;
+            r.sample = makeSample(44100.0, 1000);
+            r.sample->path = beatbench::audio::u8_string(path);
+            return r;
+        });
     }
 };
 
@@ -125,24 +117,22 @@ TEST_F(SampleCacheTest, InvalidateremovesEntryAndCancelsInflight) {
     std::condition_variable cv;
     bool decodeStarted = false;
     bool doCancel = false;
-    cache.setDecoders(
-        [&](const std::string& path) -> DecodeResult {
-            calls.fetch_add(1);
-            {
-                std::lock_guard<std::mutex> lock(m);
-                decodeStarted = true;
-            }
-            cv.notify_all();
-            {
-                std::unique_lock<std::mutex> lock(m);
-                cv.wait(lock, [&] { return doCancel; });  // 挂起直到主线程放行
-            }
-            DecodeResult r;
-            r.ok = true;
-            r.sample = makeSample(44100.0, 1000);
-            return r;
-        },
-        {});
+    cache.setDecoders([&](const std::filesystem::path& path) -> DecodeResult {
+        calls.fetch_add(1);
+        {
+            std::lock_guard<std::mutex> lock(m);
+            decodeStarted = true;
+        }
+        cv.notify_all();
+        {
+            std::unique_lock<std::mutex> lock(m);
+            cv.wait(lock, [&] { return doCancel; });  // 挂起直到主线程放行
+        }
+        DecodeResult r;
+        r.ok = true;
+        r.sample = makeSample(44100.0, 1000);
+        return r;
+    });
 
     // 解码线程（成为解码者；get 会阻塞解码直到放行）
     std::atomic<bool> finished{false};

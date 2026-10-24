@@ -10,6 +10,7 @@
 // 非 Windows（POSIX 原生 UTF-8）用窄字符即够（跨平台见 doc/development.md 四、）。
 #pragma once
 
+#include <filesystem>
 #include <string>
 
 #include "beatbench/audio/DecodedSample.hpp"
@@ -26,12 +27,11 @@ struct DecodeResult {
 /// 返回的 sample 引用计数 = 1（调用方负责 SampleRef 包装或传给
 /// SamplePlayer::play（其内部 ref +1 供 voice 生命周期]）。
 /// 失败时 sample = nullptr、message 有值。
-/// **path 须为 UTF-8**（POSIX 原生；Windows 侧请用 decode_audio_file_w）。
-DecodeResult decode_audio_file(const std::string& path);
+/// 解码音频文件。path 原生形态直接喂 miniaudio（Windows = UTF-16、POSIX = UTF-8），
+/// 调用方不再区分窄宽；core 层 UTF-8 窄串经 std::filesystem::u8path 构造后传入。
+DecodeResult decode_audio_file(const std::filesystem::path& path);
 
 /// Windows 宽字符（UTF-16）版本：含非 ASCII 路径必须走它（ma_decoder_init_file_w）。
-/// 非 Windows 平台等同 decode_audio_file（路径转 UTF-8）。
-DecodeResult decode_audio_file_w(const std::wstring& path);
 
 /// 文件扩展名是否受支持（wav/ogg/oga/mp3/flac；不查内容）。
 bool audio_extension_supported(const std::string& ext);

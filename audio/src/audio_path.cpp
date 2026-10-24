@@ -16,41 +16,10 @@ const std::vector<std::string>& fallback_exts() {
 }
 }  // namespace
 
-std::string resolve_audio_path(const std::string& dir, const std::string& base) {
-    // 原样（base 可能已含目录）
-    std::string asIs = dir.empty() ? base : dir + "/" + base;
-    if (std::filesystem::exists(asIs)) return asIs;
-
-    // 从 base 拆 basename（去掉目录）+ 原扩展名
-    std::string name = base;
-    const auto slash = name.find_last_of("/\\");
-    if (slash != std::string::npos) name = name.substr(slash + 1);
-    const auto dot = name.find_last_of('.');
-    const std::string stem = (dot != std::string::npos) ? name.substr(0, dot) : name;
-
-    for (const auto& ext : fallback_exts()) {
-        std::string cand(dir);
-        if (!cand.empty()) cand += '/';
-        cand += stem;
-        cand += ext;
-        if (std::filesystem::exists(cand)) return cand;
-    }
-    return std::string();
-}
-
-std::string resolve_audio_path_full(const std::string& path) {
-    // 拆 dir/base：最后一个 / 或 \ 前为目录（Linux / Windows 双兼容）
-    const auto slash = path.find_last_of("/\\");
-    if (slash == std::string::npos) return resolve_audio_path("", path);
-    const std::string dir = path.substr(0, slash);
-    const std::string base = path.substr(slash + 1);
-    return resolve_audio_path(dir, base);
-}
-
-std::filesystem::path resolve_audio_path_w(const std::filesystem::path& path) {
+std::filesystem::path resolve_audio_path(const std::filesystem::path& path) {
     // 原样存在 → 用它
     if (std::filesystem::exists(path)) return path;
-    // 拆 stem + 原扩展名；按 basename 试其它音频扩展名（顺序 = resolve_audio_path）
+    // 拆 stem + 原扩展名；按 basename 试其它音频扩展名。
     // ⚠️ 宽字符拼接（stem.wstring() + ext）——`path.string()` 对 Unicode 字符
     // 走 ACP（GBK 无法编码日文）→ 抛 system_error（2026-09 CLI 日文渲染异常）。
     const std::filesystem::path stem = path.stem();

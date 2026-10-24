@@ -95,7 +95,7 @@ add_test(NAME waveform_pyramid_tests COMMAND waveform_pyramid_test)
 # 依赖 core（Chart/TimingEngine）；sample_player.cpp 引用 decode_audio_file*（解码器）
 # → 链 decoder_miniaudio.cpp？不——只有 sample_cache.cpp 引用；本测试只链
 # sample_player.cpp + pcm_playback.cpp + playback_plan.cpp（playback_plan 引用
-# resolve_audio_path_w → audio_path.cpp）。play 本身零解码（DecodedSample 直接喂）。
+# resolve_audio_path → audio_path.cpp）。play 本身零解码（DecodedSample 直接喂）。
 add_executable(m5_playback_test m5_playback_test.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/sample_player.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/pcm_playback.cpp

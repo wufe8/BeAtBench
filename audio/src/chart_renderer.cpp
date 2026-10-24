@@ -84,8 +84,8 @@ bool write_wav16(const std::string& path, const std::vector<float>& pcm, float s
 }
 
 #ifdef _WIN32
-bool write_wav16_w(const std::wstring& path, const std::vector<float>& pcm, float sampleRate,
-                   std::string* message) {
+bool write_wav16(const std::filesystem::path& path, const std::vector<float>& pcm, float sampleRate,
+                 std::string* message) {
     const std::string bytes = encode_wav_pcm(pcm, sampleRate);
     if (bytes.empty()) {
         if (message) *message = "PCM 数据为空";
@@ -158,19 +158,10 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate, dou
 
 }  // namespace
 
-RenderResult render_chart_range(
-    const beatbench::Chart& chart, const beatbench::TimingEngine& timing, SampleCache& cache,
-    double sampleRate, double t0, double t1,
-    const std::string&
-        sourceDir) {  // 窄版：UTF-8 → UTF-16（Windows 原生；ASCII 路径无损，非 ASCII 走宽版）
-    return render_chart_range_w(chart, timing, cache, sampleRate, t0, t1,
-                                std::filesystem::u8path(sourceDir).wstring());
-}
-
-RenderResult render_chart_range_w(const beatbench::Chart& chart,
-                                  const beatbench::TimingEngine& timing, SampleCache& cache,
-                                  double sampleRate, double t0, double t1,
-                                  const std::wstring& sourceDir) {
+RenderResult render_chart_range(const beatbench::Chart& chart,
+                                const beatbench::TimingEngine& timing, SampleCache& cache,
+                                double sampleRate, double t0, double t1,
+                                const std::filesystem::path& sourceDir) {
     RenderResult res;
     res.audio.sampleRate = sampleRate;
     if (sampleRate <= 0.0) {
@@ -230,12 +221,12 @@ RenderResult render_chart_range_w(const beatbench::Chart& chart,
         //   samples.file 是 core 层 UTF-8 窄字符 → u8path 转原生路径。
         // ⚠️ **扩展名兼容**（2026-09 Doppelganger 空音频根因）：定义 `kick.wav`
         //   实际文件 `kick.ogg`——必须 resolve_audio_path 后再解码。
-        const std::filesystem::path dirFs(sourceDir);  // wstring → 原生路径（Windows UTF-16）
+        const std::filesystem::path& dirFs = sourceDir;  // path 原生形态，直用
         const std::filesystem::path fileFs = std::filesystem::u8path(ev.file);
         std::filesystem::path rawPath = fileFs.is_absolute() ? fileFs : (dirFs / fileFs);
-        const std::filesystem::path resPath = beatbench::audio::resolve_audio_path_w(rawPath);
+        const std::filesystem::path resPath = beatbench::audio::resolve_audio_path(rawPath);
         if (resPath.empty()) continue;  // 原样与回退全无 → 静音（lint 已报）
-        const auto c = cache.get_w(resPath.wstring());
+        const auto c = cache.get(resPath);
         if (!c.ok) {
             continue;  // 缺失/解码失败：静音（lint 已报）
         }
@@ -255,29 +246,15 @@ RenderResult render_chart_range_w(const beatbench::Chart& chart,
 }
 
 RenderResult render_chart(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
-                          SampleCache& cache, double sampleRate, const std::string& sourceDir) {
+                          SampleCache& cache, double sampleRate,
+                          const std::filesystem::path& sourceDir) {
     return render_chart_range(chart, timing, cache, sampleRate, 0.0, -1.0, sourceDir);
 }
 
-RenderResult render_chart_w(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
-                            SampleCache& cache, double sampleRate, const std::wstring& sourceDir) {
-    return render_chart_range_w(chart, timing, cache, sampleRate, 0.0, -1.0, sourceDir);
-}
-
-bool write_wav_file(const std::string& path, const RenderedAudio& audio, std::string* message) {
+bool write_wav_file(const std::filesystem::path& path, const RenderedAudio& audio,
+                    std::string* message) {
     return write_wav16(path, audio.interleavedStereo, static_cast<float>(audio.sampleRate),
                        message);
-}
-
-bool write_wav_file_w(const std::wstring& path, const RenderedAudio& audio, std::string* message) {
-#ifdef _WIN32
-    return write_wav16_w(path, audio.interleavedStereo, static_cast<float>(audio.sampleRate),
-                         message);
-#else
-    // 非 Windows：宽字符转窄即可（POSIX 窄 API 原生 UTF-8）
-    return write_wav16(std::string(path.begin(), path.end()), audio.interleavedStereo,
-                       static_cast<float>(audio.sampleRate), message);
-#endif
 }
 
 }  // namespace beatbench::audio
