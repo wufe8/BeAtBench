@@ -512,7 +512,7 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
             // 时，按 sub_line 分组写多行（保持解析时的行结构；空行也输出占位）。
             // 组数 = max(sub_line)+1；缺失组输出全 "00" 行（保留空层，iBMSC 式）。其余按 pos 冲突分组。
             const bool group_sub_lines = [&] {
-                const auto r = bms_channel_rule(channel);
+                const auto r = bms_channel_rule_for(chart.mode_id.value_or("sp7k"), channel);
                 if (r && r->allow_sub_lines) return true;
                 for (const auto& c : cells)
                     if (c.sub_line > 0) return true;  // 未声明但有子行 → 也原样保留
