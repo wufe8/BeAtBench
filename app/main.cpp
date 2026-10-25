@@ -40,6 +40,7 @@
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/QuickPlaceController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWorkspace.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -272,6 +273,10 @@ int main(int argc, char** argv) {
     // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
     // 与 info/check 命令共用同一 core 解析入口（doc/command-protocol.md 三、6.）
     beatbench::app::ChartSession chartSession;
+    // 键盘快速摆音（issue #46）：选中已有 note 后按轨键逐个换轨；事件过滤器 + QSettings 预设。
+    beatbench::app::QuickPlaceController quickPlace;
+    quickPlace.setChartSession(&chartSession);
+    app.installEventFilter(&quickPlace);
     // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
     beatbench::app::AudioEngine audioEngine;
     // 切音工作台数据桥（M6.1）：参考音频 + MIDI 导入/持有；QML 经 `sliceWorkspace` 访问
@@ -295,6 +300,7 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
     engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
+    engine.rootContext()->setContextProperty(QStringLiteral("quickPlace"), &quickPlace);
     engine.rootContext()->setContextProperty(QStringLiteral("audioEngine"), &audioEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("sliceWorkspace"), &sliceWorkspace);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
@@ -359,8 +365,12 @@ int main(int argc, char** argv) {
                                   nullptr, qml("copySelection")});
         uiActions.add(UiActionDef{"edit.paste", QCoreApplication::tr("粘贴"), "Ctrl+V", "edit",
                                   nullptr, qml("pasteClipboard")});
+        uiActions.add(UiActionDef{"edit.pastePattern", QCoreApplication::tr("配置复制"),
+                                  "Ctrl+Shift+V", "edit", nullptr, qml("pastePattern")});
         uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit",
                                   nullptr, qml("uiActionDelete")});
+        uiActions.add(UiActionDef{"edit.toggleVerticalMove", QCoreApplication::tr("纵向锁定"),
+                                  "Ctrl+L", "edit", nullptr, qml("toggleVerticalMove")});
         uiActions.addSeparator(QStringLiteral("edit"));  // 分隔线：编辑操作 ↔ 播放/渲染/取消
         // 编辑页播放/渲染/取消（2026-09 快捷键收尾）：进注册表 → 设置页可改绑。
         // scope="edit" 与切音页 slice.playPause 的 Space 作用域隔离（doc/action-registry.md 九、）。

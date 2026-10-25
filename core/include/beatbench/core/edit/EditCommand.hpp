@@ -9,6 +9,7 @@
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/Payloads.hpp"
 #include "beatbench/core/Rational.hpp"
+#include "beatbench/core/edit/Selection.hpp"
 
 namespace beatbench::edit {
 
@@ -37,6 +38,19 @@ std::string_view timing_kind_name(TimingKind kind);
 /// 协议字符串 → TimingKind。未知 → nullopt。
 std::optional<TimingKind> timing_kind_from_name(std::string_view name);
 
+/// 命令的变更维度。锁只消费 moves_time/moves_lane；changes_content 表示
+/// note 图/顺序/身份发生变化（LN 重建的触发条件），不表示 meta/BGA/timing 变更。
+struct ChangeSet {
+    bool moves_time = false;
+    bool moves_lane = false;
+    bool changes_content = false;
+
+    friend constexpr ChangeSet operator|(ChangeSet a, ChangeSet b) {
+        return {a.moves_time || b.moves_time, a.moves_lane || b.moves_lane,
+                a.changes_content || b.changes_content};
+    }
+};
+
 /// 编辑命令（doc/core-model.md 二、）：文档变更的唯一操作面，可逆、可合并。
 /// 与协议命令（cmd::Command，一次性 run→Json）平行：编辑命令有状态
 /// （作用在 Chart& 上，apply/invert 配对保证可逆）；协议命令无状态。
@@ -55,6 +69,9 @@ class EditCommand {
     /// 逆操作：把 chart 还原到 apply 之前的状态。
     /// 必须与 apply 精确互逆（可逆性测试守卫）。
     virtual void invert(Chart& chart) = 0;
+
+    /// 命令的变更维度。纯虚：新命令不实现就编译失败，避免默认 false 的 fail-open。
+    virtual ChangeSet changes() const = 0;
 
     /// 尝试与下一个命令合并（连续拖动/滚轮微调 → 一个 undo 步）。
     /// next 尚未应用；若可合并，把 next 并入自身并返回 true（调用方不再单独入栈），
@@ -82,10 +99,28 @@ class CompositeCommand : public EditCommand {
     std::string name() const override;
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override;
     std::string describe() const override;
 
    private:
     std::vector<std::unique_ptr<EditCommand>> m_commands;
+};
+
+/// 维度标记包装：内部命令整体视为“改变时间/轨道维度”中的一个或多个。
+/// 协议层把多个原语组合成一次粘贴/移动时使用（单个 Put 只是放置，不算移动；
+/// 组合后的实际变更维度由标志声明，供三态锁拦截判定）。
+class ShiftMarkerCommand : public EditCommand {
+   public:
+    ShiftMarkerCommand(std::unique_ptr<EditCommand> inner, ChangeSet changes);
+    std::string name() const override;
+    void apply(Chart& chart) override;
+    void invert(Chart& chart) override;
+    ChangeSet changes() const override;
+    std::string describe() const override;
+
+   private:
+    std::unique_ptr<EditCommand> m_inner;
+    ChangeSet m_changes;
 };
 
 /// 放置/更改时间轴事件（BPM/STOP/节拍 → timing.put，doc/ui-design.md 九、「工具栏值放置」）。
@@ -104,6 +139,7 @@ class PutTimingCommand : public EditCommand {
     std::string name() const override { return "timing.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -140,6 +176,7 @@ class DeleteTimingCommand : public EditCommand {
     std::string name() const override { return "timing.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -167,20 +204,18 @@ class DeleteTimingCommand : public EditCommand {
 /// 单个 undo 步；批量 = CompositeCommand（与 note.move 同族）。
 class ConvertNoteCommand : public EditCommand {
    public:
-    ConvertNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                       std::uint32_t sub_line, ConvertTarget target, std::uint32_t to_measure = 0,
+    ConvertNoteCommand(NoteRef from, ConvertTarget target, std::uint32_t to_measure = 0,
                        Rational to_pos = Rational(0, 1));
     std::string name() const override { return "note.convert"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override {
+        return {m_from.measure != m_to_measure || m_from.pos != m_to_pos, true, true};
+    }
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;  ///< 源 (measure, pos)
-    Rational m_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
-    std::uint32_t m_sub_line;
+    NoteRef m_from;  ///< 源 note 五元组
     ConvertTarget m_target;
     std::uint32_t m_to_measure;  ///< 目标位置（转换后事件落点；可同一 position）
     Rational m_to_pos;
@@ -208,19 +243,15 @@ class ConvertNoteCommand : public EditCommand {
 /// 批量 = CompositeCommand（一个 undo 步）；单选 = 本命令。
 class ToggleLnCommand : public EditCommand {
    public:
-    ToggleLnCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                    std::uint32_t sub_line = 0);
+    explicit ToggleLnCommand(NoteRef ref);
     std::string name() const override { return "note.toggleLn"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, true}; }
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;
-    Rational m_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
-    std::uint32_t m_sub_line;
+    NoteRef m_ref;
     /// apply 前本 note 是否在 LN 通道（invert 恢复原值）
     bool m_was_ln = false;
     /// 单点→LN 时被标记的伙伴下标（invert 清除标记）
@@ -241,6 +272,7 @@ class RenameSampleCommand : public EditCommand {
     std::string name() const override { return "sample.rename"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -269,6 +301,7 @@ class SetSampleFileCommand : public EditCommand {
     std::string name() const override { return "sample.setFile"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -291,6 +324,7 @@ class SetSampleValueCommand : public EditCommand {
     std::string name() const override { return "sample.setValue"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -312,19 +346,15 @@ class SetSampleValueCommand : public EditCommand {
 /// 逆操作：恢复原 sample 引用。单个 undo 步。
 class SetNoteSampleCommand : public EditCommand {
    public:
-    SetNoteSampleCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                         std::uint32_t sub_line, std::uint32_t to);
+    SetNoteSampleCommand(NoteRef ref, std::uint32_t to);
     std::string name() const override { return "note.setSample"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, true}; }
     std::string describe() const override;
 
    private:
-    std::uint32_t m_measure;
-    Rational m_pos;
-    Lane m_lane;
-    std::uint32_t m_sample;
-    std::uint32_t m_sub_line;
+    NoteRef m_ref;
     std::uint32_t m_to;
     std::optional<std::size_t> m_applied_index;  ///< 命中的 note 下标（invert 定位）
     bool m_did_change = false;
@@ -340,6 +370,7 @@ class DeleteSampleCommand : public EditCommand {
     std::string name() const override { return "sample.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:

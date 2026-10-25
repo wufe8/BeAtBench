@@ -131,7 +131,7 @@
 | 编辑会话 | `session.create` / `load` / `save` / `close` / `activate` / `undo` / `redo` / `autosave` / `lint` / `samples` | 多文档会话、undo/redo、自动保存 |
 | Note 编辑 | `note.put` / `move` / `delete` / `quantize` / `transform` / `setSample` / `moveRegion` / `toggleLn` / `convert` / `convertBack` | 放置/移动/选区批量/LN/类型转换 |
 | 时间轴 / BGA | `timing.list` / `put` / `delete` / `move`；`bga.list` / `put` / `delete` / `move` | BPM/STOP/小节长事件、BGA 图层 |
-| 剪贴板 | `clipboard.copy` / `paste` | BMS 数据行文本出入 |
+| 剪贴板 | `clipboard.copy` / `paste` / `applyPattern` | BMS 数据行文本出入；`applyPattern` 按轨道序列重排选中 note（不改时间/采样） |
 | 元数据 / 采样 | `meta.list` / `edit` / `rawEdit`；`sample.rename` / `setFile` / `delete` | 头部字段、`#WAV`/`#BMP` 绑定管理 |
 | 切音 / MIDI | `slice.detect` / `midi.parse` | 网格/MIDI 切片规划、MIDI 解析（headless，不拖 PortAudio） |
 

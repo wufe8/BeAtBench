@@ -395,6 +395,7 @@ QVariantMap SliceWorkspace::exportSlices(qreal bpm, int subdivision, int beatsPe
         Json args = Json::object();
         args.set("text", rawStr);
         args.set("sub_line_mode", "uniform");
+        args.set("bypass_vertical_lock", true);  // 切音铺入 = 程序化放置，不受拖拽锁约束
         req.set("args", std::move(args));
         const Json resp = beatbench::cmd::global_registry().dispatch(req);
         // 两层都要 ok（2026-09 审查修复）：顶层 ok = 协议/解析成功；result.ok = session.exec
