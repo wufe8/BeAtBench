@@ -131,9 +131,8 @@ TEST(OnsetDetectorTest, NonFiniteConfigAndSamplesDoNotEscape) {
     addBurst(pcm, 1.0, 880.0, 0.4);
     pcm[static_cast<std::size_t>(1.2 * kSr)] = std::numeric_limits<float>::quiet_NaN();
     const auto st = stereoFromMono(pcm);
-    const auto onsets =
-        beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr,
-                                        beatbench::audio::OnsetConfig{});
+    const auto onsets = beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr,
+                                                        beatbench::audio::OnsetConfig{});
     for (const double t : onsets) EXPECT_TRUE(std::isfinite(t));
 
     beatbench::audio::OnsetConfig bad;
@@ -145,9 +144,8 @@ TEST(OnsetDetectorTest, NonFiniteConfigAndSamplesDoNotEscape) {
     bad = beatbench::audio::OnsetConfig{};
     bad.windowSize = 1;
     EXPECT_TRUE(beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr, bad).empty());
-    EXPECT_TRUE(beatbench::audio::detect_onsets(
-                    st.data(), st.size() / 2, 2,
-                    std::numeric_limits<double>::quiet_NaN())
+    EXPECT_TRUE(beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2,
+                                                std::numeric_limits<double>::quiet_NaN())
                     .empty());
 }
 

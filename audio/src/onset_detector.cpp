@@ -68,8 +68,8 @@ double median_of(std::vector<double> v) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)——谱通量峰值拾取：阈值比较状态链，拆散反而伤可读
 std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCount, int channels,
                                   double sampleRate, const OnsetConfig& cfg) {
-    if (interleaved == nullptr || frameCount == 0 || channels <= 0 ||
-        !std::isfinite(sampleRate) || sampleRate <= 0.0)
+    if (interleaved == nullptr || frameCount == 0 || channels <= 0 || !std::isfinite(sampleRate) ||
+        sampleRate <= 0.0)
         return {};
     if (!std::isfinite(cfg.sensitivity) || !std::isfinite(cfg.minGapSec) || cfg.minGapSec < 0.0)
         return {};
