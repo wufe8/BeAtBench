@@ -129,6 +129,7 @@
 |---|---|---|
 | 基础查询/转换 | `version` / `capabilities` / `info` / `check` / `convert` | 协议版本、能力清单、元信息、lint、编码转换与往返 |
 | 编辑会话 | `session.create` / `load` / `save` / `close` / `activate` / `undo` / `redo` / `autosave` / `lint` / `samples` | 多文档会话、undo/redo、自动保存 |
+| 谱面模式 | `chart.set_mode` | 运行中切换模式；`dry_run` 预检，不可表示 note 拒绝（raw 降级待补） |
 | Note 编辑 | `note.put` / `move` / `delete` / `quantize` / `transform` / `setSample` / `moveRegion` / `toggleLn` / `convert` / `convertBack` | 放置/移动/选区批量/LN/类型转换 |
 | 时间轴 / BGA | `timing.list` / `put` / `delete` / `move`；`bga.list` / `put` / `delete` / `move` | BPM/STOP/小节长事件、BGA 图层 |
 | 剪贴板 | `clipboard.copy` / `paste` | BMS 数据行文本出入 |

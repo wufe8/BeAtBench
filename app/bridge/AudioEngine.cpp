@@ -17,10 +17,12 @@
 #include <QVariant>
 #include <QVariantList>
 #include <cmath>
+#include <exception>
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 #include "bridge/ChartSession.hpp"
+#include "bridge/PathUtils.hpp"
 
 namespace beatbench::app {
 
@@ -48,7 +50,8 @@ beatbench::audio::DecodedSample* makeTestToneSample() {
 AudioEngine::AudioEngine(QObject* parent)
     : QObject(parent),
       m_playback(&m_player, 44100.0),
-      m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot) {
+      m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot),
+      m_auditionPlayback(&m_player, 44100.0, beatbench::audio::kAuditionPcmSlot) {
     // 1) 加载持久化设置（设备/采样率/缓冲/音量）
     loadSettings();
     m_player.setMasterVolume(static_cast<float>(masterVolume()));
@@ -68,6 +71,8 @@ AudioEngine::AudioEngine(QObject* parent)
             m_renderCtx.deviceRate.store(static_cast<double>(m_backend->streamInfo().sampleRate));
             m_playback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
             m_refPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
+            m_auditionPlayback.setDeviceRate(
+                static_cast<double>(m_backend->streamInfo().sampleRate));
             m_initialized = true;
         } else {
             // 启动失败（可能设置里设备/采样率不可用）：回退默认（手动再试一次）
@@ -85,6 +90,8 @@ AudioEngine::AudioEngine(QObject* parent)
                     static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_playback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_refPlayback.setDeviceRate(
+                    static_cast<double>(m_backend->streamInfo().sampleRate));
+                m_auditionPlayback.setDeviceRate(
                     static_cast<double>(m_backend->streamInfo().sampleRate));
                 m_initialized = true;
                 m_statusText = QStringLiteral("指定设备不可用，已回退默认设备");
@@ -118,6 +125,7 @@ AudioEngine::AudioEngine(QObject* parent)
                 emit playbackChanged();
                 emit playbackFinished();  // 完成信号（QML 状态栏/后续）
             }
+            if (slot == beatbench::audio::kAuditionPcmSlot) emit auditionChanged();
         }
         // M5 播放时钟：播放中 positionSec 持续变化 → playbackChanged（20Hz 状态栏刷新）。
         // 自然播完检测：reachedEnd → notifyEnded 复位状态机（否则状态卡 Playing →
@@ -138,6 +146,10 @@ AudioEngine::AudioEngine(QObject* parent)
         if (m_refPlayback.playing()) {
             if (m_refPlayback.reachedEnd()) m_refPlayback.notifyEnded();
             emit refPlaybackChanged();
+        }
+        if (m_auditionPlayback.playing()) {
+            if (m_auditionPlayback.reachedEnd()) m_auditionPlayback.notifyEnded();
+            emit auditionChanged();
         }
     });
     poll->start();
@@ -185,15 +197,10 @@ bool AudioEngine::playPreview(const QString& file) {
     const QString pathCopy = absPath;
     qInfo("AudioEngine: playPreview %s", qPrintable(pathCopy));  // 冒烟日志
     QThreadPool::globalInstance()->start([this, pathCopy] {
-    // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）——
-    // 窄字符 fopen 走 ANSI 代码页（GBK）打不开日文谱面目录（2026-09 用户实测）。
-    // 跨平台：Windows 用 toStdWString；其它平台窄字符（注释见 AudioDecoder.hpp）。
-    // SampleCache 内部负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
-#ifdef _WIN32
-        const beatbench::audio::SampleCacheResult r = m_cache.get_w(pathCopy.toStdWString());
-#else
-        const beatbench::audio::SampleCacheResult r = m_cache.get(pathCopy.toStdString());
-#endif
+        // path 原生形态（Windows UTF-16）直达缓存——窄/宽分派已收进 audio 层内部
+        //（ma_decoder_init_file_w 的选择在 decode_audio_file 单点）。SampleCache 内部
+        // 负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
+        const beatbench::audio::SampleCacheResult r = m_cache.get(path_from_qstring(pathCopy));
         QMetaObject::invokeMethod(
             this,
             [this, r] {
@@ -226,6 +233,10 @@ void AudioEngine::stopAll() {
     if (m_refPlayback.playing()) {
         m_refPlayback.stop();
         emit refPlaybackChanged();
+    }
+    if (m_auditionPlayback.playing()) {
+        m_auditionPlayback.stop();
+        emit auditionChanged();
     }
     m_busy = false;
     emit busyChanged();
@@ -294,6 +305,7 @@ bool AudioEngine::reopenStream() {
         m_renderCtx.deviceRate.store(static_cast<double>(m_backend->streamInfo().sampleRate));
         m_playback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
         m_refPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
+        m_auditionPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
         return true;
     }
     // 失败：回退旧设置重开
@@ -306,6 +318,7 @@ bool AudioEngine::reopenStream() {
         m_settings = old;
         m_renderCtx.deviceRate.store(static_cast<double>(m_backend->streamInfo().sampleRate));
         m_refPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
+        m_auditionPlayback.setDeviceRate(static_cast<double>(m_backend->streamInfo().sampleRate));
         return false;  // 回退成功但应用失败
     }
     // 回退也失败：保持未启动（不崩溃；playPreview 会提示不可用）
@@ -318,11 +331,74 @@ void AudioEngine::setSourceDir(const QString& dir) { m_sourceDir = dir; }
 
 /// 设置谱面路径（AudioEngine 内部解析目录；QML 传 r.result.path）。
 void AudioEngine::setChartPath(const QString& path) {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+    m_waveformRequested.clear();
+    m_auditionPlayback.stop();
+    m_auditionPlayback.load(nullptr, 0.0);
+    emit auditionChanged();
     if (path.isEmpty()) {
         m_sourceDir.clear();
         return;
     }
     m_sourceDir = QFileInfo(path).absoluteDir().path();
+}
+
+void AudioEngine::requestSampleWaveform(const QString& file) {
+    if (file.isEmpty()) return;
+    if (m_waveforms.count(file)) return;
+    if (m_waveformRequested.contains(file)) return;
+    m_waveformRequested.insert(file);
+    const QString sourceDir = m_sourceDir;
+    // 线程模型：m_waveforms/m_waveformRequested 是 UI 线程容器；work 只解码，
+    // 路径解析也放在 work 内，paint 不再做 QFileInfo/exists。
+    auto slot = std::make_shared<std::shared_ptr<const beatbench::audio::WaveformPyramid>>();
+    m_waveformTasks.submit(
+        file,
+        [this, file, sourceDir, slot](AudioTaskRunner::Generation gen) {
+            if (m_waveformTasks.cancelled(gen)) return;
+            QString resolved = file;
+            if (QDir::isRelativePath(file) && !sourceDir.isEmpty())
+                resolved = QDir(sourceDir).filePath(file);
+            const QString path = AudioEngine::resolveAudioPath(resolved);
+            auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
+            if (!path.isEmpty()) {
+                const beatbench::audio::SampleCacheResult r = m_cache.get(path.toStdString());
+                if (r.ok && r.sample) {
+                    wf->build(r.sample->pcm().data(), r.sample->frameCount(), 2,
+                              r.sample->sampleRate);
+                    beatbench::audio::decoded_sample_release(r.sample);
+                }
+            }
+            *slot = std::move(wf);
+        },
+        [this, file, slot](AudioTaskRunner::Generation, std::exception_ptr error) {
+            m_waveformRequested.remove(file);
+            if (error || !slot || !*slot) {
+                // 解码/构建异常也缓存空金字塔：会话内不反复重试坏文件。
+                m_waveforms[file] = std::make_shared<beatbench::audio::WaveformPyramid>();
+            } else {
+                m_waveforms[file] = *slot;
+            }
+            emit sampleWaveformReady(file);
+        });
+}
+
+void AudioEngine::invalidateSampleWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+    m_waveformRequested.clear();
+}
+
+void AudioEngine::cancelPendingWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveformRequested.clear();
+}
+
+std::shared_ptr<const beatbench::audio::WaveformPyramid> AudioEngine::sampleWaveform(
+    const QString& file) const {
+    const auto it = m_waveforms.find(file);
+    return it == m_waveforms.end() ? nullptr : it->second;
 }
 
 // —— M5 播放（PCM 渲染代理；零拷贝经 SamplePlayer 播出） ——
@@ -364,11 +440,20 @@ void AudioEngine::setChartSession(QObject* session) {
                     play();
                 }
             });
+    // 整轨试听：筛选渲染完成 → 装载独立 PCM 槽（#50）
+    connect(m_chartSession, &ChartSession::auditionReady, this, [this] {
+        if (m_chartSession)
+            setAuditionPcm(m_chartSession->auditionPcm(), m_chartSession->auditionSampleRate());
+    });
     // 编辑即停（M5 决策）：内容变化 → 停止播放（计划/渲染过期；下次起播用新版）
     connect(m_chartSession, &ChartSession::contentChanged, this, [this] {
         if (m_playback.playing()) {
             m_playback.stop();
             emit playbackChanged();
+        }
+        if (m_auditionPlayback.playing()) {
+            m_auditionPlayback.stop();
+            emit auditionChanged();
         }
         m_waitRender = false;
         emit waitRenderChanged();
@@ -462,20 +547,9 @@ void AudioEngine::setLoopEnabled(bool v) {
 /// 音频路径解析 + 扩展名回退（非成员静态；playPreview 调用）。
 /// 返回存在的绝对路径；全都不存在返回空串。
 QString AudioEngine::resolveAudioPath(const QString& resolved) {
-    const QFileInfo fi(resolved);
-    const QString absPath = fi.absoluteFilePath();
-    if (QFileInfo::exists(absPath)) return absPath;
-    // 回退：相同 basename、其它音频扩展名（顺序 = BMS 社区常见优先级）
-    const QString base = fi.completeBaseName();
-    const QString dir = fi.absolutePath();
-    static const QStringList kFallbackExts = {QStringLiteral(".ogg"),  QStringLiteral(".mp3"),
-                                              QStringLiteral(".flac"), QStringLiteral(".wav"),
-                                              QStringLiteral(".oga"),  QStringLiteral(".m4a")};
-    for (const QString& ext : kFallbackExts) {
-        const QString candidate = QDir(dir).filePath(base + ext);
-        if (QFileInfo::exists(candidate)) return QFileInfo(candidate).absoluteFilePath();
-    }
-    return QString();
+    // 单一实现：audio 层的扩展名回退与存在性检查；Qt 字符串只在这里进出。
+    const auto path = beatbench::audio::resolve_audio_path(path_from_qstring(resolved));
+    return path ? qstring_from_path(*path) : QString();
 }
 
 QString AudioEngine::deviceDescription() const {
@@ -529,6 +603,49 @@ void AudioEngine::rebuildDevices() {
         }
     }
     emit devicesChanged();
+}
+
+// —— 整轨试听（#50；独立 PCM 槽） ——
+
+void AudioEngine::setAuditionPcm(std::shared_ptr<const std::vector<float>> pcm, double sampleRate) {
+    m_auditionPlayback.load(std::move(pcm), sampleRate);
+    emit auditionChanged();
+}
+
+bool AudioEngine::auditionPlay() {
+    if (!m_initialized) {
+        m_statusText = QStringLiteral("音频不可用（后端初始化失败）");
+        emit statusTextChanged();
+        return false;
+    }
+    if (m_playback.playing()) {
+        m_playback.stop();
+        emit playbackChanged();
+    }
+    if (m_refPlayback.playing()) {
+        m_refPlayback.stop();
+        emit refPlaybackChanged();
+    }
+    if (!m_auditionPlayback.play(m_player.masterVolume())) {
+        m_statusText = QStringLiteral("试听尚无有效 PCM");
+        emit statusTextChanged();
+        return false;
+    }
+    emit auditionChanged();
+    return true;
+}
+
+void AudioEngine::auditionStop() {
+    m_auditionPlayback.stop();
+    emit auditionChanged();
+}
+
+bool AudioEngine::auditionToggle() {
+    if (m_auditionPlayback.playing()) {
+        auditionStop();
+        return false;
+    }
+    return auditionPlay();
 }
 
 // —— M6.1 参考音频（切音工作台预览；独立于谱面播放） ——

@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "beatbench/audio/AudioPath.hpp"
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 
@@ -43,19 +44,12 @@ DecodedSample* makeSine(double rate, double freq, double seconds, float amp = 0.
 /// 注入解码器（路径 → 采样；未知路径失败）
 void installDecoder(SampleCache& cache, const std::string& path,
                     DecodedSample* (*maker)(const std::string&)) {
-    cache.setDecoders(
-        [maker](const std::string& p) -> DecodeResult {
-            DecodeResult r;
-            r.sample = maker(p);
-            r.ok = r.sample != nullptr;
-            return r;
-        },
-        [maker](const std::wstring& p) -> DecodeResult {
-            DecodeResult r;
-            r.sample = maker(std::string(p.begin(), p.end()));
-            r.ok = r.sample != nullptr;
-            return r;
-        });
+    cache.setDecoders([maker](const std::filesystem::path& p) -> DecodeResult {
+        DecodeResult r;
+        r.sample = maker(beatbench::audio::u8_string(p));
+        r.ok = r.sample != nullptr;
+        return r;
+    });
 }
 
 TEST(ChartRendererTest, RenderSingleNote) {
@@ -146,8 +140,8 @@ TEST(ChartRendererTest, BackFillBeforeRangeStart) {
     installDecoder(cache, "a.wav", [](const std::string&) {
         return makeSine(44100.0, 440.0, 0.5);  // 0.25s 触发 → 播 0.25~0.75
     });
-    // 直接验证 cache 解码（宽字符路径）可用
-    const auto probe = cache.get_w(L"a.wav");
+    // 直接验证 cache 解码可用
+    const auto probe = cache.get("a.wav");
     ASSERT_TRUE(probe.ok) << "cache 解码失败";
     if (probe.sample) beatbench::audio::decoded_sample_release(probe.sample);
 
@@ -203,19 +197,12 @@ TEST(ChartRendererTest, DecodeFailureSkipsNotCrash) {
     // 注入**失败**解码器（模拟文件不存在：decode_audio_file_w 对不存在路径
     // 返回 ok=false + sample=null——cache 的 getImpl 必须如实回传）
     SampleCache cache;
-    cache.setDecoders(
-        [](const std::string&) -> DecodeResult {
-            DecodeResult r;
-            r.ok = false;
-            r.message = "文件不存在";
-            return r;
-        },
-        [](const std::wstring&) -> DecodeResult {
-            DecodeResult r;
-            r.ok = false;
-            r.message = "文件不存在";
-            return r;
-        });
+    cache.setDecoders([](const std::filesystem::path&) -> DecodeResult {
+        DecodeResult r;
+        r.ok = false;
+        r.message = "文件不存在";
+        return r;
+    });
 
     // 关键回归：不得崩溃；输出应为静音（全 0）
     const auto r = render_chart_range(chart, timing, cache, 44100.0, 0.0, 1.0, "");
@@ -244,31 +231,26 @@ TEST(ChartRendererTest, WideCharSourceDirJapanese) {
     beatbench::TimingEngine timing;
     timing.rebuild(chart);
 
-    // 记录解码器收到的宽路径（断言 join 后含日文目录）
-    std::wstring gotPath;
+    // 记录解码器收到的路径（断言 join 后含日文目录）
+    std::string gotPath;
     SampleCache cache;
-    cache.setDecoders(
-        [](const std::string&) -> DecodeResult {
-            DecodeResult r;
-            r.ok = false;
-            return r;
-        },
-        [&](const std::wstring& p) -> DecodeResult {
-            gotPath = p;
-            DecodeResult r;
-            r.ok = true;
-            r.sample = makeSine(44100.0, 440.0, 0.3);
-            return r;
-        });
+    cache.setDecoders([&](const std::filesystem::path& p) -> DecodeResult {
+        gotPath = beatbench::audio::u8_string(p);
+        DecodeResult r;
+        r.ok = true;
+        r.sample = makeSine(44100.0, 440.0, 0.3);
+        return r;
+    });
 
-    const std::wstring dir = L"C:\\songs\\\u5f7c\u5cb8\u5e30\u822a";
+    const std::filesystem::path dir =
+        "C:\\songs" / std::filesystem::u8path("\xE5\xBD\xBC\xE5\xB2\xB8\xE5\xBD\x92\xE8\x88\xAA");
     const auto r =
-        beatbench::audio::render_chart_range_w(chart, timing, cache, 44100.0, 0.0, 1.0, dir);
+        beatbench::audio::render_chart_range(chart, timing, cache, 44100.0, 0.0, 1.0, dir);
     ASSERT_TRUE(r.ok) << r.message;
-    // 解码器收到的路径 = dir + "/" + kick.wav（resolve_audio_path_w 原样存在时返回原样；
-    // 测试注入无磁盘文件 → 返回原路径 → get_w 按宽路径）
-    EXPECT_NE(gotPath.find(L"\u5f7c\u5cb8"), std::wstring::npos);
-    EXPECT_NE(gotPath.find(L"kick.wav"), std::wstring::npos);
+    // 解码器收到的路径 = dir + "/" + kick.wav（resolve_audio_path 原样存在时返回原样；
+    // 测试注入无磁盘文件 → 返回原路径）
+    EXPECT_NE(gotPath.find("\xE5\xBD\xBC\xE5\xB2\xB8"), std::string::npos);
+    EXPECT_NE(gotPath.find("kick.wav"), std::string::npos);
     // 渲染非零（注入解码器工作）
     float peak = 0.0f;
     for (const float v : r.audio.interleavedStereo) peak = std::max(peak, std::fabs(v));
