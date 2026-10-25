@@ -201,6 +201,7 @@ ApplicationWindow {
     // 平移模式（checkbox 开关，默认关）：拖拽选中 note = 移动；勾选=按方向轴锁定
     // （纵向→时间/通道不变；横向→通道/时间不变）。未勾=自由 2D（时间+通道都动）。
     property bool moveMode: false
+    property bool showNoteWaveforms: true
     // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
     property bool lnSelectMode: false
     // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
@@ -638,6 +639,13 @@ ApplicationWindow {
                     ToolTip.text: qsTr("勾选=按方向轴锁定移动（纵向→时间/通道不变，横向→通道/时间不变）；"
                                      + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
                 }
+                BbCheckBox {
+                    text: qsTr("波形")
+                    checked: window.showNoteWaveforms
+                    onToggled: window.showNoteWaveforms = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("选中 note 的采样波形（按采样时长展开；异步解码）")
+                }
                 Item { Layout.fillWidth: true }
                 // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
                 BbCheckBox {
@@ -741,6 +749,7 @@ ApplicationWindow {
                 showGrid: window.showGrid
                 editorTool: window.editorTool
                 moveMode: window.moveMode
+                showNoteWaveforms: window.showNoteWaveforms
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs

@@ -68,6 +68,7 @@ class SamplePlayer {
 
     // 常量（非枚举：无类型集语义；kMaxVoices 作数组界，kPreviewVoice 作槽位比较）
     static constexpr int kMaxVoices = 8;
+    static constexpr int kFirstReservedVoice = 4;  ///< 4-7 为 PCM/试听保留槽，普通 play 不碰
     static constexpr int kPreviewVoice = 7;
 
     /// 播放一个采样（**所有权转移**：调用方把对 sample 的 1 份持有转给本函数）。
@@ -75,6 +76,9 @@ class SamplePlayer {
     /// volume 0..1；startSec = 起始秒（0 = 从头；M5 任意起播倒推的接口形状）。
     /// 回调侧：无空闲槽时丢弃（同样 unref 归还）。
     bool play(DecodedSample* sample, float volume, double startSec);
+
+    /// 显式槽启动（试听槽/保留槽内部用）；槽忙 → 失败，不 fallback。
+    bool playAtSlot(DecodedSample* sample, float volume, double startSec, int slot);
 
     /// M5 零拷贝播放：共享 PCM（渲染代理缓冲等；专用槽 = slot，默认 kPcmSlot）。
     /// **保活协议**：pcm 缓冲的生命周期由本函数创建的 DecodedSample 包装持有——

@@ -17,10 +17,12 @@
 #include <QVariant>
 #include <QVariantList>
 #include <cmath>
+#include <exception>
 
 #include "beatbench/audio/AudioDecoder.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 #include "bridge/ChartSession.hpp"
+#include "bridge/PathUtils.hpp"
 
 namespace beatbench::app {
 
@@ -185,15 +187,10 @@ bool AudioEngine::playPreview(const QString& file) {
     const QString pathCopy = absPath;
     qInfo("AudioEngine: playPreview %s", qPrintable(pathCopy));  // 冒烟日志
     QThreadPool::globalInstance()->start([this, pathCopy] {
-    // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）——
-    // 窄字符 fopen 走 ANSI 代码页（GBK）打不开日文谱面目录（2026-09 用户实测）。
-    // 跨平台：Windows 用 toStdWString；其它平台窄字符（注释见 AudioDecoder.hpp）。
-    // SampleCache 内部负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
-#ifdef _WIN32
-        const beatbench::audio::SampleCacheResult r = m_cache.get_w(pathCopy.toStdWString());
-#else
-        const beatbench::audio::SampleCacheResult r = m_cache.get(pathCopy.toStdString());
-#endif
+        // path 原生形态（Windows UTF-16）直达缓存——窄/宽分派已收进 audio 层内部
+        //（ma_decoder_init_file_w 的选择在 decode_audio_file 单点）。SampleCache 内部
+        // 负责：命中 O(1) 返回；未命中解码（键 = UTF-8 路径）。
+        const beatbench::audio::SampleCacheResult r = m_cache.get(path_from_qstring(pathCopy));
         QMetaObject::invokeMethod(
             this,
             [this, r] {
@@ -318,11 +315,71 @@ void AudioEngine::setSourceDir(const QString& dir) { m_sourceDir = dir; }
 
 /// 设置谱面路径（AudioEngine 内部解析目录；QML 传 r.result.path）。
 void AudioEngine::setChartPath(const QString& path) {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+    m_waveformRequested.clear();
     if (path.isEmpty()) {
         m_sourceDir.clear();
         return;
     }
     m_sourceDir = QFileInfo(path).absoluteDir().path();
+}
+
+void AudioEngine::requestSampleWaveform(const QString& file) {
+    if (file.isEmpty()) return;
+    if (m_waveforms.count(file)) return;
+    if (m_waveformRequested.contains(file)) return;
+    m_waveformRequested.insert(file);
+    const QString sourceDir = m_sourceDir;
+    // 线程模型：m_waveforms/m_waveformRequested 是 UI 线程容器；work 只解码，
+    // 路径解析也放在 work 内，paint 不再做 QFileInfo/exists。
+    auto slot = std::make_shared<std::shared_ptr<const beatbench::audio::WaveformPyramid>>();
+    m_waveformTasks.submit(
+        file,
+        [this, file, sourceDir, slot](AudioTaskRunner::Generation gen) {
+            if (m_waveformTasks.cancelled(gen)) return;
+            QString resolved = file;
+            if (QDir::isRelativePath(file) && !sourceDir.isEmpty())
+                resolved = QDir(sourceDir).filePath(file);
+            const QString path = AudioEngine::resolveAudioPath(resolved);
+            auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
+            if (!path.isEmpty()) {
+                const beatbench::audio::SampleCacheResult r = m_cache.get(path.toStdString());
+                if (r.ok && r.sample) {
+                    wf->build(r.sample->pcm().data(), r.sample->frameCount(), 2,
+                              r.sample->sampleRate);
+                    beatbench::audio::decoded_sample_release(r.sample);
+                }
+            }
+            *slot = std::move(wf);
+        },
+        [this, file, slot](AudioTaskRunner::Generation, std::exception_ptr error) {
+            m_waveformRequested.remove(file);
+            if (error || !slot || !*slot) {
+                // 解码/构建异常也缓存空金字塔：会话内不反复重试坏文件。
+                m_waveforms[file] = std::make_shared<beatbench::audio::WaveformPyramid>();
+            } else {
+                m_waveforms[file] = *slot;
+            }
+            emit sampleWaveformReady(file);
+        });
+}
+
+void AudioEngine::invalidateSampleWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+    m_waveformRequested.clear();
+}
+
+void AudioEngine::cancelPendingWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveformRequested.clear();
+}
+
+std::shared_ptr<const beatbench::audio::WaveformPyramid> AudioEngine::sampleWaveform(
+    const QString& file) const {
+    const auto it = m_waveforms.find(file);
+    return it == m_waveforms.end() ? nullptr : it->second;
 }
 
 // —— M5 播放（PCM 渲染代理；零拷贝经 SamplePlayer 播出） ——
@@ -462,20 +519,9 @@ void AudioEngine::setLoopEnabled(bool v) {
 /// 音频路径解析 + 扩展名回退（非成员静态；playPreview 调用）。
 /// 返回存在的绝对路径；全都不存在返回空串。
 QString AudioEngine::resolveAudioPath(const QString& resolved) {
-    const QFileInfo fi(resolved);
-    const QString absPath = fi.absoluteFilePath();
-    if (QFileInfo::exists(absPath)) return absPath;
-    // 回退：相同 basename、其它音频扩展名（顺序 = BMS 社区常见优先级）
-    const QString base = fi.completeBaseName();
-    const QString dir = fi.absolutePath();
-    static const QStringList kFallbackExts = {QStringLiteral(".ogg"),  QStringLiteral(".mp3"),
-                                              QStringLiteral(".flac"), QStringLiteral(".wav"),
-                                              QStringLiteral(".oga"),  QStringLiteral(".m4a")};
-    for (const QString& ext : kFallbackExts) {
-        const QString candidate = QDir(dir).filePath(base + ext);
-        if (QFileInfo::exists(candidate)) return QFileInfo(candidate).absoluteFilePath();
-    }
-    return QString();
+    // 单一实现：audio 层的扩展名回退与存在性检查；Qt 字符串只在这里进出。
+    const auto path = beatbench::audio::resolve_audio_path(path_from_qstring(resolved));
+    return path ? qstring_from_path(*path) : QString();
 }
 
 QString AudioEngine::deviceDescription() const {

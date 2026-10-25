@@ -140,6 +140,9 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
 
 ### 5. ghost 预览 / 后端命令
 
+- 单 note 波形（#49）：`AudioEngine` 异步解码采样并构建 `WaveformPyramid`（按绝对路径缓存，
+  `SampleCache` 复用）；`ChartViewItem` 只对“选中且当前视口可见”的 note 画，沿时间轴按采样
+  时长展开、BGM 也画；工具条“波形”开关。无采样/解码失败不画。
 - `ChartViewItem::drawPreview` 与 `moveSelection` 镜像同一套分派分支，拖拽中先见落点。
 - 后端：note 空间内用 `note.move`（逐个 + Composite = 一个 undo 步；`to.sub_line` 显式给，否则按
   `(measure,pos)` 自动分配不冲突行）；跨命名空间用 `note.convert`。

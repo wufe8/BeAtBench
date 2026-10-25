@@ -230,7 +230,7 @@ TEST_F(
     // 窄字符 fopen 走 ANSI 代码页打不开；ma_decoder_init_file_w（UTF-16）必须可用。
     const auto dir = m_tmp / L"彼岸帰航-idling mix-";
     std::filesystem::create_directories(dir);
-    const std::wstring wpath = dir / L"abass-01.wav";
+    const std::filesystem::path wpath = dir / L"abass-01.wav";
     // 直接写 wav（宽字符 _wfopen_s）：复用 writeTestWav 需窄路径，这里单独写
     FILE* f = nullptr;
     _wfopen_s(&f, wpath.c_str(), L"wb");
@@ -257,7 +257,7 @@ TEST_F(
     }
     std::fclose(f);
 
-    const auto r = beatbench::audio::decode_audio_file_w(wpath);
+    const auto r = beatbench::audio::decode_audio_file(wpath);
     EXPECT_TRUE(r.ok) << "宽字符解码失败: " << r.message;
     if (r.ok) {
         EXPECT_GT(r.sample->frameCount(), 1000u);
