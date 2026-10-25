@@ -68,8 +68,13 @@ double median_of(std::vector<double> v) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)——谱通量峰值拾取：阈值比较状态链，拆散反而伤可读
 std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCount, int channels,
                                   double sampleRate, const OnsetConfig& cfg) {
-    if (interleaved == nullptr || frameCount == 0 || channels <= 0 || sampleRate <= 0.0) return {};
-    if (!is_pow2(cfg.windowSize) || !is_pow2(cfg.hopSize) || cfg.hopSize > cfg.windowSize)
+    if (interleaved == nullptr || frameCount == 0 || channels <= 0 ||
+        !std::isfinite(sampleRate) || sampleRate <= 0.0)
+        return {};
+    if (!std::isfinite(cfg.sensitivity) || !std::isfinite(cfg.minGapSec) || cfg.minGapSec < 0.0)
+        return {};
+    if (cfg.windowSize < 2 || !is_pow2(cfg.windowSize) || !is_pow2(cfg.hopSize) ||
+        cfg.hopSize > cfg.windowSize)
         return {};
 
     const std::size_t win = static_cast<std::size_t>(cfg.windowSize);
@@ -120,7 +125,7 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
                 if (dev > 0.0) fMagSum += dev;
             }
         }
-        flux[f] = fMagSum;
+        flux[f] = std::isfinite(fMagSum) ? fMagSum : 0.0;
         prev2 = prev1;
         for (std::size_t k = 0; k < bins; ++k) prev1[k] = spec[k];
     }
