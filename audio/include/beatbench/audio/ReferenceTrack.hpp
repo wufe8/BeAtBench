@@ -12,6 +12,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,10 +27,9 @@ class ReferenceTrack {
     /// Windows 宽字符（UTF-16）路径装载：解码（audio/ 全套格式）→ 全量 PCM +
     /// 波形金字塔 + 时长/采样率统计。返回 false → error() 有原因；失败时原内容保留
     /// （load 失败不会清掉已装载的参考音轨，工作台语义友好）。
-    bool load_w(const std::wstring& path);
 
     /// POSIX UTF-8 路径装载（语义同 load_w）。
-    bool load(const std::string& path);
+    bool load(const std::filesystem::path& path);
 
     /// 清除（释放 PCM/金字塔）。
     void clear();

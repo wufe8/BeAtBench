@@ -95,7 +95,7 @@ add_test(NAME waveform_pyramid_tests COMMAND waveform_pyramid_test)
 # 依赖 core（Chart/TimingEngine）；sample_player.cpp 引用 decode_audio_file*（解码器）
 # → 链 decoder_miniaudio.cpp？不——只有 sample_cache.cpp 引用；本测试只链
 # sample_player.cpp + pcm_playback.cpp + playback_plan.cpp（playback_plan 引用
-# resolve_audio_path_w → audio_path.cpp）。play 本身零解码（DecodedSample 直接喂）。
+# resolve_audio_path → audio_path.cpp）。play 本身零解码（DecodedSample 直接喂）。
 add_executable(m5_playback_test m5_playback_test.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/sample_player.cpp
     ${CMAKE_SOURCE_DIR}/audio/src/pcm_playback.cpp
@@ -150,6 +150,16 @@ if (Qt6Core_FOUND)
     beatbench_set_warnings(slice_workspace_test)
     add_test(NAME slice_workspace_tests COMMAND slice_workspace_test)
     set_tests_properties(slice_workspace_tests PROPERTIES TIMEOUT 20)
+
+    add_executable(audio_task_runner_test audio_task_runner_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp)
+    target_include_directories(audio_task_runner_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(audio_task_runner_test PRIVATE Qt6::Core GTest::gtest_main)
+    set_target_properties(audio_task_runner_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(audio_task_runner_test)
+    add_test(NAME audio_task_runner_tests COMMAND audio_task_runner_test)
+    set_tests_properties(audio_task_runner_tests PROPERTIES TIMEOUT 20)
 
     add_executable(ui_action_registry_test ui_action_registry_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.cpp

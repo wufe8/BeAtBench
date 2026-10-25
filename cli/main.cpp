@@ -299,21 +299,20 @@ int cmd_render_impl(const std::string& in_path, const std::string& out_path, dou
     // ⚠️ 宽字符（Windows UTF-16）：日文目录用窄 string（ACP）会 mojibake
     // → 渲染器找不到采样 → 空音频（2026-09 日文谱面复现）。
     const std::filesystem::path inFs = u8ps(in_path);
-    const std::wstring sourceDir = inFs.parent_path().wstring();
 
-    // 时序引擎 + 解码缓存 + 渲染（宽字符版：日文路径正确）
+    // 时序引擎 + 解码缓存 + 渲染（path 原生形态：日文路径正确）
     beatbench::TimingEngine timing;
     timing.rebuild(result.chart);
     beatbench::audio::SampleCache cache;
     const auto r =
-        beatbench::audio::render_chart_w(result.chart, timing, cache, sampleRate, sourceDir);
+        beatbench::audio::render_chart(result.chart, timing, cache, sampleRate, inFs.parent_path());
     if (!r.ok) {
         std::printf("[ERROR] 渲染失败: %s\n", r.message.c_str());
         return 1;
     }
     std::string err;
-    // ⚠️ 宽字符写（日文输出路径；窄 fopen ACP 打不开）
-    if (!beatbench::audio::write_wav_file_w(u8ps(out_path).wstring(), r.audio, &err)) {
+    // path 原生形态直写（日文输出路径；窄 fopen ACP 旧坑已随 _w 退役）
+    if (!beatbench::audio::write_wav_file(u8ps(out_path), r.audio, &err)) {
         std::printf("[ERROR] 写出 WAV 失败: %s\n", err.c_str());
         return 1;
     }

@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "beatbench/audio/AudioDecoder.hpp"
+#include "beatbench/audio/AudioPath.hpp"
 
 // ⚠️ Vorbis 支持（2026-09 修复「定义 wav 实际 ogg 无声」根因）：
 // miniaudio **默认不内嵌 vorbis**——`MA_HAS_VORBIS` 仅在定义了
@@ -142,7 +143,7 @@ DecodeResult decode_with(OpenFn openFile, const std::string& pathForRecord) {
 
 }  // namespace
 
-DecodeResult decode_audio_file(const std::string& path) {
+DecodeResult decode_audio_file(const std::filesystem::path& path) {
     DecodeResult res;
     if (path.empty()) {
         res.message = "文件路径为空";
@@ -152,36 +153,17 @@ DecodeResult decode_audio_file(const std::string& path) {
         res.message = "文件不存在";
         return res;
     }
+    // 记录用的窄字符串（仅诊断；u8_string 不抛，无 ACP 风险）
+    const std::string recordPath = u8_string(path);
     return decode_with(
         [&](ma_decoder* d, const ma_decoder_config* c) {
+    // 窄/宽分派收口（唯一一处）：path 原生形态直接喂 miniaudio——
+    // Windows = UTF-16 wchar（init_file_w）、POSIX = UTF-8 char（init_file）。
+#ifdef _WIN32
+            return ma_decoder_init_file_w(path.c_str(), c, d);
+#else
             return ma_decoder_init_file(path.c_str(), c, d);
-        },
-        path);
-}
-
-DecodeResult decode_audio_file_w(const std::wstring& path) {
-    DecodeResult res;
-    if (path.empty()) {
-        res.message = "文件路径为空";
-        return res;
-    }
-    // 存在性检查：宽字符路径优先（`std::filesystem::path` 构造自 wstring 为原生宽 API）
-    const std::filesystem::path fsPath(path);
-    if (!std::filesystem::exists(fsPath)) {
-        res.message = "文件不存在";
-        return res;
-    }
-    // 记录用的窄字符串（仅诊断；失败/无意义时保留空）
-    std::string recordPath;
-    try {
-        const auto u8 = std::filesystem::path(path).u8string();  // C++20: std::u8string
-        recordPath.assign(reinterpret_cast<const char*>(u8.data()), u8.size());
-        // NOLINTNEXTLINE(bugprone-empty-catch)——诊断字段容错，解码主流程不依赖此路径
-    } catch (...) {
-    }
-    return decode_with(
-        [&](ma_decoder* d, const ma_decoder_config* c) {
-            return ma_decoder_init_file_w(path.c_str(), c, d);  // Windows 宽字符（UTF-16）
+#endif
         },
         recordPath);
 }
