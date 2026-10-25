@@ -767,6 +767,9 @@ QtObject {
         if (id === undefined || id === null || id === "") return
         const r = sessionCmd("sample.setFile", { id: id, file: file })
         if (!r) return
+        if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.invalidateSampleWaveforms()
+        if (typeof chartSession !== "undefined" && chartSession && chartSession.invalidateAuditionCache)
+            chartSession.invalidateAuditionCache()
         refreshSamples()
         sampleModel.selectId(id)  // 保持当前采样为该行；不滚动（视口保持不变）
         setStatus(qsTr("#WAV%1 → %2（Undo 可恢复）").arg(id).arg(file))

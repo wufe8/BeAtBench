@@ -20,6 +20,10 @@ namespace beatbench::audio {
 //   解码返回(1) → play 转移(1) → voice 启动(1) → 回调 unref → 归零 → 入回收 → UI delete。
 // 回调线程绝不 delete：unref() 归零时只见「push 回收 ring」；delete 只在 UI 线程。
 bool SamplePlayer::play(DecodedSample* sample, float volume, double startSec) {
+    return playAtSlot(sample, volume, startSec, -1);
+}
+
+bool SamplePlayer::playAtSlot(DecodedSample* sample, float volume, double startSec, int slot) {
     if (!sample) return false;
     if (volume < 0.0f) volume = 0.0f;
     if (volume > 1.0f) volume = 1.0f;
@@ -29,7 +33,7 @@ bool SamplePlayer::play(DecodedSample* sample, float volume, double startSec) {
     cmd.sample = sample;
     cmd.volume = volume;
     cmd.startSec = startSec;
-    cmd.slot = -1;
+    cmd.slot = slot;
     if (!m_cmdRing.push(cmd)) {
         // 满：引用归还给调用方（调用方释放；回调不消费）
         decoded_sample_release(sample);
@@ -82,7 +86,7 @@ bool SamplePlayer::playPreview(DecodedSample* sample, float volume) {
         if (sample) decoded_sample_release(sample);  // 停失败：归还调用方
         return false;
     }
-    return play(sample, volume, 0.0);
+    return playAtSlot(sample, volume, 0.0, kPreviewVoice);
 }
 
 bool SamplePlayer::stopAll() {
@@ -158,16 +162,16 @@ void SamplePlayer::render(float* out, int frames, double deviceRate) {
             }
         } else if (cmd.type == CmdType::Start || cmd.type == CmdType::StartSharedPcm) {
             int slot = -1;
-            if (cmd.slot >= 0 && cmd.slot < kMaxVoices && !m_voices[cmd.slot].active)
-                slot = cmd.slot;
-            else {
-                for (int i = 0; i < kMaxVoices; ++i)
-                    // ⚠️ 普通 play（slot=-1）跳过 PCM 播放专用槽（6 = 谱面、5 = 参考音轨；
-                    // 避免被 keysound/试听抢占——否则 playSharedPcm 的「停旧启新」会误杀）
-                    if (i != kPcmSlot && i != kRefPcmSlot && !m_voices[i].active) {
-                        slot = i;
-                        break;
-                    }
+            if (cmd.slot >= 0) {
+                // 显式槽（试听/谱面/参考/整轨试听）必须精确命中；忙则丢弃，绝不 fallback。
+                if (cmd.slot < kMaxVoices && !m_voices[cmd.slot].active) slot = cmd.slot;
+            } else {
+                for (int i = 0; i < kFirstReservedVoice; ++i) {
+                    // 普通 play 只碰 0-3；4-7 为 PCM/试听保留槽。
+                    if (m_voices[i].active) continue;
+                    slot = i;
+                    break;
+                }
             }
             if (slot < 0) {
                 // 无空闲槽：归还（不播）

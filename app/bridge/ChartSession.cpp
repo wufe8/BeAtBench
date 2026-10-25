@@ -7,6 +7,8 @@
 #include <QMetaObject>
 #include <QThreadPool>
 #include <bit>
+#include <exception>
+#include <set>
 
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/SampleCache.hpp"
@@ -19,8 +21,10 @@
 #include "beatbench/core/codec/Codec.hpp"
 #include "beatbench/core/codec/CodecRegistry.hpp"
 #include "beatbench/core/command/Command.hpp"
+#include "beatbench/core/edit/Selection.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "beatbench/core/json/Json.hpp"
+#include "bridge/PathUtils.hpp"
 
 namespace beatbench::app {
 
@@ -195,21 +199,21 @@ bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
         return false;
     }
     // 采样相对路径基准 = 谱面目录（chart.path 有目录部分）
-    // ⚠️ 宽字符（Windows UTF-16）：日文目录窄 string（ACP）mojibake → 空音频
+    // path 原生形态（Windows UTF-16）：QFileInfo → path，免窄 string ACP 中转
     const QFileInfo fi(m_path);
-    const std::wstring sourceDir = fi.absolutePath().toStdWString();
+    const std::filesystem::path sourceDir = path_from_qstring(fi.absolutePath());
     // 渲染器用独立缓存（不占 AudioEngine 的试听缓存；渲染是全量顺序解码，
     // 帧内无并发——简单 SampleCache 即可）
     beatbench::audio::SampleCache cache;
-    const auto r = beatbench::audio::render_chart_w(*m_chart, *m_timing, cache,
-                                                    static_cast<double>(sampleRate), sourceDir);
+    const auto r = beatbench::audio::render_chart(*m_chart, *m_timing, cache,
+                                                  static_cast<double>(sampleRate), sourceDir);
     if (!r.ok) {
         m_error = QString::fromStdString(r.message);
         return false;
     }
     std::string err;
-    // ⚠️ 宽字符写（Windows 日文路径；窄 fopen ACP 打不开 → 「路径不可写」2026-09）
-    if (!beatbench::audio::write_wav_file_w(outPath.toStdWString(), r.audio, &err)) {
+    // path 原生形态直写（Windows 日文路径；窄 fopen ACP 旧坑已随 _w 退役）
+    if (!beatbench::audio::write_wav_file(path_from_qstring(outPath), r.audio, &err)) {
         m_error = QString::fromStdString(err);
         return false;
     }
@@ -232,6 +236,87 @@ static QString noteSnapKey(const beatbench::Event<beatbench::Note>& n) {
 /// 区间外已渲染 PCM 保持不变，其尾音延伸进脏区间的部分由区间重混按倒推衔接处理）。
 static constexpr double kTailSec = 8.0;
 
+bool ChartSession::renderAudition(const QVariantList& selection, double startSec,
+                                  qreal sampleRate) {
+    if (!m_chart || !m_timing || selection.isEmpty()) return false;
+    Chart filtered = *m_chart;
+    filtered.notes.clear();
+    // 选中集转值集合后单遍扫描：原实现外层 selection 内层全表 = O(S×N)，
+    // 大选择集（轨头全选）在 UI 线程卡顿；set 查找降至 O((N+S)·log S)。
+    std::set<beatbench::edit::NoteRef> wanted;
+    for (const auto& item : selection) {
+        const QVariantMap m = item.toMap();
+        if (m.isEmpty()) continue;
+        const QVariantMap pos = m.value(QStringLiteral("pos")).toMap();
+        const QVariantMap laneMap = m.value(QStringLiteral("lane")).toMap();
+        const QString kind = laneMap.value(QStringLiteral("kind")).toString();
+        beatbench::Lane lane;
+        lane.player = static_cast<std::uint8_t>(laneMap.value(QStringLiteral("player")).toInt());
+        lane.kind = kind == QStringLiteral("scratch") ? beatbench::LaneKind::Scratch
+                    : kind == QStringLiteral("pedal") ? beatbench::LaneKind::Pedal
+                    : kind == QStringLiteral("bgm")   ? beatbench::LaneKind::Bgm
+                                                      : beatbench::LaneKind::Key;
+        lane.index = static_cast<std::uint8_t>(laneMap.value(QStringLiteral("index")).toInt());
+        wanted.insert(beatbench::edit::NoteRef{
+            static_cast<std::uint32_t>(m.value(QStringLiteral("measure")).toInt()),
+            beatbench::Rational(pos.value(QStringLiteral("num")).toLongLong(),
+                                pos.value(QStringLiteral("den")).toLongLong()),
+            lane, static_cast<std::uint32_t>(m.value(QStringLiteral("sample")).toInt()),
+            static_cast<std::uint32_t>(m.value(QStringLiteral("sub_line")).toInt())});
+    }
+    if (wanted.empty()) return false;
+    for (const auto& ev : m_chart->notes) {
+        if (wanted.count(beatbench::edit::NoteRef{ev.measure, ev.pos, ev.value.lane,
+                                                  ev.value.sample.id, ev.value.sub_line}) != 0)
+            filtered.notes.push_back(ev);
+    }
+    if (filtered.notes.empty()) return false;
+    bool has_after = false;
+    for (const auto& ev : filtered.notes) {
+        if (m_timing &&
+            static_cast<double>(m_timing->time_us(beatbench::Position{ev.measure, ev.pos})) / 1e6 >=
+                startSec) {
+            has_after = true;
+            break;
+        }
+    }
+    if (!has_after) return false;  // 选中 note 全在红线之前（或时间无效）
+
+    const std::filesystem::path sourceDir = path_from_qstring(QFileInfo(m_path).absolutePath());
+    auto result = std::make_shared<beatbench::audio::RenderResult>();
+    m_auditionTasks.cancelAll();
+    m_auditionTasks.submit(
+        QStringLiteral("audition"),
+        [this, filtered = std::move(filtered), startSec, sampleRate, sourceDir,
+         result](AudioTaskRunner::Generation gen) mutable {
+            if (m_auditionTasks.cancelled(gen)) return;
+            beatbench::TimingEngine timing;
+            timing.rebuild(filtered);
+            *result = beatbench::audio::render_chart_range(
+                filtered, timing, m_auditionCache, static_cast<double>(sampleRate),
+                std::max(0.0, startSec), 0.0, sourceDir,
+                [this, gen] { return m_auditionTasks.cancelled(gen); });
+        },
+        [this, result](AudioTaskRunner::Generation, std::exception_ptr error) {
+            if (error) {
+                emit auditionFinished(false, QStringLiteral("试听渲染异常"));
+                return;
+            }
+            if (result->cancelled) return;  // 主动取消：静默丢弃，不冒错误提示
+            if (!result->ok) {
+                emit auditionFinished(false, QString::fromStdString(result->message));
+                return;
+            }
+            m_auditionRate = result->audio.sampleRate;
+            m_auditionDuration = result->audio.durationSeconds();
+            m_auditionPcm = std::make_shared<const std::vector<float>>(
+                std::move(result->audio.interleavedStereo));
+            emit auditionReady();
+            emit auditionFinished(true, QString());
+        });
+    return true;
+}
+
 bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
     if (!m_chart || !m_timing) return false;
     // 去重：渲染中忽略（完成信号回 UI；再次触发等 finish）
@@ -249,7 +334,7 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
                             QStringLiteral(".render.wav");
     const QString basePath = m_path;
     const double sr = static_cast<double>(sampleRate);
-    const std::wstring sourceDir = QFileInfo(basePath).absolutePath().toStdWString();
+    const std::filesystem::path sourceDir = path_from_qstring(QFileInfo(basePath).absolutePath());
     const std::uint64_t version = m_renderVersion.load();  // 本次渲染的版本（唯一）
     // 是否增量：已有渲染结果 + 无 timing 变化（BPM/STOP/节拍编辑 → 全量正确性优先）
     const bool incremental = (m_rendered != nullptr) && !m_timingDirty;
@@ -282,8 +367,8 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
                 const double t0 = static_cast<double>(dirtyLo) / sr;
                 const double t1 = static_cast<double>(dirtyHi) / sr;
                 auto rPtr = std::make_shared<beatbench::audio::RenderResult>(
-                    beatbench::audio::render_chart_range_w(chartCopy, timing, cache, sr, t0, t1,
-                                                           sourceDir));
+                    beatbench::audio::render_chart_range(chartCopy, timing, cache, sr, t0, t1,
+                                                         sourceDir));
                 std::shared_ptr<const beatbench::audio::WaveformPyramid> wfNew;
                 if (rPtr->ok) {
                     // 替换共享 PCM 缓冲的对应帧（缓冲长不变——总长未变的编辑）
@@ -330,11 +415,11 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
             }
             // ---- 全量（首次 / timing 变化 / 无旧结果） ----
             auto rPtr = std::make_shared<beatbench::audio::RenderResult>(
-                beatbench::audio::render_chart_w(chartCopy, timing, cache, sr, sourceDir));
+                beatbench::audio::render_chart(chartCopy, timing, cache, sr, sourceDir));
             // M5：saveWav 手动（Ctrl+R）才写 .wav（debug 验证产物）；载入自动/增量只内存
             if (rPtr->ok && saveWav) {
                 std::string werr;
-                beatbench::audio::write_wav_file_w(outPath.toStdWString(), rPtr->audio, &werr);
+                beatbench::audio::write_wav_file(path_from_qstring(outPath), rPtr->audio, &werr);
             }
             // M4.3c 波形：渲染线程建 min/max 金字塔（不占 UI 线程；PCM 消费后即释，
             // 金字塔常驻供波形组件查询——RenderedAudio 大 PCM 由 UI 线程显式释放）。
@@ -565,7 +650,21 @@ int ChartSession::decodeId(const QString& idText) const {
                                 : beatbench::bms::c36_to_u32(t, 2));
 }
 
+void ChartSession::cancelAudition() {
+    m_auditionTasks.cancelAll();
+    m_auditionPcm.reset();
+    m_auditionRate = 0.0;
+    m_auditionDuration = 0.0;
+}
+
+void ChartSession::invalidateAuditionCache() {
+    cancelAudition();
+    m_auditionCache.clear();
+}
+
 void ChartSession::resetRenderState() {
+    cancelAudition();
+    m_auditionCache.clear();
     m_renderVersion.fetch_add(1, std::memory_order_relaxed);
     m_rendered.reset();
     m_waveform.reset();
