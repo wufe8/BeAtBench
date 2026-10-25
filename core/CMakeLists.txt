@@ -3,7 +3,6 @@
 # M1 起含 .cpp 实现（BMS codec / 编码层），保持静态库形态；GUI/CLI/测试三方复用。
 add_library(beatbench_core STATIC
     src/bms/encoding.cpp
-    src/bms/channel_map.cpp
     src/bms/bms_parser.cpp
     src/bms/bms_writer.cpp
     src/bms/bms_flatten.cpp

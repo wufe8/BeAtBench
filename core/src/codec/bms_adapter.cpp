@@ -60,7 +60,7 @@ class BmsCodec : public Codec {
         return out;
     }
 
-    std::string write(const Chart& chart, const WriteOptions& opts) const override {
+    WriteResult write(const Chart& chart, const WriteOptions& opts) const override {
         beatbench::bms::BmsWriteOptions wo;
         if (opts.encoding == "sjis" || opts.encoding == "shift_jis" ||
             opts.encoding == "shift-jis") {
@@ -68,7 +68,19 @@ class BmsCodec : public Codec {
         } else {
             wo.encoding = beatbench::bms::BmsEncoding::Utf8;  // 默认 utf8
         }
-        return beatbench::bms::write_bms(chart, wo);
+        auto r = beatbench::bms::write_bms_checked(chart, wo);
+        WriteResult out;
+        out.ok = r.ok;
+        out.text = std::move(r.text);
+        out.error = std::move(r.error);
+        for (const auto& d : r.diagnostics) {
+            out.diagnostics.push_back(
+                {d.severity == beatbench::bms::Severity::Error     ? Severity::Error
+                 : d.severity == beatbench::bms::Severity::Warning ? Severity::Warning
+                                                                   : Severity::Info,
+                 d.message, 0});
+        }
+        return out;
     }
 };
 

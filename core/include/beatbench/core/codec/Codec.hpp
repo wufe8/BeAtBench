@@ -35,6 +35,14 @@ struct ReadOptions {
     std::string mode;
 };
 
+/// 写入结果（格式无关）：失败时 text 为空，diagnostics 带原因。
+struct WriteResult {
+    bool ok = false;
+    std::string text;
+    std::string error;
+    std::vector<Diagnostic> diagnostics;
+};
+
 /// 写入选项（格式无关）。
 struct WriteOptions {
     std::string encoding;  ///< 空 = codec 默认（bms 为 utf8）
@@ -62,8 +70,8 @@ class Codec {
     /// 读取：按扩展名/format 参数分派到本 codec。
     virtual ReadResult read(const std::filesystem::path& path, const ReadOptions& opts) const = 0;
 
-    /// 写入：返回文本字节。overwrite 语义由调用方（命令层）检查。
-    virtual std::string write(const Chart& chart, const WriteOptions& opts) const = 0;
+    /// 写入：返回文本或失败诊断。overwrite 语义由调用方（命令层）检查。
+    virtual WriteResult write(const Chart& chart, const WriteOptions& opts) const = 0;
 };
 
 }  // namespace beatbench::codec

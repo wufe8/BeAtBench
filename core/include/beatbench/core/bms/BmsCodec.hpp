@@ -57,7 +57,16 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts = {});
 /// 宽字符 API 打开（修复日文/非 ASCII 目录打不开，2026-09）。
 BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts = {});
 
-/// 写出 BMS 文本（M1 实现）。
+/// 写出 BMS 文本（M1 实现）。不可表示 note → 失败，不静默丢弃。
+struct BmsWriteResult {
+    bool ok = false;
+    std::string text;
+    std::string error;
+    std::vector<Diagnostic> diagnostics;
+};
+BmsWriteResult write_bms_checked(const Chart& chart, const BmsWriteOptions& opts = {});
+
+/// 兼容入口：失败时抛 std::runtime_error（保留旧 string 返回）。
 std::string write_bms(const Chart& chart, const BmsWriteOptions& opts = {});
 
 /// #RANDOM/#IF/#SWITCH/#SETRANDOM 选择块展开（文本层预处理，不解析块内容）。

@@ -16,6 +16,7 @@ using beatbench::codec::CodecRegistry;
 using beatbench::codec::ReadOptions;
 using beatbench::codec::ReadResult;
 using beatbench::codec::WriteOptions;
+using beatbench::codec::WriteResult;
 
 namespace {
 
@@ -95,7 +96,7 @@ TEST(CodecRegistry, DuplicateIdAndExtensionThrow) {
         ReadResult read(const std::filesystem::path&, const ReadOptions&) const override {
             return {};
         }
-        std::string write(const beatbench::Chart&, const WriteOptions&) const override {
+        WriteResult write(const beatbench::Chart&, const WriteOptions&) const override {
             return {};
         }
     };
@@ -109,7 +110,7 @@ TEST(CodecRegistry, DuplicateIdAndExtensionThrow) {
         ReadResult read(const std::filesystem::path&, const ReadOptions&) const override {
             return {};
         }
-        std::string write(const beatbench::Chart&, const WriteOptions&) const override {
+        WriteResult write(const beatbench::Chart&, const WriteOptions&) const override {
             return {};
         }
     };
@@ -201,7 +202,9 @@ TEST(CodecRegistry, BmsWriteRoundtrip) {
     const Codec* bms = reg.by_id("bms");
     const std::string in = write_temp("dp.bms", kChart);
     const auto res = bms->read(in, {});
-    const auto out = bms->write(res.chart, {});
+    const auto out_result = bms->write(res.chart, {});
+    ASSERT_TRUE(out_result.ok) << out_result.error;
+    const std::string out = out_result.text;
     EXPECT_NE(out.find("#PLAYER 3"), std::string::npos);
     // 写回 → 再读 → 模式保留 + 事件保留（走注册表全链路）
     const std::string out_path = write_temp("dp_out.bms", out);
@@ -210,7 +213,9 @@ TEST(CodecRegistry, BmsWriteRoundtrip) {
     EXPECT_EQ(*res2.chart.mode_id, "dp");
     EXPECT_EQ(res2.chart.notes.size(), res.chart.notes.size());
     // 幂等
-    EXPECT_EQ(bms->write(res2.chart, {}), out);
+    const auto out2_result = bms->write(res2.chart, {});
+    ASSERT_TRUE(out2_result.ok) << out2_result.error;
+    EXPECT_EQ(out2_result.text, out);
 }
 
 // —— capabilities 动态（经命令层间接验证：注册表 ids 驱动 formats） ——

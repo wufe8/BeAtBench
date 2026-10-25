@@ -254,14 +254,20 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
         std::printf("[ERROR] 未知编码 '%s'（支持 utf8 / sjis）\n", encoding.c_str());
         return 2;
     }
-    const auto text = codec->write(result.chart, opts);
-    const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(out_path), text);
+    const auto written = codec->write(result.chart, opts);
+    if (!written.ok) {
+        std::printf("[ERROR] %s\n", written.error.c_str());
+        for (const auto& d : written.diagnostics) std::printf("  %s\n", d.message.c_str());
+        return 1;
+    }
+    const auto wr =
+        beatbench::io::atomic_write_file(std::filesystem::u8path(out_path), written.text);
     if (!wr.ok) {
         std::printf("[ERROR] %s\n", wr.error.c_str());
         return 1;
     }
-    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(), text.size(),
-                encoding.c_str());
+    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(),
+                written.text.size(), encoding.c_str());
     return 0;
 }
 

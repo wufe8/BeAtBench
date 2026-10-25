@@ -463,13 +463,14 @@ class ConvertCommand : public Command {
             throw CommandError("read_failed", "读取失败（存在错误级诊断），未写出: " + in_path);
         }
 
-        const std::string text = codec->write(result.chart, wopts);
-        write_chart_or_throw(out_path, text);
+        const auto wr = codec->write(result.chart, wopts);
+        if (!wr.ok) throw CommandError("write_failed", wr.error);
+        write_chart_or_throw(out_path, wr.text);
 
         Json res = Json::object();
         res.set("written", true);
         res.set("output", out_path);
-        res.set("bytes", static_cast<std::int64_t>(text.size()));
+        res.set("bytes", static_cast<std::int64_t>(wr.text.size()));
         res.set("format", std::string(codec->id()));
         if (result.chart.mode_id) res.set("mode", *result.chart.mode_id);
         res.set("from_encoding",
@@ -728,8 +729,13 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
 edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
     return [codec](const Chart& chart, const std::string& path, std::string* error) -> bool {
         try {
-            const std::string text = codec->write(chart, beatbench::codec::WriteOptions{});
-            const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(path), text);
+            const auto written = codec->write(chart, beatbench::codec::WriteOptions{});
+            if (!written.ok) {
+                if (error) *error = written.error;
+                return false;
+            }
+            const auto wr =
+                beatbench::io::atomic_write_file(std::filesystem::u8path(path), written.text);
             if (!wr.ok) {
                 if (error) *error = wr.error;
                 return false;
@@ -1462,8 +1468,9 @@ class SessionSaveCommand : public Command {
                 }
             }
         }
-        const std::string text = codec->write(session.chart(), wopts);
-        write_chart_or_throw(out_path, text);
+        const auto written = codec->write(session.chart(), wopts);
+        if (!written.ok) throw CommandError("write_failed", written.error);
+        write_chart_or_throw(out_path, written.text);
 
         // 另存为后更新会话路径（后续「保存」写新路径）
         if (session.path() != out_path) session.set_path(out_path);
@@ -1472,7 +1479,7 @@ class SessionSaveCommand : public Command {
         Json res = Json::object();
         res.set("saved", true);
         res.set("output", out_path);
-        res.set("bytes", static_cast<std::int64_t>(text.size()));
+        res.set("bytes", static_cast<std::int64_t>(written.text.size()));
         res.set("format", std::string(codec->id()));
         res.set("dirty", false);
         if (!session.last_backup_error().empty())
