@@ -72,7 +72,18 @@ void write_chart_or_throw(const std::string& out_path, const std::string& text) 
 std::string serialize_or_throw(const Codec& codec, const Chart& chart,
                                const beatbench::codec::WriteOptions& options) {
     try {
-        return codec.write(chart, options);
+        auto result = codec.write(chart, options);
+        if (!result.ok) {
+            std::string message = result.error;
+            for (const auto& d : result.diagnostics) {
+                if (!message.empty()) message.push_back('\n');
+                message += d.message;
+            }
+            throw CommandError("write_failed", std::move(message));
+        }
+        return std::move(result.text);
+    } catch (const CommandError&) {
+        throw;
     } catch (const std::exception& e) {
         throw CommandError("write_failed", e.what());
     }

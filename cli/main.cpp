@@ -264,14 +264,19 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
             std::printf("[ERROR] 输入编码有歧义，不能覆盖现有输出；请改用新路径\n");
             return 1;
         }
-        const auto text = codec->write(result.chart, opts);
-        const auto wr = beatbench::io::atomic_write_file(output, text);
+        const auto written = codec->write(result.chart, opts);
+        if (!written.ok) {
+            std::printf("[ERROR] %s\n", written.error.c_str());
+            for (const auto& d : written.diagnostics) std::printf("  %s\n", d.message.c_str());
+            return 1;
+        }
+        const auto wr = beatbench::io::atomic_write_file(output, written.text);
         if (!wr.ok) {
             std::printf("[ERROR] %s\n", wr.error.c_str());
             return 1;
         }
         std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(),
-                    text.size(), encoding.c_str());
+                    written.text.size(), encoding.c_str());
         return 0;
     } catch (const std::exception& e) {
         std::printf("[ERROR] 写出失败: %s\n", e.what());

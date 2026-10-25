@@ -555,6 +555,12 @@ class BmsByteFormat : public testing::Test {
         return bms.read(path, {.encoding = std::move(encoding), .mode = {}});
     }
 
+    std::string write(const Chart& chart, const codec::WriteOptions& opts) const {
+        auto result = bms.write(chart, opts);
+        EXPECT_TRUE(result.ok) << result.error;
+        return std::move(result.text);
+    }
+
     static bool rejected(const codec::ReadResult& result) {
         return std::ranges::any_of(result.diagnostics, [](const codec::Diagnostic& d) {
             return d.severity == codec::Severity::Error;
@@ -613,7 +619,7 @@ TEST_F(BmsByteFormat, CommentsAndOtherFieldsAreNotDeclarations) {
     EXPECT_EQ(result.chart.meta.at("TITLE"), "\xE3\x81\x92");
     codec::WriteOptions opts;
     opts.encoding = "sjis";
-    const std::string saved = bms.write(result.chart, opts);
+    const std::string saved = write(result.chart, opts);
     EXPECT_NE(saved.find("/* comment\n#ENCODING UTF-8\n*/"), std::string::npos);
     EXPECT_NE(saved.find("#ENCODING_OTHER UTF-8"), std::string::npos);
 }
@@ -632,7 +638,7 @@ TEST_F(BmsByteFormat, DualDecodableNonAsciiDefaultsToCp932UnlessEvidenceResolves
     opts.encoding = "sjis";
     bool ambiguous = false;
     opts.encoding_ambiguous = &ambiguous;
-    EXPECT_TRUE(read(bms.write(result.chart, opts)).encoding_ambiguous);
+    EXPECT_TRUE(read(write(result.chart, opts)).encoding_ambiguous);
     EXPECT_TRUE(ambiguous);
 
     result = read(std::string(5000, ' ') + "\n#eNcOdInG: UTF-8\n" + text);
@@ -692,13 +698,13 @@ TEST_F(BmsByteFormat, WritesChosenEolAndBomAndReportsAsciiBytes) {
     for (const auto* ending : {"crlf", "lf", "cr"}) {
         opts.line_ending = ending;
         opts.utf8_bom = false;
-        auto result = read(bms.write(c, opts));
+        auto result = read(write(c, opts));
         ASSERT_FALSE(rejected(result));
         EXPECT_EQ(result.line_ending, ending);
         EXPECT_EQ(result.detected_encoding, "ascii");
         EXPECT_TRUE(ascii);
         opts.utf8_bom = true;
-        result = read(bms.write(c, opts));
+        result = read(write(c, opts));
         EXPECT_EQ(result.line_ending, ending);
         EXPECT_EQ(result.detected_encoding, "utf8");
         EXPECT_TRUE(result.utf8_bom);
@@ -712,7 +718,7 @@ TEST_F(BmsByteFormat, OutputCannotInheritEncodingFromGenericMeta) {
     c.meta["ENCODING"] = "CP932";
     codec::WriteOptions opts;
     opts.utf8_bom = true;
-    const auto bytes = bms.write(c, opts);
+    const auto bytes = write(c, opts);
     EXPECT_EQ(bytes.find("#ENCODING"), std::string::npos);
     const auto result = read(bytes);
     EXPECT_FALSE(rejected(result));
@@ -722,13 +728,13 @@ TEST_F(BmsByteFormat, OutputCannotInheritEncodingFromGenericMeta) {
 TEST_F(BmsByteFormat, Utf8OutputDeclaresAmbiguousBytesWithoutChangingBomPolicy) {
     Chart c;
     c.meta["TITLE"] = "\xC2\xA9";
-    const auto bytes = bms.write(c, {});
+    const auto bytes = write(c, {});
     EXPECT_TRUE(bytes.starts_with("#ENCODING UTF-8\n"));
     const auto result = read(bytes);
     EXPECT_EQ(result.detected_encoding, "utf8");
     EXPECT_FALSE(result.utf8_bom);
     EXPECT_EQ(result.chart.meta.at("TITLE"), "\xC2\xA9");
-    EXPECT_EQ(bms.write(result.chart, {}), bytes);
+    EXPECT_EQ(write(result.chart, {}), bytes);
 }
 
 TEST_F(BmsByteFormat, StrictCp932RejectsCharacterLossAndSupportsExtensionBytes) {
@@ -736,11 +742,11 @@ TEST_F(BmsByteFormat, StrictCp932RejectsCharacterLossAndSupportsExtensionBytes) 
     c.meta["TITLE"] = "\xF0\x9F\x98\x80";  // 😀
     codec::WriteOptions opts;
     opts.encoding = "sjis";
-    EXPECT_NE(bms.write(c, opts).find("#TITLE ?"), std::string::npos);
+    EXPECT_NE(write(c, opts).find("#TITLE ?"), std::string::npos);
     opts.strict_encoding = true;
     EXPECT_THROW((void)bms.write(c, opts), std::invalid_argument);
     c.meta["TITLE"] = "\xEF\xA3\xB0";  // U+F8F0 ↔ CP932 A0
-    auto result = read(bms.write(c, opts));
+    auto result = read(write(c, opts));
     EXPECT_EQ(result.detected_encoding, "sjis");
     EXPECT_EQ(result.chart.meta.at("TITLE"), c.meta.at("TITLE"));
     opts.utf8_bom = true;
@@ -1417,4 +1423,19 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
     }
     ASSERT_GT(verified, 0u) << "local/chart 下未找到任何谱面样本";
     std::printf("验证谱面 %zu 个（跳过 %zu 个）\n", verified, skipped);
+}
+
+TEST(BmsWriter, UnrepresentableNoteFailsInsteadOfDropping) {
+    Chart c;
+    c.mode_id = "sp7k";
+    c.meta["BPM"] = "130";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Key, 9};  // sp7k 无键9
+    n.value.sample.id = 1;
+    c.notes.push_back(n);
+    const auto r = write_bms_checked(c);
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(r.text.empty());
+    EXPECT_FALSE(r.diagnostics.empty());
+    EXPECT_THROW(write_bms(c), std::runtime_error);
 }
