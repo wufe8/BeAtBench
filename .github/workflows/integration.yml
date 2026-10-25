@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# 组合验证（手动触发）：把声明的分支按顺序合到 origin/master，构建、ctest、GUI 冒烟。
+#
+# 定位：PR 仍以 master 为 base、彼此不是 GitHub 栈时的补偿控制；不替代单 PR 的 ci.yml。
+# 触发：Actions -> Integration -> Run workflow，branches 留空则只验证两个地基分支。
+#
+# 用法示例（branches）：
+#   refactor/edit-foundation refactor/audio-foundation feat/vertical-lock
+#   feat/clipboard-pattern feat/split-view feat/note-waveform feat/audition-lanes
+#
+# 合并冲突会直接失败，不自动解决；需要现场时本地跑
+#   scripts/check-integration.sh --keep <branches...>
+name: Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: '空格分隔的分支名（按合并顺序）；留空验证两个地基'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          arch: linux_gcc_64
+          cache: true
+          cache-key-prefix: install-qt-linux
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y ninja-build fonts-noto-cjk
+
+      - name: Run integration check
+        env:
+          INTEGRATION_BRANCHES: ${{ inputs.branches }}
+        run: |
+          set -euo pipefail
+          export QT_PREFIX="${QT_ROOT_DIR:-}"
+          test -n "$QT_PREFIX" || { echo "QT_ROOT_DIR 未设置" >&2; exit 1; }
+          chmod +x scripts/check-integration.sh
+          scripts/check-integration.sh
