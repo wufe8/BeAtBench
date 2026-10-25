@@ -78,8 +78,8 @@ TEST(SessionRegistry, SessionsIsolated) {
     // a 放 note
     reg.by_id("a")->load(make_chart(1));
     reg.by_id("b")->load(make_chart(2));
-    ASSERT_TRUE(reg.by_id("a")->exec(
-        std::make_unique<PutNoteCommand>(2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 9)));
+    ASSERT_TRUE(reg.by_id("a")->exec(std::make_unique<PutNoteCommand>(
+        NoteRef{2, Rational(0, 1), Lane{0, LaneKind::Key, 3}, 9})));
     EXPECT_EQ(reg.by_id("a")->chart().notes.size(), 2u);
     EXPECT_EQ(reg.by_id("b")->chart().notes.size(), 1u);  // b 不受影响
     EXPECT_EQ(reg.by_id("b")->undo_depth(), 0u);

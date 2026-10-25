@@ -361,6 +361,8 @@ int main(int argc, char** argv) {
                                   nullptr, qml("pasteClipboard")});
         uiActions.add(UiActionDef{"edit.delete", QCoreApplication::tr("删除"), "Del", "edit",
                                   nullptr, qml("uiActionDelete")});
+        uiActions.add(UiActionDef{"edit.toggleVerticalMove", QCoreApplication::tr("纵向锁定"),
+                                  "Ctrl+L", "edit", nullptr, qml("toggleVerticalMove")});
         uiActions.addSeparator(QStringLiteral("edit"));  // 分隔线：编辑操作 ↔ 播放/渲染/取消
         // 编辑页播放/渲染/取消（2026-09 快捷键收尾）：进注册表 → 设置页可改绑。
         // scope="edit" 与切音页 slice.playPause 的 Space 作用域隔离（doc/action-registry.md 九、）。

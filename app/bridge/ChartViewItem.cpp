@@ -1426,7 +1426,9 @@ void ChartViewItem::drawPreview(QPainter* p) const {
                     int maxKey = 7;
                     if (const ChartSession* cs = sessionObj()) {
                         if (const beatbench::Chart* c = cs->chart()) {
-                            maxKey = beatbench::chart_mode_key_count(c->mode_id.value_or("sp7k"));
+                            // 未知模式显式降级 7 键；放置合法性由模式白名单另行拦截。
+                            maxKey = beatbench::chart_mode_key_count(c->mode_id.value_or("sp7k"))
+                                         .value_or(7);
                         }
                     }
                     const int ni =

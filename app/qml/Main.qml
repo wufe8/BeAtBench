@@ -198,9 +198,10 @@ ApplicationWindow {
     property int apiFilterIndex: 0
     // 缩放锚点（2026-09 用户：鼠标滚轮缩放时往鼠标位置放大；默认开）
     property bool zoomToCursor: true
-    // 平移模式（checkbox 开关，默认关）：拖拽选中 note = 移动；勾选=按方向轴锁定
-    // （纵向→时间/通道不变；横向→通道/时间不变）。未勾=自由 2D（时间+通道都动）。
-    property bool moveMode: false
+    // 纵向移动锁（默认开）：note/BGA/BPM/STOP 只能横向换轨/换图层；解锁后才允许改时间。
+    // 每个文档重置为锁定；Ctrl+L / 工具条开关切换。
+    property int verticalMoveMode: 0  // 0=仅横向，1=仅纵向，2=自由
+    readonly property bool verticalMoveLocked: verticalMoveMode === 0
     // LN 选取模式（默认关）：开启后点选 LN 任一段自动选中配对两端（整体移动/删除）
     property bool lnSelectMode: false
     // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
@@ -260,6 +261,9 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
                enabled: chartMeta !== null && currentPage === 0
                onActivated: uiActions.invoke("edit.delete") }
+    Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.toggleVerticalMove") : ""
+               enabled: chartMeta !== null && currentPage === 0 && !window.textInputFocused
+               onActivated: uiActions.invoke("edit.toggleVerticalMove") }
 
     // 工具动作（数字 1-5：文本输入焦点时让行）
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("tool.pan") : ""
@@ -626,17 +630,17 @@ ApplicationWindow {
                         ToolTip.text: uiActions.tooltip(actId)
                     }
                 }
-                // 平移 = 轴锁定开关（不占工具位、非门控）：勾选后拖拽选中 note 按方向主轴
-                // 移动——纵向=时间（note.move，通道不变）；横向=通道（delete+put，时间不变）。
-                // 未勾选 = 自由 2D（时间+通道都动）。无论勾选与否，拖拽选中 note 都可移动。
-                BbCheckBox {
-                    id: moveModeCheck
-                    text: qsTr("平移")
-                    checked: window.moveMode
-                    onToggled: window.moveMode = checked
+                // 纵向移动三态：仅横向 / 仅纵向 / 自由；默认仅横向。
+                // 仅横向时 core 同时拒绝改时间（粘贴/量化/BPM/STOP/BGA 纵向移动）。
+                BbComboBox {
+                    id: verticalModeCombo
+                    model: [qsTr("仅横向"), qsTr("仅纵向"), qsTr("自由")]
+                    currentIndex: window.verticalMoveMode
+                    onActivated: (idx) => window.setVerticalMoveMode(idx)
+                    Layout.preferredWidth: 100
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("勾选=按方向轴锁定移动（纵向→时间/通道不变，横向→通道/时间不变）；"
-                                     + "未勾选=自由 2D 移动（时间+通道都动）。拖拽选中 note 恒可移动")
+                    ToolTip.text: qsTr("仅横向=只换轨；仅纵向=只改时间；自由=2D。"
+                                     + "Ctrl+L 在仅横向与自由之间切换；每个文档默认仅横向")
                 }
                 Item { Layout.fillWidth: true }
                 // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
@@ -740,7 +744,7 @@ ApplicationWindow {
                 showExtras: window.showExtras
                 showGrid: window.showGrid
                 editorTool: window.editorTool
-                moveMode: window.moveMode
+                verticalMoveMode: window.verticalMoveMode
                 sampleId: chartSession.sampleValueOf(window.currentSampleId)
                 sampleText: sampleModel.currentSampleText
                 selection: window.selectionRefs
@@ -864,6 +868,15 @@ ApplicationWindow {
                     Layout.minimumWidth: 90
                     Layout.maximumWidth: 320
                 }
+                // 纵向移动三态常驻提示（编辑页状态栏；切音页不显示）
+                Label {
+                    text: window.verticalMoveMode === 0 ? qsTr("仅横向")
+                        : window.verticalMoveMode === 1 ? qsTr("仅纵向") : qsTr("自由")
+                    color: window.verticalMoveLocked ? Theme.textFaint : Theme.warning
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    font.bold: !window.verticalMoveLocked
+                }
                 // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
                 // M5 收尾 2026-09：有播放头（已渲染/已播放，playheadSec>=0）→ 时间/小节 = **播放头**
                 // （随播放推进；暂停停在播放位置，无视"跟随"开关）；未渲染（playheadSec<0）→ 视口光标。
@@ -917,6 +930,24 @@ ApplicationWindow {
     function setStatus(msg) {
         window.statusText = msg
         statusClearTimer.restart()
+    }
+    /// 纵向移动三态：UI 状态 + EditorSession 命令层守卫同步。
+    /// 0=仅横向（core 锁时间），1=仅纵向（core 不锁，GUI 只允许改时间），2=自由。
+    /// 打开/新建谱面时由 openChart/performNewChart 直接置 0（不弹瞬态消息）。
+    function setVerticalMoveMode(mode) {
+        const v = (mode === 1) ? 1 : (mode === 2 ? 2 : 0)
+        window.verticalMoveMode = v
+        if (typeof chartSession !== "undefined" && chartSession)
+            chartSession.setVerticalMoveMode(v)
+        if (v === 0)
+            setStatus(qsTr("仅横向：只能换轨（Ctrl+L 切到自由）"))
+        else if (v === 1)
+            setStatus(qsTr("仅纵向：只能改时间（Ctrl+L 回到仅横向）"))
+        else
+            setStatus(qsTr("自由：时间与轨道都可动（Ctrl+L 回到仅横向）"))
+    }
+    function toggleVerticalMove() {
+        setVerticalMoveMode(window.verticalMoveMode === 0 ? 2 : 0)
     }
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
@@ -1018,6 +1049,14 @@ ApplicationWindow {
         _debugActQueue.push(debugSliceAct)
         debugSliceAct = ""
         debugActFlush.start()
+    }
+    // 活动会话切换：回读该文档的纵向锁（仅横向/自由）；仅纵向保留 GUI 当前选择。
+    Connections {
+        target: typeof chartSession !== "undefined" ? chartSession : null
+        function onVerticalMoveModeChanged() {
+            if (typeof chartSession === "undefined" || !chartSession) return
+            window.verticalMoveMode = chartSession.verticalMoveMode()
+        }
     }
     // 2026-09「同时铺入编辑区」成功 → 刷新左 dock 采样列表（#WAV 定义新入谱面；
     // contentChanged 只刷新时间轴/波形，定义表须显式重取 session.samples）。
@@ -1610,6 +1649,8 @@ ApplicationWindow {
             window.chartEncoding = enc
             // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
             chartSession.openChart(path)
+            window.verticalMoveMode = 0
+            chartSession.setVerticalMoveMode(0)  // 每个文档默认仅横向
             window.pendingLnHead = null  // 换谱面：清除可能的未完成 LN 头
             window.selectionRefs = []
             window.metaSelection = []
@@ -1803,6 +1844,8 @@ ApplicationWindow {
         window.chartFormat = "bms"
         window.chartMode = mode
         window.chartEncoding = "utf8"
+        window.verticalMoveMode = 0
+        chartSession.setVerticalMoveMode(0)  // 新文档默认仅横向
         // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）。
         // ⚠️ 不预设 PLAYER（2026-10 复核）：草稿回填 "1" 会覆盖模式推导——DP/Battle 新建
         // 保存后 PLAYER 由 writer 按 mode_id 推导（dp=3/battle=4），重开不再退回 SP。
@@ -1950,6 +1993,7 @@ ApplicationWindow {
         setActionEnabled("edit.paste", chartMeta !== null && currentPage === 0)
         setActionEnabled("edit.delete", chartMeta !== null && currentPage === 0 &&
                                            (selectionRefs.length > 0 || metaSelection.length > 0))
+        setActionEnabled("edit.toggleVerticalMove", chartMeta !== null && currentPage === 0)
         setActionEnabled("tool.quantize", selectionRefs.length > 0)
         setActionEnabled("tool.mirror", selectionRefs.length > 0)
         setActionEnabled("tool.rotate", selectionRefs.length > 0)
