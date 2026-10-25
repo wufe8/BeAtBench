@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "beatbench/core/Chart.hpp"
+#include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Command.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
@@ -115,4 +116,47 @@ TEST(ModeSwitch, NoOpDoesNotPushUndo) {
     ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
     EXPECT_TRUE(resp.at("result").at("unchanged").as_bool());
     EXPECT_EQ(global_editor_session().undo_depth(), undo_before);
+}
+
+TEST(ModeSwitch, RawNoteLinesBlockSwitch) {
+    Chart c = chart_with({0, LaneKind::Key, 7});
+    c.raw_lines.push_back("#00111:0100");
+    global_editor_session().load(std::move(c));
+    const auto before = global_editor_session().chart().mode_id.value_or("");
+    Json args = Json::object();
+    args.set("mode", "pms9k");
+    const Json resp = global_registry().dispatch(req("chart.set_mode", std::move(args)));
+    ASSERT_FALSE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("error").at("code").as_str(), std::string("mode_raw_unsupported"));
+    EXPECT_EQ(global_editor_session().chart().mode_id.value_or(""), before);
+}
+
+TEST(ModeSwitch, RawMetaAndBgmLinesAllowSwitch) {
+    Chart c = chart_with({0, LaneKind::Key, 7});
+    c.raw_lines.push_back("#00101:0100");  // BGM
+    c.raw_lines.push_back("#00102:1.0");   // 小节长
+    global_editor_session().load(std::move(c));
+    Json args = Json::object();
+    args.set("mode", "pms9k");
+    const Json resp = global_registry().dispatch(req("chart.set_mode", std::move(args)));
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(global_editor_session().chart().mode_id.value_or(""), std::string("pms9k"));
+}
+
+TEST(ModeSwitch, SaveReloadKeepsRepresentableLane) {
+    Chart c = chart_with({0, LaneKind::Key, 7});
+    global_editor_session().load(std::move(c));
+    Json args = Json::object();
+    args.set("mode", "pms9k");
+    ASSERT_TRUE(
+        global_registry().dispatch(req("chart.set_mode", std::move(args))).at("ok").as_bool());
+    const std::string text = bms::write_bms(global_editor_session().chart());
+    bms::BmsReadOptions opts;
+    opts.mode = "pms9k";
+    const auto reread = bms::read_bms(text, opts);
+    ASSERT_EQ(reread.chart.notes.size(), 2u);
+    bool found_key7 = false;
+    for (const auto& n : reread.chart.notes)
+        if (n.value.sample.id == 2 && n.value.lane == Lane{0, LaneKind::Key, 7}) found_key7 = true;
+    EXPECT_TRUE(found_key7) << text;
 }

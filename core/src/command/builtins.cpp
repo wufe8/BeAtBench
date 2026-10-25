@@ -1562,6 +1562,24 @@ class SessionLoadCommand : public Command {
     }
 };
 
+namespace {
+
+/// raw_lines 中的数据行是否落在 note 通道（1x/2x/5x/6x/Dx/Ex）。
+/// 保守判定：只拦 note 通道，BGM ch01 与 ch02-0A meta/BGA 放行。
+bool raw_note_channel_line(std::string_view line) {
+    if (line.size() < 7 || line.front() != '#') return false;
+    for (std::size_t i = 1; i <= 3; ++i)
+        if (line[i] < '0' || line[i] > '9') return false;
+    const auto colon = line.find(':');
+    if (colon == std::string_view::npos || colon <= 4) return false;
+    const auto channel = line.substr(4, colon - 4);
+    if (channel.empty() || channel.size() > 2) return false;
+    const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(channel.front())));
+    return c == '1' || c == '2' || c == '5' || c == '6' || c == 'D' || c == 'E';
+}
+
+}  // namespace
+
 // chart.set_mode：运行中切换谱面模式（issue #26 阶段二安全子集）。
 // 预检新模式下每个 note 仍可写出（bms_channel_for_mode 非空）；有不可表示项 → 拒绝，
 // 不丢数据（raw 降级/重吸收尚未实现，完整阶段二后续补）。dry_run 返回统计，供 UI 确认。
@@ -1579,6 +1597,14 @@ class ChartSetModeCommand : public Command {
             const auto ch =
                 bms::bms_channel_for_mode(mode, ev.value.lane, ev.value.ln_channel, ev.value.kind);
             if (ch.empty()) ++unsupported;
+        }
+        std::int64_t raw_note_lines = 0;
+        for (const auto& line : chart.raw_lines)
+            if (raw_note_channel_line(line)) ++raw_note_lines;
+        if (raw_note_lines > 0) {
+            throw CommandError("mode_raw_unsupported",
+                               "raw_lines 含 " + std::to_string(raw_note_lines) +
+                                   " 条 note 数据行，无法保证新模式写回；先清理 raw 或另开文件");
         }
         const auto current = chart.mode_id.value_or("sp7k");
         if (arg_bool(args, "dry_run", false)) {
