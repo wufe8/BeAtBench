@@ -129,9 +129,8 @@ TEST(AudioTaskRunner, WorkExceptionIsForwardedToDone) {
     AudioTaskRunner runner(nullptr, 1);
     std::atomic<bool> saw_error{false};
     runner.submit(
-        QStringLiteral("throw"), [](AudioTaskRunner::Generation) {
-            throw std::runtime_error("boom");
-        },
+        QStringLiteral("throw"),
+        [](AudioTaskRunner::Generation) { throw std::runtime_error("boom"); },
         [&](AudioTaskRunner::Generation, std::exception_ptr error) {
             saw_error.store(error != nullptr);
         });
