@@ -231,6 +231,36 @@ jobs:
           path: ${{ runner.temp }}/pkg-arch
           if-no-files-found: error
 
+  # ---------- 滚动 Arch 兼容探测（非阻塞，仅 schedule/手动） ----------
+  # 钉定快照是发布基线；本 job 用最新 archlinux:base-devel，提前暴露 Qt 新版 API
+  # 编译破坏。continue-on-error：失败只作为预警，不阻断发版。
+  arch-rolling:
+    name: arch-rolling
+    needs: version-check
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build arch package (rolling)
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-arch-rolling"; mkdir -p "$OUT"
+          docker run --rm -e OUT=/out             -v "$PWD:/src:ro" -v "$OUT:/out" archlinux:base-devel             bash /src/scripts/package-linux.sh arch
+      - name: Install smoke on rolling Arch
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pkg-arch-rolling"
+          docker run --rm -v "$OUT:/pkgs:ro" -v "$PWD:/src:ro" archlinux:base-devel             bash /src/scripts/verify-linux-package.sh arch /pkgs
+      - name: Upload rolling arch artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: beatbench-linux-arch-rolling
+          path: ${{ runner.temp }}/pkg-arch-rolling
+          if-no-files-found: ignore
+
   # ---------- 挂载到 Release：把 Linux 包附到 release.yml 建好的同一个 Release ----------
   # 为什么是「等」而不是「建」：Release 的标题/说明由 release.yml 单一维护（CHANGELOG 段落 +
   # 构建环境），这里只负责把包附上去，避免两处都可写 Release 而打架。release.yml 要先跑完整

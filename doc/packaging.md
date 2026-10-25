@@ -53,7 +53,7 @@ QML 入口加载（`QQmlApplicationEngine::loadFromModule` 6.5 才引入，6.4 �
 
 1. 顶层 CMake 定义 `QT_NO_VERSION_TAGGING`，避免引入 `Qt_6.x` 小版本哨兵；
 2. `scripts/package-linux.sh` 的 `assert_portable_qt_links` 检查 staging 内 ELF 的 VERNEED，发现小版本 tag 即失败。该断言只查版本 tag，不能发现泛化 `Qt_6` 下缺失的普通导出符号；
-3. Arch 的构建与安装冒烟使用 `package.yml` 中 `ARCH_ROOTFS` 钉定的快照与同日 archive 仓库。Qt 只保证旧构建在新运行时上的向后兼容，使用更新头文件可能引用旧库没有的符号。更换快照前核对当日 `extra.db` 中的 qt6-base 版本；抬高构建面可能抬高运行下限。每周 schedule 验证钉定基线，不代表追踪最新滚动 Qt。
+3. Arch 的构建与安装冒烟使用 `package.yml` 中 `ARCH_ROOTFS` 钉定的快照与同日 archive 仓库。Qt 只保证旧构建在新运行时上的向后兼容，使用更新头文件可能引用旧库没有的符号。更换快照前核对当日 `extra.db` 中的 qt6-base 版本；抬高构建面可能抬高运行下限。每周 schedule 验证钉定基线，不代表追踪最新滚动 Qt；另有非阻塞 `arch-rolling` job 用最新 `archlinux:base-devel` 做滚动兼容预警（失败不阻断发版）。
 
 ⚠️ 悬停高亮的**无头冒烟覆盖不到**（offscreen 平台没有真实指针），但真实 X11 平台可做**指针注入**
 自动化（定位窗口 → `XWarpPointer`/`XTestFakeMotionEvent`，配合 app 自身的 `--screenshot` 抓帧）；
