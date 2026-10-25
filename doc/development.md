@@ -109,7 +109,7 @@ cmake --build build-gui --target beatbench
   其余沿用 Google 默认（attached 大括号、单行短 if/loop、include 分块排序）。选型时对全仓
   六种内置 preset 做过实测比对，纯 preset 无一能直接用，详见该文件头注释。
 - `third_party/` 与生成文件 `core/src/bms/sjis_table.hpp` 在 `.clang-format-ignore` 中排除，
-  生成表由 `tools/gen_sjis_table.ps1` 重新生成，不参与格式化。
+  生成表由 `tools/gen_sjis_table.py` 重新生成（数据源 `tools/cp932_map.tsv`），不参与格式化。
 - 检查入口 `scripts/check-format.sh`（check.sh 第 0 步与 CI format job 同一入口）；版本钉
   23.1.3（本机版本不符只警告不拦截，以 CI 为准）。修复命令：
   `git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format -i`。

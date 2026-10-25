@@ -5,4 +5,8 @@
 .githooks/**   text eol=lf
 *.yml          text eol=lf
 
+# 生成数据与源表：生成器按 LF 逐字比较，Windows 检出不得转 CRLF
+core/src/bms/sjis_table.hpp text eol=lf
+tools/cp932_map.tsv         text eol=lf
+
 # 其余源文件沿用仓库既有风格（不做全局 text=auto，避免一次巨大的重写 diff）。

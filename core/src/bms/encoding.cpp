@@ -7,6 +7,10 @@
 
 #include "sjis_table.hpp"
 
+static_assert(sizeof(beatbench::bms::kSjisToUcs) / sizeof(beatbench::bms::kSjisToUcs[0]) ==
+                  beatbench::bms::kSjisLeadRows * beatbench::bms::kSjisTrailCols,
+              "sjis_table.hpp 正表尺寸与生成器常量不一致");
+
 namespace beatbench::bms {
 namespace {
 
@@ -84,26 +88,25 @@ inline void append_utf8(std::string& out, std::uint32_t cp) {
     }
 }
 
-// 正表二分查找（kSjisToUcs 按 (lead, trail) 升序）
-inline const SjisPair* find_sjis_pair(std::uint8_t lead, std::uint8_t trail) {
-    const auto* begin = kSjisToUcs;
-    const auto* end = begin + kSjisToUcsCount;
-    while (begin < end) {
-        const auto* mid = begin + (end - begin) / 2;
-        if (mid->lead < lead || (mid->lead == lead && mid->trail < trail)) {
-            begin = mid + 1;
-        } else {
-            end = mid;
-        }
+// 正表直接索引：行 = lead（0x81-0x9F 顺排 0-30，0xE0-0xFC 续排 31-59），
+// 列 = trail（b - 0x40，跳过 0x7F）；无映射返回 0。
+inline std::uint16_t lookup_sjis_to_ucs(std::uint8_t lead, std::uint8_t trail) {
+    if (trail < kSjisTrailBase || trail == 0x7F || trail > 0xFC) return 0;
+    std::size_t row;
+    if (lead >= 0x81 && lead <= 0x9F) {
+        row = static_cast<std::size_t>(lead - 0x81);
+    } else if (lead >= 0xE0 && lead <= 0xFC) {
+        row = static_cast<std::size_t>(lead - 0xE0) + 31;
+    } else {
+        return 0;
     }
-    if (begin != kSjisToUcs + kSjisToUcsCount && begin->lead == lead && begin->trail == trail) {
-        return begin;
-    }
-    return nullptr;
+    const std::size_t col =
+        static_cast<std::size_t>(trail - kSjisTrailBase) - (trail > 0x7F ? 1 : 0);
+    return kSjisToUcs[row * kSjisTrailCols + col];
 }
 
-// 反表二分查找（kUcsToSjis 按 ucs 升序；同 ucs 多映射取首个）
-inline const SjisPair* find_ucs_pair(std::uint32_t ucs) {
+// 反表二分查找（kUcsToSjis 按 ucs 升序）；无映射返回 0（sjis 高字节最小 0x81，0 不可为合法值）。
+inline std::uint16_t lookup_ucs_to_sjis(std::uint32_t ucs) {
     const auto* begin = kUcsToSjis;
     const auto* end = begin + kUcsToSjisCount;
     while (begin < end) {
@@ -115,9 +118,9 @@ inline const SjisPair* find_ucs_pair(std::uint32_t ucs) {
         }
     }
     if (begin != kUcsToSjis + kUcsToSjisCount && begin->ucs == ucs) {
-        return begin;
+        return begin->sjis;
     }
-    return nullptr;
+    return 0;
 }
 
 // ASCII 大小写不敏感前缀匹配（bytes 为原始字节流，可能含高位字节）
@@ -164,8 +167,8 @@ std::string shiftjis_to_utf8(std::string_view in) {
         if ((b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC)) {
             if (i + 1 < in.size()) {
                 const auto t = static_cast<unsigned char>(in[i + 1]);
-                if (const SjisPair* p = find_sjis_pair(b, t)) {
-                    append_utf8(out, p->ucs);
+                if (const std::uint16_t u = lookup_sjis_to_ucs(b, t); u != 0) {
+                    append_utf8(out, u);
                     i += 2;
                     continue;
                 }
@@ -203,9 +206,9 @@ std::string utf8_to_shiftjis(std::string_view in) {
             out.push_back(static_cast<char>(0xA1 + (d.cp - 0xFF61)));
             continue;
         }
-        if (const SjisPair* p = find_ucs_pair(d.cp)) {
-            out.push_back(static_cast<char>(p->lead));
-            out.push_back(static_cast<char>(p->trail));
+        if (const std::uint16_t s = lookup_ucs_to_sjis(d.cp); s != 0) {
+            out.push_back(static_cast<char>(s >> 8));
+            out.push_back(static_cast<char>(s & 0xFF));
         } else {
             out.push_back('?');  // 不可映射（BMSE 惯例）
         }
