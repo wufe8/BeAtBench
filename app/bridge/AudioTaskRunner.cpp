@@ -4,6 +4,7 @@
 #include <QMetaObject>
 #include <QRunnable>
 #include <algorithm>
+#include <exception>
 #include <utility>
 
 namespace beatbench::app {
@@ -18,14 +19,19 @@ class AudioTaskRunner::Task final : public QRunnable {
           m_done(std::move(done)) {}
 
     void run() override {
-        if (m_owner && !m_owner->cancelled(m_gen) && m_work) m_work(m_gen);
+        std::exception_ptr error;
+        try {
+            if (m_owner && !m_owner->cancelled(m_gen) && m_work) m_work(m_gen);
+        } catch (...) {
+            error = std::current_exception();
+        }
         if (!m_owner) return;
         AudioTaskRunner* owner = m_owner;
         const QString key = m_key;
         const Generation gen = m_gen;
         const Done done = m_done;
         QMetaObject::invokeMethod(
-            owner, [owner, key, gen, done] { owner->finish(key, gen, done); },
+            owner, [owner, key, gen, done, error] { owner->finish(key, gen, done, error); },
             Qt::QueuedConnection);
     }
 
@@ -51,6 +57,7 @@ void AudioTaskRunner::submit(const QString& key, Work work, Done done) {
     if (!key.isEmpty() && m_pending.contains(key)) return;
     const Generation gen = generation();
     if (!key.isEmpty()) m_pending.insert(key, gen);
+    m_active.fetch_add(1, std::memory_order_acq_rel);
     m_pool.start(new Task(this, key, gen, std::move(work), std::move(done)));
 }
 
@@ -59,10 +66,12 @@ void AudioTaskRunner::cancelAll() {
     m_pending.clear();
 }
 
-void AudioTaskRunner::finish(const QString& key, Generation gen, const Done& done) {
+void AudioTaskRunner::finish(const QString& key, Generation gen, const Done& done,
+                             std::exception_ptr error) {
     if (!key.isEmpty() && m_pending.value(key) == gen) m_pending.remove(key);
+    m_active.fetch_sub(1, std::memory_order_acq_rel);
     if (gen != generation()) return;
-    if (done) done(gen);
+    if (done) done(gen, std::move(error));
 }
 
 void AudioTaskRunner::waitForDone() { m_pool.waitForDone(); }

@@ -21,6 +21,7 @@
 #include <QThreadPool>
 #include <atomic>
 #include <cstdint>
+#include <exception>
 #include <functional>
 
 namespace beatbench::app {
@@ -31,7 +32,7 @@ class AudioTaskRunner : public QObject {
    public:
     using Generation = std::uint64_t;
     using Work = std::function<void(Generation)>;
-    using Done = std::function<void(Generation)>;
+    using Done = std::function<void(Generation, std::exception_ptr)>;
 
     explicit AudioTaskRunner(QObject* parent = nullptr, int maxThreads = 2);
     ~AudioTaskRunner() override;
@@ -51,8 +52,8 @@ class AudioTaskRunner : public QObject {
         return gen != m_generation.load(std::memory_order_acquire);
     }
 
-    /// 在途 key 数（含已取消但 worker 尚未收尾的任务；测试/诊断用）。
-    int pendingCount() const { return static_cast<int>(m_pending.size()); }
+    /// 在途任务数（含已取消但 worker 尚未收尾的任务；测试/诊断用）。
+    int pendingCount() const { return m_active.load(std::memory_order_acquire); }
 
     /// 等待在途任务结束（析构/测试用；不处理事件，done 回调需调用方再跑事件循环）。
     void waitForDone();
@@ -61,10 +62,11 @@ class AudioTaskRunner : public QObject {
     class Task;
     friend class Task;
 
-    void finish(const QString& key, Generation gen, const Done& done);
+    void finish(const QString& key, Generation gen, const Done& done, std::exception_ptr error);
 
     QThreadPool m_pool;
     std::atomic<Generation> m_generation{0};
+    std::atomic<int> m_active{0};
     QHash<QString, Generation> m_pending;
 };
 

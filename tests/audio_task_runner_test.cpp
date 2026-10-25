@@ -6,6 +6,8 @@
 #include <QSemaphore>
 #include <atomic>
 #include <chrono>
+#include <exception>
+#include <stdexcept>
 #include <thread>
 
 #include "bridge/AudioTaskRunner.hpp"
@@ -32,7 +34,7 @@ TEST(AudioTaskRunner, RunsWorkAndClearsPending) {
     std::atomic<int> done{0};
     runner.submit(
         QStringLiteral("k"), [&](AudioTaskRunner::Generation) { work.fetch_add(1); },
-        [&](AudioTaskRunner::Generation) { done.fetch_add(1); });
+        [&](AudioTaskRunner::Generation, std::exception_ptr) { done.fetch_add(1); });
     runner.waitForDone();
     drain();
     EXPECT_EQ(work.load(), 1);
@@ -74,7 +76,7 @@ TEST(AudioTaskRunner, CancelAllSkipsDoneAndWork) {
             started.release();
             gate.acquire();
         },
-        [&](AudioTaskRunner::Generation) { done.fetch_add(1); });
+        [&](AudioTaskRunner::Generation, std::exception_ptr) { done.fetch_add(1); });
     started.acquire();
     runner.cancelAll();
     gate.release();
@@ -115,9 +117,26 @@ TEST(AudioTaskRunner, CancelThenResubmitSameKeyIsNotRemovedByOldTask) {
     started.acquire();
     runner.cancelAll();
     runner.submit(QStringLiteral("same"), [](AudioTaskRunner::Generation) {});
-    EXPECT_EQ(runner.pendingCount(), 1);
+    // 旧任务仍在 worker 里，新任务已排队：在途数 = 2（旧 key 已从去重表移除）。
+    EXPECT_EQ(runner.pendingCount(), 2);
     gate.release();
     runner.waitForDone();
     drain();
+    EXPECT_EQ(runner.pendingCount(), 0);
+}
+
+TEST(AudioTaskRunner, WorkExceptionIsForwardedToDone) {
+    AudioTaskRunner runner(nullptr, 1);
+    std::atomic<bool> saw_error{false};
+    runner.submit(
+        QStringLiteral("throw"), [](AudioTaskRunner::Generation) {
+            throw std::runtime_error("boom");
+        },
+        [&](AudioTaskRunner::Generation, std::exception_ptr error) {
+            saw_error.store(error != nullptr);
+        });
+    runner.waitForDone();
+    drain();
+    EXPECT_TRUE(saw_error.load());
     EXPECT_EQ(runner.pendingCount(), 0);
 }
