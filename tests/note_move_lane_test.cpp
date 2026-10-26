@@ -71,8 +71,8 @@ TEST(NoteMoveLane, MoveTimeAndLane) {
     s.load(make_chart());
     // m1 pos0 key1 s1 → m3 pos1/4 scratch（时间 + 通道一起动）
     ASSERT_TRUE(s.exec(
-        std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3,
-                                          Rational(1, 4), false, Lane{0, LaneKind::Scratch, 0})));
+        std::make_unique<MoveNoteCommand>(NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                                          3, Rational(1, 4), Lane{0, LaneKind::Scratch, 0})));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 3u);
     // 找到移动后的 note：m3 pos1/4 scratch s1
@@ -102,8 +102,9 @@ TEST(NoteMoveLane, BackwardCompatNoLane) {
     // 不传 to.lane = 纯时间移动（旧行为完全一致）
     EditorSession s;
     s.load(make_chart());
-    ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 5, Rational(1, 2))));  // 无 to_lane
+    ASSERT_TRUE(s.exec(
+        std::make_unique<MoveNoteCommand>(NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                                          5, Rational(1, 2))));  // 无 to_lane
     // lane 不变，measure/pos 变
     bool found = false;
     for (const auto& e : s.chart().notes) {
@@ -138,43 +139,14 @@ Chart ln_chart() {
     return c;
 }
 
-TEST(NoteMoveLane, LnPairMovesBothLanes) {
-    EditorSession s;
-    s.load(ln_chart());
-    // 2026-09 用户最终确认（LN 跨通道断开）：移动只移动选中 note；跨通道（lane 变）
-    // → 不再是同通道 LN → **断开**（两端都变普通单点，ln_pair 清空）。
-    // 头 m1 pos0 key1 → m2 pos0 key5；尾留 m1 pos1/2 key1；两者不相连。
-    ASSERT_TRUE(
-        s.exec(std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 2,
-                                                 Rational(0, 1), true, Lane{0, LaneKind::Key, 5})));
-    const auto& notes = s.chart().notes;
-    ASSERT_EQ(notes.size(), 2u);
-    bool head_ok = false, tail_ok = false;
-    for (const auto& e : notes) {
-        if (e.measure == 2 && e.value.lane == Lane{0, LaneKind::Key, 5}) {
-            head_ok = !e.value.ln_pair.has_value();  // 断开
-        }
-        if (e.measure == 1 && e.value.lane == Lane{0, LaneKind::Key, 1}) {
-            tail_ok = !e.value.ln_pair.has_value();
-        }
-    }
-    EXPECT_TRUE(head_ok);
-    EXPECT_TRUE(tail_ok);
-    EXPECT_TRUE(ln_consistent(notes));
-    // undo → 回源位置 + 源 lane + 配对恢复（rebuild 重建同通道 LN）
-    ASSERT_TRUE(s.undo());
-    EXPECT_EQ(norm_notes(s.chart().notes), norm_notes(ln_chart().notes));
-    EXPECT_TRUE(ln_consistent(s.chart().notes));
-}
-
 TEST(NoteMoveLane, LnSingleNoteBreaksPairCrossLane) {
     EditorSession s;
     s.load(ln_chart());
     // 单 note 模式跨通道：只移头（key1→key7），**断开**（跨通道不构成 LN）——
     // 2026-09 用户最终确认：要么移动到普通游玩通道（断开变单点），要么留在 LN 通道。
     ASSERT_TRUE(s.exec(
-        std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 2,
-                                          Rational(0, 1), false, Lane{0, LaneKind::Key, 7})));
+        std::make_unique<MoveNoteCommand>(NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                                          2, Rational(0, 1), Lane{0, LaneKind::Key, 7})));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 2u);
     // 头在 m2 key7 无配对；尾在 m1 key1 无配对（断开）
@@ -203,7 +175,7 @@ TEST(NoteMoveLane, LnSingleMoveSameLaneReconnectsForward) {
     s.load(ln_chart());  // 头 m1 pos0 + 尾 m1 pos1/2，互指
     // 只移尾（同通道，m1 pos1/2 → m2 pos3/4）：尾在新位置向前找最近同通道未配对 note
     ASSERT_TRUE(s.exec(std::make_unique<MoveNoteCommand>(
-        1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1, 2, Rational(3, 4), false)));
+        NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 1}, 1}, 2, Rational(3, 4))));
     const auto& notes = s.chart().notes;
     ASSERT_EQ(notes.size(), 2u);
     EXPECT_TRUE(ln_consistent(notes));
@@ -227,11 +199,12 @@ TEST(NoteMoveLane, CompositeBatchCrossLaneOneUndo) {
     s.load(make_chart());  // 3 notes
     // 批量：n1 (m1 pos0 key1 s1) → m3 key5；n2 (m1 pos1/2 key2 s2) → m3 scratch
     auto comp = std::make_unique<CompositeCommand>();
-    comp->add(std::make_unique<MoveNoteCommand>(1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1, 3,
-                                                Rational(0, 1), false, Lane{0, LaneKind::Key, 5}));
-    comp->add(std::make_unique<MoveNoteCommand>(1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2, 3,
-                                                Rational(1, 2), false,
-                                                Lane{0, LaneKind::Scratch, 0}));
+    comp->add(
+        std::make_unique<MoveNoteCommand>(NoteRef{1, Rational(0, 1), Lane{0, LaneKind::Key, 1}, 1},
+                                          3, Rational(0, 1), Lane{0, LaneKind::Key, 5}));
+    comp->add(
+        std::make_unique<MoveNoteCommand>(NoteRef{1, Rational(1, 2), Lane{0, LaneKind::Key, 2}, 2},
+                                          3, Rational(1, 2), Lane{0, LaneKind::Scratch, 0}));
     ASSERT_TRUE(s.exec(std::move(comp)));
     EXPECT_EQ(s.undo_depth(), 1u);  // 一个 undo 步
 
