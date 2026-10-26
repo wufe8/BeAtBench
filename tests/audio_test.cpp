@@ -148,6 +148,32 @@ TEST_F(AudioLibTest, PlayPreviewSwitch) {
     player.drainReclaimed();
 }
 
+TEST_F(AudioLibTest, OrdinaryPlaySkipsReservedVoices) {
+    // 保留槽 6-9 全部占满后，普通 play 仍能用 0-5 六个槽；第七个普通 play
+    // 在回调侧被丢弃，不能挤占保留槽（#59 槽位收口的回归守卫）。
+    SamplePlayer player;
+    for (int slot = SamplePlayer::kFirstReservedVoice; slot < SamplePlayer::kMaxVoices; ++slot) {
+        ASSERT_TRUE(player.playAtSlot(makeTestSample(44100.0, 4410, 0.1f), 1.0f, 0.0, slot));
+    }
+    std::vector<float> out(2, 0.0f);
+    player.render(out.data(), 1, 44100.0);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kMaxVoices - SamplePlayer::kFirstReservedVoice);
+
+    for (int i = 0; i < SamplePlayer::kFirstReservedVoice; ++i) {
+        ASSERT_TRUE(player.play(makeTestSample(44100.0, 4410, 0.1f), 1.0f, 0.0));
+    }
+    player.render(out.data(), 1, 44100.0);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kMaxVoices);
+
+    ASSERT_TRUE(player.play(makeTestSample(44100.0, 4410, 0.1f), 1.0f, 0.0));
+    player.render(out.data(), 1, 44100.0);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kMaxVoices);
+
+    player.stopAll();
+    player.render(out.data(), 1, 44100.0);
+    player.drainReclaimed();
+}
+
 TEST_F(AudioLibTest, VorbisOggSupported) {
     // 仅验证扩展名判定（实际 OGG 解码依赖 miniaudio；合成 OGG 复杂，跳过）
     EXPECT_TRUE(beatbench::audio::audio_extension_supported("ogg"));
