@@ -29,9 +29,9 @@
 namespace beatbench::audio {
 
 /// kPcmSlot：PCM 播放专用槽位（不与其他 note/试听抢占）。
-inline constexpr int kPcmSlot = 6;
+inline constexpr int kPcmSlot = 8;
 /// kRefPcmSlot：参考音轨播放专用槽位（M6.1 切音工作台；与谱面 kPcmSlot 互不挤占）。
-inline constexpr int kRefPcmSlot = 5;
+inline constexpr int kRefPcmSlot = 7;
 
 class SamplePlayer {
    public:
@@ -73,9 +73,9 @@ class SamplePlayer {
     };
 
     // 常量（非枚举：无类型集语义；kMaxVoices 作数组界，kPreviewVoice 作槽位比较）
-    static constexpr int kMaxVoices = 8;
-    static constexpr int kFirstReservedVoice = 4;  ///< 4-7 为 PCM/试听保留槽，普通 play 不碰
-    static constexpr int kPreviewVoice = 7;
+    static constexpr int kMaxVoices = 10;
+    static constexpr int kFirstReservedVoice = 6;  ///< 6-9 为 PCM/试听保留槽，普通 play 不碰
+    static constexpr int kPreviewVoice = 9;
 
     /// 播放一个采样（**所有权转移**：调用方把对 sample 的 1 份持有转给本函数）。
     /// 若返回 false（命令队列满）→ 引用**已归还**（本函数内部 unref），调用方不再持有。
