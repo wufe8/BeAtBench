@@ -18,7 +18,9 @@ Item {
     property string sampleLiteral: ""
     property var referenceEditSettings: ({})
     signal referenceNoteEditRequested(var ref)
+    signal referenceMetaEditRequested(var obj)
     readonly property bool referenceEditingAvailable: compareSplit.referenceEditable
+    readonly property var referenceChartView: compareSplit.referenceView
     property bool hideSecondaryChannels: true
     function prepareReferenceSwap() { compareSplit.prepareSwap() }
     function abortReferenceSwap() { compareSplit.discardPreparedSwap() }
@@ -399,6 +401,7 @@ Item {
                 referenceEditOperations: root.referenceEditOperations
                 editSettings: root.referenceEditSettings
                 onReferenceNoteEditRequested: (ref) => root.referenceNoteEditRequested(ref)
+                onReferenceMetaEditRequested: (obj) => root.referenceMetaEditRequested(obj)
                 onMessage: (text) => root.metaMessage(text)
                 snapNum: root.snapNum
                 snapDen: root.snapDen

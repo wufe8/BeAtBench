@@ -24,6 +24,7 @@ Item {
     property string sampleText: ""
     property var editSettings: ({})
     signal referenceNoteEditRequested(var ref)
+    signal referenceMetaEditRequested(var obj)
     signal message(string text)
     readonly property bool referenceEditable: referenceEditContext !== null
         && referenceEditOperations !== null && referenceEditContext.available
@@ -455,8 +456,9 @@ Item {
                         if (root.referenceEditOperations) root.referenceEditOperations.clearSelection()
                         else { selection = []; metaSelection = [] }
                     }
-                    // 本增量不开放 B 的元事件值弹窗，避免复用 A 的单位/定义上下文。
-                    onMetaEditRequested: (obj) => root.message(qsTr("B 元事件值编辑尚未接入；可放置、移动和删除"))
+                    onMetaEditRequested: (obj) => {
+                        if (root.referenceEditable) root.referenceMetaEditRequested(obj)
+                    }
                     onMetaRightDeleted: (obj) => {
                         if (root.referenceEditable) root.referenceEditOperations.deleteMeta(obj)
                     }

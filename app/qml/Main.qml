@@ -275,6 +275,7 @@ ApplicationWindow {
 
     // A 的编辑仍走既有 SessionController；context 仅同步其窗格状态。
     readonly property var primaryEditContext: typeof primaryPaneContext !== "undefined" ? primaryPaneContext : null
+    readonly property var primaryEditOperations: typeof primaryPaneOperations !== "undefined" ? primaryPaneOperations : null
     readonly property var referenceEditContext: typeof referencePaneContext !== "undefined" ? referencePaneContext : null
     readonly property var referenceEditOperations: typeof referencePaneOperations !== "undefined" ? referencePaneOperations : null
     Binding { target: window.primaryEditContext; property: "sessionId"; value: chartSession ? chartSession.sessionId : ""; when: window.primaryEditContext !== null }
@@ -297,6 +298,10 @@ ApplicationWindow {
     onActionSelectionChanged: updateActionStates()
     onActionMetaSelectionChanged: updateActionStates()
     Connections {
+        target: window.primaryEditOperations
+        function onMessage(text) { window.setStatus(text) }
+    }
+    Connections {
         target: window.referenceEditOperations
         function onMessage(text) { window.setStatus(text) }
     }
@@ -314,7 +319,7 @@ ApplicationWindow {
         window.metaSelection = []
     }
     function clearSampleEditRefs(id) {
-        // setSample 改变 NoteRef 身份；两窗格同文档的旧 sample 引用必须一起失效。
+        // note/meta 弹窗改值后，丢弃源窗格及同文档另窗格的旧引用；不删除任何实际对象。
         if (chartSession && id === chartSession.sessionId) window.invalidatePrimaryPaneRefs()
         if (window.referenceEditContext && window.referenceEditContext.sessionId === id)
             window.referenceEditContext.clearState()
@@ -346,10 +351,10 @@ ApplicationWindow {
                onActivated: uiActions.invoke("edit.redo") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.copy") : ""
                enabled: chartMeta !== null && chartEditingAllowed &&
-                        !window.textInputFocused && !referenceActionTarget && window.selectionRefs.length > 0
+                        !window.textInputFocused && actionSelection.length > 0
                onActivated: uiActions.invoke("edit.copy") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.paste") : ""
-               enabled: chartMeta !== null && chartEditingAllowed && !referenceActionTarget && !window.textInputFocused
+               enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.paste") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
                enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
@@ -981,6 +986,7 @@ ApplicationWindow {
                 sampleLiteral: window.currentSampleId
                 referenceEditSettings: window.referenceEditSettings
                 onReferenceNoteEditRequested: (ref) => window.editReferenceNoteSample(ref)
+                onReferenceMetaEditRequested: (obj) => window.editReferenceMetaObject(obj)
                 hideSecondaryChannels: window.hideReferenceSecondaryChannels
                 onReferenceSwapRequested: (id) => window.requestDocumentAction("swap", id)
                 chartMeta: window.chartMeta
@@ -1946,12 +1952,21 @@ ApplicationWindow {
     // 可能按错误 id 覆盖 #WAV 定义。取消可先去元信息设置 #BASE 62 或重新导出。
     BbDialog {
         id: base62PasteDialog
+        objectName: "base62PasteDialog"
         title: qsTr("Base62 粘贴提醒")
         width: 470
         height: 224
         showCancel: false
         property string pendingText: ""
         property int pendingTarget: 0
+        property var editContext: null
+        property var editOperations: null
+        property var captureToken: ({})
+        property var pendingSettings: ({})
+        onRejected: {
+            editContext = null; editOperations = null; captureToken = ({})
+            pendingText = ""; pendingSettings = ({})
+        }
         Label {
             Layout.fillWidth: true
             text: qsTr("粘贴内容看起来是 Base62（含 #BASE 62 声明或小写 id），但当前谱面未声明 #BASE 62。\n\nBase36 会把两位 id 解释成不同数值（如 10：Base62=62，Base36=36），可能覆盖已有 #WAV 定义。\n\n建议取消，先在元信息里设置 #BASE 62，或用 Base36 重新导出。仍要继续吗？")
@@ -1977,7 +1992,11 @@ ApplicationWindow {
                         const t = base62PasteDialog.pendingText
                         const m = base62PasteDialog.pendingTarget
                         base62PasteDialog.close()
-                        session.pasteRawText(t, m)
+                        if (!base62PasteDialog.editContext || !base62PasteDialog.editOperations) return
+                        const response = base62PasteDialog.editOperations.pasteCaptured(
+                            base62PasteDialog.captureToken, t, m, base62PasteDialog.pendingSettings)
+                        window.finishPanePaste(base62PasteDialog.editContext, response,
+                                               base62PasteDialog.captureToken.sessionId)
                     }
                 }
                 BbToolButton {
@@ -2275,7 +2294,17 @@ ApplicationWindow {
         if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.cancelPendingLn() : false
         return session.cancelPendingLn()
     }
-    function copySelection() { return referenceActionTarget ? false : session.copySelection() }
+    function copySelection() {
+        const ops = referenceActionTarget ? referenceEditOperations : primaryEditOperations
+        if (!ops) return referenceActionTarget ? false : session.copySelection()
+        const response = ops.copySelection()
+        if (response.ok) {
+            window.clipboardLines = response.result.lines || []
+            if (typeof clipboard !== "undefined" && clipboard)
+                clipboard.setText(response.result.text)
+        }
+        return response
+    }
     function deleteBga(layer, measure, num, den) { return session.deleteBga(layer, measure, num, den) }
     function deleteMetaObject(obj) { return session.deleteMetaObject(obj) }
     function deleteMetaSelection() { return session.deleteMetaSelection() }
@@ -2360,10 +2389,51 @@ ApplicationWindow {
     function onMetaClicked(obj, ctrl) { return session.onMetaClicked(obj, ctrl) }
     function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }
     function onSelectionMade(refs) { return session.onSelectionMade(refs) }
-    function pasteClipboard() { return referenceActionTarget ? false : session.pasteClipboard() }
-    /// Base62 粘贴确认（2026-09 数据安全）：SessionController.pasteClipboard 判定「目标谱面
-    /// Base36 + 文本含 Base62 id」时调用；确认后走同一 pasteRawText 落点（一个 undo 步）。
+    function finishPanePaste(ctx, response, targetId) {
+        if (!response.ok) return response
+        if (ctx === primaryEditContext) {
+            window.pendingLnHead = null
+            window.metaSelection = []
+            window.selectionRefs = response.result.selection || []
+            if (referenceEditContext && referenceEditContext.sessionId === targetId)
+                referenceEditContext.clearState()
+        }
+        return response
+    }
+    function pasteClipboard() {
+        const ctx = referenceActionTarget ? referenceEditContext : primaryEditContext
+        const ops = referenceActionTarget ? referenceEditOperations : primaryEditOperations
+        if (!ops || !ctx) return referenceActionTarget ? false : session.pasteClipboard()
+        if (!ctx.available || !ctx.editable) return false
+        const view = referenceActionTarget ? editPage.referenceChartView : editPage.locateChartView()
+        if (!view) return false
+        const target = Math.max(0, Math.floor(view.centerMeasure() || 0))
+        const systemText = typeof clipboard !== "undefined" && clipboard ? clipboard.text() : ""
+        const text = systemText && editUtils.looksLikeBmsText(systemText)
+            ? systemText : window.clipboardLines.join("\n")
+        const settings = {allowDefinitions: !referenceActionTarget, legacyBase36CaseFold: !referenceActionTarget}
+        const token = ctx.capture()
+        const targetId = ctx.sessionId
+        const response = ops.paste(text, target, settings)
+        if (!response.ok && response.error.code === "base62_confirmation_required") {
+            base62PasteDialog.editContext = ctx
+            base62PasteDialog.editOperations = ops
+            base62PasteDialog.captureToken = token
+            base62PasteDialog.pendingSettings = settings
+            base62PasteDialog.pendingText = text
+            base62PasteDialog.pendingTarget = target
+            base62PasteDialog.open()
+            return response
+        }
+        return finishPanePaste(ctx, response, targetId)
+    }
+    /// legacy A 宿主兼容入口：确认始终保存原 owner/revision，不再调用可跟随 active 的 pasteRawText。
     function requestBase62PasteConfirm(text, targetMeasure) {
+        if (!primaryEditContext || !primaryEditOperations) return false
+        base62PasteDialog.editContext = primaryEditContext
+        base62PasteDialog.editOperations = primaryEditOperations
+        base62PasteDialog.captureToken = primaryEditContext.capture()
+        base62PasteDialog.pendingSettings = {allowDefinitions: true, legacyBase36CaseFold: true}
         base62PasteDialog.pendingText = text
         base62PasteDialog.pendingTarget = targetMeasure
         base62PasteDialog.open()
@@ -2512,8 +2582,8 @@ ApplicationWindow {
         setActionEnabled("edit.redo",
                          (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
-        setActionEnabled("edit.copy", chartEditingAllowed && !referenceActionTarget && chartMeta !== null && selectionRefs.length > 0)
-        setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed && !referenceActionTarget)
+        setActionEnabled("edit.copy", chartEditingAllowed && chartMeta !== null && actionSelection.length > 0)
+        setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed)
         setActionEnabled("edit.delete", chartMeta !== null && chartEditingAllowed &&
                                            (actionSelection.length > 0 || actionMetaSelection.length > 0))
         setActionEnabled("tool.quantize", chartEditingAllowed && actionSelection.length > 0)
@@ -2599,8 +2669,11 @@ ApplicationWindow {
 
     // ---------- 对话框耦合函数（委托需 window 作用域的对话框，故保留在 Main） ----------
     function editMetaObject(obj) {
-        if (obj.kind === "bga") metaEditDialog.openBga(obj)
-        else metaEditDialog.openTiming(obj.kind, obj)
+        return metaEditDialog.openPane(primaryEditContext, primaryEditOperations, obj)
+    }
+    function editReferenceMetaObject(obj) {
+        if (!editPage.referenceEditingAvailable) return false
+        return metaEditDialog.openPane(referenceEditContext, referenceEditOperations, obj)
     }
 
     function editNoteSample(ref) {
@@ -2727,8 +2800,38 @@ ApplicationWindow {
         property var base: null    // 原对象（measure/pos/layer/sample/value）
         readonly property string layerText: base ? ["base","poor","layer","layer2"][base.layer] : ""
 
-        function openBga(obj) { kind = "bga"; base = obj; applyFields(); open() }
-        function openTiming(k, obj) { kind = k; base = obj; applyFields(); open() }
+        property var editContext: null
+        property var editOperations: null
+        property var captureToken: ({})
+        property var displaySession: null
+        property var frozenSettings: ({})
+        property string displayText: ""
+        onRejected: { editContext = null; editOperations = null; captureToken = ({}) }
+        function openPane(ctx, ops, obj) {
+            if (!ctx || !ops || !ctx.available || !ctx.editable || !obj) return false
+            const settings = {stopUnit: window.stopUnit}
+            const info = ops.metaEditInfo(obj, settings)
+            if (!info.ok) { window.setStatus(info.error.message); return false }
+            editContext = ctx
+            editOperations = ops
+            captureToken = ctx.capture()
+            displaySession = ctx.session
+            base = JSON.parse(JSON.stringify(obj))
+            kind = base.kind
+            frozenSettings = {stopUnit: info.result.stopUnit, stopBpm: info.result.stopBpm}
+            displayText = info.result.text
+            applyFields()
+            open()
+            return true
+        }
+        function openBga(obj) {
+            const value = JSON.parse(JSON.stringify(obj)); value.kind = "bga"
+            return openPane(window.primaryEditContext, window.primaryEditOperations, value)
+        }
+        function openTiming(k, obj) {
+            const value = JSON.parse(JSON.stringify(obj)); value.kind = k
+            return openPane(window.primaryEditContext, window.primaryEditOperations, value)
+        }
         function applyFields() {
             meLabel.text = kind === "bga" ? qsTr("BGA 对象")
                           : kind === "bpm" ? qsTr("BPM 对象") : qsTr("STOP 对象")
@@ -2737,12 +2840,12 @@ ApplicationWindow {
             if (kind === "bga") {
                 meLayerLabel.text = qsTr("图层：%1").arg(metaEditDialog.layerText)
                 meContentLabel.text = qsTr("#BMP id")
-                meContentField.text = "#BMP" + chartSession.idTextOf(base.sample)
+                meContentField.text = displayText
                 meContentField.placeholderText = qsTr("01/ZZ")
             } else {
-                meContentLabel.text = kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
-                meContentField.text = kind === "bpm" ? String(base.value) : window.stopToDisplay(base.value)
-                meContentField.placeholderText = kind === "bpm" ? qsTr("如 180") : (window.stopUnit === 0 ? qsTr("如 96") : qsTr("如 800"))
+                meContentLabel.text = kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(frozenSettings.stopUnit === 0 ? qsTr("unit") : qsTr("ms"))
+                meContentField.text = displayText
+                meContentField.placeholderText = kind === "bpm" ? qsTr("如 180") : (frozenSettings.stopUnit === 0 ? qsTr("如 96") : qsTr("如 800"))
             }
         }
         onOpened: meContentField.forceActiveFocus()
@@ -2760,6 +2863,7 @@ ApplicationWindow {
             Label { id: meContentLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
             BbTextField {
                 id: meContentField
+                objectName: "metaEditValueInput"
                 Layout.fillWidth: true
                 font.family: Theme.fontMono
                 onAccepted: metaEditDialog.accept()
@@ -2767,26 +2871,12 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            const s = metaEditDialog.base
-            if (!s) return
-            if (metaEditDialog.kind === "bga") {
-                const id = meContentField.text.trim().indexOf("#BMP") === 0
-                           ? meContentField.text.trim().substring(4) : meContentField.text.trim()
-                const sample = chartSession.decodeId(id)
-                if (sample < 0) { setStatus(qsTr("#BMP id 非法：%1").arg(id)); return }
-                const r = sessionCmd("bga.put", { layer: s.layer, measure: s.measure, pos: s.pos, sample: sample })
-                if (r) {
-                    if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()
-                    setStatus(qsTr("BGA → #BMP%1").arg(id))
-                }
-            } else {
-                const raw = parseFloat(meContentField.text)
-                const value = metaEditDialog.kind === "bpm" ? raw : window.stopFromDisplay(meContentField.text)
-                if (!isFinite(value)) { setStatus(qsTr("值非法")); return }
-                const r = sessionCmd("timing.put", { kind: metaEditDialog.kind,
-                                                     measure: s.measure, pos: s.pos, value: value })
-                if (r) { refreshTiming(); setStatus(qsTr("已改 %1 值").arg(metaEditDialog.kind.toUpperCase())) }
-            }
+            if (!metaEditDialog.editContext || !metaEditDialog.editOperations || !metaEditDialog.base) return
+            const response = metaEditDialog.editOperations.editMetaCaptured(
+                metaEditDialog.captureToken, metaEditDialog.base, meContentField.text,
+                metaEditDialog.frozenSettings)
+            if (response.ok) window.clearSampleEditRefs(metaEditDialog.captureToken.sessionId)
+            else window.setStatus(response.error.message)
         }
     }
 

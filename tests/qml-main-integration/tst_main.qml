@@ -2039,6 +2039,263 @@ TestCase {
         verify(mainFixture.disk(a).indexOf("#COMMENT e") >= 0)
         verify(mainFixture.disk(a).indexOf("#PLAYER 4") >= 0)
     }
+    function paneProtocol(id, command, args) {
+        const explicit = Object.assign({}, args || {}, {session_id: id})
+        const response = JSON.parse(beatbench.dispatch(JSON.stringify({command: command, args: explicit})))
+        verify(response.ok, command + ": " + JSON.stringify(response.error))
+        documents.refresh()
+        return response.result
+    }
+    function seedPaneMeta(id, kind) {
+        const object = {kind: kind, measure: 2, pos: {num: 0, den: 1}, layer: 0,
+                        sample: id === a ? 1 : 2, value: kind === "bpm" ? 180 : 96}
+        paneProtocol(id, kind === "bga" ? "bga.put" : "timing.put", object)
+        return object
+    }
+    function paneMetaEvents(id, kind) {
+        return paneProtocol(id, kind === "bga" ? "bga.list" : "timing.list", {kind: kind}).events
+    }
+    function test_referenceClipboard_realShortcutsUseBAndOneUndo_data() {
+        return [{tag: "different-doc", sameDocument: false}, {tag: "same-doc", sameDocument: true}]
+    }
+    function test_referenceClipboard_realShortcutsUseBAndOneUndo(data) {
+        start(false)
+        if (data.sameDocument) verify(split.selectReference(a))
+        const id = data.sameDocument ? a : b, other = data.sameDocument ? b : a
+        const sample = data.sameDocument ? 1 : 2
+        main.editorTool = "select"
+        main.selectionRefs = [{measure: 1, pos: {num: 0, den: 1}, sample: 1,
+                              lane: {player: 0, kind: "key", index: 1}}]
+        const before = mainFixture.snapshot(id), untouched = mainFixture.snapshot(other)
+        const point = auditionPoint(split.referenceView, true, sample)
+        mouseClick(split.referenceView, point.x, point.y)
+        keySequence("Ctrl+C")
+        verify(clipboard.text().indexOf(sample === 2 ? "02" : "01") >= 0,
+               "Copy must encode the selected B document sample")
+        compare(clipboard.text(), main.clipboardLines.join("\n"))
+        verify(clipboard.text().toUpperCase().indexOf("#WAV") < 0)
+        compare(mainFixture.snapshot(id), before)
+        compare(mainFixture.snapshot(other), untouched)
+        const view = split.referenceView
+        split.synchronizeViewports = false
+        for (let i = 0; i < 8; ++i) view.extendMeasures()
+        // Editable tail measures have no timing index; navigate them by musical position, not seconds.
+        view.viewportItem.applyViewportAnchor({valid: true, measure: 6, fraction: 0})
+        tryVerify(() => Math.floor(view.centerMeasure()) > 1)
+        const target = Math.floor(view.centerMeasure())
+        verify(target > 1)
+        keySequence("Ctrl+V")
+        tryVerify(() => mainFixture.snapshot(id).notes.length === before.notes.length + 1)
+        const pasted = mainFixture.snapshot(id)
+        compare(pasted.undo, before.undo + 1)
+        compare(pasted.notes.length, before.notes.length + 1)
+        verify(pasted.notes.some(n => n.measure === target && n.sample === sample))
+        compare(pasted.definitions, before.definitions)
+        compare(mainFixture.snapshot(other), untouched)
+        if (data.sameDocument)
+            compare(mainFixture.bridgeState(mainFixture.primaryView(main).documentSession).notes, pasted.notes.length)
+        compare(documents.activeId(), a)
+        compare(view.ownsPlayback, false)
+        verify(uiActions.invoke("edit.undo", {}))
+        compare(mainFixture.snapshot(id).notes, before.notes)
+    }
+    function test_referencePaste_rejectsDefinitionsAndLowercaseWithoutFallback_data() {
+        return [{tag: "raw-definitions", text: "#WAVZZ new.wav\n#00011:ZZ"},
+                {tag: "literal-lowercase", text: "#00011:0a"},
+                {tag: "base62-declaration", text: "#BASE 62\n#00011:10"}]
+    }
+    function test_referencePaste_rejectsDefinitionsAndLowercaseWithoutFallback(data) {
+        start(false)
+        split.referenceFocused = true
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        clipboard.setText(data.text)
+        main.pasteClipboard()
+        unchanged(sa, sb)
+        const dialog = mainFixture.objectNamed(main, "base62PasteDialog")
+        compare(dialog.visible, false, "B must not expose a case-fold confirmation bypass")
+        const response = main.referenceEditOperations.pasteCaptured(
+            main.referenceEditContext.capture(), data.text, 3, {})
+        compare(response.ok, false)
+        unchanged(sa, sb)
+    }
+    function test_primaryPaste_preservesExplicitRawDefinitionsAndInternalFallback() {
+        start(false)
+        split.referenceFocused = false
+        const sb = mainFixture.snapshot(b)
+        const before = mainFixture.snapshot(a)
+        clipboard.setText("#WAVZZ explicit.wav\n#00011:ZZ")
+        main.pasteClipboard()
+        const first = mainFixture.snapshot(a)
+        compare(first.undo, before.undo + 1)
+        verify(Object.values(first.definitions).indexOf("explicit.wav") >= 0)
+        verify(first.notes.some(n => n.sample === 1295))
+        compare(main.selectionRefs.length, 1)
+        compare(mainFixture.snapshot(b), sb)
+        main.clipboardLines = ["#00012:02"]
+        clipboard.setText("not BMS text")
+        main.pasteClipboard()
+        const after = mainFixture.snapshot(a)
+        compare(after.undo, first.undo + 1)
+        verify(after.notes.some(n => n.sample === 2 && n.lane === 2))
+        compare(mainFixture.snapshot(b), sb)
+    }
+    function test_primaryBase62Confirm_freezesOwnerTextAndTarget_data() {
+        return [{tag: "focus-only", change: "focus"}, {tag: "active-document", change: "active"},
+                {tag: "revision-changed", change: "revision"}, {tag: "cancel", change: "cancel"}]
+    }
+    function test_primaryBase62Confirm_freezesOwnerTextAndTarget(data) {
+        start(false)
+        split.referenceFocused = false
+        clipboard.setText("#00011:0a")
+        main.pasteClipboard()
+        const dialog = mainFixture.objectNamed(main, "base62PasteDialog")
+        tryCompare(dialog, "opened", true)
+        const target = dialog.pendingTarget
+        compare(dialog.captureToken.sessionId, a)
+        compare(dialog.pendingText, "#00011:0a")
+        clipboard.setText("#00012:ZZ")
+        const primary = mainFixture.primaryView(main)
+        for (let i = 0; i < 8; ++i) primary.extendMeasures()
+        primary.viewportItem.applyViewportAnchor({valid: true, measure: 6, fraction: 0})
+        tryVerify(() => Math.floor(primary.centerMeasure()) !== target)
+        split.referenceFocused = true
+        if (data.change === "active") {
+            verify(documents.activate(b).ok)
+            main.adoptChart(mainFixture.snapshot(b).path)
+        } else if (data.change === "revision") {
+            paneProtocol(a, "note.put", {measure: 5, pos: {num: 0, den: 1}, sample: 1,
+                lane: {player: 0, kind: "key", index: 2}})
+        }
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        if (data.change === "cancel") clickButton(dialog, "取消")
+        else clickButton(dialog, "仍要粘贴")
+        tryCompare(dialog, "visible", false)
+        compare(mainFixture.snapshot(b), sb)
+        if (data.change === "focus") {
+            const after = mainFixture.snapshot(a)
+            compare(after.undo, sa.undo + 1)
+            verify(after.notes.some(n => n.measure === target && n.sample === 10))
+            verify(!after.notes.some(n => n.sample === 1295))
+        } else compare(mainFixture.snapshot(a), sa)
+    }
+    function test_metaModal_bothPanesFreezeStopUnitsAndDestination_data() {
+        const result = []
+        for (const reference of [false, true]) for (const kind of ["bpm", "stop", "bga"])
+            result.push({tag: (reference ? "B-" : "A-") + kind, reference: reference, kind: kind})
+        return result
+    }
+    function test_metaModal_bothPanesFreezeStopUnitsAndDestination(data) {
+        start(false)
+        const id = data.reference ? b : a, other = data.reference ? a : b
+        const object = seedPaneMeta(id, data.kind)
+        const before = mainFixture.snapshot(id), untouched = mainFixture.snapshot(other)
+        const original = paneMetaEvents(id, data.kind)
+        main.stopUnit = 1
+        if (data.reference) split.referenceView.metaEditRequested(object)
+        else main.editMetaObject(object)
+        const dialog = mainFixture.objectNamed(main, "metaEditDialog")
+        tryCompare(dialog, "opened", true)
+        compare(dialog.displaySession, documents.session(id))
+        const frozenBpm = data.reference ? 180 : 120
+        if (data.kind === "stop") {
+            compare(dialog.frozenSettings.stopUnit, 1)
+            compare(dialog.frozenSettings.stopBpm, frozenBpm)
+            fuzzyCompare(Number(dialog.displayText), 96 * 1250 / frozenBpm, 0.000001)
+        }
+        main.stopUnit = 0
+        main.currentBpmValue = 999
+        split.referenceFocused = !data.reference
+        const field = mainFixture.objectNamed(main, "metaEditValueInput")
+        field.text = data.kind === "bpm" ? "240" : data.kind === "stop" ? "1250" : "ZZ"
+        dialog.accept()
+        tryCompare(dialog, "visible", false)
+        const events = paneMetaEvents(id, data.kind)
+        compare(events.length, original.length)
+        if (data.kind === "bga") compare(events[0].sample, 1295)
+        else compare(events[0].value, data.kind === "bpm" ? 240 : frozenBpm)
+        compare(mainFixture.snapshot(id).undo, before.undo + 1)
+        compare(mainFixture.snapshot(other), untouched)
+        compare(documents.activeId(), a)
+    }
+    function test_referenceMetaBga_usesStrictDestinationLiteral_data() {
+        return [{tag: "base36-rejects-lowercase", base: 36, text: "0a", accepted: false},
+                {tag: "base62-case-sensitive", base: 62, text: "0a", accepted: true, sample: 36},
+                {tag: "base36-unbound", base: 36, text: "ZZ", accepted: true, sample: 1295},
+                {tag: "no-prefix", base: 36, text: "#BMP02", accepted: false},
+                {tag: "no-trim", base: 36, text: " 02", accepted: false}]
+    }
+    function test_referenceMetaBga_usesStrictDestinationLiteral(data) {
+        start(false)
+        verify(mainFixture.setDocumentBase(b, data.base))
+        const object = seedPaneMeta(b, "bga")
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const original = paneMetaEvents(b, "bga")
+        main.editReferenceMetaObject(object)
+        const dialog = mainFixture.objectNamed(main, "metaEditDialog")
+        tryCompare(dialog, "opened", true)
+        compare(mainFixture.objectNamed(main, "metaEditValueInput").text, "02")
+        mainFixture.objectNamed(main, "metaEditValueInput").text = data.text
+        dialog.accept()
+        tryCompare(dialog, "visible", false)
+        compare(mainFixture.snapshot(a), sa)
+        compare(mainFixture.snapshot(b).definitions, sb.definitions)
+        if (data.accepted) {
+            compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+            compare(paneMetaEvents(b, "bga")[0].sample, data.sample)
+        } else {
+            compare(mainFixture.snapshot(b), sb)
+            compare(paneMetaEvents(b, "bga"), original)
+        }
+    }
+    function test_referenceMetaModal_closedOwnerNeverFallsBackToA() {
+        start(false)
+        const id = documents.create().id
+        verify(documents.activate(a).ok)
+        main.adoptChart(mainFixture.snapshot(a).path)
+        verify(split.selectReference(id))
+        const object = seedPaneMeta(id, "bpm")
+        main.editReferenceMetaObject(object)
+        const dialog = mainFixture.objectNamed(main, "metaEditDialog")
+        tryCompare(dialog, "opened", true)
+        verify(JSON.parse(beatbench.dispatch(JSON.stringify({command: "session.close", args: {id: id}}))).ok)
+        documents.refresh()
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        compare(mainFixture.objectNamed(main, "metaEditValueInput").text, "180")
+        mainFixture.objectNamed(main, "metaEditValueInput").text = "240"
+        dialog.accept()
+        tryCompare(dialog, "visible", false)
+        unchanged(sa, sb)
+    }
+    function test_metaModal_rejectsOwnerOrRevisionChanges_data() {
+        return [{tag: "A-active-changed", reference: false, change: "active"},
+                {tag: "A-revision", reference: false, change: "revision"},
+                {tag: "B-document-changed", reference: true, change: "document"},
+                {tag: "B-revision", reference: true, change: "revision"}]
+    }
+    function test_metaModal_rejectsOwnerOrRevisionChanges(data) {
+        start(false)
+        const id = data.reference ? b : a
+        const object = seedPaneMeta(id, "bpm")
+        if (data.reference) main.editReferenceMetaObject(object)
+        else main.editMetaObject(object)
+        const dialog = mainFixture.objectNamed(main, "metaEditDialog")
+        tryCompare(dialog, "opened", true)
+        const displayOwner = dialog.displaySession
+        if (data.change === "active") {
+            verify(documents.activate(b).ok)
+            main.adoptChart(mainFixture.snapshot(b).path)
+        } else if (data.change === "document") verify(split.selectReference(a))
+        else paneProtocol(id, "note.put", {measure: 5, pos: {num: 0, den: 1}, sample: 1,
+            lane: {player: 0, kind: "key", index: 2}})
+        compare(dialog.displaySession, displayOwner)
+        compare(mainFixture.objectNamed(main, "metaEditValueInput").text, "180")
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        mainFixture.objectNamed(main, "metaEditValueInput").text = "240"
+        dialog.accept()
+        tryCompare(dialog, "visible", false)
+        unchanged(sa, sb)
+        compare(paneMetaEvents(id, "bpm")[0].value, 180)
+    }
     function test_referenceFocus_routesRealDeleteAndUndoWithoutChangingA() {
         start(false)
         main.editorTool = "select"
@@ -2053,11 +2310,11 @@ TestCase {
         compare(main.referenceEditContext.sessionId, b)
         compare(main.referenceEditContext.selection.length, 1)
         compare(main.selectionRefs, heldA)
-        for (const id of ["edit.copy", "edit.paste", "tool.addMeasure"]) {
+        for (const id of ["tool.addMeasure"]) {
             verify(!uiActions.enabled(id), id)
             verify(!uiActions.invoke(id, {}), id)
         }
-        for (const id of ["edit.delete", "edit.undo", "edit.redo", "tool.quantize", "tool.mirror", "tool.rotate", "tool.toggleLn"])
+        for (const id of ["edit.copy", "edit.paste", "edit.delete", "edit.undo", "edit.redo", "tool.quantize", "tool.mirror", "tool.rotate", "tool.toggleLn"])
             verify(uiActions.enabled(id), id)
         keyClick(Qt.Key_Delete)
         tryVerify(() => mainFixture.snapshot(b).notes.length === sb.notes.length - 1)
@@ -2432,10 +2689,19 @@ TestCase {
     }
     function test_editObjectDialog_contentBounds(data) {
         start(false)
-        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         const ref = {measure: 1, pos: {num: 0, den: 1}, sample: 1,
                      lane: {player: 0, kind: "key", index: 1},
                      kind: data.kind, layer: 3, value: data.kind === "bpm" ? 180 : 96}
+        if (data.kind !== "note") {
+            const seeded = JSON.parse(beatbench.dispatch(JSON.stringify({
+                command: data.kind === "bga" ? "bga.put" : "timing.put",
+                args: {session_id: a, kind: data.kind, measure: ref.measure, pos: ref.pos,
+                       layer: ref.layer, sample: ref.sample, value: ref.value}
+            })))
+            verify(seeded.ok)
+            documents.refresh()
+        }
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         if (data.kind === "note") {
             main.selectionRefs = [ref]
             wait(0)

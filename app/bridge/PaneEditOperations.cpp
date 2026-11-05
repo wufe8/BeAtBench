@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "PaneEditOperations.hpp"
 
+#include <QRegularExpression>
+#include <QStringList>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -571,6 +573,170 @@ QVariantMap PaneEditOperations::moveMeta(const QString& kind, const QVariantMap&
         m_context->setMetaSelection(selected);
         m_context->setPendingLnHead({});
     }
+    return response;
+}
+
+QVariantMap PaneEditOperations::copySelection() {
+    if (!m_context || m_context->selection().isEmpty())
+        return fail("empty_selection", tr("没有选中音符"));
+    auto response =
+        run("clipboard.copy", {{"selection", m_context->selection()}}, tr("已复制选中音符"));
+    if (ok(response)) {
+        auto result = response.value("result").toMap();
+        result.insert("text", result.value("lines").toStringList().join(QLatin1Char('\n')));
+        result.insert("selectionDisposition", "preserve");
+        response.insert("result", result);
+    }
+    return response;
+}
+QVariantMap PaneEditOperations::paste(const QString& text, int measure,
+                                      const QVariantMap& settings) {
+    return pasteImpl(nullptr, text, measure, settings);
+}
+QVariantMap PaneEditOperations::pasteCaptured(const QVariantMap& token, const QString& text,
+                                              int measure, const QVariantMap& settings) {
+    return pasteImpl(&token, text, measure, settings);
+}
+QVariantMap PaneEditOperations::pasteImpl(const QVariantMap* token, const QString& text,
+                                          int measure, const QVariantMap& settings) {
+    if (!m_context || !m_context->available()) return fail("no_document", tr("窗格未绑定有效文档"));
+    if (!m_context->editable()) return fail("read_only", tr("该窗格仅供参考"));
+    if (measure < 0 || text.trimmed().isEmpty())
+        return fail("bad_paste", tr("粘贴文本或目标小节无效"));
+    // 只做保守的整段政策检查，不另写一份 BMS parser；解释/undo 仍由 clipboard.paste 唯一负责。
+    // BASE 声明不是导入指令，原协议会忽略它；两位字面 ID 始终按目标文档进制解释。
+    if (!settings.value("allowDefinitions", false).toBool()) {
+        static const QRegularExpression definitions(
+            QStringLiteral("^#(?:WAV|BMP|BPM|STOP|EXBPM|BGA)"),
+            QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression timingRows(QStringLiteral("^#[0-9]{3}(?:02|03|08|09):"));
+        for (const auto& line : text.split(QLatin1Char('\n'))) {
+            const auto trimmed = line.trimmed();
+            if (definitions.match(trimmed).hasMatch() || timingRows.match(trimmed).hasMatch())
+                return fail("definitions_not_allowed",
+                            tr("该窗格不允许粘贴资源或时序定义；整段未修改"));
+        }
+    }
+    m_context->session()->refresh();
+    EditUtils utils;
+    if (m_context->session()->idBase() == 36 && utils.textUsesBase62Ids(text)) {
+        if (!settings.value("legacyBase36CaseFold", false).toBool())
+            return fail("invalid_id", tr("Base36 目标禁止 Base62 原始 ID（不转换大小写）"));
+        if (!token)
+            return fail("base62_confirmation_required",
+                        tr("目标文档为 Base36，请确认按目标进制解释原始 ID"));
+    }
+    const QVariantMap args{{"text", text}, {"target_measure", measure}};
+    auto response = token ? m_context->dispatchCaptured(*token, "clipboard.paste", args)
+                          : m_context->dispatch("clipboard.paste", args);
+    if (ok(response)) {
+        auto result = response.value("result").toMap();
+        m_context->setSelection(result.value("selection").toList());
+        m_context->setMetaSelection({});
+        m_context->setPendingLnHead({});
+        result.insert("selectionDisposition", "replace");
+        response.insert("result", result);
+    }
+    emit message(ok(response) ? tr("已粘贴到小节 %1（可撤销）").arg(measure)
+                              : response.value("error").toMap().value("message").toString());
+    return response;
+}
+QVariantMap PaneEditOperations::metaEditInfo(const QVariantMap& object,
+                                             const QVariantMap& settings) {
+    if (!m_context || !m_context->available()) return fail("no_document", tr("窗格未绑定有效文档"));
+    if (!validPosition(object)) return fail("bad_ref", tr("元事件位置无效"));
+    const auto kind = object.value("kind").toString();
+    if (kind != "bga" && kind != "bpm" && kind != "stop")
+        return fail("bad_kind", tr("不支持的元事件"));
+    const int unit = settings.value("stopUnit", 0).toInt();
+    if (unit != 0 && unit != 1) return fail("bad_unit", tr("STOP 单位无效"));
+    auto* bridge = m_context->session();
+    bridge->refresh();
+    const auto* chart = bridge->chart();
+    if (!chart) return fail("no_document", tr("目标文档已失效"));
+    const auto p = object.value("pos").toMap();
+    const beatbench::Rational pos(p.value("num").toLongLong(), p.value("den").toLongLong());
+    const auto measure = object.value("measure").toUInt();
+    const auto at = [&](const auto& e) { return e.measure == measure && e.pos == pos; };
+    QString text;
+    double bpm = 0.0;
+    bool found = false;
+    if (kind == "bga") {
+        for (const auto& e : chart->bga_events) {
+            if (!at(e) || e.value.layer != object.value("layer", -1).toInt()) continue;
+            if (object.contains("sample") && object.value("sample").toUInt() != e.value.image.id)
+                return fail("not_found", tr("原 BGA 不是协议支持替换的同位对象"));
+            text = bridge->idTextOf(static_cast<int>(e.value.image.id));
+            found = true;
+            break;
+        }
+    } else if (kind == "bpm") {
+        // timing.put 修改同位最后一个事件；不可把更早的重叠引用误路由到最后一个。
+        for (auto it = chart->bpm_events.rbegin(); it != chart->bpm_events.rend(); ++it) {
+            const auto& e = *it;
+            if (!at(e)) continue;
+            if (object.contains("value") && object.value("value").toDouble() != e.value.value)
+                return fail("not_found", tr("原 BPM 不是协议支持替换的同位对象"));
+            text = QString::number(e.value.value, 'g', 17);
+            found = true;
+            break;
+        }
+    } else {
+        const auto* timing = bridge->timing();
+        bpm = timing ? timing->bpm_at({measure, pos}) : 0.0;
+        if (!std::isfinite(bpm) || bpm <= 0.0)
+            return fail("invalid_bpm", tr("目标事件拍位没有有效 BPM"));
+        for (auto it = chart->stop_events.rbegin(); it != chart->stop_events.rend(); ++it) {
+            const auto& e = *it;
+            if (!at(e)) continue;
+            if (object.contains("value") &&
+                object.value("value").toDouble() != static_cast<double>(e.value.count))
+                return fail("not_found", tr("原 STOP 不是协议支持替换的同位对象"));
+            text = unit == 0 ? QString::number(e.value.count)
+                             : QString::number(static_cast<double>(e.value.count) * 1250.0 / bpm,
+                                               'g', 17);
+            found = true;
+            break;
+        }
+    }
+    if (!found) return fail("not_found", tr("原元事件已不存在或身份已变化"));
+    return success({{"text", text}, {"stopUnit", unit}, {"stopBpm", bpm}});
+}
+QVariantMap PaneEditOperations::editMetaCaptured(const QVariantMap& token,
+                                                 const QVariantMap& object, const QString& text,
+                                                 const QVariantMap& settings) {
+    const auto info = metaEditInfo(object, settings);
+    if (!ok(info)) return info;
+    const auto kind = object.value("kind").toString();
+    QVariantMap args{{"measure", object.value("measure")}, {"pos", object.value("pos")}};
+    if (kind == "bga") {
+        const auto decoded = m_context->decodeLiteralId(text);
+        if (!ok(decoded))
+            return fail("invalid_id", decoded.value("error").toMap().value("message").toString());
+        args.insert("layer", object.value("layer"));
+        args.insert("sample", decoded.value("result").toMap().value("sample"));
+    } else {
+        bool parsed = false;
+        double value = text.toDouble(&parsed);
+        if (!parsed || !std::isfinite(value) || value < 0.0 || (kind == "bpm" && value == 0.0))
+            return fail("invalid_value", tr("元事件值无效"));
+        if (kind == "stop" && info.value("result").toMap().value("stopUnit").toInt() == 1)
+            value *= info.value("result").toMap().value("stopBpm").toDouble() / 1250.0;
+        if (!std::isfinite(value) || (kind == "stop" && value >= 9.22e18))
+            return fail("invalid_value", tr("元事件值超出有效范围"));
+        args.insert("kind", kind);
+        args.insert("value", value);
+    }
+    auto response =
+        m_context->dispatchCaptured(token, kind == "bga" ? "bga.put" : "timing.put", args);
+    if (ok(response)) {
+        m_context->clearState();
+        auto result = response.value("result").toMap();
+        result.insert("selectionDisposition", "clear");
+        response.insert("result", result);
+    }
+    emit message(ok(response) ? tr("已修改元事件（可撤销）")
+                              : response.value("error").toMap().value("message").toString());
     return response;
 }
 }  // namespace beatbench::app
