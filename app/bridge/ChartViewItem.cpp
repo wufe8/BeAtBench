@@ -1042,6 +1042,27 @@ qreal ChartViewItem::measureAtY(qreal y) const {
     return (mf < 0.0 || mf >= static_cast<qreal>(effectiveCount())) ? -1.0 : mf;
 }
 
+QVariantMap ChartViewItem::dragSampleAt(qreal x, qreal y) const {
+    const QVariantMap invalid{{"valid", false}};
+    if (!std::isfinite(x) || !std::isfinite(y) || x < m_rulerWidth || x >= width() || y < 18.0 ||
+        y >= height())
+        return invalid;
+    const qreal musicalF = measureAtY(y);
+    if (!std::isfinite(musicalF) || musicalF < 0.0) return invalid;
+    const auto rectangles = columnRects();
+    for (std::size_t i = 0; i < rectangles.size(); ++i) {
+        const auto& rect = rectangles[i];
+        if (x < rect.left() || x >= rect.right()) continue;
+        const auto column = laneAtX(x);
+        if (!column.value("valid").toBool()) return invalid;
+        return {{"valid", true},
+                {"musicalF", musicalF},
+                {"columnRank", static_cast<int>(i)},
+                {"column", column}};
+    }
+    return invalid;
+}
+
 QVariantMap ChartViewItem::laneAtX(qreal x) const {
     const auto colRects = columnRects();
     QVariantMap res;

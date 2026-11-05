@@ -148,6 +148,24 @@ Item {
             compare(partsB.chart.selection.length, 0)
         }
 
+        function test_drag_sample_uses_raw_local_time_and_rejects_noncanvas() {
+            const chart = partsB.chart
+            const point = pointFor(viewB, partsB, false)
+            const sample = chart.dragSampleAt(point.x, point.y)
+            verify(sample.valid)
+            compare(sample.musicalF, chart.measureAtY(point.y))
+            verify(sample.columnRank >= 0)
+            compare(sample.column.laneKind, "key")
+            compare(chart.editColumns()[sample.columnRank].laneIndex, sample.column.laneIndex)
+            const second = chart.dragSampleAt(point.x, point.y + 0.25)
+            verify(second.valid)
+            verify(second.musicalF !== sample.musicalF, "Drag sampling must not quantize pointer time")
+            for (const p of [{x: -1, y: point.y}, {x: chart.rulerWidth - 1, y: point.y},
+                             {x: point.x, y: 17}, {x: chart.width, y: point.y},
+                             {x: point.x, y: chart.height}])
+                compare(chart.dragSampleAt(p.x, p.y).valid, false)
+        }
+
         function test_edit_columns_preserve_full_display_order() {
             for (const showExtras of [false, true]) {
                 viewB.showExtras = showExtras

@@ -303,6 +303,10 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 屏幕 y → 拍位（measure + pos 小数；时间轴工具（平移等）距离换算用）。
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
+    /// 拖动原始落点：{valid,musicalF,columnRank,column}，不吸附、不夹到小节末槽。
+    /// 坐标属于本 viewport；边界/固定头/标尺外返回 invalid。业务权限由窗格控制器验证。
+    Q_INVOKABLE QVariantMap dragSampleAt(qreal x, qreal y) const;
+
     /// 屏幕 x → 命中的可放置列（{valid, lanePlayer, laneKind, laneIndex}；横向改轨移动用）。
     /// 扩展（2026-09 跨命名空间移动）：额外带 subLine（BGM 展开列行号；-1 非 BGM）、
     /// bgaLayer（BGA 图层列 0..3；-1 非 BGA）、metaKind（"bpm"/"stop"；空 = 非元事件轨）。
