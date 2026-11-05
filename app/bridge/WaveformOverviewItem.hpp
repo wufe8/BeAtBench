@@ -55,7 +55,7 @@ class WaveformOverviewItem : public QQuickPaintedItem {
 
     void paint(QPainter* painter) override;
 
-    QObject* session() const { return m_session; }
+    QObject* session() const { return m_session.data(); }
     void setSession(QObject* session);
     QObject* chartView() const { return m_chartView.data(); }
     void setChartView(QObject* view);
@@ -109,7 +109,8 @@ class WaveformOverviewItem : public QQuickPaintedItem {
 
     QPointer<QObject> m_chartView;
     std::vector<QMetaObject::Connection> m_chartViewConnections;
-    QObject* m_session = nullptr;
+    // Sessions may be destroyed before their QML overview; never retain a dangling wrapper.
+    QPointer<QObject> m_session;
     QObject* m_theme = nullptr;
     int m_orientation = 1;  // 默认垂直（当前布局=右侧条）
     qreal m_measureHeight = 96.0;

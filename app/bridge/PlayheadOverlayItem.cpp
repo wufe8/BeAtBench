@@ -27,14 +27,30 @@ PlayheadOverlayItem::PlayheadOverlayItem(QQuickItem* parent) : QQuickPaintedItem
 
 void PlayheadOverlayItem::setSession(QObject* session) {
     if (m_session == session) return;
+    disconnect(m_sessionDestroyed);
     m_session = session;
+    if (session) {
+        m_sessionDestroyed = connect(session, &QObject::destroyed, this, [this] {
+            m_session = nullptr;
+            emit sessionChanged();
+            update();
+        });
+    }
     emit sessionChanged();
     update();
 }
 
 void PlayheadOverlayItem::setChartView(QObject* v) {
     if (m_chartView == v) return;
+    disconnect(m_chartViewDestroyed);
     m_chartView = v;
+    if (v) {
+        m_chartViewDestroyed = connect(v, &QObject::destroyed, this, [this] {
+            m_chartView = nullptr;
+            emit chartViewChanged();
+            update();
+        });
+    }
     emit chartViewChanged();
     update();
 }
@@ -103,13 +119,13 @@ void PlayheadOverlayItem::setPlayheadSec(double v) {
 }
 
 ChartSession* PlayheadOverlayItem::sessionObj() const {
-    return qobject_cast<ChartSession*>(m_session);
+    return qobject_cast<ChartSession*>(m_session.data());
 }
 
 qreal PlayheadOverlayItem::yForSec(double sec) const {
     // 2026-09 变拍高修复：换算委托 ChartViewItem（yOf 按每小节高度累计——x2/x0.5 小节不
     // 再错位）；未接线时走旧均匀公式兜底（防御）。
-    if (auto* view = qobject_cast<ChartViewItem*>(m_chartView)) {
+    if (auto* view = qobject_cast<ChartViewItem*>(m_chartView.data())) {
         return view->yForSec(sec);
     }
     const ChartSession* cs = sessionObj();

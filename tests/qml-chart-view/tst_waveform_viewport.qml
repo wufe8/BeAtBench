@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import QtQuick
 import QtTest
+import BeatBench 1.0
 import "../../app/qml/components" as Components
 
 Item {
@@ -16,6 +17,9 @@ Item {
             followPlayhead: false
         }
     }
+    Component { id: overview; WaveformOverviewItem { width: 60; height: 192; theme: Theme } }
+    Component { id: playhead; PlayheadOverlayItem { width: 60; height: 192 } }
+    Component { id: sessionSpy; SignalSpy { signalName: "sessionChanged" } }
     TestCase {
         name: "ChartWaveformViewport"
         when: windowShown
@@ -26,8 +30,10 @@ Item {
         function cleanup() {
             bindingFixture.releaseOverlayCaptures()
             if (view) view.documentSession = null
+            if (wave) wave.session = null
             if (primary) bindingFixture.destroyOverlaySession(primary)
             primary = null
+            view = null; chart = null; wave = null
             bindingFixture.resetAudioProbe(false)
             bindingFixture.resetCompare()
         }
@@ -53,6 +59,58 @@ Item {
         }
         function distance(a, b) {
             return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b)
+        }
+        function test_destroyed_session_paint_and_rebind() {
+            bindingFixture.resetWaveformViewport(false)
+            primary = bindingFixture.temporaryWaveformSession()
+            verify(primary.renderAsync(8000, false))
+            tryVerify(() => primary.waveformInfo().valid === true, 10000)
+            // Deliberately no QML binding that could clear these properties for C++.
+            wave = createTemporaryObject(overview, scene, {session: primary})
+            const head = createTemporaryObject(playhead, scene, {session: primary})
+            verify(wave !== null); verify(head !== null)
+            const waveChanged = createTemporaryObject(sessionSpy, scene, {target: wave})
+            const headChanged = createTemporaryObject(sessionSpy, scene, {target: head})
+            verify(waveChanged !== null); verify(headChanged !== null)
+            verify(bindingFixture.paintOverlay(wave) !== null)
+            const cursorY = Math.floor(head.height * 0.90)
+            const liveHead = bindingFixture.paintOverlay(head)
+            const liveCursor = liveHead.pixel(30, cursorY)
+            verify(liveCursor.a > 0.9 && liveCursor.r > liveCursor.g, "Live session paints a red cursor")
+            wave.scrubbing = true
+            bindingFixture.destroyOverlaySession(primary)
+            primary = null
+            compare(wave.session, null); compare(head.session, null)
+            compare(waveChanged.count, 1); compare(headChanged.count, 1)
+            compare(wave.scrubbing, false)
+            compare(wave.viewportTimeWindow().valid, false)
+            // Exercise the actual production painters while their former owner is gone.
+            const emptyWave = bindingFixture.paintOverlay(wave)
+            const emptyHead = bindingFixture.paintOverlay(head)
+            verify(emptyWave !== null); verify(emptyHead !== null)
+            verify(distance(emptyWave.pixel(2, 2), Theme.surface) < 0.01)
+            compare(emptyHead.pixel(30, cursorY).a, 0)
+            primary = bindingFixture.temporaryWaveformSession()
+            verify(primary.renderAsync(8000, false))
+            tryVerify(() => primary.waveformInfo().valid === true, 10000)
+            wave.session = primary; head.session = primary
+            compare(wave.session, primary); compare(head.session, primary)
+            compare(waveChanged.count, 2); compare(headChanged.count, 2)
+            verify(bindingFixture.paintOverlay(wave) !== null)
+            const reboundHead = bindingFixture.paintOverlay(head)
+            // The 2px antialiased line is centered at height*0.90 (172.8 here).
+            // Sample its fully covered floor row, not row 173 at the fractional edge.
+            const reboundCursor = reboundHead.pixel(30, cursorY)
+            verify(reboundCursor.a > 0.9, "Live session restores the playhead cursor")
+            verify(distance(reboundCursor, liveCursor) < 0.01, "Rebinding restores the same red cursor")
+            // Replacing a live owner must disconnect its destruction notification.
+            const old = bindingFixture.temporaryOverlaySession()
+            wave.session = old; head.session = old
+            wave.session = primary; head.session = primary
+            waveChanged.clear(); headChanged.clear()
+            bindingFixture.destroyOverlaySession(old)
+            compare(wave.session, primary); compare(head.session, primary)
+            compare(waveChanged.count, 0); compare(headChanged.count, 0)
         }
         function test_own_timing_window_data() {
             return [{tag: "uniform-up", variable: false, high: true},
@@ -109,12 +167,18 @@ Item {
             compare(chart.timeAtY(80), -1, "B tail is not an A seek position")
 
             // Mismatched or unwired overview cannot reuse another document's timing.
-            wave.chartView = null
-            compare(wave.viewportTimeWindow().valid, false)
-            wave.chartView = chart
-            wave.session = bridgeB
-            compare(wave.viewportTimeWindow().valid, false)
-            wave.session = primary
+            try {
+                wave.chartView = null
+                compare(wave.viewportTimeWindow().valid, false)
+                wave.chartView = chart
+                wave.session = bridgeB
+                compare(wave.viewportTimeWindow().valid, false)
+            } finally {
+                // Restore both production bindings, including after a failed assertion.
+                const documentView = view
+                wave.chartView = Qt.binding(() => chart)
+                wave.session = Qt.binding(() => documentView.documentSession)
+            }
             windowIs(false, end, end)
             compare(audioEngine.seekCount, 0)
             compare(JSON.stringify(bindingFixture.documentState(bridgeA.sessionId)), a)

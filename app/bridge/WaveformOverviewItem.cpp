@@ -29,7 +29,7 @@ WaveformOverviewItem::WaveformOverviewItem(QQuickItem* parent) : QQuickPaintedIt
 }
 
 ChartSession* WaveformOverviewItem::sessionObj() const {
-    return qobject_cast<ChartSession*>(m_session);
+    return qobject_cast<ChartSession*>(m_session.data());
 }
 
 ThemeManager* WaveformOverviewItem::themeObj() const {
@@ -41,8 +41,20 @@ void WaveformOverviewItem::setSession(QObject* session) {
     if (m_pressed) ungrabMouse();
     m_pressed = false;
     setScrubbing(false);
-    if (auto* old = sessionObj()) disconnect(old, nullptr, this, nullptr);
+    if (m_session) disconnect(m_session.data(), nullptr, this, nullptr);
     m_session = session;
+    if (session) {
+        connect(session, &QObject::destroyed, this, [this] {
+            // QPointer is already clear here. Notify QML and retire any pending gesture
+            // even when the session binding was replaced by an imperative assignment.
+            m_session = nullptr;
+            if (m_pressed) ungrabMouse();
+            m_pressed = false;
+            setScrubbing(false);
+            emit sessionChanged();
+            update();
+        });
+    }
     if (auto* cs = sessionObj()) {
         // 渲染完成 → 波形数据就绪 → 重绘（renderFinished 信号在 UI 线程发）
         connect(cs, &ChartSession::renderFinished, this, [this] { update(); });
