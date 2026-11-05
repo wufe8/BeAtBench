@@ -9,6 +9,27 @@ Item {
     id: root
     default property alias primaryContent: primary.data
     property var documentService: null
+    // 可选注入：独立组件测试无 context/operations 时仍为只读 B。
+    property var referenceEditContext: null
+    property var referenceEditOperations: null
+    property int snapNum: 1
+    property int snapDen: 16
+    property bool moveMode: false
+    property bool lnSelectMode: false
+    property bool showGrid: true
+    property bool showChannelIds: false
+    property bool zoomToCursor: true
+    property int noteSampleMode: 0
+    property string sampleLiteral: ""
+    property string sampleText: ""
+    property var editSettings: ({})
+    signal referenceNoteEditRequested(var ref)
+    signal message(string text)
+    readonly property bool referenceEditable: referenceEditContext !== null
+        && referenceEditOperations !== null && referenceEditContext.available
+        && expanded && visible && !overlayMode
+    Binding { target: root.referenceEditContext; property: "sessionId"; value: root.referenceDocumentId; when: root.referenceEditContext !== null }
+    Binding { target: root.referenceEditContext; property: "editable"; value: root.referenceEditable; when: root.referenceEditContext !== null }
     property var primarySession: null
     property var primaryChartView: null
     property bool overlayMode: false
@@ -64,7 +85,7 @@ Item {
                 onClicked: root.setOverlayMode(false)
             }
             Label {
-                text: root.overlayMode ? qsTr("A 编辑 / B 参考") : qsTr("B · 只读")
+                text: root.overlayMode ? qsTr("A 编辑 / B 参考") : root.referenceEditable ? qsTr("B · 编辑") : qsTr("B · 只读")
                 color: root.overlayMode ? Theme.accent2 : Theme.textMuted
                 font.pixelSize: Theme.fsSmall
             }
@@ -128,7 +149,7 @@ Item {
                 onActiveFocusChanged: if (activeFocus) root.referenceFocused = true
                 onClicked: root.requestSwap()
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("交换 A/B：左侧编辑并播放，右侧只读")
+                ToolTip.text: qsTr("交换 A/B：A 为保存、播放和 Dock 来源")
             }
             BbToolButton {
                 text: "×"
@@ -310,8 +331,10 @@ Item {
             swapRequested(referenceDocumentId)
     }
     onReferenceSessionChanged: {
-        referenceChart.selection = []
-        referenceChart.metaSelection = []
+        if (!root.referenceEditContext) {
+            referenceChart.selection = []
+            referenceChart.metaSelection = []
+        }
         Qt.callLater(root.refreshStructure)
         queueSync(primaryChartView)
     }
@@ -347,7 +370,7 @@ Item {
                 opacity: hover.hovered ? 0.35 : 0
             }
             ToolTip.visible: hover.hovered
-            ToolTip.text: qsTr("向左拖出只读对照；向右拖回收起")
+            ToolTip.text: qsTr("向左拖出 B 对照；向右拖回收起")
         }
         Item {
             id: primary
@@ -377,13 +400,45 @@ Item {
                     Layout.fillHeight: true
                     documentSession: root.referenceSession
                     primaryPlaybackRole: false
-                    editable: false
+                    editable: root.referenceEditable
                     editorTool: root.editorTool
+                    snapNum: root.snapNum
+                    snapDen: root.snapDen
+                    moveMode: root.moveMode
+                    lnSelectMode: root.lnSelectMode
+                    showGrid: root.showGrid
+                    showChannelIds: root.showChannelIds
+                    zoomToCursor: root.zoomToCursor
+                    noteSampleMode: root.noteSampleMode
+                    sampleText: root.sampleText
+                    sampleId: {
+                        if (!root.referenceEditContext || !root.referenceEditContext.available) return -1
+                        const decoded = root.referenceEditContext.decodeLiteralId(root.sampleLiteral)
+                        return decoded.ok ? decoded.result.sample : -1
+                    }
                     hideSecondaryChannels: root.hideSecondaryChannels
                     showExtras: root.showExtras
                     onNavigationCompleted: root.queueSync(referenceChart)
                     onHeightChanged: root.queueSync(root.primaryChartView)
+                    selection: root.referenceEditContext ? root.referenceEditContext.selection : []
+                    metaSelection: root.referenceEditContext ? root.referenceEditContext.metaSelection : []
+                    onHitPlaceRequested: (hit) => {
+                        if (root.referenceEditable) root.referenceEditOperations.place(hit, root.editSettings)
+                    }
+                    onNoteRightDeleted: (ref) => {
+                        if (root.referenceEditable) root.referenceEditOperations.deleteNote(ref)
+                    }
+                    onNoteEditRequested: (ref) => {
+                        if (root.referenceEditable) root.referenceNoteEditRequested(ref)
+                    }
+                    onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => {
+                        if (root.referenceEditable) root.referenceEditOperations.moveSelection(deltaF, targetLane || ({}), sourceLane || ({}), sourceBgmLine, referenceChart.viewportItem.editColumns(), root.editSettings)
+                    }
                     onNoteClicked: (ref, ctrl) => {
+                        if (root.referenceEditOperations) {
+                            root.referenceEditOperations.selectNote(ref, ctrl, root.lnSelectMode)
+                            return
+                        }
                         if (!ctrl) { selection = [ref]; metaSelection = []; return }
                         let next = selection.slice()
                         const key = JSON.stringify(ref)
@@ -392,11 +447,28 @@ Item {
                         else next.splice(index, 1)
                         selection = next
                     }
-                    onSelectionFinished: (refs) => { selection = refs; metaSelection = [] }
-                    onCanvasClicked: { selection = []; metaSelection = [] }
-                    onMetaObjectClicked: (obj, ctrl) => { metaSelection = [obj]; selection = [] }
+                    onSelectionFinished: (refs) => {
+                        if (root.referenceEditOperations) root.referenceEditOperations.selectNotes(refs)
+                        else { selection = refs; metaSelection = [] }
+                    }
+                    onCanvasClicked: {
+                        if (root.referenceEditOperations) root.referenceEditOperations.clearSelection()
+                        else { selection = []; metaSelection = [] }
+                    }
+                    // 本增量不开放 B 的元事件值弹窗，避免复用 A 的单位/定义上下文。
+                    onMetaEditRequested: (obj) => root.message(qsTr("B 元事件值编辑尚未接入；可放置、移动和删除"))
+                    onMetaRightDeleted: (obj) => {
+                        if (root.referenceEditable) root.referenceEditOperations.deleteMeta(obj)
+                    }
+                    onMetaMoveRequested: (kind, obj, deltaF, targetLane) => {
+                        if (root.referenceEditable) root.referenceEditOperations.moveMeta(kind, obj, deltaF, targetLane || ({}), root.editSettings)
+                    }
+                    onMetaObjectClicked: (obj, ctrl) => {
+                        if (root.referenceEditOperations) root.referenceEditOperations.selectMeta(obj, ctrl)
+                        else { metaSelection = [obj]; selection = [] }
+                    }
                     onEditAreaPressed: root.areaPressed()
-                    // Deliberately no edit/audition consumers: B is visual only.
+                    // B 不接试听消费者；播放来源与 Dock 仍归 A。
                 }
                 Label {
                     Layout.fillWidth: true

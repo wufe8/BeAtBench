@@ -35,6 +35,8 @@ add_executable(beatbench
     bridge/ResourceRelocationController.hpp
     bridge/PaneEditContext.cpp
     bridge/PaneEditContext.hpp
+    bridge/PaneEditOperations.cpp
+    bridge/PaneEditOperations.hpp
     bridge/ProjectController.cpp
     bridge/ProjectController.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）

@@ -1075,14 +1075,15 @@ TestCase {
         }
         unchanged(sa, sb)
     }
-    function test_referenceFollowsToolbarToolWithoutEnablingEdits() {
+    function test_referenceFollowsToolbarToolWithIndependentEditingContext() {
         start(false)
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         for (const tool of ["pan", "select", "note", "ln", "mine"]) {
             main.editorTool = tool
             compare(split.editorTool, tool)
             compare(split.referenceView.editorTool, tool)
-            compare(split.referenceView.editable, false)
+            compare(split.referenceView.editable, true)
+            compare(split.referenceView.ownsPlayback, false)
         }
         unchanged(sa, sb)
     }
@@ -2038,32 +2039,306 @@ TestCase {
         verify(mainFixture.disk(a).indexOf("#COMMENT e") >= 0)
         verify(mainFixture.disk(a).indexOf("#PLAYER 4") >= 0)
     }
-    function test_readonlyFocus_disablesRealRegistryInvoke() {
+    function test_referenceFocus_routesRealDeleteAndUndoWithoutChangingA() {
         start(false)
-        main.selectionRefs = [{measure: 1, pos: {num: 0, den: 1}, lane: {player: 0, kind: "key", index: 1}}]
-        const primary = mainFixture.primaryView(main)
-        verify(primary !== null)
-        mouseClick(primary, 30, 40)
-        // Seed an existing A selection, as would be held after selecting a note.
-        main.selectionRefs = [{measure: 1, pos: {num: 0, den: 1}, lane: {player: 0, kind: "key", index: 1}}]
-        tryVerify(function() { return uiActions.enabled("edit.delete") })
-        verify(uiActions.invoke("edit.copy", {}))
+        main.editorTool = "select"
+        main.selectionRefs = [{measure: 1, pos: {num: 0, den: 1}, sample: 1,
+                              lane: {player: 0, kind: "key", index: 1}}]
+        const heldA = main.selectionRefs
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
-        mouseClick(split.referenceView, 40, 80)
+        const note = auditionPoint(split.referenceView, true, 2)
+        mouseClick(split.referenceView, note.x, note.y)
         tryCompare(split, "referenceFocused", true)
-        compare(main.chartEditingAllowed, false)
-        const ids = ["edit.delete", "edit.paste", "edit.undo", "edit.redo", "tool.quantize", "tool.mirror", "tool.rotate", "tool.toggleLn"]
-        for (let i = 0; i < ids.length; ++i) {
-            verify(!uiActions.enabled(ids[i]), ids[i])
-            verify(!uiActions.invoke(ids[i], {}), ids[i])
+        compare(main.chartEditingAllowed, true)
+        compare(main.referenceEditContext.sessionId, b)
+        compare(main.referenceEditContext.selection.length, 1)
+        compare(main.selectionRefs, heldA)
+        for (const id of ["edit.copy", "edit.paste", "tool.addMeasure"]) {
+            verify(!uiActions.enabled(id), id)
+            verify(!uiActions.invoke(id, {}), id)
         }
-        unchanged(sa, sb)
-        mouseClick(primary, 30, 40)
-        tryCompare(main, "chartEditingAllowed", true)
-        for (let i = 0; i < ids.length; ++i) verify(uiActions.enabled(ids[i]), ids[i])
+        for (const id of ["edit.delete", "edit.undo", "edit.redo", "tool.quantize", "tool.mirror", "tool.rotate", "tool.toggleLn"])
+            verify(uiActions.enabled(id), id)
+        keyClick(Qt.Key_Delete)
+        tryVerify(() => mainFixture.snapshot(b).notes.length === sb.notes.length - 1)
+        compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+        compare(mainFixture.snapshot(a), sa)
+        compare(main.selectionRefs, heldA)
+        compare(documents.activeId(), a)
         verify(uiActions.invoke("edit.undo", {}))
-        verify(mainFixture.snapshot(a).undo < sa.undo)
-        compare(mainFixture.snapshot(b), sb)
+        compare(mainFixture.snapshot(b).notes, sb.notes)
+        compare(mainFixture.snapshot(a), sa)
+        compare(main.referenceEditContext.selection.length, 0)
+        compare(mainFixture.primaryView(main).documentSession, chartSession)
+        compare(split.referenceView.documentSession, documents.session(b))
+        compare(audioEngine.previewFiles.length, 0)
+    }
+    function test_referencePlacement_preservesLiteralInDestinationBase_data() {
+        return [{tag: "62-to36-lowercase-rejected", sourceBase: 62, targetBase: 36, text: "0a", accepted: false},
+                {tag: "62-to36-uppercase", sourceBase: 62, targetBase: 36, text: "10", accepted: true, sample: 36},
+                {tag: "36-to62-same-literal", sourceBase: 36, targetBase: 62, text: "10", accepted: true, sample: 62},
+                {tag: "62-unbound-lowercase", sourceBase: 62, targetBase: 62, text: "0a", accepted: true, sample: 36},
+                {tag: "reserved-zero", sourceBase: 36, targetBase: 36, text: "00", accepted: false}]
+    }
+    function test_referencePlacement_preservesLiteralInDestinationBase(data) {
+        start(false)
+        verify(mainFixture.setDocumentBase(a, data.sourceBase))
+        verify(mainFixture.setDocumentBase(b, data.targetBase))
+        split.synchronizeViewports = false
+        main.editorTool = "note"
+        main.currentSampleId = data.text
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const view = split.referenceView
+        verify(waitForRendering(view))
+        const point = auditionPoint(view, false)
+        mouseClick(view, point.x, point.y)
+        if (data.accepted) {
+            tryVerify(() => mainFixture.snapshot(b).notes.length === sb.notes.length + 1)
+            compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+            verify(mainFixture.snapshot(b).notes.some(n => n.sample === data.sample))
+            compare(mainFixture.snapshot(b).definitions, sb.definitions)
+        } else compare(mainFixture.snapshot(b), sb)
+        compare(mainFixture.snapshot(a), sa)
+        compare(main.currentSampleId, data.text)
+        compare(documents.activeId(), a)
+    }
+    function test_referencePlacement_sameDocumentRefreshAndUndo() {
+        start(false)
+        split.synchronizeViewports = false
+        verify(split.selectReference(a))
+        main.editorTool = "note"
+        main.currentSampleId = "ZZ" // valid unbound slot must not import/create a definition
+        const before = mainFixture.snapshot(a), other = mainFixture.snapshot(b)
+        const view = split.referenceView
+        verify(waitForRendering(view))
+        const point = auditionPoint(view, false)
+        mouseClick(view, point.x, point.y)
+        tryVerify(() => mainFixture.snapshot(a).notes.length === before.notes.length + 1)
+        compare(mainFixture.snapshot(a).undo, before.undo + 1)
+        compare(mainFixture.snapshot(a).definitions, before.definitions)
+        compare(view.documentSession, chartSession)
+        compare(view.ownsPlayback, false)
+        compare(mainFixture.bridgeState(mainFixture.primaryView(main).documentSession).notes, before.notes.length + 1)
+        compare(mainFixture.bridgeState(view.documentSession).notes, before.notes.length + 1)
+        compare(documents.activeId(), a)
+        verify(uiActions.invoke("edit.undo", {}))
+        compare(mainFixture.snapshot(a).notes, before.notes)
+        compare(mainFixture.snapshot(b), other)
+    }
+    function test_referenceNoteModal_keepsCapturedDestination_data() {
+        return [{tag: "focus-only", switchDocument: false}, {tag: "changed-B", switchDocument: true}]
+    }
+    function test_referenceNoteModal_keepsCapturedDestination(data) {
+        start(false)
+        main.editorTool = "select"
+        const view = split.referenceView
+        const point = auditionPoint(view, true, 2)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        mouseDoubleClickSequence(view, point.x, point.y)
+        const dialog = mainFixture.objectNamed(main, "noteSampleDialog")
+        tryCompare(dialog, "opened", true)
+        compare(dialog.displaySession, documents.session(b))
+        const field = mainFixture.objectNamed(main, "noteSampleIdInput")
+        field.text = "ZZ"
+        if (data.switchDocument) verify(split.selectReference(a))
+        else split.referenceFocused = false
+        compare(dialog.displaySession, documents.session(b))
+        dialog.accept()
+        tryCompare(dialog, "visible", false)
+        compare(mainFixture.snapshot(a), sa)
+        if (data.switchDocument) compare(mainFixture.snapshot(b), sb)
+        else {
+            compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+            verify(mainFixture.snapshot(b).notes.some(n => n.sample === 1295))
+        }
+        compare(documents.activeId(), a)
+    }
+    function test_referenceEdit_preservesDraftDocksAndCtrlSSavesA() {
+        start(true)
+        const text = draft()
+        const sa = mainFixture.snapshot(a)
+        const owner = chartSession
+        main.currentSampleId = "02"
+        main.editorTool = "note"
+        const point = auditionPoint(split.referenceView, false)
+        mouseClick(split.referenceView, point.x, point.y)
+        tryCompare(split, "referenceFocused", true)
+        const editedB = mainFixture.snapshot(b)
+        compare(mainFixture.snapshot(a), sa)
+        compare(main.metaDraftDirty, true)
+        compare(chartSession, owner)
+        compare(documents.activeId(), a)
+        compare(main.currentSampleId, "02")
+        keySequence("Ctrl+S")
+        tryCompare(main, "metaDraftDirty", false)
+        tryVerify(() => !mainFixture.snapshot(a).dirty)
+        verify(mainFixture.disk(a).indexOf("#TITLE " + text) >= 0)
+        compare(mainFixture.snapshot(b), editedB)
+        compare(split.referenceView.documentSession, documents.session(b))
+        compare(chartSession, owner)
+    }
+    function test_referenceLnPendingAndCancel_areIndependentOfA() {
+        start(false)
+        for (const id of [a, b]) {
+            const changed = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+                session_id: id, edits: [{key: "LNOBJ", value: "ZZ"}]
+            }})))
+            verify(changed.ok)
+        }
+        documents.refresh()
+        split.synchronizeViewports = false
+        main.editorTool = "ln"
+        main.currentSampleId = "01"
+        const primary = mainFixture.primaryView(main)
+        const ap = auditionPoint(primary, false)
+        mouseClick(primary, ap.x, ap.y)
+        verify(main.pendingLnHead !== null)
+        const pendingA = main.pendingLnHead
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const bp = auditionPoint(split.referenceView, false)
+        mouseClick(split.referenceView, bp.x, bp.y)
+        verify(main.referenceEditContext.pendingLnHead.measure !== undefined)
+        compare(main.pendingLnHead, pendingA)
+        compare(main.primaryEditContext.pendingLnHead, pendingA)
+        compare(mainFixture.snapshot(a), sa)
+        compare(mainFixture.snapshot(b).notes.length, sb.notes.length + 1)
+        keyClick(Qt.Key_Escape)
+        compare(Object.keys(main.referenceEditContext.pendingLnHead).length, 0)
+        compare(mainFixture.snapshot(b).notes, sb.notes)
+        compare(main.pendingLnHead, pendingA)
+        compare(mainFixture.snapshot(a), sa)
+    }
+    function test_sameDocumentReferenceUndo_invalidatesPrimaryPendingHead() {
+        start(false)
+        verify(JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+            session_id: a, edits: [{key: "LNOBJ", value: "ZZ"}]
+        }}))).ok)
+        documents.refresh()
+        verify(split.selectReference(a))
+        main.editorTool = "ln"
+        main.currentSampleId = "01"
+        const primary = mainFixture.primaryView(main)
+        const before = mainFixture.snapshot(a)
+        primary.hitPlaceRequested({valid: true, measure: 2, num: 0, den: 1,
+            lanePlayer: 0, laneKind: "key", laneIndex: 1})
+        verify(main.pendingLnHead !== null)
+        compare(main.pendingLnHead.measure, 2)
+        main.selectionRefs = [main.pendingLnHead]
+        split.referenceFocused = true
+        verify(uiActions.invoke("edit.undo", {}))
+        compare(mainFixture.snapshot(a).notes, before.notes)
+        compare(main.pendingLnHead, null)
+        compare(main.selectionRefs.length, 0)
+        compare(main.metaSelection.length, 0)
+        split.referenceFocused = false
+        primary.hitPlaceRequested({valid: true, measure: 3, num: 0, den: 1,
+            lanePlayer: 0, laneKind: "key", laneIndex: 1})
+        verify(main.pendingLnHead !== null, "A click must create a fresh head, not an orphan LNOBJ tail")
+        compare(main.pendingLnHead.measure, 3)
+        const after = mainFixture.snapshot(a)
+        compare(after.notes.length, before.notes.length + 1)
+        verify(after.notes.some(n => n.measure === 3 && n.sample === 1))
+        verify(!after.notes.some(n => n.measure === 3 && n.sample === 1295))
+    }
+    function test_referenceToolSwitch_doesNotDeletePrimaryPendingNote() {
+        start(false)
+        for (const id of [a, b]) {
+            verify(JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+                session_id: id, edits: [{key: "LNOBJ", value: "ZZ"}]
+            }}))).ok)
+        }
+        documents.refresh()
+        main.editorTool = "ln"
+        main.currentSampleId = "01"
+        mainFixture.primaryView(main).hitPlaceRequested({valid: true, measure: 2, num: 0, den: 1,
+            lanePlayer: 0, laneKind: "key", laneIndex: 1})
+        verify(main.pendingLnHead !== null)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        split.referenceView.hitPlaceRequested({valid: true, measure: 2, num: 0, den: 1,
+            lanePlayer: 0, laneKind: "key", laneIndex: 1})
+        verify(main.referenceEditContext.pendingLnHead.measure !== undefined)
+        split.referenceFocused = true
+        verify(uiActions.invoke("tool.note", {}))
+        compare(main.editorTool, "note")
+        compare(mainFixture.snapshot(a), sa, "Switching B's tool must not delete A's actual head")
+        compare(main.pendingLnHead, null) // inactive pane state is invalidated, not deleted
+        compare(mainFixture.snapshot(b).notes, sb.notes) // only B's pending head was cancelled
+        compare(Object.keys(main.referenceEditContext.pendingLnHead).length, 0)
+    }
+    function test_noteSampleModal_clearsStaleSelectionsInBothSameDocumentPanes_data() {
+        return [{tag: "A-modal", reference: false}, {tag: "B-modal", reference: true}]
+    }
+    function test_noteSampleModal_clearsStaleSelectionsInBothSameDocumentPanes(data) {
+        start(false)
+        verify(split.selectReference(a))
+        main.editorTool = "select"
+        const ref = {measure: 1, pos: {num: 0, den: 1}, sample: 1,
+                     lane: {player: 0, kind: "key", index: 1}, ln_channel: false, note_kind: "normal"}
+        main.selectionRefs = [ref]
+        main.referenceEditContext.selection = [ref]
+        if (data.reference) main.editReferenceNoteSample(ref)
+        else main.editNoteSample(ref)
+        const dialog = mainFixture.objectNamed(main, "noteSampleDialog")
+        tryCompare(dialog, "opened", true)
+        mainFixture.objectNamed(main, "noteSampleIdInput").text = "02"
+        dialog.accept()
+        tryCompare(dialog, "visible", false)
+        verify(mainFixture.snapshot(a).notes.some(n => n.measure === 1 && n.sample === 2))
+        compare(main.selectionRefs.length, 0)
+        compare(main.referenceEditContext.selection.length, 0)
+        split.referenceFocused = true
+        verify(!uiActions.invoke("edit.delete", {}), "Del must not reuse pre-setSample identity")
+    }
+    function test_referenceTransformsAndMove_useLocalSelection() {
+        start(false)
+        main.editorTool = "select"
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        const view = split.referenceView
+        const point = auditionPoint(view, true, 2)
+        mouseClick(view, point.x, point.y)
+        verify(uiActions.invoke("tool.mirror", {}))
+        compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+        compare(mainFixture.snapshot(a), sa)
+        verify(uiActions.invoke("edit.undo", {}))
+        compare(mainFixture.snapshot(b).notes, sb.notes)
+        mouseClick(view, point.x, point.y)
+        const picked = main.referenceEditContext.selection[0]
+        verify(picked !== undefined)
+        view.moveSelectionRequested(0.25, null, picked.lane, -1)
+        compare(mainFixture.snapshot(b).undo, sb.undo + 1)
+        compare(mainFixture.snapshot(a), sa)
+        compare(main.referenceEditContext.selection.length, 1)
+        compare(main.referenceEditContext.selection[0].sample, picked.sample)
+        verify(uiActions.invoke("edit.undo", {}))
+        compare(mainFixture.snapshot(b).notes, sb.notes)
+    }
+    function test_referenceMissingDocument_neverFallsBackToA() {
+        start(false)
+        const sa = mainFixture.snapshot(a)
+        verify(split.selectReference(""))
+        split.referenceFocused = true
+        compare(split.referenceView.editable, false)
+        compare(main.chartEditingAllowed, false)
+        for (const id of ["edit.delete", "edit.undo", "edit.redo", "edit.copy", "edit.paste", "tool.quantize"])
+            verify(!uiActions.invoke(id, {}), id)
+        split.referenceView.hitPlaceRequested({valid: true, measure: 0, num: 0, den: 1,
+            lanePlayer: 0, laneKind: "key", laneIndex: 1})
+        main.undoEdit()
+        main.pasteClipboard()
+        main.uiActionDelete()
+        compare(mainFixture.snapshot(a), sa)
+        const temporaryId = documents.create().id
+        verify(documents.activate(a).ok)
+        main.adoptChart(sa.path)
+        verify(split.selectReference(temporaryId))
+        split.referenceFocused = true
+        const closed = JSON.parse(beatbench.dispatch(JSON.stringify({command: "session.close", args: {id: temporaryId}})))
+        verify(closed.ok)
+        documents.refresh()
+        compare(main.referenceEditContext.available, false)
+        compare(split.referenceView.editable, false)
+        main.undoEdit()
+        compare(mainFixture.snapshot(a), sa)
     }
     function test_editPlayback_geometryStableAcrossStateChanges() {
         start(false)
@@ -2180,7 +2455,7 @@ TestCase {
         tryCompare(dialog, "visible", false)
         unchanged(sa, sb)
     }
-    function auditionPoint(view, wantNote) {
+    function auditionPoint(view, wantNote, expectedSample = 1) {
         const columns = view.probe(0, 40).columns
         for (let c = 0; c < columns.length; ++c) {
             const x = columns[c].x + columns[c].w / 2
@@ -2189,7 +2464,7 @@ TestCase {
                 const hit = view.viewportItem.hitTest(x, y)
                 if (!hit.valid || hit.laneKind !== "key") continue
                 const object = view.viewportItem.objectAt(x, y)
-                if (wantNote ? object.valid && object.sample === 1 : !object.valid)
+                if (wantNote ? object.valid && object.sample === expectedSample : !object.valid)
                     return {x: x, y: y}
             }
         }

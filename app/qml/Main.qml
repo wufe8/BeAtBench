@@ -193,10 +193,20 @@ ApplicationWindow {
     property string editorTool: "pan"
     // 工具切换：进入 LN 放置 → 显示状态栏说明（持久）；离开 → 取消未完成 LN 头 + 恢复就绪
     onEditorToolChanged: {
+        updateActionStates()
         if (window.editorTool === "ln") {
             activateLnHint()
         } else {
-            if (window.pendingLnHead) cancelPendingLn()
+            // 工具动作只取消来源窗格的头；另一窗格仅失效状态，不删除其真实 note。
+            if (window.referenceActionTarget) {
+                if (window.referenceEditOperations && editPage.referenceEditingAvailable
+                        && window.referenceEditContext.pendingLnHead.measure !== undefined)
+                    window.referenceEditOperations.cancelPendingLn()
+                window.pendingLnHead = null
+            } else {
+                if (window.pendingLnHead) session.cancelPendingLn()
+                if (window.referenceEditContext) window.referenceEditContext.pendingLnHead = ({})
+            }
             statusClearTimer.stop()
             window.statusText = qsTr("就绪")
         }
@@ -263,9 +273,65 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("file.exit") : ""
                onActivated: uiActions.invoke("file.exit") }
 
-    // B keeps local selection; mutation actions must not act on A's old selection.
-    readonly property bool chartEditingAllowed: currentPage === 0 && !editPage.referenceFocused
+    // A 的编辑仍走既有 SessionController；context 仅同步其窗格状态。
+    readonly property var primaryEditContext: typeof primaryPaneContext !== "undefined" ? primaryPaneContext : null
+    readonly property var referenceEditContext: typeof referencePaneContext !== "undefined" ? referencePaneContext : null
+    readonly property var referenceEditOperations: typeof referencePaneOperations !== "undefined" ? referencePaneOperations : null
+    Binding { target: window.primaryEditContext; property: "sessionId"; value: chartSession ? chartSession.sessionId : ""; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "editable"; value: chartSession !== null && chartSession.hasChart; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "selection"; value: window.selectionRefs; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "metaSelection"; value: window.metaSelection; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "pendingLnHead"; value: window.pendingLnHead || ({}); when: window.primaryEditContext !== null }
+
+    // 焦点只选择编辑上下文，不改变 active 文档、保存、播放或 Dock 所有权。
+    readonly property bool referenceActionTarget: editPage.referenceFocused
+    readonly property bool chartEditingAllowed: currentPage === 0 &&
+        (!referenceActionTarget || editPage.referenceEditingAvailable)
+    readonly property var actionSelection: referenceActionTarget
+        ? (referenceEditContext ? referenceEditContext.selection : []) : selectionRefs
+    readonly property var actionMetaSelection: referenceActionTarget
+        ? (referenceEditContext ? referenceEditContext.metaSelection : []) : metaSelection
+    readonly property var referenceEditSettings: ({tool: editorTool, sampleText: currentSampleId,
+        bmpText: currentBmpId, bpmValue: currentBpmValue, stopValue: currentStopValue,
+        snapNum: snapNum, snapDen: snapDen})
+    onActionSelectionChanged: updateActionStates()
+    onActionMetaSelectionChanged: updateActionStates()
+    Connections {
+        target: window.referenceEditOperations
+        function onMessage(text) { window.setStatus(text) }
+    }
+    // 仅实际改到 A 文档时刷新 A 的资源/事件查询；不重载元信息草稿。
+    function refreshPaneEditOwner(id) {
+        if (chartSession && id === chartSession.sessionId) {
+            window.refreshLint(); window.refreshSamples(); window.refreshTiming()
+            editPage.reloadBga()
+        }
+    }
+    function invalidatePrimaryPaneRefs() {
+        // B 已改同一文档：旧 A 引用/待定头不再可信；只丢弃 UI 状态，不发删除命令。
+        window.pendingLnHead = null
+        window.selectionRefs = []
+        window.metaSelection = []
+    }
+    function clearSampleEditRefs(id) {
+        // setSample 改变 NoteRef 身份；两窗格同文档的旧 sample 引用必须一起失效。
+        if (chartSession && id === chartSession.sessionId) window.invalidatePrimaryPaneRefs()
+        if (window.referenceEditContext && window.referenceEditContext.sessionId === id)
+            window.referenceEditContext.clearState()
+    }
+    Connections {
+        target: window.referenceEditContext
+        function onEdited(id) {
+            if (chartSession && id === chartSession.sessionId) window.invalidatePrimaryPaneRefs()
+            window.refreshPaneEditOwner(id)
+        }
+    }
+    Connections {
+        target: window.primaryEditContext
+        function onEdited(id) { window.refreshPaneEditOwner(id) }
+    }
     onChartEditingAllowedChanged: updateActionStates()
+    onReferenceActionTargetChanged: updateActionStates()
 
     // 编辑动作
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.undo") : ""
@@ -280,13 +346,13 @@ ApplicationWindow {
                onActivated: uiActions.invoke("edit.redo") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.copy") : ""
                enabled: chartMeta !== null && chartEditingAllowed &&
-                        !window.textInputFocused && window.selectionRefs.length > 0
+                        !window.textInputFocused && !referenceActionTarget && window.selectionRefs.length > 0
                onActivated: uiActions.invoke("edit.copy") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.paste") : ""
-               enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
+               enabled: chartMeta !== null && chartEditingAllowed && !referenceActionTarget && !window.textInputFocused
                onActivated: uiActions.invoke("edit.paste") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
-               enabled: chartMeta !== null && chartEditingAllowed
+               enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.delete") }
 
     // 工具动作（数字 1-5：文本输入焦点时让行）
@@ -319,7 +385,7 @@ ApplicationWindow {
     Shortcut {
         sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.cancel") : ""
         enabled: currentPage === 0 && editorTool === "ln" && !window.textInputFocused
-                 && chartMeta !== null
+                 && chartEditingAllowed
         onActivated: uiActions.invoke("edit.cancel")
     }
 
@@ -909,6 +975,12 @@ ApplicationWindow {
             EditPage {
                 id: editPage
                 documentService: documents
+                primaryEditContext: window.primaryEditContext
+                referenceEditContext: window.referenceEditContext
+                referenceEditOperations: window.referenceEditOperations
+                sampleLiteral: window.currentSampleId
+                referenceEditSettings: window.referenceEditSettings
+                onReferenceNoteEditRequested: (ref) => window.editReferenceNoteSample(ref)
                 hideSecondaryChannels: window.hideReferenceSecondaryChannels
                 onReferenceSwapRequested: (id) => window.requestDocumentAction("swap", id)
                 chartMeta: window.chartMeta
@@ -2199,8 +2271,11 @@ ApplicationWindow {
     function bmpRename(fromId, toId) { return session.bmpRename(fromId, toId) }
     function bmpSetFile(id, file) { return session.bmpSetFile(id, file) }
     function addWavSample(id, file) { return session.addWavSample(id, file) }
-    function cancelPendingLn() { return session.cancelPendingLn() }
-    function copySelection() { return session.copySelection() }
+    function cancelPendingLn() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.cancelPendingLn() : false
+        return session.cancelPendingLn()
+    }
+    function copySelection() { return referenceActionTarget ? false : session.copySelection() }
     function deleteBga(layer, measure, num, den) { return session.deleteBga(layer, measure, num, den) }
     function deleteMetaObject(obj) { return session.deleteMetaObject(obj) }
     function deleteMetaSelection() { return session.deleteMetaSelection() }
@@ -2211,7 +2286,10 @@ ApplicationWindow {
     function editBga(layer, measure, num, den, bmpId) { return session.editBga(layer, measure, num, den, bmpId) }
     function editTiming(kind, measure, num, den, value, ref) { return session.editTiming(kind, measure, num, den, value, ref) }
     /// 2026-09「加一小节」：编辑态有效小节数下限 +1（可放内容的新小节；用不到的保存时被 BMS 丢弃）。
-    function addMeasure() { editPage.extendMeasures(); setStatus(qsTr("已加一小节（保存时未用到的空小节会被舍弃）")) }
+    function addMeasure() {
+        if (referenceActionTarget) return false
+        editPage.extendMeasures(); setStatus(qsTr("已加一小节（保存时未用到的空小节会被舍弃）"))
+    }
     /// 新建空谱面：草稿确认 → 选模式（对话框）→ DocumentService.create(mode) 独立文档。
     /// 2026-10 阶段一（issue #26）：Ctrl+N 不再直建 sp7k，先选模式（新谳 PMS/DP 不再受阻）。
     function newChart() {
@@ -2282,7 +2360,7 @@ ApplicationWindow {
     function onMetaClicked(obj, ctrl) { return session.onMetaClicked(obj, ctrl) }
     function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }
     function onSelectionMade(refs) { return session.onSelectionMade(refs) }
-    function pasteClipboard() { return session.pasteClipboard() }
+    function pasteClipboard() { return referenceActionTarget ? false : session.pasteClipboard() }
     /// Base62 粘贴确认（2026-09 数据安全）：SessionController.pasteClipboard 判定「目标谱面
     /// Base36 + 文本含 Base62 id」时调用；确认后走同一 pasteRawText 落点（一个 undo 步）。
     function requestBase62PasteConfirm(text, targetMeasure) {
@@ -2293,7 +2371,10 @@ ApplicationWindow {
     function placeBgaAt(hit) { return session.placeBgaAt(hit) }
     function placeLnType2(hit) { return session.placeLnType2(hit) }
     function placeNote(hit) { return session.placeNote(hit) }
-    function quantizeSelection() { return session.quantizeSelection() }
+    function quantizeSelection() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.quantize(referenceEditSettings) : false
+        return session.quantizeSelection()
+    }
     function refEquals(a, b) { return session.refEquals(a, b) }
     function refreshLint() { return session.refreshLint() }
     function refreshSamples() { return session.refreshSamples() }
@@ -2334,13 +2415,20 @@ ApplicationWindow {
     function setCurrentBmp(id) { return session.setCurrentBmp(id) }
     function setSampleFile(id, file) { return session.setSampleFile(id, file) }
     function toggleGrid() { return session.toggleGrid() }
-    function toggleLnSelection() { return session.toggleLnSelection() }
-    function transformSelection(mirror, rotate) { return session.transformSelection(mirror, rotate) }
+    function toggleLnSelection() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.toggleLn() : false
+        return session.toggleLnSelection()
+    }
+    function transformSelection(mirror, rotate) {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.transform(mirror, rotate) : false
+        return session.transformSelection(mirror, rotate)
+    }
     function undoEdit() {
         if (currentPage === 1) {
             sliceWorkspace.undoSliceEdit()
             return
         }
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.undo() : false
         return session.undoEdit()
     }
     function redoEdit() {
@@ -2348,6 +2436,7 @@ ApplicationWindow {
             sliceWorkspace.redoSliceEdit()
             return
         }
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.redo() : false
         return session.redoEdit()
     }
 
@@ -2389,6 +2478,7 @@ ApplicationWindow {
         }
     }
     function uiActionDelete() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.deleteSelection() : false
         if (window.metaSelection.length > 0) deleteMetaSelection()
         else deleteSelection()
     }
@@ -2422,14 +2512,16 @@ ApplicationWindow {
         setActionEnabled("edit.redo",
                          (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
-        setActionEnabled("edit.copy", chartEditingAllowed && chartMeta !== null && selectionRefs.length > 0)
-        setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed)
+        setActionEnabled("edit.copy", chartEditingAllowed && !referenceActionTarget && chartMeta !== null && selectionRefs.length > 0)
+        setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed && !referenceActionTarget)
         setActionEnabled("edit.delete", chartMeta !== null && chartEditingAllowed &&
-                                           (selectionRefs.length > 0 || metaSelection.length > 0))
-        setActionEnabled("tool.quantize", chartEditingAllowed && selectionRefs.length > 0)
-        setActionEnabled("tool.mirror", chartEditingAllowed && selectionRefs.length > 0)
-        setActionEnabled("tool.rotate", chartEditingAllowed && selectionRefs.length > 0)
-        setActionEnabled("tool.toggleLn", chartEditingAllowed && selectionRefs.length > 0)
+                                           (actionSelection.length > 0 || actionMetaSelection.length > 0))
+        setActionEnabled("tool.quantize", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.mirror", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.rotate", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.toggleLn", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.addMeasure", currentPage === 0 && !referenceActionTarget)
+        setActionEnabled("edit.cancel", chartEditingAllowed && editorTool === "ln")
         setActionEnabled("tool.pan", currentPage === 0)
         setActionEnabled("tool.select", currentPage === 0)
         setActionEnabled("tool.note", currentPage === 0)
@@ -2513,8 +2605,24 @@ ApplicationWindow {
 
     function editNoteSample(ref) {
         if (!ref) return
+        noteSampleDialog.editContext = primaryEditContext
+        noteSampleDialog.capturedPane = primaryEditContext !== null
+        noteSampleDialog.captureToken = primaryEditContext ? primaryEditContext.capture() : ({})
+        noteSampleDialog.displaySession = chartSession
         noteSampleDialog.ref = ref
-        noteIdInput.text = chartSession.idTextOf(ref.sample)
+        noteSampleDialog.displayId = chartSession.idTextOf(ref.sample)
+        noteIdInput.text = noteSampleDialog.displayId
+        noteSampleDialog.open()
+    }
+    function editReferenceNoteSample(ref) {
+        if (!ref || !editPage.referenceEditingAvailable) return
+        noteSampleDialog.editContext = referenceEditContext
+        noteSampleDialog.capturedPane = true
+        noteSampleDialog.captureToken = referenceEditContext.capture()
+        noteSampleDialog.displaySession = referenceEditContext.session
+        noteSampleDialog.ref = ref
+        noteSampleDialog.displayId = referenceEditContext.session.idTextOf(ref.sample)
+        noteIdInput.text = noteSampleDialog.displayId
         noteSampleDialog.open()
     }
 
@@ -2547,9 +2655,14 @@ ApplicationWindow {
         // Four rows plus spacing exceeded the old 176px box after header/footer.
         height: naturalHeight
         property var ref: null
+        property var editContext: null
+        property bool capturedPane: false
+        property var captureToken: ({})
+        property var displaySession: null
+        property string displayId: ""
         readonly property string posText: ref ? qsTr("小节 %1 · %2/%3")
                                                  .arg(ref.measure).arg(ref.pos.num).arg(ref.pos.den) : ""
-        readonly property string curText: ref ? qsTr("#WAV%1").arg(chartSession.idTextOf(ref.sample)) : ""
+        readonly property string curText: ref ? qsTr("#WAV%1").arg(displayId) : ""
         onOpened: noteIdInput.forceActiveFocus()
         Label { text: qsTr("note 引用采样"); color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
         Label { Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
@@ -2576,7 +2689,7 @@ ApplicationWindow {
         onAccepted: {
             const r = noteSampleDialog.ref
             if (!r) return
-            const to = noteIdInput.text.trim()
+            const to = noteSampleDialog.capturedPane ? noteIdInput.text : noteIdInput.text.trim()
             if (to === "") { setStatus(qsTr("未填 #WAV id")); return }
             const args = {
                 measure: r.measure,
@@ -2588,8 +2701,18 @@ ApplicationWindow {
             if (r.sub_line !== undefined) args.sub_line = r.sub_line
             if (r.ln_channel !== undefined) args.ln_channel = r.ln_channel
             if (r.note_kind !== undefined) args.note_kind = r.note_kind
-            const res = sessionCmd("note.setSample", args)
-            if (res) setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
+            if (noteSampleDialog.capturedPane) {
+                if (!noteSampleDialog.editContext) return
+                const res = noteSampleDialog.editContext.dispatchCaptured(noteSampleDialog.captureToken, "note.setSample", args)
+                if (res.ok) window.clearSampleEditRefs(noteSampleDialog.captureToken.sessionId)
+                setStatus(res.ok ? qsTr("note → #WAV%1（Undo 可恢复）").arg(to) : res.error.message)
+            } else {
+                const res = sessionCmd("note.setSample", args)
+                if (res) {
+                    window.clearSampleEditRefs(chartSession.sessionId)
+                    setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
+                }
+            }
         }
     }
 

@@ -31,6 +31,8 @@
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/PaneEditContext.hpp"
+#include "bridge/PaneEditOperations.hpp"
 #include "bridge/PlayheadOverlayItem.hpp"
 #include "bridge/ProjectController.hpp"
 #include "bridge/ResourceBindingController.hpp"
@@ -125,12 +127,17 @@ class MainIntegrationSetup : public QObject {
     }
     Q_INVOKABLE QObject* primaryView(QObject* parent) const {
         for (auto* o : descendants(parent))
-            if (o->property("editable").toBool() && o->property("documentSession").isValid())
+            if (o->property("primaryPlaybackRole").toBool() &&
+                o->property("documentSession").isValid())
                 return o;
         return nullptr;
     }
     Q_INVOKABLE void reset(bool named) {
         root = nullptr;
+        primaryPaneContext.setEditable(false);
+        referencePaneContext.setEditable(false);
+        primaryPaneContext.setSessionId({});
+        referencePaneContext.setSessionId({});
         releaseProjectScan();
         relocation.cancel();
         project.clear();
@@ -162,6 +169,14 @@ class MainIntegrationSetup : public QObject {
         documents.refresh();
         clipboard.setText(QString{});
         if (audio) audio->setProperty("playbackCalls", 0);
+    }
+    Q_INVOKABLE bool setDocumentBase(const QString& id, int base) {
+        auto* session = beatbench::edit::session_registry().by_id(id.toStdString());
+        if (!session || !session->has_chart() || (base != 36 && base != 62)) return false;
+        session->chart_mut().id_base =
+            base == 62 ? beatbench::IdBase::Base62 : beatbench::IdBase::Base36;
+        documents.refresh();
+        return true;
     }
     Q_INVOKABLE void startLargeProjectScan() {
         const auto folder = temp->filePath("main-ui-stress");
@@ -384,11 +399,14 @@ class MainIntegrationSetup : public QObject {
         }
         // Same id -> QML handler wiring as app/main.cpp; never reimplement swap or gates.
         const std::pair<const char*, const char*> actions[] = {
+            {"file.save", "saveChart"},
+            {"edit.cancel", "cancelPendingLn"},
             {"edit.undo", "undoEdit"},
             {"edit.redo", "redoEdit"},
             {"edit.copy", "copySelection"},
             {"edit.paste", "pasteClipboard"},
             {"edit.delete", "uiActionDelete"},
+            {"tool.addMeasure", "addMeasure"},
             {"tool.quantize", "quantizeSelection"},
             {"tool.mirror", "uiActionMirror"},
             {"tool.rotate", "uiActionRotate"},
@@ -397,11 +415,26 @@ class MainIntegrationSetup : public QObject {
             UiActionDef def;
             def.id = QString::fromLatin1(id);
             def.label = def.id;
+            const QVariantMap shortcuts{{"file.save", "Ctrl+S"}, {"edit.cancel", "Esc"},
+                                        {"edit.delete", "Del"},  {"edit.undo", "Ctrl+Z"},
+                                        {"edit.redo", "Ctrl+Y"}, {"edit.copy", "Ctrl+C"},
+                                        {"edit.paste", "Ctrl+V"}};
+            def.shortcut = shortcuts.value(def.id).toString();
+            if (def.id == "edit.cancel") def.scope = "edit";
             def.handler = [this, method](const QVariantMap&) {
                 return root && QMetaObject::invokeMethod(root, method, Qt::DirectConnection);
             };
             uiActions.add(std::move(def));
         }
+        UiActionDef noteTool;
+        noteTool.id = "tool.note";
+        noteTool.label = "note";
+        noteTool.shortcut = "3";
+        noteTool.category = "tool";
+        noteTool.handler = [this](const QVariantMap&) {
+            return root && root->setProperty("editorTool", "note");
+        };
+        uiActions.add(std::move(noteTool));
     }
     void qmlEngineAvailable(QQmlEngine* engine) {
         QQmlComponent audioComponent(
@@ -435,6 +468,10 @@ class MainIntegrationSetup : public QObject {
             project.refreshOpenStates();
         });
         ctx->setContextProperty("documents", &documents);
+        ctx->setContextProperty("primaryPaneContext", &primaryPaneContext);
+        ctx->setContextProperty("referencePaneContext", &referencePaneContext);
+        ctx->setContextProperty("primaryPaneOperations", &primaryPaneOperations);
+        ctx->setContextProperty("referencePaneOperations", &referencePaneOperations);
         ctx->setContextProperty("chartHistoryController", history.get());
         workspace.setChartSession(documents.currentSession());
         connect(&documents, &DocumentService::currentSessionChanged, engine, [this, ctx] {
@@ -507,6 +544,10 @@ class MainIntegrationSetup : public QObject {
         return functions;
     }
     DocumentService documents;
+    PaneEditContext primaryPaneContext{&documents};
+    PaneEditContext referencePaneContext{&documents};
+    PaneEditOperations primaryPaneOperations{&primaryPaneContext};
+    PaneEditOperations referencePaneOperations{&referencePaneContext};
     ResourceBindingController bindings{&documents};
     CommandDispatcher dispatcher;
     UiActionRegistry uiActions;

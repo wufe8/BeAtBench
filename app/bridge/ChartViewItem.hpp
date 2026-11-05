@@ -314,6 +314,10 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 只是 id/效果不同——编辑视图把它们当连续演出轨道，2026-09 用户）。
     Q_INVOKABLE QVariantMap laneAtColumn(int col) const;
 
+    /// 当前完整显示列序（含 BPM/STOP/BGA 占位与 BGM 子通道）；显式窗格编辑几何使用。
+    /// 每项同 laneAtX，不依赖滚动/宽度，避免按列反复命中测试的平方开销。
+    Q_INVOKABLE QVariantList editColumns() const;
+
     /// 给定 note 引用（{lane:{player,kind,index}, sub_line?}）→ 该 note 当前**显示列下标**
     /// （columnFor 封装：BGM 展开列按 sub_line 精确匹配、玩乐列按 lane 匹配；-1 = 无对应列）。
     /// BGM 跨通道相对间距（连续轨道平移）用同一列序自然表达——不再受「sub_line 对玩乐

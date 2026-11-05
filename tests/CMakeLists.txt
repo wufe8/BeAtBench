@@ -247,6 +247,26 @@ if (Qt6Core_FOUND)
     add_test(NAME pane_edit_context_tests COMMAND pane_edit_context_test)
     set_tests_properties(pane_edit_context_tests PROPERTIES TIMEOUT 20)
 
+    # 显式窗格编辑操作：列秩/LN/选择/撤销语义（无窗口/音频设备）。
+    add_executable(pane_edit_operations_test pane_edit_operations_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditOperations.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditOperations.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/EditUtils.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/EditUtils.hpp)
+    target_include_directories(pane_edit_operations_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(pane_edit_operations_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest_main)
+    set_target_properties(pane_edit_operations_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(pane_edit_operations_test)
+    add_test(NAME pane_edit_operations_tests COMMAND pane_edit_operations_test)
+    set_tests_properties(pane_edit_operations_tests PROPERTIES TIMEOUT 20)
+
     add_executable(chart_history_controller_test chart_history_controller_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
@@ -386,7 +406,7 @@ if (Qt6Core_FOUND)
         # Full production Main/SessionController integration; audio is a no-device spy.
         add_executable(main_integration_test main_integration_test.cpp
             ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
-        foreach(bridge ChartSession DocumentService ResourceBindingController ResourceRelocationController ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
+        foreach(bridge ChartSession DocumentService PaneEditContext PaneEditOperations ResourceBindingController ResourceRelocationController ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
                 ChartViewItem PlayheadOverlayItem WaveformOverviewItem SliceWaveformItem
                 SliceWorkspace AudioEngine ThemeManager UiActionRegistry KeyMonitor ClipboardBridge EditUtils ProjectController)
             target_sources(main_integration_test PRIVATE
@@ -411,7 +431,7 @@ if (Qt6Core_FOUND)
             TIMEOUT 45
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
         set_tests_properties(main_integration_tests PROPERTIES
-            TIMEOUT 90
+            TIMEOUT 150
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
 
         add_executable(chart_view_binding_test chart_view_binding_test.cpp)

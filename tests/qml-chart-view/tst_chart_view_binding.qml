@@ -148,6 +148,27 @@ Item {
             compare(partsB.chart.selection.length, 0)
         }
 
+        function test_edit_columns_preserve_full_display_order() {
+            for (const showExtras of [false, true]) {
+                viewB.showExtras = showExtras
+                for (const expanded of [false, true]) {
+                    viewB.bgmExpanded = expanded
+                    const chart = partsB.chart
+                    const columns = chart.editColumns()
+                    const geometry = chart.probe(0, 0).columns
+                    compare(columns.length, chart.columnCount)
+                    compare(columns.length, geometry.length)
+                    for (let i = 0; i < columns.length; ++i) {
+                        const hit = chart.laneAtX(geometry[i].x + geometry[i].w / 2)
+                        verify(columns[i].valid)
+                        for (const key of ["lanePlayer", "laneKind", "laneIndex", "sub_line", "bgaLayer", "label"])
+                            compare(columns[i][key], hit[key], key + " at " + i)
+                        compare(columns[i].metaKind, hit.metaKind || "")
+                    }
+                }
+            }
+        }
+
         function test_readonly_denies_mutation_but_editable_emits() {
             const blank = pointFor(viewB, partsB, false)
             viewB.editorTool = "note"

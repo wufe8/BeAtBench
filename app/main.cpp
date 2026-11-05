@@ -44,6 +44,8 @@
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/PaneEditContext.hpp"
+#include "bridge/PaneEditOperations.hpp"
 #include "bridge/ProjectController.hpp"
 #include "bridge/ResourceBindingController.hpp"
 #include "bridge/ResourceRelocationController.hpp"
@@ -279,6 +281,10 @@ int main(int argc, char** argv) {
     beatbench::app::LintListModel lintModel;
     // 单开/多开共用同一文档集合，每个文档 ID 对应一个稳定的视图桥。
     beatbench::app::DocumentService documentService;
+    beatbench::app::PaneEditContext primaryPaneContext(&documentService);
+    beatbench::app::PaneEditContext referencePaneContext(&documentService);
+    beatbench::app::PaneEditOperations primaryPaneOperations(&primaryPaneContext);
+    beatbench::app::PaneEditOperations referencePaneOperations(&referencePaneContext);
     auto* initialSession = documentService.currentSession();
     // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
     beatbench::app::AudioEngine audioEngine;
@@ -340,6 +346,14 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("resourceRelocationController"),
                                              &resourceRelocationController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
+    engine.rootContext()->setContextProperty(QStringLiteral("primaryPaneContext"),
+                                             &primaryPaneContext);
+    engine.rootContext()->setContextProperty(QStringLiteral("referencePaneContext"),
+                                             &referencePaneContext);
+    engine.rootContext()->setContextProperty(QStringLiteral("primaryPaneOperations"),
+                                             &primaryPaneOperations);
+    engine.rootContext()->setContextProperty(QStringLiteral("referencePaneOperations"),
+                                             &referencePaneOperations);
     engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"),
                                              &chartHistoryController);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）

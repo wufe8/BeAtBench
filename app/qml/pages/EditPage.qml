@@ -12,6 +12,13 @@ import "../components"  // BbTabButton（页面工具条等，默认皮肤组件
 Item {
     id: root
     property var documentService: null
+    property var primaryEditContext: null
+    property var referenceEditContext: null
+    property var referenceEditOperations: null
+    property string sampleLiteral: ""
+    property var referenceEditSettings: ({})
+    signal referenceNoteEditRequested(var ref)
+    readonly property bool referenceEditingAvailable: compareSplit.referenceEditable
     property bool hideSecondaryChannels: true
     function prepareReferenceSwap() { compareSplit.prepareSwap() }
     function abortReferenceSwap() { compareSplit.discardPreparedSwap() }
@@ -388,6 +395,21 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 4
                 documentService: root.documentService
+                referenceEditContext: root.referenceEditContext
+                referenceEditOperations: root.referenceEditOperations
+                editSettings: root.referenceEditSettings
+                onReferenceNoteEditRequested: (ref) => root.referenceNoteEditRequested(ref)
+                onMessage: (text) => root.metaMessage(text)
+                snapNum: root.snapNum
+                snapDen: root.snapDen
+                moveMode: root.moveMode
+                lnSelectMode: root.lnSelectMode
+                showGrid: root.showGrid
+                showChannelIds: root.showChannelIds
+                noteSampleMode: root.noteSampleMode
+                zoomToCursor: root.zoomToCursor
+                sampleLiteral: root.sampleLiteral
+                sampleText: root.sampleText
                 hideSecondaryChannels: root.hideSecondaryChannels
                 editorTool: root.editorTool
                 showExtras: root.showExtras

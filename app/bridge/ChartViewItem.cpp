@@ -1087,6 +1087,33 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
     return res;
 }
 
+QVariantList ChartViewItem::editColumns() const {
+    QVariantList result;
+    result.reserve(qsizetype(m_columns.size()));
+    for (const auto& c : m_columns) {
+        QString kind = QStringLiteral("key");
+        if (c.bpm || c.stop) {
+            // 与 laneAtX 一致：时序列内部用 pedal 哨兵，但对外不是可演出轨。
+        } else if (c.lane.kind == beatbench::LaneKind::Scratch)
+            kind = QStringLiteral("scratch");
+        else if (c.lane.kind == beatbench::LaneKind::Pedal)
+            kind = QStringLiteral("pedal");
+        else if (c.lane.kind == beatbench::LaneKind::Bgm)
+            kind = QStringLiteral("bgm");
+        result.push_back(QVariantMap{{"valid", true},
+                                     {"lanePlayer", QVariant::fromValue(c.lane.player)},
+                                     {"laneKind", kind},
+                                     {"laneIndex", QVariant::fromValue(c.lane.index)},
+                                     {"sub_line", c.subLine},
+                                     {"bgaLayer", c.bgaLayer},
+                                     {"label", c.label},
+                                     {"metaKind", c.bpm    ? QStringLiteral("bpm")
+                                                  : c.stop ? QStringLiteral("stop")
+                                                           : QString{}}});
+    }
+    return result;
+}
+
 QVariantMap ChartViewItem::laneAtColumn(int col) const {
     QVariantMap res;
     res.insert(QStringLiteral("valid"), false);
