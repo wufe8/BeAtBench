@@ -135,6 +135,15 @@ QVariantMap PaneEditContext::capture() {
     m_capture = Captured{token, m_sessionId, s, &s->chart(), s->revision()};
     return {{"token", token}, {"sessionId", m_sessionId}};
 }
+bool PaneEditContext::captureCurrent(const QVariantMap& token) const {
+    if (!m_capture || token.value("token").toString() != m_capture->token ||
+        token.value("sessionId").toString() != m_capture->sessionId || !m_editable ||
+        !available() || m_capture->sessionId != m_sessionId)
+        return false;
+    const auto* s = document(m_sessionId);
+    return s && m_capture->owner == s && m_capture->chart == &s->chart() &&
+           m_capture->revision == s->revision();
+}
 QVariantMap PaneEditContext::dispatchCaptured(const QVariantMap& token, const QString& command,
                                               const QVariantMap& args) {
     const auto* s = document(m_sessionId);

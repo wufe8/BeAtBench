@@ -44,6 +44,7 @@
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/PaneDragController.hpp"
 #include "bridge/PaneEditContext.hpp"
 #include "bridge/PaneEditOperations.hpp"
 #include "bridge/ProjectController.hpp"
@@ -285,6 +286,7 @@ int main(int argc, char** argv) {
     beatbench::app::PaneEditContext referencePaneContext(&documentService);
     beatbench::app::PaneEditOperations primaryPaneOperations(&primaryPaneContext);
     beatbench::app::PaneEditOperations referencePaneOperations(&referencePaneContext);
+    beatbench::app::PaneDragController paneDragController;
     auto* initialSession = documentService.currentSession();
     // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
     beatbench::app::AudioEngine audioEngine;
@@ -346,6 +348,8 @@ int main(int argc, char** argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("resourceRelocationController"),
                                              &resourceRelocationController);
     engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
+    engine.rootContext()->setContextProperty(QStringLiteral("paneDragController"),
+                                             &paneDragController);
     engine.rootContext()->setContextProperty(QStringLiteral("primaryPaneContext"),
                                              &primaryPaneContext);
     engine.rootContext()->setContextProperty(QStringLiteral("referencePaneContext"),

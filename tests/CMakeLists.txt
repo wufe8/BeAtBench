@@ -247,8 +247,19 @@ if (Qt6Core_FOUND)
     add_test(NAME pane_edit_context_tests COMMAND pane_edit_context_test)
     set_tests_properties(pane_edit_context_tests PROPERTIES TIMEOUT 20)
 
+    # 纯 QtCore 冻结快照规划，不依赖文档、QObject、GUI 或音频。
+    add_executable(note_move_plan_test note_move_plan_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.hpp)
+    target_include_directories(note_move_plan_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(note_move_plan_test PRIVATE Qt6::Core GTest::gtest_main)
+    beatbench_set_warnings(note_move_plan_test)
+    add_test(NAME note_move_plan_tests COMMAND note_move_plan_test)
+
     # 显式窗格编辑操作：列秩/LN/选择/撤销语义（无窗口/音频设备）。
     add_executable(pane_edit_operations_test pane_edit_operations_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditOperations.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditOperations.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.cpp
@@ -387,6 +398,25 @@ if (Qt6Core_FOUND)
     # Qt Quick 鼠标注入：实际弹窗/设置组件，无声卡、无用户偏好写入；兼容 Qt 6.4。
     find_package(Qt6 6.4 COMPONENTS QuickTest QuickControls2 QUIET)
     if (Qt6QuickTest_FOUND AND Qt6QuickControls2_FOUND)
+        add_executable(pane_drag_controller_test pane_drag_controller_test.cpp)
+        foreach(bridge PaneDragController PaneEditContext PaneEditOperations NoteMovePlan
+                DocumentService ChartSession ChartViewItem PlayheadOverlayItem EditUtils ThemeManager)
+            target_sources(pane_drag_controller_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(pane_drag_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(pane_drag_controller_test PRIVATE
+            beatbench_core beatbench_audio Qt6::Quick GTest::gtest)
+        target_compile_definitions(pane_drag_controller_test PRIVATE
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(pane_drag_controller_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(pane_drag_controller_test)
+        add_test(NAME pane_drag_controller_tests COMMAND pane_drag_controller_test)
+        set_tests_properties(pane_drag_controller_tests PROPERTIES
+            TIMEOUT 40
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
         add_executable(dialog_drag_test dialog_drag_test.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.hpp)
@@ -406,7 +436,7 @@ if (Qt6Core_FOUND)
         # Full production Main/SessionController integration; audio is a no-device spy.
         add_executable(main_integration_test main_integration_test.cpp
             ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
-        foreach(bridge ChartSession DocumentService PaneEditContext PaneEditOperations ResourceBindingController ResourceRelocationController ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
+        foreach(bridge ChartSession DocumentService PaneEditContext PaneEditOperations NoteMovePlan PaneDragController ResourceBindingController ResourceRelocationController ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
                 ChartViewItem PlayheadOverlayItem WaveformOverviewItem SliceWaveformItem
                 SliceWorkspace AudioEngine ThemeManager UiActionRegistry KeyMonitor ClipboardBridge EditUtils ProjectController)
             target_sources(main_integration_test PRIVATE

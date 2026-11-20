@@ -1013,8 +1013,8 @@ QVariantMap ChartViewItem::hitTest(qreal x, qreal y) const {
     res.insert(QStringLiteral("den"), den);
     res.insert(QStringLiteral("valid"), true);
     res.insert(QStringLiteral("measure"), measure);
-    res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
-    res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+    res.insert(QStringLiteral("lanePlayer"), static_cast<int>(c.lane.player));
+    res.insert(QStringLiteral("laneIndex"), static_cast<int>(c.lane.index));
     QString kind = QStringLiteral("key");
     if (c.lane.kind == beatbench::LaneKind::Scratch)
         kind = QStringLiteral("scratch");
@@ -1081,9 +1081,9 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
             res.insert(QStringLiteral("valid"), true);
             res.insert(QStringLiteral("metaKind"),
                        c.bpm ? QStringLiteral("bpm") : QStringLiteral("stop"));
-            res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
+            res.insert(QStringLiteral("lanePlayer"), static_cast<int>(c.lane.player));
             res.insert(QStringLiteral("laneKind"), QStringLiteral("key"));
-            res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+            res.insert(QStringLiteral("laneIndex"), static_cast<int>(c.lane.index));
             res.insert(QStringLiteral("label"), c.label);
             res.insert(QStringLiteral("sub_line"), -1);
             res.insert(QStringLiteral("bgaLayer"), -1);
@@ -1097,8 +1097,8 @@ QVariantMap ChartViewItem::laneAtX(qreal x) const {
         else if (c.lane.kind == beatbench::LaneKind::Bgm)
             kind = QStringLiteral("bgm");
         res.insert(QStringLiteral("valid"), true);
-        res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
-        res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+        res.insert(QStringLiteral("lanePlayer"), static_cast<int>(c.lane.player));
+        res.insert(QStringLiteral("laneIndex"), static_cast<int>(c.lane.index));
         res.insert(QStringLiteral("laneKind"), kind);
         res.insert(QStringLiteral("label"), c.label);
         res.insert(QStringLiteral("sub_line"), c.subLine);
@@ -1122,9 +1122,9 @@ QVariantList ChartViewItem::editColumns() const {
         else if (c.lane.kind == beatbench::LaneKind::Bgm)
             kind = QStringLiteral("bgm");
         result.push_back(QVariantMap{{"valid", true},
-                                     {"lanePlayer", QVariant::fromValue(c.lane.player)},
+                                     {"lanePlayer", static_cast<int>(c.lane.player)},
                                      {"laneKind", kind},
-                                     {"laneIndex", QVariant::fromValue(c.lane.index)},
+                                     {"laneIndex", static_cast<int>(c.lane.index)},
                                      {"sub_line", c.subLine},
                                      {"bgaLayer", c.bgaLayer},
                                      {"label", c.label},
@@ -1148,8 +1148,8 @@ QVariantMap ChartViewItem::laneAtColumn(int col) const {
     else if (c.lane.kind == beatbench::LaneKind::Pedal)
         kind = QStringLiteral("pedal");
     res.insert(QStringLiteral("valid"), true);
-    res.insert(QStringLiteral("lanePlayer"), QVariant::fromValue(c.lane.player));
-    res.insert(QStringLiteral("laneIndex"), QVariant::fromValue(c.lane.index));
+    res.insert(QStringLiteral("lanePlayer"), static_cast<int>(c.lane.player));
+    res.insert(QStringLiteral("laneIndex"), static_cast<int>(c.lane.index));
     res.insert(QStringLiteral("laneKind"), kind);
     return res;
 }
@@ -1204,13 +1204,13 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
         pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
         res.insert(QStringLiteral("pos"), pos);
         QVariantMap lane;
-        lane.insert(QStringLiteral("player"), QVariant::fromValue(ev.value.lane.player));
+        lane.insert(QStringLiteral("player"), static_cast<int>(ev.value.lane.player));
         lane.insert(QStringLiteral("kind"),
                     ev.value.lane.kind == beatbench::LaneKind::Scratch ? QStringLiteral("scratch")
                     : ev.value.lane.kind == beatbench::LaneKind::Pedal ? QStringLiteral("pedal")
                     : ev.value.lane.kind == beatbench::LaneKind::Bgm   ? QStringLiteral("bgm")
                                                                        : QStringLiteral("key"));
-        lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
+        lane.insert(QStringLiteral("index"), static_cast<int>(ev.value.lane.index));
         res.insert(QStringLiteral("lane"), lane);
         res.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
         // BGM 行序号（同值多行 Bgm note 消歧；前端选中/删除/移动必带）
@@ -1230,14 +1230,14 @@ QVariantMap ChartViewItem::noteAt(qreal x, qreal y) const {
             ppos.insert(QStringLiteral("den"), static_cast<qlonglong>(p.pos.den));
             pr.insert(QStringLiteral("pos"), ppos);
             QVariantMap plane;
-            plane.insert(QStringLiteral("player"), QVariant::fromValue(p.value.lane.player));
+            plane.insert(QStringLiteral("player"), static_cast<int>(p.value.lane.player));
             plane.insert(QStringLiteral("kind"),
                          p.value.lane.kind == beatbench::LaneKind::Scratch
                              ? QStringLiteral("scratch")
                          : p.value.lane.kind == beatbench::LaneKind::Pedal ? QStringLiteral("pedal")
                          : p.value.lane.kind == beatbench::LaneKind::Bgm   ? QStringLiteral("bgm")
                                                                            : QStringLiteral("key"));
-            plane.insert(QStringLiteral("index"), QVariant::fromValue(p.value.lane.index));
+            plane.insert(QStringLiteral("index"), static_cast<int>(p.value.lane.index));
             pr.insert(QStringLiteral("lane"), plane);
             pr.insert(QStringLiteral("sample"), static_cast<int>(p.value.sample.id));
             pr.insert(QStringLiteral("sub_line"), static_cast<int>(p.value.sub_line));
@@ -1370,13 +1370,13 @@ QVariantList ChartViewItem::notesInRect(qreal x0, qreal y0, qreal x1, qreal y1) 
         pos.insert(QStringLiteral("den"), static_cast<qlonglong>(ev.pos.den));
         ref.insert(QStringLiteral("pos"), pos);
         QVariantMap lane;
-        lane.insert(QStringLiteral("player"), QVariant::fromValue(ev.value.lane.player));
+        lane.insert(QStringLiteral("player"), static_cast<int>(ev.value.lane.player));
         lane.insert(QStringLiteral("kind"),
                     ev.value.lane.kind == beatbench::LaneKind::Scratch ? QStringLiteral("scratch")
                     : ev.value.lane.kind == beatbench::LaneKind::Pedal ? QStringLiteral("pedal")
                     : ev.value.lane.kind == beatbench::LaneKind::Bgm   ? QStringLiteral("bgm")
                                                                        : QStringLiteral("key"));
-        lane.insert(QStringLiteral("index"), QVariant::fromValue(ev.value.lane.index));
+        lane.insert(QStringLiteral("index"), static_cast<int>(ev.value.lane.index));
         ref.insert(QStringLiteral("lane"), lane);
         ref.insert(QStringLiteral("sample"), static_cast<int>(ev.value.sample.id));
         ref.insert(QStringLiteral("sub_line"), static_cast<int>(ev.value.sub_line));
@@ -1888,7 +1888,38 @@ void ChartViewItem::drawNoteGhost(QPainter* p, qreal measureFloat, const beatben
     p->drawRect(rect.adjusted(-1.5, 0.0, 1.5, 0.0));
 }
 
+void ChartViewItem::setPlannedMovePreview(const QVariantList& refs, bool active) {
+    const QVariantList next = active ? refs : QVariantList{};
+    if (next == m_plannedMovePreview && active == m_plannedMovePreviewActive) return;
+    m_plannedMovePreview = next;
+    m_plannedMovePreviewActive = active;
+    update();
+    // A direct preview observer may destroy this viewport. Do not touch this after notification.
+    emit plannedMovePreviewChanged();
+}
+
 void ChartViewItem::drawPreview(QPainter* p) const {
+    if (m_plannedMovePreviewActive) {
+        // 此路径不计算位移/改轨/吸附；预览与提交消费同一份纯移动计划。
+        for (const auto& value : m_plannedMovePreview) {
+            const auto ref = value.toMap();
+            const auto pos = ref.value("pos").toMap();
+            const double den = pos.value("den").toDouble();
+            if (den <= 0.0) continue;
+            const auto laneMap = ref.value("lane").toMap();
+            beatbench::Lane lane;
+            lane.player = static_cast<std::uint8_t>(laneMap.value("player").toUInt());
+            lane.kind = laneKindFromString(laneMap.value("kind").toString());
+            lane.index = static_cast<std::uint8_t>(laneMap.value("index").toUInt());
+            const double mf = ref.value("measure").toDouble() + pos.value("num").toDouble() / den;
+            const QString kind = ref.value("ln_channel").toBool()
+                                     ? QStringLiteral("ln")
+                                     : ref.value("note_kind", "normal").toString();
+            drawNoteGhost(p, mf, lane, kind, ref.value("sample").toUInt(),
+                          ref.value("sub_line", -1).toInt());
+        }
+        return;
+    }
     if (m_movePreview) {
         // 移动预览：选中 note 各画 ghost @ 原始 + delta。跨通道移动（targetLane 有效）时，
         // 命中 sourceLane 的 note 用 targetLane 画（ghost 落目标列），其余只按时间位移。

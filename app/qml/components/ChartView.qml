@@ -22,6 +22,20 @@ Item {
     property var documentSession: typeof chartSession !== "undefined" ? chartSession : null
     // Read-only keeps selection/navigation/audition, but emits no document edits.
     property bool editable: true
+    // 默认关闭的 note 拖动 seam：控制器负责所有文档/落点/命令语义，surface 只持有鼠标 grab。
+    // begin(sourceView, pressPoint, currentPoint, pressedRef, selectionSnapshot) -> bool
+    // update/finish(sourceView, viewportPoint), cancel(sourceView, reason)。所有点都在 viewportItem 本地。
+    // begin 拒绝也消费整次 gesture；只有 null 控制器才走 legacy 移动。
+    property var managedDragController: null
+    readonly property bool managedDragConsumed: _managedDragConsumed
+    property bool _managedDragConsumed: false
+    property bool _managedDragActive: false
+    property var _managedDragOwner: null
+    onManagedDragControllerChanged: if (_managedDragConsumed) cancelManagedDrag("controller-changed")
+    onVisibleChanged: if (!visible) invalidatePointerGesture("hidden")
+    onEnabledChanged: if (!enabled) invalidatePointerGesture("disabled")
+    onEditorToolChanged: if (_managedDragConsumed) cancelManagedDrag("tool-changed")
+    onReferenceOverlayEnabledChanged: if (_managedDragConsumed) cancelManagedDrag("overlay-changed")
     // B is painted inside this viewport, never a second input surface.
     property var referenceSession: null
     property bool referenceOverlayEnabled: false
@@ -41,7 +55,10 @@ Item {
         waveformReady = waveformShown
         view.playheadSec = -1
     }
-    onDocumentSessionChanged: Qt.callLater(root.restoreDocumentVisuals)
+    onDocumentSessionChanged: {
+        root.invalidatePointerGesture("document-changed")
+        Qt.callLater(root.restoreDocumentVisuals)
+    }
     Component.onCompleted: restoreDocumentVisuals()
 
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
@@ -385,23 +402,72 @@ Item {
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
     property var _moveSourceLane: null  // 拖起的 note 所在轨（{player,kind,index}；跨通道多换轨判定用）
     property int _moveSourceSubLine: -1 // 拖起 note 的 BGM 子通道行号（相对平移对齐基准；非 BGM=-1）
+    property bool _collapseSelectionOnClick: false // managed 组选中仅在无拖动 release 时折叠
     property var _pressedNoteRef: null  // press 命中的 note（有值 = 点击待确认；release 无拖译才播放）
 
-    // Becoming read-only cancels a pending edit, including its ghost. Mark the
-    // gesture consumed so re-enabling editing before release cannot place a note.
-    onEditableChanged: {
-        if (!root.editable) {
-            root._moving = false
-            root._moveKind = ""
-            root._moveObj = null
-            root._pressedNoteRef = null
-            root._dragged = true
+    function clearPointerMoveState() {
+        _moving = false
+        _moveKind = ""
+        _moveObj = null
+        _pressedNoteRef = null
+        _collapseSelectionOnClick = false
+        _moveSourceLane = null
+        _moveSourceSubLine = -1
+        _moveTargetLane = null
+        _moveDeltaF = 0
+        _dragged = true
+        _boxSelect = false
+        _panning = false
+        _lastY = -1
+        if (selRect) selRect.visible = false
+        if (view) {
             view.movePreview = false
             view.moveTargetLane = ({})
             view.moveSourceLane = ({})
             view.moveSourceSubLine = -1
         }
     }
+    function cancelManagedDrag(reason) {
+        if (!_managedDragConsumed) return false
+        const owner = _managedDragOwner
+        const active = _managedDragActive
+        _managedDragActive = false
+        _managedDragOwner = null
+        clearPointerMoveState()
+        // 保留 consumed，直到 release 或下一次 press；取消/拒绝绝不回退放置、试听或 legacy move。
+        if (active && owner) {
+            try { owner.cancel(root, reason || "cancelled") }
+            catch (error) { console.warn("Managed drag cancel failed: " + error) }
+        }
+        return true
+    }
+    function invalidatePointerGesture(reason) {
+        if (_managedDragConsumed) cancelManagedDrag(reason)
+        clearPointerMoveState()
+    }
+    function managedViewportPoint(x, y) {
+        const point = view.mapFromItem(root, x, y)
+        return Qt.point(point.x, point.y)
+    }
+    function beginManagedDrag(x, y) {
+        const owner = managedDragController
+        const pressed = _pressedNoteRef
+        const selected = selection.slice()
+        const pressPoint = managedViewportPoint(_pressX, _pressY)
+        const currentPoint = managedViewportPoint(x, y)
+        _managedDragConsumed = true // latch 必须先于任何外部调用，包括 begin 的拒绝/同步取消。
+        _managedDragActive = true
+        _managedDragOwner = owner
+        clearPointerMoveState()
+        interactionArea.forceActiveFocus()
+        try {
+            const accepted = owner.begin(root, pressPoint, currentPoint, pressed, selected)
+            if (accepted !== true && _managedDragActive) cancelManagedDrag("begin-rejected")
+        } catch (error) {
+            cancelManagedDrag("controller-error")
+        }
+    }
+    onEditableChanged: if (!editable) invalidatePointerGesture("read-only")
 
     /// 平移判定：按下点在选中集内的某个 note 上？
     function isSelectedNote(hit) {
@@ -422,6 +488,10 @@ Item {
     }
 
     function handlePress(x, y, shift, ctrl) {
+        if (_managedDragConsumed) {
+            cancelManagedDrag("new-press")
+            _managedDragConsumed = false
+        }
         if (y <= 18 && view.bgmHeaderIndexAt(x) >= 0) {
             root.bgmExpanded = !root.bgmExpanded
             return
@@ -432,6 +502,7 @@ Item {
         _pressY = y
         _dragged = false
         _ctrlHeld = ctrl
+        _collapseSelectionOnClick = false
         // M5 seek 交互：点秒标尺列（x<rulerWidth、y>头部）→ 设播放位置（seek + 滚到红线）。
         // 与 note/框选/放置解耦；只响应单点（拖动不触发，保持标尺纯跳转语义）。
         if (x < view.rulerWidth && y > 18) {
@@ -474,7 +545,11 @@ Item {
                 // 点击（无论是否已选中）→ noteClicked（选中；播放延后到 release 无拖动
                 // 时——拖动 = 移动操作不播，2026-09 用户「点击播放/移动不播」语义。
                 // 重复点击（已选中）也播放（用户「重复点击播放」确认）。
-                root.noteClicked(obj, false)
+                // Managed 拖动已选 note 必须把完整组选中交给控制器，不能在 press 先折叠。
+                // 仍是普通点击时延后到 release，保持原有单击选择/试听语义。
+                _collapseSelectionOnClick = managedDragController !== null && root.editable &&
+                                            root.editorTool !== "pan" && isSelectedNote(obj)
+                if (!_collapseSelectionOnClick) root.noteClicked(obj, false)
                 _pressedNoteRef = obj
                 if (!root.editable || root.editorTool === "pan") {
                     // 拖拽工具（2026-09 用户默认「1 拖拽」）：点 note 只选中 +（release 无位移）试听，
@@ -512,10 +587,21 @@ Item {
         }
     }
     function handleMove(x, y) {
+        if (_managedDragConsumed) {
+            if (_managedDragActive && _managedDragOwner) {
+                try { _managedDragOwner.update(root, managedViewportPoint(x, y)) }
+                catch (error) { cancelManagedDrag("controller-error") }
+            }
+            return
+        }
         if (_lastY < 0 && !_moving) return
         if (_moving) {
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             if (moved > 4) _dragged = true
+            if (_dragged && _moveKind === "" && managedDragController) {
+                beginManagedDrag(x, y)
+                return
+            }
             // 实时 delta 拍位（供状态栏/预览；release 一次性应用）
             if (_dragged) {
                 _moveDeltaF = view.measureAtY(y) - _moveStartF
@@ -571,6 +657,24 @@ Item {
         _lastX = x
     }
     function handleRelease(x, y) {
+        if (_managedDragConsumed) {
+            const owner = _managedDragOwner
+            const active = _managedDragActive
+            _managedDragActive = false
+            _managedDragOwner = null
+            clearPointerMoveState()
+            try {
+                if (active && owner) owner.finish(root, managedViewportPoint(x, y))
+            } catch (error) {
+                if (owner) {
+                    try { owner.cancel(root, "controller-error") }
+                    catch (cancelError) { console.warn("Managed drag cancel failed: " + cancelError) }
+                }
+            } finally {
+                _managedDragConsumed = false
+            }
+            return
+        }
         _lastY = -1
         // 拖拽工具（pan）：点 note 选中后，release 无位移 → 试听该采样；有位移 → 平移视口（不移动 note）。
         if (_pressedNoteRef && (!root.editable || root.editorTool === "pan")) {
@@ -623,8 +727,10 @@ Item {
             }
             // 点击（按下→释放，无拖动）= 播放一次；拖动（移动 note）= 不播。
             if (!_dragged && _pressedNoteRef) {
+                if (_collapseSelectionOnClick) root.noteClicked(_pressedNoteRef, false)
                 root.playNoteSample(_pressedNoteRef)
             }
+            _collapseSelectionOnClick = false
             _pressedNoteRef = null
             root._moveKind = ""
             root._moveObj = null
@@ -684,19 +790,30 @@ Item {
     }
 
     MouseArea {
+        id: interactionArea
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        preventStealing: root._managedDragConsumed
         // select = 箭头（框选/点选）；pan = 手（拖动滚动）；note = 十字（点击放置）
         objectName: "chartInteractionArea"
         cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor
                      : root._panning || ((pressedButtons & Qt.LeftButton) !== 0 && root.editorTool === "pan")
                        ? Qt.ClosedHandCursor
-                     : pressed && root._moving && root._dragged ? Qt.SizeAllCursor
+                     : root._managedDragActive || (pressed && root._moving && root._dragged) ? Qt.SizeAllCursor
                      : root.editable && root.editorTool === "note" ? Qt.CrossCursor
                      : root.editorTool === "pan" ? Qt.OpenHandCursor
                      : Qt.ArrowCursor
 
+        Keys.onEscapePressed: (event) => {
+            if (root._managedDragConsumed) {
+                root.cancelManagedDrag("escape")
+                event.accepted = true
+            } else event.accepted = false
+        }
         onPressed: (mouse) => {
+            // 附加按钮不能重置已消费的左键手势；buttons 是当前 mask，button 才是本次变化。
+            // 只有对应左键 release / 下一次左键 press 能结束或重启 managed 手势。
+            if (root._managedDragConsumed && mouse.button !== Qt.LeftButton) return
             // 2026-09：编辑区任意按下 → Main 释放文本框焦点（否则快捷键被文本框吞掉）
             root.editAreaPressed()
             if (mouse.button === Qt.RightButton) {
@@ -725,6 +842,10 @@ Item {
                              (mouse.modifiers & Qt.ControlModifier) !== 0)
         }
         onPositionChanged: (mouse) => {
+            if (root._managedDragConsumed) {
+                root.handleMove(mouse.x, mouse.y)
+                return
+            }
             if (root._panning) {
                 const moved = Math.abs(mouse.y - root._pressY) + Math.abs(mouse.x - root._pressX)
                 if (moved > 4) root._dragged = true
@@ -741,18 +862,22 @@ Item {
             root.handleMove(mouse.x, mouse.y)
         }
         onReleased: (mouse) => {
-            if (root._panning) {
-                root._panning = false
-                root._lastY = -1
+            if (root._managedDragConsumed) {
+                if (mouse.button === Qt.LeftButton) root.handleRelease(mouse.x, mouse.y)
                 return
             }
-            if (mouse.button === Qt.RightButton) return
+            if (mouse.button === Qt.MiddleButton) {
+                // 左键 managed finish 后仍可能收到中键 release；没有 pan 就只消费，不能回退编辑。
+                if (root._panning) {
+                    root._panning = false
+                    root._lastY = -1
+                }
+                return
+            }
+            if (mouse.button === Qt.RightButton || root._panning) return
             root.handleRelease(mouse.x, mouse.y)
         }
-        onCanceled: {
-            root._panning = false
-            root._lastY = -1
-        }
+        onCanceled: root.invalidatePointerGesture("pointer-cancelled")
         onDoubleClicked: (mouse) => {
             // 双击命中 note / BGA / BPM / STOP（select 工具）→ 编辑（note 改采样；bga 改 BMP/图层；
             // bpm/stop 改值；Main 弹对话框）

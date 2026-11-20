@@ -10,6 +10,7 @@ Item {
     default property alias primaryContent: primary.data
     property var documentService: null
     // 可选注入：独立组件测试无 context/operations 时仍为只读 B。
+    property var managedDragController: null
     property var referenceEditContext: null
     property var referenceEditOperations: null
     property int snapNum: 1
@@ -400,6 +401,11 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     documentSession: root.referenceSession
+                    managedDragController: root.managedDragController
+                    Component.onCompleted: {
+                        if (root.managedDragController)
+                            root.managedDragController.registerPane(root.referenceEditContext, referenceChart, referenceChart.viewportItem, root.referenceEditOperations)
+                    }
                     primaryPlaybackRole: false
                     editable: root.referenceEditable
                     editorTool: root.editorTool

@@ -8,6 +8,7 @@
 #include <numeric>
 
 #include "EditUtils.hpp"
+#include "NoteMovePlan.hpp"
 #include "beatbench/core/Rational.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 
@@ -64,19 +65,6 @@ int columnIndex(const QVariantList& columns, const QVariantMap& lane, int subLin
         if (c.value("sub_line", -1).toInt() < 0) aggregate = static_cast<int>(i);
     }
     return aggregate;
-}
-QVariantMap shifted(const QVariantMap& ref, double delta, int slotCount) {
-    const auto p = ref.value("pos").toMap();
-    const double target = (ref.value("measure").toDouble() +
-                           p.value("num").toDouble() / p.value("den").toDouble() + delta) *
-                          slotCount;
-    if (!std::isfinite(target) || std::abs(target) > 1e12) return {};
-    const qint64 slot = static_cast<qint64>(std::round(target));
-    qint64 measure = slot / slotCount;
-    if (slot < 0 && slot % slotCount != 0) --measure;
-    if (measure < 0 || measure > 1000000000) return {};
-    return {{"measure", QVariant::fromValue<qlonglong>(measure)},
-            {"pos", rational(slot - measure * slotCount, slotCount)}};
 }
 }  // namespace
 
@@ -405,8 +393,36 @@ QVariantMap PaneEditOperations::moveSelection(double deltaF, const QVariantMap& 
                                               const QVariantMap& sourceLane, int sourceBgmLine,
                                               const QVariantList& columns,
                                               const QVariantMap& settings) {
+    return moveSelectionImpl(nullptr, deltaF, targetLane, sourceLane, sourceBgmLine, columns,
+                             settings);
+}
+QVariantMap PaneEditOperations::moveSelectionCaptured(const QVariantMap& token, double deltaF,
+                                                      const QVariantMap& targetLane,
+                                                      const QVariantMap& sourceLane,
+                                                      int sourceBgmLine,
+                                                      const QVariantList& columns,
+                                                      const QVariantMap& settings) {
+    return moveSelectionImpl(&token, deltaF, targetLane, sourceLane, sourceBgmLine, columns,
+                             settings);
+}
+QVariantMap PaneEditOperations::moveSelectionImpl(const QVariantMap* token, double deltaF,
+                                                  const QVariantMap& targetLane,
+                                                  const QVariantMap& sourceLane, int sourceBgmLine,
+                                                  const QVariantList& columns,
+                                                  const QVariantMap& settings) {
     if (!m_context || !m_context->available()) return fail("no_document", tr("窗格未绑定有效文档"));
+    const auto frozenSelection = m_context->selection();
     m_context->session()->refresh();
+    if (!m_context || (token && (!m_context->captureCurrent(*token) ||
+                                 m_context->selection() != frozenSelection)))
+        return fail("stale_context", tr("拖动来源已变化"));
+    const auto execute = [&](const QString& command, const QVariantMap& args, const QString& text) {
+        if (!token) return run(command, args, text);
+        const auto response = m_context->dispatchCaptured(*token, command, args);
+        emit message(ok(response) ? text
+                                  : response.value("error").toMap().value("message").toString());
+        return response;
+    };
     const auto refs = m_context->selection();
     if (refs.isEmpty()) return fail("empty_selection", tr("先选中音符"));
     int num, den;
@@ -415,8 +431,6 @@ QVariantMap PaneEditOperations::moveSelection(double deltaF, const QVariantMap& 
     const int slotCount = std::max(1, den / num);
     const bool validTarget = targetLane.value("valid").toBool();
     const auto target = laneOf(targetLane);
-    const bool bgmTarget = validTarget && target.value("kind") == "bgm";
-    const bool playTarget = validTarget && playable(target);
     const QString meta = targetLane.value("metaKind").toString();
     if (validTarget &&
         (meta == "bpm" || meta == "stop" || targetLane.value("bgaLayer", -1).toInt() >= 0)) {
@@ -434,78 +448,48 @@ QVariantMap PaneEditOperations::moveSelection(double deltaF, const QVariantMap& 
                             : layer == 3 ? "bga_layer2"
                                          : "bga_base";
         }
-        const auto response =
-            run("note.convert", {{"selection", refs}, {"target", convertTarget}, {"delta", delta}},
-                tr("已转换选中音符"));
-        if (ok(response)) {
+        const auto response = execute(
+            "note.convert", {{"selection", refs}, {"target", convertTarget}, {"delta", delta}},
+            tr("已转换选中音符"));
+        if (ok(response) && m_context) {
             m_context->setSelection({});
-            m_context->setPendingLnHead({});
+            if (m_context) m_context->setPendingLnHead({});
         }
         return response;
     }
-    const int grabCol = columnIndex(columns, sourceLane, sourceBgmLine);
-    const int targetCol = columnIndex(columns, target, targetLane.value("sub_line", -1).toInt());
-    if ((bgmTarget || playTarget) && (grabCol < 0 || targetCol < 0))
-        return fail("missing_columns", tr("缺少完整列布局，未移动音符"));
-    const int deltaCol = targetCol - grabCol;
-    const int targetLine = std::max(0, targetLane.value("sub_line", -1).toInt());
-    QVariantList moves, selected;
+    NoteMoveSource source;
+    source.refs = refs;
+    source.columns = columns;
+    // 旧信号没有原 grabRef；只选同 lane/subline 的完整引用作秩锚点，
+    // 时间位移仍完全来自调用方 deltaF，绝不从这个代表引用重算按下时间。
     for (const auto& value : refs) {
-        auto ref = value.toMap();
-        if (!validPosition(ref)) return fail("bad_ref", tr("音符位置无效"));
-        QVariantMap to = std::abs(deltaF) <= 1e-12 ? QVariantMap{{"measure", ref.value("measure")},
-                                                                 {"pos", ref.value("pos")}}
-                                                   : shifted(ref, deltaF, slotCount);
-        if (to.isEmpty()) return fail("bad_target", tr("移动目标超出有效小节范围"));
+        const auto ref = value.toMap();
         const auto lane = ref.value("lane").toMap();
-        const int noteCol = columnIndex(columns, lane, ref.value("sub_line", -1).toInt());
-        if ((bgmTarget || playTarget) && noteCol < 0)
-            return fail("missing_columns", tr("选中音符不在当前显示列中，未移动"));
-        const int gap = noteCol - grabCol;
-        bool changedLane = false;
-        if (bgmTarget) {
-            to.insert("lane", target);
-            to.insert("sub_line", std::max(0, targetLine + gap));
-            changedLane = true;
-        } else if (playTarget && playable(sourceLane) && deltaCol != 0 && playable(lane) &&
-                   lane.value("player") == target.value("player")) {
-            const int newCol = noteCol + deltaCol;
-            if (newCol >= 0 && newCol < columns.size()) {
-                const auto c = columns[newCol].toMap();
-                const auto newLane = laneOf(c);
-                if (c.value("valid").toBool() && playable(newLane) &&
-                    c.value("metaKind").toString().isEmpty() &&
-                    c.value("bgaLayer", -1).toInt() < 0 &&
-                    newLane.value("player") == target.value("player") &&
-                    !laneEquals(lane, newLane)) {
-                    to.insert("lane", newLane);
-                    changedLane = true;
-                }
-            }
-        } else if (validTarget && (playTarget || bgmTarget) && laneEquals(lane, sourceLane) &&
-                   !laneEquals(lane, target)) {
-            auto newLane = target;
-            if (target.value("kind") == "key")
-                newLane.insert("index", std::clamp(target.value("index").toInt() + gap, 1,
-                                                   m_context->session()->playKeyCount()));
-            to.insert("lane", newLane);
-            changedLane = true;
-        }
-        moves.append(QVariantMap{{"from", ref}, {"to", to}});
-        ref.insert("measure", to.value("measure"));
-        ref.insert("pos", to.value("pos"));
-        ref.remove("lnPartner");
-        if (changedLane) {
-            ref.insert("lane", to.value("lane"));
-            ref.insert("sub_line", to.value("lane").toMap().value("kind") == "bgm"
-                                       ? to.value("sub_line", 0)
-                                       : QVariant(0));
-        }
-        selected.append(ref);
+        source.ranks.append(columnIndex(columns, lane, ref.value("sub_line", 0).toInt()));
+        if (source.grabRef.isEmpty() && laneEquals(lane, sourceLane) &&
+            (lane.value("kind") != "bgm" || sourceBgmLine < 0 ||
+             ref.value("sub_line", 0).toInt() == sourceBgmLine))
+            source.grabRef = ref;
     }
-    const auto response = run("note.move", {{"moves", moves}}, tr("已移动选中音符（可撤销）"));
+    NoteMoveDrop drop;
+    drop.deltaF = deltaF;
+    drop.snapNum = num;
+    drop.snapDen = den;
+    drop.timeLocked = std::abs(deltaF) <= 1e-12;
+    drop.laneLocked = !validTarget;
+    drop.columns = columns;
+    drop.targetColumn = targetLane;
+    drop.targetRank = columnIndex(columns, target, targetLane.value("sub_line", -1).toInt());
+    if (source.grabRef.isEmpty() && drop.laneLocked) source.grabRef = refs.front().toMap();
+    source.grabRank = columnIndex(columns, source.grabRef.value("lane").toMap(),
+                                  source.grabRef.value("sub_line", 0).toInt());
+    const auto plan = buildNoteMovePlan(source, drop);
+    if (!plan.ok) return fail(plan.errorCode, plan.errorMessage);
+    if (!plan.changed) return success({{"notes", 0}, {"selection", plan.selection}});
+    const auto response =
+        execute("note.move", {{"moves", plan.moves}}, tr("已移动选中音符（可撤销）"));
     if (ok(response)) {
-        m_context->setSelection(selected);
+        m_context->setSelection(plan.selection);
         m_context->setPendingLnHead({});
     }
     return response;

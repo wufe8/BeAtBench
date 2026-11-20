@@ -109,6 +109,10 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(QString cursorPosText READ cursorPosText NOTIFY cursorChanged)
     /// M6 编辑预览：放置工具（note/ln/mine）下鼠标悬浮 → 画 ghost note（"normal"/"ln"/"mine"；
     /// 空 = 关闭）。用户 2026-09：操作前先看到落点。
+    Q_PROPERTY(
+        QVariantList plannedMovePreview READ plannedMovePreview NOTIFY plannedMovePreviewChanged)
+    Q_PROPERTY(bool plannedMovePreviewActive READ plannedMovePreviewActive NOTIFY
+                   plannedMovePreviewChanged)
     Q_PROPERTY(QString previewNoteKind READ previewNoteKind WRITE setPreviewNoteKind NOTIFY
                    previewNoteKindChanged)
     /// M6 编辑预览：拖拽移动选中 note → 各画 ghost @ 原始+moveDeltaF（位移拍位小数）。
@@ -187,6 +191,10 @@ class ChartViewItem : public QQuickPaintedItem {
     /// M5 收尾 2026-09：**播放头**（playheadSec）所在小节号文本（播放中状态栏用，随播放推进；
     /// 非播放/未渲染 → 空，回落视口光标 cursorPosText）。与 cursorPosText 区分：后者=视口光标。
     Q_INVOKABLE QString playheadPosText() const;
+    QVariantList plannedMovePreview() const { return m_plannedMovePreview; }
+    bool plannedMovePreviewActive() const { return m_plannedMovePreviewActive; }
+    /// 只绘制共用移动计划给出的最终 refs；active=true 且空列表表示无效落点，不画旧 ghost。
+    Q_INVOKABLE void setPlannedMovePreview(const QVariantList& refs, bool active);
     QString previewNoteKind() const { return m_previewNoteKind; }
     void setPreviewNoteKind(const QString& v);
     bool movePreview() const { return m_movePreview; }
@@ -375,6 +383,7 @@ class ChartViewItem : public QQuickPaintedItem {
     void viewportAnchorChanged();
     /// 滚动上限变化（height/contentHeight/topHigh/measureHeight 任一变化）。
     void maxScrollYChanged();
+    void plannedMovePreviewChanged();
     void previewNoteKindChanged();
     void movePreviewChanged();
     void moveDeltaFChanged();
@@ -597,6 +606,8 @@ class ChartViewItem : public QQuickPaintedItem {
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
     qreal m_hoverX = -1.0;  // 悬停 x（M6 预览：列命中用；-1 = 无）
     // —— M6 编辑预览（用户 2026-09）——
+    QVariantList m_plannedMovePreview;
+    bool m_plannedMovePreviewActive = false;
     QString m_previewNoteKind;     // 放置工具 ghost 类型（"normal"/"ln"/"mine"；空 = 关）
     bool m_movePreview = false;    // 移动预览总开关（拖拽时 QML 置 true）
     qreal m_moveDeltaF = 0.0;      // 移动预览位移（拍位小数）

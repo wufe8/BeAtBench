@@ -2,13 +2,18 @@
 // Production ChartView, real registry/bridges/theme; no AudioEngine or device.
 #include <QtQuickTest/quicktest.h>
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
 #include <QImage>
+#include <QJsonDocument>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QVariantMap>
 #include <algorithm>
 #include <cmath>
@@ -89,6 +94,53 @@ class OverlayPaintCapture : public QObject {
 class ChartViewBindingSetup : public QObject {
     Q_OBJECT
    public:
+    // Serialize native production QVariant values before a QML conversion can hide UChar types.
+    Q_INVOKABLE QString chartLaneJson(QObject* item, qreal x, qreal y) const {
+        auto* chart = qobject_cast<beatbench::app::ChartViewItem*>(item);
+        if (!chart) return {};
+        const auto columns = chart->editColumns();
+        QVariantList performanceColumns;
+        for (int i = 0; i < columns.size(); ++i) {
+            const auto lane = chart->laneAtColumn(i);
+            if (lane.value("valid").toBool()) performanceColumns.push_back(lane);
+        }
+        const QVariantMap result{{"note", chart->noteAt(x, y)},
+                                 {"object", chart->objectAt(x, y)},
+                                 {"selected", chart->notesInRect(x - 2, y - 2, x + 2, y + 2)},
+                                 {"hit", chart->hitTest(x, y)},
+                                 {"lane", chart->laneAtX(x)},
+                                 {"drag", chart->dragSampleAt(x, y)},
+                                 {"columns", columns},
+                                 {"performanceColumns", performanceColumns}};
+        return QString::fromUtf8(QJsonDocument::fromVariant(result).toJson(QJsonDocument::Compact));
+    }
+
+    // QuickTest's mousePress/mouseRelease do not retain a chord's full buttons mask.
+    // Deliver explicit masks through QQuickWindow, not by calling QML handlers/signals.
+    Q_INVOKABLE bool sendPointerEvent(QQuickItem* item, qreal x, qreal y, int button, int buttons,
+                                      const QString& action) {
+        if (!item || !item->window()) return false;
+        QEvent::Type type;
+        if (action == "press")
+            type = QEvent::MouseButtonPress;
+        else if (action == "release")
+            type = QEvent::MouseButtonRelease;
+        else if (action == "move")
+            type = QEvent::MouseMove;
+        else
+            return false;
+        auto* window = item->window();
+        const auto scenePoint = item->mapToScene(QPointF(x, y));
+        QMouseEvent event(type, scenePoint, window->mapToGlobal(scenePoint),
+                          static_cast<Qt::MouseButton>(button), Qt::MouseButtons(buttons),
+                          Qt::NoModifier);
+        // Separate synthetic presses enough to avoid accidental double-click recognition.
+        static ulong timestamp = 0;
+        timestamp += 1000;
+        event.setTimestamp(timestamp);
+        return QCoreApplication::sendEvent(window, &event);
+    }
+
     // Opt-in, scalar-only breadcrumbs for memory-limited projection diagnosis.
     Q_INVOKABLE void traceOverlayStage(const QString& stage) const {
         if (qEnvironmentVariableIsSet("BB_OVERLAY_TRACE"))

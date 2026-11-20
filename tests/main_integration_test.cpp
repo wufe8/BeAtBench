@@ -31,6 +31,7 @@
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/PaneDragController.hpp"
 #include "bridge/PaneEditContext.hpp"
 #include "bridge/PaneEditOperations.hpp"
 #include "bridge/PlayheadOverlayItem.hpp"
@@ -468,6 +469,7 @@ class MainIntegrationSetup : public QObject {
             project.refreshOpenStates();
         });
         ctx->setContextProperty("documents", &documents);
+        ctx->setContextProperty("paneDragController", &paneDragController);
         ctx->setContextProperty("primaryPaneContext", &primaryPaneContext);
         ctx->setContextProperty("referencePaneContext", &referencePaneContext);
         ctx->setContextProperty("primaryPaneOperations", &primaryPaneOperations);
@@ -548,6 +550,7 @@ class MainIntegrationSetup : public QObject {
     PaneEditContext referencePaneContext{&documents};
     PaneEditOperations primaryPaneOperations{&primaryPaneContext};
     PaneEditOperations referencePaneOperations{&referencePaneContext};
+    PaneDragController paneDragController;
     ResourceBindingController bindings{&documents};
     CommandDispatcher dispatcher;
     UiActionRegistry uiActions;

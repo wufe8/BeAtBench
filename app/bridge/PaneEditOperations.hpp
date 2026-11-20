@@ -51,6 +51,11 @@ class PaneEditOperations : public QObject {
     Q_INVOKABLE QVariantMap moveSelection(double deltaF, const QVariantMap& targetLane,
                                           const QVariantMap& sourceLane, int sourceBgmLine,
                                           const QVariantList& columns, const QVariantMap& settings);
+    // Captured gesture conversion shares all policies with the local move path.
+    QVariantMap moveSelectionCaptured(const QVariantMap& token, double deltaF,
+                                      const QVariantMap& targetLane, const QVariantMap& sourceLane,
+                                      int sourceBgmLine, const QVariantList& columns,
+                                      const QVariantMap& settings);
     Q_INVOKABLE QVariantMap moveMeta(const QString& kind, const QVariantMap& object, double deltaF,
                                      const QVariantMap& targetLane, const QVariantMap& settings);
    signals:
@@ -62,6 +67,10 @@ class PaneEditOperations : public QObject {
     QVariantMap placeLnObj(const QVariantMap& hit, const QVariantMap& settings);
     QVariantMap pasteImpl(const QVariantMap* token, const QString& text, int measure,
                           const QVariantMap& settings);
+    QVariantMap moveSelectionImpl(const QVariantMap* token, double deltaF,
+                                  const QVariantMap& targetLane, const QVariantMap& sourceLane,
+                                  int sourceBgmLine, const QVariantList& columns,
+                                  const QVariantMap& settings);
     bool pendingIsCurrent() const;
     void rememberPending(const QVariantMap& ref);
     QPointer<PaneEditContext> m_context;

@@ -148,6 +148,27 @@ Item {
             compare(partsB.chart.selection.length, 0)
         }
 
+        function test_planned_preview_preserves_exact_refs_and_never_mutates_notes() {
+            const chart = partsB.chart
+            const point = pointFor(viewB, partsB, true)
+            const planned = JSON.parse(JSON.stringify(point.note))
+            planned.pos = {num: 1, den: 7}
+            chart.setPlannedMovePreview([planned], true)
+            compare(chart.plannedMovePreviewActive, true)
+            compare(chart.plannedMovePreview.length, 1)
+            compare(chart.plannedMovePreview[0].pos.den, 7)
+            compare(chart.plannedMovePreview[0].sample, point.note.sample)
+            verify(waitForRendering(scene))
+            compare(chart.noteAt(point.x, point.y).sample, point.note.sample)
+            compare(bridgeB.dirty, false)
+            chart.setPlannedMovePreview([], true)
+            compare(chart.plannedMovePreviewActive, true) // invalid plan suppresses legacy ghosts
+            compare(chart.plannedMovePreview.length, 0)
+            chart.setPlannedMovePreview([planned], false)
+            compare(chart.plannedMovePreviewActive, false)
+            compare(chart.plannedMovePreview.length, 0)
+        }
+
         function test_drag_sample_uses_raw_local_time_and_rejects_noncanvas() {
             const chart = partsB.chart
             const point = pointFor(viewB, partsB, false)

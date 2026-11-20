@@ -157,6 +157,46 @@ TEST_F(PaneEditContextTest, LiteralIdPreservesTextAndUsesOnlyTargetBaseWithoutDe
     set.insert("to", "0a");
     EXPECT_EQ(code(right_->dispatch("note.setSample", set)), "invalid_id");
 }
+TEST_F(PaneEditContextTest, CaptureCurrentIsNonConsumingAndUnaffectedByFocusOrSelection) {
+    const auto token = right_->capture();
+    ASSERT_TRUE(right_->captureCurrent(token));
+    EXPECT_FALSE(left_->captureCurrent(token));
+    auto forged = token;
+    forged.insert("sessionId", a_);
+    EXPECT_FALSE(right_->captureCurrent(forged));
+    EXPECT_FALSE(right_->captureCurrent({}));
+    ASSERT_TRUE(session_registry().activate(b_.toStdString()));
+    right_->setSelection({putArgs(4)});
+    right_->setMetaSelection({QVariantMap{{"kind", "bpm"}}});
+    EXPECT_TRUE(right_->captureCurrent(token));
+    EXPECT_TRUE(right_->captureCurrent(token));  // Read-only query does not consume.
+    ASSERT_TRUE(ok(right_->dispatchCaptured(token, "note.put", putArgs())));
+    EXPECT_FALSE(right_->captureCurrent(token));
+}
+TEST_F(PaneEditContextTest, CaptureCurrentDetectsReplacementRevisionReloadAndPermissionLoss) {
+    auto token = right_->capture();
+    const auto replacement = right_->capture();
+    EXPECT_FALSE(right_->captureCurrent(token));
+    EXPECT_TRUE(right_->captureCurrent(replacement));
+    token = replacement;
+    ASSERT_TRUE(ok(right_->dispatch("note.put", putArgs())));
+    ASSERT_TRUE(ok(right_->dispatch("session.undo")));
+    EXPECT_FALSE(right_->captureCurrent(token));
+    token = right_->capture();
+    core(b_)->load(beatbench::Chart{});
+    EXPECT_FALSE(right_->captureCurrent(token));
+    token = right_->capture();
+    right_->setEditable(false);
+    right_->setEditable(true);
+    EXPECT_FALSE(right_->captureCurrent(token));
+    token = right_->capture();
+    right_->setSessionId(a_);
+    right_->setSessionId(b_);
+    EXPECT_FALSE(right_->captureCurrent(token));
+    token = right_->capture();
+    documents_.reset();
+    EXPECT_FALSE(right_->captureCurrent(token));
+}
 TEST_F(PaneEditContextTest, CapturesAreOpaqueOwnerBoundReplaceableAndSingleUse) {
     const auto first = right_->capture();
     EXPECT_FALSE(first.contains("revision"));
@@ -187,10 +227,13 @@ TEST_F(PaneEditContextTest, CapturesRejectRevisionReloadRebindAndPermissionChang
 }
 TEST_F(PaneEditContextTest, ClosedAndRecreatedIdCannotReviveCapturedOwner) {
     const auto token = right_->capture();
+    EXPECT_TRUE(right_->captureCurrent(token));
     ASSERT_TRUE(session_registry().close(b_.toStdString()));
+    EXPECT_FALSE(right_->captureCurrent(token));
     EXPECT_EQ(code(right_->dispatch("note.put", putArgs())), "no_document");
     ASSERT_TRUE(session_registry().create(b_.toStdString(), false));
     core(b_)->load(beatbench::Chart{});
+    EXPECT_FALSE(right_->captureCurrent(token));
     EXPECT_EQ(code(right_->dispatchCaptured(token, "note.put", putArgs())), "stale_context");
     EXPECT_TRUE(core(a_)->chart().notes.empty());
 }

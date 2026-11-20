@@ -51,6 +51,8 @@ class PaneEditContext : public QObject {
     Q_INVOKABLE QVariantMap dispatch(const QString& command, const QVariantMap& args = {});
     // 无有效可编辑文档返回空对象；调用方应将凭证与原对象/落点一并保留。
     Q_INVOKABLE QVariantMap capture();
+    // 只读预检；不续期、不替换、不消费凭证，也不能使失效凭证复活。
+    Q_INVOKABLE bool captureCurrent(const QVariantMap& token) const;
     Q_INVOKABLE QVariantMap dispatchCaptured(const QVariantMap& token, const QString& command,
                                              const QVariantMap& args = {});
 

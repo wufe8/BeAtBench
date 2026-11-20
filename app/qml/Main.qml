@@ -273,7 +273,23 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("file.exit") : ""
                onActivated: uiActions.invoke("file.exit") }
 
+    Connections {
+        target: window.managedDragController
+        function onMessage(text) { window.setStatus(text) }
+        function onActiveChanged() { window.updateActionStates() }
+        function onSelectionCommitted(source, target, refs) {
+            // A selection is window-owned; context is its one-way mirror.
+            if (target === window.primaryEditContext) window.selectionRefs = refs
+            else if (source === window.primaryEditContext) window.selectionRefs = []
+            if (source === window.primaryEditContext || target === window.primaryEditContext) {
+                window.pendingLnHead = null
+                window.metaSelection = []
+            }
+        }
+    }
     // A 的编辑仍走既有 SessionController；context 仅同步其窗格状态。
+    readonly property var managedDragController: typeof paneDragController !== "undefined" ? paneDragController : null
+    onActiveChanged: if (!active && managedDragController) managedDragController.cancelActive("window_inactive")
     readonly property var primaryEditContext: typeof primaryPaneContext !== "undefined" ? primaryPaneContext : null
     readonly property var primaryEditOperations: typeof primaryPaneOperations !== "undefined" ? primaryPaneOperations : null
     readonly property var referenceEditContext: typeof referencePaneContext !== "undefined" ? referencePaneContext : null
@@ -389,7 +405,7 @@ ApplicationWindow {
     // 2026-09 快捷键收尾：进注册表（edit.cancel，scope=edit）→ 设置页可改绑。
     Shortcut {
         sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.cancel") : ""
-        enabled: currentPage === 0 && editorTool === "ln" && !window.textInputFocused
+        enabled: currentPage === 0 && (editorTool === "ln" || (managedDragController && managedDragController.active)) && !window.textInputFocused
                  && chartEditingAllowed
         onActivated: uiActions.invoke("edit.cancel")
     }
@@ -980,6 +996,8 @@ ApplicationWindow {
             EditPage {
                 id: editPage
                 documentService: documents
+                managedDragController: window.managedDragController
+                primaryEditOperations: window.primaryEditOperations
                 primaryEditContext: window.primaryEditContext
                 referenceEditContext: window.referenceEditContext
                 referenceEditOperations: window.referenceEditOperations
@@ -2291,6 +2309,10 @@ ApplicationWindow {
     function bmpSetFile(id, file) { return session.bmpSetFile(id, file) }
     function addWavSample(id, file) { return session.addWavSample(id, file) }
     function cancelPendingLn() {
+        if (managedDragController && managedDragController.active) {
+            managedDragController.cancelActive("escape")
+            return true
+        }
         if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.cancelPendingLn() : false
         return session.cancelPendingLn()
     }
@@ -2591,7 +2613,7 @@ ApplicationWindow {
         setActionEnabled("tool.rotate", chartEditingAllowed && actionSelection.length > 0)
         setActionEnabled("tool.toggleLn", chartEditingAllowed && actionSelection.length > 0)
         setActionEnabled("tool.addMeasure", currentPage === 0 && !referenceActionTarget)
-        setActionEnabled("edit.cancel", chartEditingAllowed && editorTool === "ln")
+        setActionEnabled("edit.cancel", chartEditingAllowed && (editorTool === "ln" || (managedDragController && managedDragController.active)))
         setActionEnabled("tool.pan", currentPage === 0)
         setActionEnabled("tool.select", currentPage === 0)
         setActionEnabled("tool.note", currentPage === 0)
@@ -2630,6 +2652,7 @@ ApplicationWindow {
     }
     onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
     onCurrentPageChanged: {
+        if (managedDragController) managedDragController.cancelActive("page_changed")
         updateActionStates()
         updateCheckedStates()
         // M7：进项目页 → 重新采集「已打开 / 未保存」状态（§9.2）

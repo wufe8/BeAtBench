@@ -12,6 +12,8 @@ import "../components"  // BbTabButton（页面工具条等，默认皮肤组件
 Item {
     id: root
     property var documentService: null
+    property var managedDragController: null
+    property var primaryEditOperations: null
     property var primaryEditContext: null
     property var referenceEditContext: null
     property var referenceEditOperations: null
@@ -397,6 +399,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 4
                 documentService: root.documentService
+                managedDragController: root.managedDragController
                 referenceEditContext: root.referenceEditContext
                 referenceEditOperations: root.referenceEditOperations
                 editSettings: root.referenceEditSettings
@@ -481,6 +484,11 @@ Item {
                     ChartView {
                         id: chartView
                         documentSession: chartSession
+                        managedDragController: root.managedDragController
+                        Component.onCompleted: {
+                            if (root.managedDragController)
+                                root.managedDragController.registerPane(root.primaryEditContext, chartView, chartView.viewportItem, root.primaryEditOperations)
+                        }
                         editable: true
                         referenceSession: compareSplit.referenceSession
                         referenceOverlayEnabled: compareSplit.overlayMode && compareSplit.overlayVisible && root.visible
