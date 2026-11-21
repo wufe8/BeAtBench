@@ -13,14 +13,19 @@ TestCase {
     readonly property string a: "main-integration-a"
     readonly property string b: "main-integration-b"
     Component { id: mainComponent; Production.Main {} }
-    function start(named, modeFields) {
+    function start(named, modeFields, referenceAudition) {
         audioEngine.allowPreview = false
         audioEngine.previewFiles = []
         audioEngine.previewStops = 0
+        audioEngine.previewFile = ""
+        audioEngine.referenceNotePreviewCalls = []
+        audioEngine.referenceNotePreview = null
+        audioEngine.referenceNotePreviewStops = 0
         audioEngine.playing = false
         audioEngine.hasPcm = false
         audioEngine.positionSec = 0
-        mainFixture.reset(named)
+        if (referenceAudition) mainFixture.resetForReferenceAudition()
+        else mainFixture.reset(named)
         if (modeFields) {
             const result = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
                 session_id: a, edits: [{key: "LNTYPE", value: "2"}, {key: "LNOBJ", value: "ZZ"},
@@ -2933,6 +2938,86 @@ TestCase {
         compare(audioEngine.previewStops, beforeB) // B cannot silence A audio.
         compare(audioEngine.playing, true)
         compare(audioEngine.playbackCalls, 0)
+        unchanged(sa, sb)
+    }
+    function test_referenceNoteAudition_usesBSessionAndStopsOnlyB_data() {
+        return [{tag: "pan", tool: "pan"}, {tag: "select", tool: "select"}]
+    }
+    function test_referenceNoteAudition_usesBSessionAndStopsOnlyB(data) {
+        start(true, false, true)
+        split.synchronizeViewports = false
+        main.editorTool = data.tool
+        const primary = mainFixture.primaryView(main), reference = split.referenceView
+        verify(waitForRendering(reference))
+        primary.viewportItem.scrollToStart()
+        reference.viewportItem.scrollToStart()
+        wait(0)
+        const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
+        verify(sa.path.endsWith("/main-integration-a/audition.bms"))
+        verify(sb.path.endsWith("/main-integration-b/audition.bms"))
+        compare(primary.documentSession.wavFileOfId(2), "a-collision.wav")
+        compare(primary.documentSession.wavFileOfId(3), "a-missing-in-b.wav")
+        const aNote = auditionPoint(primary, true, 1)
+        const bNote = auditionPoint(reference, true, 2)
+        const silent = auditionPoint(reference, true, 3)
+        const blank = auditionPoint(reference, false)
+
+        audioEngine.allowPreview = true
+        audioEngine.playing = true
+        audioEngine.hasPcm = true
+        audioEngine.positionSec = 0.75
+        mouseClick(primary, aNote.x, aNote.y)
+        compare(audioEngine.previewFiles, ["a-note.wav"])
+        compare(audioEngine.previewFile, "a-note.wav")
+        compare(audioEngine.referenceNotePreviewCalls, [])
+        const ordinaryStops = audioEngine.previewStops
+        const pathChanges = audioEngine.pathChanges
+        compare(audioEngine.chartPath, sa.path)
+        const aSelection = main.selectionRefs
+        mouseClick(reference, blank.x, blank.y)
+        compare(audioEngine.previewFile, "a-note.wav")
+        compare(audioEngine.previewStops, ordinaryStops)
+
+        // 真实 B 按压只选中，原地松开恰好试听一次。
+        mousePress(reference, bNote.x, bNote.y)
+        compare(audioEngine.referenceNotePreviewCalls, [])
+        mouseRelease(reference, bNote.x, bNote.y)
+        const expected = {path: sb.path, sampleId: 2, file: "b-note.wav"}
+        compare(audioEngine.referenceNotePreviewCalls, [expected])
+        compare(audioEngine.referenceNotePreview, expected)
+        tryCompare(split, "referenceFocused", true)
+        compare(main.referenceEditContext.selection.length, 1)
+        compare(main.referenceEditContext.selection[0].sample, 2)
+
+        // B 空白在按下时停止单音试听；A 的整曲播放继续。
+        const referenceStops = audioEngine.referenceNotePreviewStops
+        mousePress(reference, blank.x, blank.y)
+        verify(audioEngine.referenceNotePreviewStops > referenceStops)
+        compare(audioEngine.referenceNotePreview, null)
+        compare(audioEngine.previewFile, "")
+        compare(audioEngine.previewStops, ordinaryStops)
+        compare(audioEngine.playing, true)
+        mouseRelease(reference, blank.x, blank.y)
+        compare(main.referenceEditContext.selection.length, 0)
+
+        // 无定义的 note 仍然调用 C++ API；不能在 QML 预查后跳过，更不能查 A 的同 ID。
+        mouseClick(reference, silent.x, silent.y)
+        compare(audioEngine.referenceNotePreviewCalls, [expected, {path: sb.path, sampleId: 3, file: ""}])
+        compare(audioEngine.referenceNotePreview, null)
+        compare(main.referenceEditContext.selection.length, 1)
+        compare(main.referenceEditContext.selection[0].sample, 3)
+        compare(audioEngine.previewFiles, ["a-note.wav"])
+        compare(audioEngine.previewFile, "")
+        compare(audioEngine.previewStops, ordinaryStops)
+        compare(audioEngine.chartPath, sa.path)
+        compare(audioEngine.pathChanges, pathChanges)
+        compare(audioEngine.playing, true)
+        compare(audioEngine.hasPcm, true)
+        compare(audioEngine.positionSec, 0.75)
+        compare(audioEngine.playbackCalls, 0)
+        compare(main.selectionRefs, aSelection)
+        compare(documents.activeId(), a)
+        compare(split.referenceDocumentId, b)
         unchanged(sa, sb)
     }
     function test_about_genericContentBounds() {

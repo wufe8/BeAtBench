@@ -574,7 +574,7 @@ Item {
                 return
             }
         }
-        // Cancel only this viewport's audition immediately; B has no audio connection.
+        // 空白按下立即取消此窗格的单音试听，不停止整曲播放。
         if (y > 18 && x >= view.rulerWidth) root.samplePreviewStopRequested()
         // select 工具空白 = 框选（拖动）；pan 工具 = 滚动（拖动）；note/ln/mine 空白 = 点击放置
         _boxSelect = root.editorTool === "select"

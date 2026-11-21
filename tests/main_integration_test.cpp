@@ -49,6 +49,24 @@ using namespace beatbench::app;
 namespace {
 constexpr auto aId = "main-integration-a";
 constexpr auto bId = "main-integration-b";
+
+void writeFixtureWav(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) qFatal("Cannot create fixture WAV");
+    QDataStream wav(&file);
+    wav.setByteOrder(QDataStream::LittleEndian);
+    wav.writeRawData("RIFF", 4);
+    wav << quint32(36 + 1600);
+    wav.writeRawData("WAVEfmt ", 8);
+    wav << quint32(16) << quint16(1) << quint16(1);
+    wav << quint32(8000) << quint32(16000) << quint16(2) << quint16(16);
+    wav.writeRawData("data", 4);
+    wav << quint32(1600);
+    const QByteArray silence(1600, '\0');
+    wav.writeRawData(silence.constData(), silence.size());
+    if (wav.status() != QDataStream::Ok) qFatal("Cannot write fixture WAV");
+}
+
 beatbench::Chart chart(bool second) {
     beatbench::Chart c;
     c.mode_id = "sp7k";
@@ -59,6 +77,27 @@ beatbench::Chart chart(bool second) {
     n.value.lane = {0, beatbench::LaneKind::Key, 1};
     n.value.sample.id = second ? 2u : 1u;
     c.notes.push_back(n);
+    return c;
+}
+
+beatbench::Chart referenceAuditionChart(bool second, const QDir& directory) {
+    auto c = chart(second);
+    const auto bindWav = [&](unsigned id, const char* file) {
+        c.samples[{beatbench::SampleKind::Wav, id}] = {file, {}};
+        writeFixtureWav(directory.filePath(QString::fromLatin1(file)));
+    };
+    if (second) {
+        bindWav(2, "b-note.wav");
+        auto silent = c.notes.front();
+        silent.pos = beatbench::Rational(1, 2);
+        silent.value.sample.id = 3;
+        c.notes.push_back(silent);
+    } else {
+        bindWav(1, "a-note.wav");
+        // 如果 B 错用 A 的定义，既会播错已绑定采样，也会把缺定义的 note 播出声。
+        bindWav(2, "a-collision.wav");
+        bindWav(3, "a-missing-in-b.wav");
+    }
     return c;
 }
 }  // namespace
@@ -133,7 +172,11 @@ class MainIntegrationSetup : public QObject {
                 return o;
         return nullptr;
     }
-    Q_INVOKABLE void reset(bool named) {
+    Q_INVOKABLE void reset(bool named) { resetFixtures(named, false); }
+    Q_INVOKABLE void resetForReferenceAudition() { resetFixtures(true, true); }
+
+   private:
+    void resetFixtures(bool named, bool referenceAudition) {
         root = nullptr;
         primaryPaneContext.setEditable(false);
         referencePaneContext.setEditable(false);
@@ -153,11 +196,20 @@ class MainIntegrationSetup : public QObject {
         auto& registry = beatbench::edit::session_registry();
         for (const auto* id : {aId, bId}) {
             auto* s = registry.by_id(id);
-            s->load(chart(id == bId));
+            const QString sessionId = QString::fromLatin1(id);
+            QString savePath = temp->filePath(sessionId + ".bms");
+            if (referenceAudition) {
+                const QDir directory(temp->filePath(sessionId));
+                if (!QDir{}.mkpath(directory.path()))
+                    qFatal("Cannot create reference audition chart directory");
+                s->load(referenceAuditionChart(id == bId, directory));
+                savePath = directory.filePath("audition.bms");
+            } else {
+                s->load(chart(id == bId));
+            }
             s->set_backup_enabled(false);
             if (named) {
-                const auto saved = documents.save(QString::fromLatin1(id),
-                                                  temp->filePath(QString::fromLatin1(id) + ".bms"));
+                const auto saved = documents.save(sessionId, savePath);
                 if (!saved.value("ok").toBool()) qFatal("Cannot save Main integration fixture");
             }
             // Both undo and redo are nonempty: accidental resets/commands cannot hide.
@@ -171,6 +223,8 @@ class MainIntegrationSetup : public QObject {
         clipboard.setText(QString{});
         if (audio) audio->setProperty("playbackCalls", 0);
     }
+
+   public:
     Q_INVOKABLE bool setDocumentBase(const QString& id, int base) {
         auto* session = beatbench::edit::session_registry().by_id(id.toStdString());
         if (!session || !session->has_chart() || (base != 36 && base != 62)) return false;
@@ -199,21 +253,7 @@ class MainIntegrationSetup : public QObject {
     Q_INVOKABLE QVariantMap prepareSliceExport(bool includeA) {
         // Generated PCM, not testdata; real decode/export/paste without a sound device.
         const auto sourcePath = temp->filePath("slice-source.wav");
-        QFile source(sourcePath);
-        if (!source.open(QIODevice::WriteOnly)) qFatal("Cannot create slice source");
-        QDataStream wav(&source);
-        wav.setByteOrder(QDataStream::LittleEndian);
-        wav.writeRawData("RIFF", 4);
-        wav << quint32(36 + 1600);
-        wav.writeRawData("WAVEfmt ", 8);
-        wav << quint32(16) << quint16(1) << quint16(1);
-        wav << quint32(8000) << quint32(16000) << quint16(2) << quint16(16);
-        wav.writeRawData("data", 4);
-        wav << quint32(1600);
-        const QByteArray silence(1600, '\0');
-        wav.writeRawData(silence.constData(), silence.size());
-        if (wav.status() != QDataStream::Ok) qFatal("Cannot write slice source");
-        source.close();
+        writeFixtureWav(sourcePath);
         if (!workspace.loadAudioFileSyncForTest(sourcePath)) qFatal("Cannot decode slice source");
         beatbench::slice::Slice slice;
         slice.index = 0;

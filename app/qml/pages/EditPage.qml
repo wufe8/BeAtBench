@@ -402,6 +402,7 @@ Item {
                 managedDragController: root.managedDragController
                 referenceEditContext: root.referenceEditContext
                 referenceEditOperations: root.referenceEditOperations
+                referenceAudition: typeof audioEngine !== "undefined" ? audioEngine : null
                 editSettings: root.referenceEditSettings
                 onReferenceNoteEditRequested: (ref) => root.referenceNoteEditRequested(ref)
                 onReferenceMetaEditRequested: (obj) => root.referenceMetaEditRequested(obj)

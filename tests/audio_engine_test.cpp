@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// No device IO, GUI application, or user preferences; preview decoders are injected.
+// 无设备 I/O、GUI 或用户偏好；试听测试按需使用真实 WAV 或注入解码器。
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QDataStream>
 #include <QDir>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QSemaphore>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -20,7 +22,9 @@
 #include <utility>
 #include <vector>
 
+#include "beatbench/core/edit/SessionRegistry.hpp"
 #include "bridge/AudioEngine.hpp"
+#include "bridge/ChartSession.hpp"
 
 namespace beatbench::app {
 // Only synthetic PCM setup needs private access; assertions use observable clocks/output.
@@ -63,6 +67,7 @@ struct AudioEngineTestAccess {
 namespace {
 using beatbench::app::AudioEngine;
 using beatbench::app::AudioEngineTestAccess;
+using beatbench::app::ChartSession;
 using beatbench::audio::AudioBackend;
 using beatbench::audio::AudioSettings;
 
@@ -149,6 +154,33 @@ class FakeBackend final : public AudioBackend {
     void* user_ = nullptr;
     StreamInfo info_;
 };
+
+bool writePreviewWav(const QString& path, qint16 amplitude) {
+    // 48 kHz 单声道 PCM16；取包络起音之后的振幅即可区分解码结果。
+    constexpr quint32 rate = 48000;
+    constexpr quint32 frames = 4096;
+    constexpr quint32 bytesPerFrame = 2;
+    constexpr quint32 dataSize = frames * bytesPerFrame;
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    QDataStream stream(&file);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.writeRawData("RIFF", 4);
+    stream << quint32(36 + dataSize);
+    stream.writeRawData("WAVEfmt ", 8);
+    stream << quint32(16) << quint16(1) << quint16(1) << rate << quint32(rate * bytesPerFrame)
+           << quint16(bytesPerFrame) << quint16(16);
+    stream.writeRawData("data", 4);
+    stream << dataSize;
+    for (quint32 i = 0; i < frames; ++i) stream << amplitude;
+    return stream.status() == QDataStream::Ok && file.flush();
+}
+
+bool finishPreviewDecode(AudioEngine& engine) {
+    if (!AudioEngineTestAccess::wait(engine)) return false;
+    QCoreApplication::sendPostedEvents(&engine, QEvent::MetaCall);
+    return true;
+}
 
 class AudioEngineTest : public ::testing::Test {
    protected:
@@ -604,6 +636,111 @@ TEST_F(AudioEngineTest, StopPreviewAtNextCallbackPreservesMainAndReference) {
     EXPECT_TRUE(engine->refPlaying());
     EXPECT_GT(engine->positionSec(), before);
     EXPECT_GT(output[600], 0.01f);
+}
+
+TEST_F(AudioEngineTest, ReferenceNotePreviewUsesItsOwnDirectoryAndStopDoesNotCancelActivePreview) {
+    QTemporaryDir dir(QDir(previewBase()).filePath("reference-note-XXXXXX"));
+    ASSERT_TRUE(dir.isValid());
+    const QDir root(dir.path());
+    ASSERT_TRUE(root.mkdir("a"));
+    ASSERT_TRUE(root.mkdir("b"));
+    const auto wav = QStringLiteral("same.wav");
+    ASSERT_TRUE(writePreviewWav(root.filePath("a/" + wav), 4096));
+    ASSERT_TRUE(writePreviewWav(root.filePath("b/" + wav), 16384));
+    const auto chartPathA = root.filePath("a/active.bms");
+    const auto chartPathB = root.filePath("b/reference.bms");
+
+    auto& registry = beatbench::edit::session_registry();
+    constexpr auto idA = "audio-preview-active";
+    constexpr auto idB = "audio-preview-reference";
+    const auto previous = registry.active_id();
+    ASSERT_TRUE(registry.create(idA));
+    const auto closeA = qScopeGuard([&] {
+        registry.activate(previous);
+        registry.close(idA);
+    });
+    ASSERT_TRUE(registry.create(idB, false));
+    const auto closeB = qScopeGuard([&] { registry.close(idB); });
+    beatbench::Chart chart;
+    chart.samples[{beatbench::SampleKind::Wav, 1}].file = wav.toStdString();
+    registry.by_id(idA)->load(chart, chartPathA.toStdString());
+    registry.by_id(idB)->load(std::move(chart), chartPathB.toStdString());
+    ChartSession a, b;
+    a.setSessionId(QString::fromLatin1(idA));
+    b.setSessionId(QString::fromLatin1(idB));
+
+    auto engine = makeEngine();
+    ASSERT_GE(engine->metaObject()->indexOfMethod("playReferenceNotePreview(QObject*,int)"), 0);
+    ASSERT_GE(engine->metaObject()->indexOfMethod("stopReferenceNotePreview()"), 0);
+    engine->setChartSession(&a);
+    engine->setChartPath(a.path());
+    ASSERT_TRUE(AudioEngineTestAccess::playMain(*engine, pcm()));
+    constexpr float main = 0.25f;
+    constexpr float noteA = 0.125f;
+    constexpr float noteB = 0.5f;
+    constexpr float master = 0.35f;
+
+    ASSERT_TRUE(engine->playPreview(a.wavFileOfId(1)));
+    ASSERT_TRUE(finishPreviewDecode(*engine));
+    EXPECT_NEAR(fake->render(512)[600], (main + noteA) * master, 0.0001f);
+    const auto beforeB = engine->positionSec();
+    const auto mainDuration = engine->durationSec();
+
+    // 同 ID、同文件名；输出必须来自 B，而 A 的播放不暂停也不换 PCM。
+    ASSERT_TRUE(engine->playReferenceNotePreview(&b, 1));
+    ASSERT_TRUE(finishPreviewDecode(*engine));
+    EXPECT_NEAR(fake->render(512)[600], (main + noteB) * master, 0.0001f);
+    engine->stopReferenceNotePreview();
+    EXPECT_NEAR(fake->render(512)[600], main * master, 0.0001f);
+    EXPECT_TRUE(engine->playing());
+    EXPECT_EQ(engine->durationSec(), mainDuration);
+    EXPECT_GT(engine->positionSec(), beforeB);
+
+    // B 试听后再走 A 的相对路径；B 的 stop 不得取消待交付或已播出的 A。
+    ASSERT_TRUE(engine->playPreview(a.wavFileOfId(1)));
+    engine->stopReferenceNotePreview();
+    ASSERT_TRUE(finishPreviewDecode(*engine));
+    EXPECT_NEAR(fake->render(512)[600], (main + noteA) * master, 0.0001f);
+    engine->stopReferenceNotePreview();
+    EXPECT_NEAR(fake->render(512)[600], (main + noteA) * master, 0.0001f);
+}
+
+TEST_F(AudioEngineTest, UnnamedReferenceNotePreviewRequiresAbsolutePath) {
+    QTemporaryDir dir(QDir(previewBase()).filePath("reference-unnamed-XXXXXX"));
+    ASSERT_TRUE(dir.isValid());
+    const QDir root(dir.path());
+    ASSERT_TRUE(root.mkdir("active"));
+    const auto absolute = root.filePath("audition.wav");
+    ASSERT_TRUE(writePreviewWav(absolute, 16384));
+    ASSERT_TRUE(writePreviewWav(root.filePath("active/audition.wav"), 4096));
+
+    // 无路径的文档不能借 A 的目录，也不能把当前工作目录当成谱面目录。
+    const auto oldCwd = QDir::currentPath();
+    const auto restoreCwd = qScopeGuard([&] { EXPECT_TRUE(QDir::setCurrent(oldCwd)); });
+    ASSERT_TRUE(QDir::setCurrent(root.absolutePath()));
+
+    auto& registry = beatbench::edit::session_registry();
+    constexpr auto id = "audio-preview-unnamed";
+    ASSERT_TRUE(registry.create(id, false));
+    const auto close = qScopeGuard([&] { registry.close(id); });
+    beatbench::Chart chart;
+    chart.samples[{beatbench::SampleKind::Wav, 1}].file = "audition.wav";
+    chart.samples[{beatbench::SampleKind::Wav, 2}].file = absolute.toStdString();
+    registry.by_id(id)->load(std::move(chart));
+    ChartSession b;
+    b.setSessionId(QString::fromLatin1(id));
+    ASSERT_TRUE(b.path().isEmpty());
+
+    auto engine = makeEngine();
+    engine->setChartPath(root.filePath("active/active.bms"));
+    EXPECT_FALSE(engine->playReferenceNotePreview(&b, 1));
+    ASSERT_TRUE(finishPreviewDecode(*engine));
+    const auto silent = fake->render(512);
+    EXPECT_TRUE(std::all_of(silent.begin(), silent.end(), [](float v) { return v == 0.0f; }));
+
+    ASSERT_TRUE(engine->playReferenceNotePreview(&b, 2));
+    ASSERT_TRUE(finishPreviewDecode(*engine));
+    EXPECT_NEAR(fake->render(512)[600], 0.5f * 0.35f, 0.0001f);
 }
 
 TEST_F(AudioEngineTest, CancelWhileDecoderBlockedCannotStartLaterAndReleasesOnGui) {

@@ -151,8 +151,27 @@ AudioEngine::~AudioEngine() {
 }
 
 bool AudioEngine::playPreview(const QString& file) {
-    stopPreview();
-    const auto generation = m_previewGeneration;
+    return playPreviewFrom(file, m_sourceDir, false);
+}
+
+bool AudioEngine::playReferenceNotePreview(QObject* owner, int sampleId) {
+    const auto* session = qobject_cast<ChartSession*>(owner);
+    if (!session) return false;
+    const auto file = session->wavFileOfId(sampleId);
+    const auto path = session->path();
+    if (file.isEmpty() || (path.isEmpty() && QDir::isRelativePath(file))) return false;
+    const auto dir = path.isEmpty() ? QString{} : QFileInfo(path).absolutePath();
+    return playPreviewFrom(file, dir, true);
+}
+
+void AudioEngine::stopReferenceNotePreview() {
+    if (m_referenceNotePreview) stopPreview();
+}
+
+bool AudioEngine::playPreviewFrom(const QString& file, const QString& sourceDir,
+                                  bool referenceNote) {
+    // A 保留先停后播；B 无可用采样时不能打断 A 的试听。
+    if (!referenceNote) stopPreview();
     if (!m_initialized) {
         m_statusText = QStringLiteral("音频不可用（后端初始化失败）");
         emit statusTextChanged();
@@ -167,14 +186,18 @@ bool AudioEngine::playPreview(const QString& file) {
     // #WAV 定义 `kick.wav` 实际文件 `kick.ogg`——定义扩展名不等于磁盘扩展名（2026-09 用户实测）。
     // 原路径不存在 → 按相同 basename 试其它音频扩展名（ogg/mp3/flac/wav）。
     QString resolved = file;
-    if (QDir::isRelativePath(file) && !m_sourceDir.isEmpty())
-        resolved = QDir(m_sourceDir).filePath(file);
+    if (QDir::isRelativePath(file) && !sourceDir.isEmpty())
+        resolved = QDir(sourceDir).filePath(file);
     const QString absPath = resolveAudioPath(resolved);
     if (absPath.isEmpty()) {
         m_statusText = QStringLiteral("文件缺失：%1").arg(file);
         emit statusTextChanged();
         return false;
     }
+
+    if (referenceNote) stopPreview();
+    m_referenceNotePreview = referenceNote;
+    const auto generation = m_previewGeneration;
 
     // 异步解码（不卡 UI；**走 SampleCache**——同一文件重复播放不重复解码）：
     // get_w 命中返回（+1 引用，调用方持有）；未命中 = 本线程解码（QThreadPool
@@ -231,6 +254,7 @@ void AudioEngine::completePreviewDecodes() {
 }
 
 void AudioEngine::stopPreview() {
+    m_referenceNotePreview = false;
     ++m_previewGeneration;
     m_previewPool.clear();  // Discard jobs not yet started; running decodes publish stale results.
     m_previewDecoding = false;

@@ -40,11 +40,34 @@ QtObject {
     property bool allowPreview: false
     property var previewFiles: []
     property int previewStops: 0
-    function stopPreview() { previewStops++ }
+    property string previewFile: ""
+    function stopPreview() { previewStops++; previewFile = ""; referenceNotePreview = null }
     function playPreview(file) {
         if (!allowPreview) { unexpected(); return false }
         previewFiles = previewFiles.concat([file])
+        referenceNotePreview = null
+        previewFile = file
         return true
+    }
+
+    property var referenceNotePreviewCalls: []
+    property var referenceNotePreview: null
+    property int referenceNotePreviewStops: 0
+    function playReferenceNotePreview(session, sampleId) {
+        // 先记录实际 API 调用；未定义的 ID 也应抵达 C++，由其决定静音。
+        const call = { path: session ? session.path : "", sampleId: sampleId,
+                       file: session ? session.wavFileOfId(sampleId) : "" }
+        referenceNotePreviewCalls = referenceNotePreviewCalls.concat([call])
+        if (call.file === "") return false
+        // 与生产一致：A/B 共用一个单音试听通道，不与整曲播放共用。
+        previewFile = ""
+        referenceNotePreview = call
+        return true
+    }
+    function stopReferenceNotePreview() {
+        if (referenceNotePreview === null) return
+        referenceNotePreviewStops++
+        referenceNotePreview = null
     }
     function refTogglePlay() { unexpected() }
     function refStop() { unexpected() }

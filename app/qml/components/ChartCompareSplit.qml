@@ -13,6 +13,14 @@ Item {
     property var managedDragController: null
     property var referenceEditContext: null
     property var referenceEditOperations: null
+    property var referenceAudition: null
+    function stopReferenceAudition() {
+        if (referenceAudition) referenceAudition.stopReferenceNotePreview()
+    }
+    Connections {
+        target: root.referenceEditContext
+        function onSelectionChanged() { root.stopReferenceAudition() }
+    }
     property int snapNum: 1
     property int snapDen: 16
     property bool moveMode: false
@@ -30,6 +38,7 @@ Item {
     readonly property bool referenceEditable: referenceEditContext !== null
         && referenceEditOperations !== null && referenceEditContext.available
         && expanded && visible && !overlayMode
+    onReferenceEditableChanged: if (!referenceEditable) stopReferenceAudition()
     Binding { target: root.referenceEditContext; property: "sessionId"; value: root.referenceDocumentId; when: root.referenceEditContext !== null }
     Binding { target: root.referenceEditContext; property: "editable"; value: root.referenceEditable; when: root.referenceEditContext !== null }
     property var primarySession: null
@@ -365,6 +374,7 @@ Item {
             swapRequested(referenceDocumentId)
     }
     onReferenceSessionChanged: {
+        stopReferenceAudition()
         if (!root.referenceEditContext) {
             referenceChart.selection = []
             referenceChart.metaSelection = []
@@ -508,7 +518,12 @@ Item {
                         else { metaSelection = [obj]; selection = [] }
                     }
                     onEditAreaPressed: root.areaPressed()
-                    // B 不接试听消费者；播放来源与 Dock 仍归 A。
+                    // 试听使用命中的 B 文档；整曲播放来源与 Dock 仍归 A。
+                    onPlayNoteSample: (ref) => {
+                        if (root.referenceEditable && root.referenceAudition && root.referenceSession && ref)
+                            root.referenceAudition.playReferenceNotePreview(root.referenceSession, ref.sample)
+                    }
+                    onSamplePreviewStopRequested: root.stopReferenceAudition()
                 }
                 Label {
                     Layout.fillWidth: true

@@ -69,6 +69,10 @@ class AudioEngine : public QObject {
     /// 试听一个采样文件（相对 = 谱面目录；绝对路径直接用）。
     /// 返回 false = 立即失败（文件缺失/格式不支持/无文档）；解码失败异步报 statusText。
     Q_INVOKABLE bool playPreview(const QString& file);
+    /// 分栏 B 单音试听：只从传入文档取 WAV 定义与路径，不改变主播放来源。
+    Q_INVOKABLE bool playReferenceNotePreview(QObject* owner, int sampleId);
+    /// 仅取消 B 音符的试听，不影响 A 的试听或主播放。
+    Q_INVOKABLE void stopReferenceNotePreview();
 
     /// Cancel pending decode and audition only; main/reference playback is preserved.
     Q_INVOKABLE void stopPreview();
@@ -229,6 +233,7 @@ class AudioEngine : public QObject {
     void resolveSavedDevice();
     void pauseForStreamChange();
     void setSettingsError(const QString& error);
+    bool playPreviewFrom(const QString& file, const QString& sourceDir, bool referenceNote);
     void completePreviewDecodes();
 
     /// 回调上下文（render 直达内核；deviceRate 更新一次，原子读）
@@ -256,6 +261,7 @@ class AudioEngine : public QObject {
     std::vector<PreviewDecode> m_previewResults;
     std::uint64_t m_previewGeneration = 0;
     bool m_previewDecoding = false;
+    bool m_referenceNotePreview = false;
     RenderCtx m_renderCtx;
     QString m_sourceDir;  ///< 谱面目录（绝对路径；空 = 未打开）
     std::atomic<bool> m_busy{false};
