@@ -397,6 +397,11 @@ TestCase {
         const page = bindingSetup()
         const inline = mainFixture.objectNamed(page, "projectInlineWavBinding")
         verify(inline !== null)
+        const fileInput = mainFixture.objectNamed(inline, "projectWavFileInput")
+        const update = mainFixture.objectNamed(inline, "projectWavUpdateButton")
+        verify(fileInput !== null && update !== null)
+        compare(fileInput.font.family, update.contentItem.font.family)
+        compare(fileInput.font.pixelSize, update.contentItem.font.pixelSize)
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
         inline.wavId = "01"; inline.fileName = "first.wav"
@@ -2422,6 +2427,9 @@ TestCase {
         const titleB = mainFixture.objectNamed(main, "referencePaneTitle")
         verify(titleA !== null && titleA.visible)
         verify(titleB !== null && titleB.visible)
+        const toggle = mainFixture.objectNamed(main, "overlayModeButton")
+        verify(toggle !== null)
+        compare(titleA.font.family, toggle.contentItem.font.family)
         compare(titleA.font.family, titleB.font.family)
         compare(titleA.font.pixelSize, titleB.font.pixelSize)
         tryVerify(() => Math.abs(titleA.mapToItem(split, 0, titleA.baselineOffset).y

@@ -5,11 +5,11 @@ import QtQuick.Controls
 Label {
     id: root
     property bool paneActive: false
-    leftPadding: 4
-    rightPadding: 4
-    topPadding: 3
-    bottomPadding: 3
-    font.family: Theme.fontMono
+    leftPadding: 2
+    rightPadding: 2
+    topPadding: 1
+    bottomPadding: 1
+    font.family: Theme.fontSans
     font.pixelSize: Theme.fsSmall
     color: paneActive ? Theme.focusRing : Theme.textMuted
     background: Rectangle {

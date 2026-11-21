@@ -432,7 +432,7 @@ Item {
                     Rectangle {
                         visible: !compareSplit.overlayMode
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
+                        Layout.preferredHeight: compareSplit.headerHeight
                         color: Theme.surface
                         RowLayout {
                             anchors.fill: parent
@@ -449,19 +449,18 @@ Item {
                             }
                             ChartPaneTitle {
                                 objectName: "primaryPaneTitle"
-                                text: qsTr("A · 编辑")
+                                text: qsTr("A 编辑")
                                 paneActive: !compareSplit.referenceFocused
                             }
                             Label {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 elide: Text.ElideRight
-                                leftPadding: 8
                                 text: qsTr("%1 · %2 · %3/%4 snap")
                                       .arg(root.chartPath ? root.chartPath.replace(/\\/g, "/").split("/").pop() : qsTr("未命名"))
                                       .arg(root.modeLabel).arg(root.snapNum).arg(root.snapDen)
                                 color: Theme.textMuted
-                                font.family: Theme.fontMono
+                                font.family: Theme.fontSans
                                 font.pixelSize: Theme.fsSmall
                                 textFormat: Text.PlainText
                                 HoverHandler { id: primaryHeaderHover }
@@ -473,7 +472,7 @@ Item {
                                       ? qsTr("BPM %1").arg(root.chartMeta.BPM !== undefined ? root.chartMeta.BPM : "—")
                                       : qsTr("打开谱面开始编辑（Ctrl+O）")
                                 color: root.chartMeta ? Theme.accent : Theme.textFaint
-                                font.family: Theme.fontMono
+                                font.family: Theme.fontSans
                                 font.pixelSize: Theme.fsSmall
                             }
                         }

@@ -61,7 +61,6 @@ RowLayout {
         Layout.fillWidth: true
         Layout.minimumWidth: 40
         placeholderText: qsTr("文件名（相对项目根）")
-        font.family: Theme.fontMono
         onTextChanged: root.invalidate()
         onAccepted: root.updateBinding()
     }

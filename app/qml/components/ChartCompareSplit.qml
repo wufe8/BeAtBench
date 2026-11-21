@@ -41,6 +41,7 @@ Item {
     // 窗口变窄时只钳制显示宽度，不覆盖比例，放宽后自动恢复。
     property real referenceShare: 0
     readonly property real dividerWidth: 4
+    readonly property int headerHeight: 28
     readonly property real usableWidth: Math.max(0, width - dividerWidth)
     readonly property real minimumPrimaryWidth: Math.min(240, usableWidth)
     onUsableWidthChanged: applyReferenceShare()
@@ -82,7 +83,7 @@ Item {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 30
+        height: root.headerHeight
         visible: root.overlayMode
     }
     property Item referenceControls: Rectangle {
@@ -103,12 +104,13 @@ Item {
             ChartPaneTitle {
                 objectName: "referencePaneTitle"
                 visible: !root.overlayMode
-                text: root.referenceEditable ? qsTr("B · 编辑") : qsTr("B · 只读")
+                text: root.referenceEditable ? qsTr("B 编辑") : qsTr("B 只读")
                 paneActive: root.referenceFocused
             }
             Label {
                 visible: root.overlayMode
                 text: qsTr("A 编辑 / B 参考")
+                font.family: Theme.fontSans
                 color: Theme.accent2
                 font.pixelSize: Theme.fsSmall
             }
@@ -389,7 +391,7 @@ Item {
         id: split
         parent: root
         anchors.fill: parent
-        anchors.topMargin: root.overlayMode ? 30 : 0
+        anchors.topMargin: root.overlayMode ? root.headerHeight : 0
         orientation: Qt.Horizontal
         onResizingChanged: if (!resizing) root.settleSplit()
         handle: Rectangle {
@@ -424,7 +426,7 @@ Item {
                 Item {
                     id: referenceHeaderHost
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 30
+                    Layout.preferredHeight: root.headerHeight
                 }
                 ChartView {
                     id: referenceChart
