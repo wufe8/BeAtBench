@@ -37,18 +37,32 @@ Item {
     property bool overlayMode: false
     property bool overlayVisible: true
     property real overlayOpacity: 0.45
-    property real _splitReferenceWidth: 0
+    // SplitView 拖动会写像素 preferredWidth；松手后把实际宽度记为比例。
+    // 窗口变窄时只钳制显示宽度，不覆盖比例，放宽后自动恢复。
+    property real referenceShare: 0
+    readonly property real dividerWidth: 4
+    readonly property real usableWidth: Math.max(0, width - dividerWidth)
+    readonly property real minimumPrimaryWidth: Math.min(240, usableWidth)
+    onUsableWidthChanged: applyReferenceShare()
+    onReferenceShareChanged: applyReferenceShare()
+    function applyReferenceShare() {
+        if (!secondary || overlayMode || split.resizing) return
+        secondary.SplitView.preferredWidth = Math.min(usableWidth - minimumPrimaryWidth,
+                                                      Math.round(usableWidth * referenceShare))
+    }
     property var _modeAnchor: null
     property real _modePlayhead: -1
     function setOverlayMode(value) {
         if (overlayMode === value) return
         _modeAnchor = primaryChartView ? primaryChartView.viewportItem.viewportAnchor : null
         _modePlayhead = primaryChartView ? primaryChartView.playheadSec : -1
-        if (value) { _splitReferenceWidth = referenceWidth; ensureReference() }
+        if (value) ensureReference()
         overlayMode = value
         referenceFocused = false
-        if (!value) secondary.SplitView.preferredWidth = _splitReferenceWidth >= 120
-                ? _splitReferenceWidth : Math.max(160, root.width / 2)
+        if (!value) {
+            if (referenceShare === 0) referenceShare = 0.5
+            applyReferenceShare()
+        }
         presentationTimer.restart()
     }
     property Timer presentationTimer: Timer {
@@ -86,14 +100,21 @@ Item {
                 text: qsTr("A/B 分栏")
                 onClicked: root.setOverlayMode(false)
             }
+            ChartPaneTitle {
+                objectName: "referencePaneTitle"
+                visible: !root.overlayMode
+                text: root.referenceEditable ? qsTr("B · 编辑") : qsTr("B · 只读")
+                paneActive: root.referenceFocused
+            }
             Label {
-                text: root.overlayMode ? qsTr("A 编辑 / B 参考") : root.referenceEditable ? qsTr("B · 编辑") : qsTr("B · 只读")
-                color: root.overlayMode ? Theme.accent2 : Theme.textMuted
+                visible: root.overlayMode
+                text: qsTr("A 编辑 / B 参考")
+                color: Theme.accent2
                 font.pixelSize: Theme.fsSmall
             }
             BbComboBox {
                 id: selector
-                onActiveFocusChanged: if (activeFocus) root.referenceFocused = true
+                onActiveFocusChanged: if (activeFocus && root.expanded) root.referenceFocused = true
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 model: root.choices
@@ -111,6 +132,7 @@ Item {
             BbCheckBox {
                 visible: !root.overlayMode
                 objectName: "synchronizeViewportsCheck"
+                onActiveFocusChanged: if (activeFocus && root.expanded) root.referenceFocused = true
                 text: qsTr("同步")
                 checked: root.synchronizeViewports
                 onToggled: root.synchronizeViewports = checked
@@ -148,14 +170,14 @@ Item {
             BbToolButton {
                 text: qsTr("交换")
                 enabled: root.referenceSession !== null && root.referenceSession !== root.primarySession
-                onActiveFocusChanged: if (activeFocus) root.referenceFocused = true
+                onActiveFocusChanged: if (activeFocus && root.expanded) root.referenceFocused = true
                 onClicked: root.requestSwap()
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("交换 A/B：A 为保存、播放和 Dock 来源")
             }
             BbToolButton {
                 text: "×"
-                onActiveFocusChanged: if (activeFocus) root.referenceFocused = true
+                onActiveFocusChanged: if (activeFocus && root.expanded) root.referenceFocused = true
                 onClicked: root.collapse()
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("收起对照（不关闭文档）")
@@ -273,6 +295,7 @@ Item {
     }
     readonly property var referenceView: referenceChart
     readonly property bool expanded: !overlayMode && secondary.width > 0
+    onExpandedChanged: if (!expanded) referenceFocused = false
     readonly property real referenceWidth: overlayMode ? 0 : secondary.width
     readonly property var choices: {
         let rows = [{ id: "", text: qsTr("选择已打开谱面"), path: "" }]
@@ -294,7 +317,10 @@ Item {
     }
     onChoicesChanged: Qt.callLater(root.syncSelector)
     onReferenceDocumentIdChanged: Qt.callLater(root.syncSelector)
-    Component.onCompleted: syncSelector()
+    Component.onCompleted: {
+        syncSelector()
+        applyReferenceShare()
+    }
 
     function selectReference(id) {
         if (id === "") { referenceDocumentId = ""; return true }
@@ -305,7 +331,7 @@ Item {
     }
     function openReference(id) {
         if (!id || !selectReference(id)) return false
-        if (!expanded && !overlayMode) secondary.SplitView.preferredWidth = Math.max(160, root.width / 2)
+        if (referenceShare === 0 && !overlayMode) referenceShare = 0.5
         return true
     }
     function ensureReference() {
@@ -321,12 +347,16 @@ Item {
     function collapse() {
         if (overlayMode) setOverlayMode(false)
         referenceFocused = false
-        secondary.SplitView.preferredWidth = 0
+        referenceShare = 0
+        applyReferenceShare()
     }
     function settleSplit() {
         if (overlayMode) return
         if (secondary.width < 120) collapse()
-        else ensureReference()
+        else {
+            referenceShare = secondary.width / usableWidth
+            ensureReference()
+        }
     }
     function requestSwap() {
         if (referenceSession && referenceSession !== primarySession)
@@ -363,7 +393,7 @@ Item {
         orientation: Qt.Horizontal
         onResizingChanged: if (!resizing) root.settleSplit()
         handle: Rectangle {
-            implicitWidth: 4
+            implicitWidth: root.dividerWidth
             color: Theme.border
             HoverHandler { id: hover; cursorShape: parent.enabled ? Qt.SplitHCursor : Qt.ArrowCursor }
             Rectangle {
@@ -377,7 +407,7 @@ Item {
         Item {
             id: primary
             SplitView.fillWidth: true
-            SplitView.minimumWidth: Math.min(240, Math.max(0, split.width - 4))
+            SplitView.minimumWidth: root.minimumPrimaryWidth
             clip: true
         }
         Item {
@@ -386,7 +416,7 @@ Item {
             enabled: root.expanded
             SplitView.preferredWidth: 0
             SplitView.minimumWidth: 0
-            SplitView.maximumWidth: Math.max(0, split.width - 244)
+            SplitView.maximumWidth: root.usableWidth - root.minimumPrimaryWidth
             clip: true
             ColumnLayout {
                 anchors.fill: parent

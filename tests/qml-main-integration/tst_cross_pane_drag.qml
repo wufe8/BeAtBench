@@ -46,7 +46,7 @@ TestCase {
         split = mainFixture.findProperty(main, "referenceDocumentId")
         verify(split !== null)
         split.synchronizeViewports = false
-        split.splitLayout.itemAt(1).SplitView.preferredWidth = 500
+        split.referenceShare = 500 / split.usableWidth
         verify(split.selectReference(sameDocument ? a : b))
         tryVerify(() => split.referenceWidth > 450)
         primary = mainFixture.primaryView(main)

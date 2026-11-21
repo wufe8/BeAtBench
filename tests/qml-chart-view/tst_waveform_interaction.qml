@@ -52,7 +52,7 @@ Item {
             split.synchronizeViewports = false
             split.hideSecondaryChannels = false
             verify(split.selectReference("chart-view-binding-b"))
-            split.splitLayout.itemAt(1).SplitView.preferredWidth = 480
+            split.referenceShare = 480 / split.usableWidth
             tryVerify(() => split.referenceWidth > 400)
             source = split.primaryView
             wave = bindingFixture.childrenOf(source).waveform

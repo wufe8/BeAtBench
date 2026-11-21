@@ -59,6 +59,7 @@ Item {
             verify(selector !== null, "Find the actual production BbComboBox")
             compare(split.expanded, false)
             compare(split.referenceWidth, 0)
+            compare(split.referenceShare, 0)
             compare(split.primarySession, compareDocuments.session(aId))
             swapSpy.clear()
             placeSpy.clear()
@@ -95,6 +96,10 @@ Item {
             for (let n = 1; n <= 12; ++n)
                 mouseMove(split, from + (to - from) * n / 12, y, 10)
             mouseRelease(split, to, y, Qt.LeftButton)
+        }
+        function expectReferenceWidth(width) {
+            tryVerify(() => Math.abs(split.referenceWidth - width) <= 1,
+                      2000, "Expected B width near " + width + " px")
         }
         function expand() {
             dragToWidth(480)
@@ -488,6 +493,7 @@ Item {
             dragToWidth(70)
             tryCompare(split, "expanded", false)
             tryCompare(split, "referenceWidth", 0)
+            compare(split.referenceShare, 0)
             compare(split.referenceDocumentId, bId)
             compare(split.referenceSession, session)
             expand()
@@ -497,6 +503,52 @@ Item {
             tryCompare(split, "expanded", false)
             expand()
             compare(compareDocuments.activeId(), aId)
+        }
+
+        function test_dragged_share_survives_resize_clamp_overlay_and_collapse() {
+            const wide = split.width
+            compare(split.usableWidth, wide - 4)
+            dragToWidth(620)
+            // Derive the percentage from the realized drag geometry, not its requested endpoint.
+            tryVerify(() => split.referenceWidth > 580 && split.referenceWidth < 660)
+            tryCompare(split, "referenceDocumentId", bId)
+            const draggedWidth = split.referenceWidth
+            const share = split.referenceShare
+            fuzzyCompare(share, draggedWidth / (wide - 4), 0.000001)
+
+            split.width = 900
+            expectReferenceWidth((900 - 4) * share)
+            // A resize may leave B below the drag-to-collapse threshold without forgetting it.
+            split.width = 360
+            compare(split.usableWidth, 356)
+            tryCompare(split, "referenceWidth", 116)
+            tryCompare(split.primaryView, "width", 240)
+            compare(split.expanded, true)
+            compare(split.referenceShare, share)
+            split.width = wide
+            expectReferenceWidth(draggedWidth)
+
+            split.setOverlayMode(true)
+            tryCompare(split, "expanded", false)
+            compare(split.referenceWidth, 0)
+            compare(split.referenceShare, share)
+            split.width = 800
+            tryCompare(split.primaryView, "width", 800)
+            split.setOverlayMode(false)
+            expectReferenceWidth((800 - 4) * share)
+            compare(split.referenceShare, share)
+            compare(split.referenceSession, compareDocuments.session(bId))
+
+            split.setOverlayMode(true)
+            split.collapse()
+            tryCompare(split, "overlayMode", false)
+            tryCompare(split, "referenceWidth", 0)
+            compare(split.referenceShare, 0)
+            split.width = wide
+            tryCompare(split.primaryView, "width", wide - 4)
+            compare(split.referenceWidth, 0)
+            compare(split.expanded, false)
+            compare(split.referenceDocumentId, bId)
         }
 
         function test_actual_selector_mouse_unnamed_and_binding_sync() {

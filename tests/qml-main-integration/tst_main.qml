@@ -39,8 +39,9 @@ TestCase {
         wait(0) // Flush obsolete Repeater delegates from initial component creation/reload.
         split = mainFixture.findProperty(main, "referenceDocumentId")
         verify(split !== null)
-        // Open the production SplitView with the same attached width used by dragging.
-        split.splitLayout.itemAt(1).SplitView.preferredWidth = 360
+        // Start other integration tests with a predictable initial B viewport.
+        tryVerify(() => split.usableWidth > 0)
+        split.referenceShare = 360 / split.usableWidth
         verify(split.selectReference(b))
         tryVerify(function() { return split.referenceWidth > 250 })
         tryCompare(main, "chartEditingAllowed", true)
@@ -939,7 +940,7 @@ TestCase {
         activeChanges.clear()
         projectAction(sb.path, "对照 B")
         compare(main.currentPage, 3)
-        verify(split.splitLayout.itemAt(1).SplitView.preferredWidth > 0)
+        compare(split.referenceShare, 0.5)
         main.currentPage = 0 // Hidden SplitView defers layout until the editor is shown.
         tryCompare(split, "expanded", true)
         compare(split.referenceDocumentId, b)
@@ -964,7 +965,7 @@ TestCase {
         activeChanges.clear()
         projectAction(path, "对照 B")
         compare(main.currentPage, 3)
-        verify(split.splitLayout.itemAt(1).SplitView.preferredWidth > 0)
+        compare(split.referenceShare, 0.5)
         main.currentPage = 0 // Hidden SplitView defers layout until the editor is shown.
         tryCompare(split, "expanded", true)
         const id = split.referenceDocumentId
@@ -1091,6 +1092,30 @@ TestCase {
         clickButton(main, "同屏叠加")
         tryCompare(split, "overlayMode", true)
         tryCompare(mainFixture.primaryView(main), "referenceOverlayEnabled", true)
+    }
+    function test_openReference_defaults_to_half_and_tracks_window_resize() {
+        start(false)
+        split.collapse()
+        tryCompare(split, "expanded", false)
+        verify(split.openReference(b))
+        tryCompare(split, "expanded", true)
+        compare(split.referenceShare, 0.5)
+        compare(split.referenceSession, documents.session(b))
+
+        const initialWindowWidth = main.width
+        const initialSplitWidth = split.width
+        tryVerify(() => Math.abs(split.referenceWidth - (initialSplitWidth - 4) / 2) <= 1)
+
+        main.width = initialWindowWidth - 160
+        tryVerify(() => split.width < initialSplitWidth
+                  && Math.abs(split.referenceWidth - (split.width - 4) / 2) <= 1)
+        compare(split.referenceShare, 0.5)
+
+        main.width = initialWindowWidth
+        tryCompare(split, "width", initialSplitWidth)
+        tryVerify(() => Math.abs(split.referenceWidth - (initialSplitWidth - 4) / 2) <= 1)
+        compare(split.referenceShare, 0.5)
+        compare(documents.activeId(), a)
     }
     function test_overlayMode_switch_stays_at_header_left() {
         start(false)
@@ -2392,6 +2417,19 @@ TestCase {
     }
     function test_referenceFocus_routesRealDeleteAndUndoWithoutChangingA() {
         start(false)
+        const primary = mainFixture.primaryView(main)
+        const titleA = mainFixture.objectNamed(main, "primaryPaneTitle")
+        const titleB = mainFixture.objectNamed(main, "referencePaneTitle")
+        verify(titleA !== null && titleA.visible)
+        verify(titleB !== null && titleB.visible)
+        compare(titleA.font.family, titleB.font.family)
+        compare(titleA.font.pixelSize, titleB.font.pixelSize)
+        tryVerify(() => Math.abs(titleA.mapToItem(split, 0, titleA.baselineOffset).y
+                               - titleB.mapToItem(split, 0, titleB.baselineOffset).y) <= 1,
+                  2000, "The pane titles share a text baseline")
+        compare(titleA.paneActive, true)
+        compare(titleB.paneActive, false)
+        compare(main.referenceActionTarget, false)
         main.editorTool = "select"
         main.selectionRefs = [{measure: 1, pos: {num: 0, den: 1}, sample: 1,
                               lane: {player: 0, kind: "key", index: 1}}]
@@ -2400,6 +2438,9 @@ TestCase {
         const note = auditionPoint(split.referenceView, true, 2)
         mouseClick(split.referenceView, note.x, note.y)
         tryCompare(split, "referenceFocused", true)
+        compare(main.referenceActionTarget, true)
+        compare(titleA.paneActive, false)
+        compare(titleB.paneActive, true)
         compare(main.chartEditingAllowed, true)
         compare(main.referenceEditContext.sessionId, b)
         compare(main.referenceEditContext.selection.length, 1)
@@ -2420,8 +2461,16 @@ TestCase {
         compare(mainFixture.snapshot(b).notes, sb.notes)
         compare(mainFixture.snapshot(a), sa)
         compare(main.referenceEditContext.selection.length, 0)
-        compare(mainFixture.primaryView(main).documentSession, chartSession)
+        compare(primary.documentSession, chartSession)
         compare(split.referenceView.documentSession, documents.session(b))
+
+        const primaryNote = auditionPoint(primary, true)
+        mouseClick(primary, primaryNote.x, primaryNote.y)
+        tryCompare(split, "referenceFocused", false)
+        compare(main.referenceActionTarget, false)
+        compare(titleA.paneActive, true)
+        compare(titleB.paneActive, false)
+        compare(mainFixture.snapshot(a), sa)
         compare(audioEngine.previewFiles.length, 0)
     }
     function test_referencePlacement_preservesLiteralInDestinationBase_data() {

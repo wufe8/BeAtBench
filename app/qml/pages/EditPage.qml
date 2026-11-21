@@ -437,8 +437,8 @@ Item {
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 4
-                            anchors.rightMargin: 12
-                            spacing: 12
+                            anchors.rightMargin: 4
+                            spacing: 4
                             BbToolButton {
                                 objectName: "overlayModeButton"
                                 text: qsTr("同屏叠加")
@@ -447,11 +447,17 @@ Item {
                                 ToolTip.visible: hovered
                                 ToolTip.text: qsTr("在 A 下方绘制半透明 B 参考音符，不计算差异；仅 A 可编辑和播放")
                             }
+                            ChartPaneTitle {
+                                objectName: "primaryPaneTitle"
+                                text: qsTr("A · 编辑")
+                                paneActive: !compareSplit.referenceFocused
+                            }
                             Label {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 elide: Text.ElideRight
-                                text: qsTr("A · 编辑 · %1 · %2 · %3/%4 snap")
+                                leftPadding: 8
+                                text: qsTr("%1 · %2 · %3/%4 snap")
                                       .arg(root.chartPath ? root.chartPath.replace(/\\/g, "/").split("/").pop() : qsTr("未命名"))
                                       .arg(root.modeLabel).arg(root.snapNum).arg(root.snapDen)
                                 color: Theme.textMuted
