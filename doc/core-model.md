@@ -83,7 +83,8 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
 
 > note 移动逻辑的单一权威说明；厘清“轨道类别”与“note 类型”的关系，
 > 便于将来导入其它格式时判断扩展点。实现细则（函数行为、参数表）以
-> `app/bridge/ChartViewItem.hpp` 头注释与实现处注释为准。
+> [视口](<../app/bridge/ChartViewItem.hpp>)、[移动计划](<../app/bridge/NoteMovePlan.hpp>)与
+> [窗格拖动控制器](<../app/bridge/PaneDragController.hpp>)的头注释与实现处注释为准。
 
 ### 1. 两个 kind 必须区分
 
