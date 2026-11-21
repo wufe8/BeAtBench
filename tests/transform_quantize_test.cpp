@@ -259,6 +259,62 @@ TEST(TransformQuantize, ProtocolQuantizePreservesBgmSubLineAndSourceKind) {
     check(true);
 }
 
+TEST(TransformQuantize, MeasureEndQuantizeWritesBackupAndKeepsBgmSubLine) {
+    const std::string original =
+        "#BPM 120\n#00101:0000\n"
+        "#00101:00000000000000000000000000000002\n"
+        "#00111:00000000000000000000000000000100\n";
+    auto& registry = session_registry();
+    constexpr auto id = "measure-end-quantize-test";
+    ASSERT_TRUE(registry.create(id, false));
+    auto* entry = registry.by_id(id);
+    const auto cleanup = [&](EditorSession*) { registry.close(id); };
+    const std::unique_ptr<EditorSession, decltype(cleanup)> owned(entry, cleanup);
+    auto& session = *entry;
+    std::string backup;
+    session.load(bms::read_bms(original).chart, "quantize-test.bms");
+    ASSERT_EQ(session.chart().notes.size(), 2u);
+    const auto before = norm_notes(session.chart().notes);
+    session.set_persist_hook([&backup](const Chart& c, const std::string& path, std::string*) {
+        EXPECT_EQ(path, "quantize-test.bms.bak");
+        backup = bms::write_bms(c);
+        return true;
+    });
+    session.set_backup_enabled(true);
+    const auto request = Json::parse(R"({"command":"note.quantize","args":{
+        "session_id":"measure-end-quantize-test",
+        "selection":[
+            {"measure":1,"pos":[14,16],"lane":{"player":0,"kind":"key","index":1},"sample":1},
+            {"measure":1,"pos":[15,16],"lane":{"player":0,"kind":"bgm","index":0},"sample":2,"sub_line":1}
+        ],"snap":[1,4]}})");
+    const auto response = global_registry().dispatch(request);
+    ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
+    const auto& result = response.at("result");
+    ASSERT_TRUE(result.at("ok").as_bool());
+    ASSERT_EQ(result.at("selection").size(), 2u);
+    for (const auto& ref : result.at("selection").as_array()) {
+        EXPECT_EQ(ref.at("measure").as_i64(), 1);
+        EXPECT_EQ(ref.at("pos").at("num").as_i64(), 3);
+        EXPECT_EQ(ref.at("pos").at("den").as_i64(), 4);
+    }
+    EXPECT_EQ(result.at("selection").as_array().back().at("sub_line").as_i64(), 1);
+    EXPECT_EQ(session.undo_depth(), 1u);
+    const auto check_backup = [&] {
+        const auto chart = bms::read_bms(backup).chart;
+        ASSERT_EQ(chart.notes.size(), 2u);
+        for (const auto& note : chart.notes) {
+            EXPECT_EQ(note.measure, 1u);
+            EXPECT_EQ(note.pos, Rational(3, 4));
+            EXPECT_EQ(note.value.sub_line, note.value.lane.kind == LaneKind::Bgm ? 1u : 0u);
+        }
+    };
+    check_backup();
+    ASSERT_TRUE(session.undo());
+    EXPECT_EQ(norm_notes(bms::read_bms(backup).chart.notes), before);
+    ASSERT_TRUE(session.redo());
+    check_backup();
+}
+
 TEST(TransformQuantize, ProtocolTransformMirror) {
     using beatbench::cmd::global_registry;
     auto& session = beatbench::edit::global_editor_session();

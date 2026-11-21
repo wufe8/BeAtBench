@@ -1331,29 +1331,26 @@ std::string ConvertMetaToNoteCommand::describe() const {
 QuantizeNoteCommand::QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane,
                                          std::uint32_t sample, std::int64_t snap_num,
                                          std::int64_t snap_den, std::uint32_t sub_line)
-    : m_measure(measure),
-      m_pos(pos),
-      m_lane(lane),
-      m_sample(sample),
-      m_sub_line(sub_line),
-      m_snap_num(snap_num),
-      m_snap_den(snap_den) {
-    if (m_snap_num <= 0) m_snap_num = 1;
-    if (m_snap_den <= 0) m_snap_den = 1;
+    : m_measure(measure), m_pos(pos), m_lane(lane), m_sample(sample), m_sub_line(sub_line) {
+    const auto num = std::max<std::int64_t>(1, snap_num);
+    const auto den = std::max<std::int64_t>(1, snap_den);
+    const auto last = (den - 1) / num;
+    const auto rounded = std::round(static_cast<long double>(pos.num) * den /
+                                    (static_cast<long double>(pos.den) * num));
+    // 1/1 会把 BMS 写入定位到 slots.size()；取小节内最后一个有效槽。
+    // 先夹紧再转整数，也保证 step * num <= den - 1。
+    const auto step = rounded >= static_cast<long double>(last)
+                          ? last
+                          : static_cast<std::int64_t>(std::max(0.0L, rounded));
+    m_new_pos = Rational(step * num, den);
 }
 
 void QuantizeNoteCommand::apply(Chart& chart) {
     const auto idx = find_note(chart.notes, m_measure, m_pos, m_lane, m_sample, m_sub_line,
                                m_source_ln_channel, m_source_kind);
     if (!idx) return;  // 找不到 → 无操作
-    // 量化：k = round(pos * snapDen / snapNum)，目标 pos = k*snapNum/snapDen
-    // （Rational 构造自动约分，如 2/4 → 1/2；网格上 pos 本身不变）
-    const double k = std::round(static_cast<double>(m_pos.num) * static_cast<double>(m_snap_den) /
-                                (static_cast<double>(m_pos.den) * static_cast<double>(m_snap_num)));
-    const Rational target(static_cast<std::int64_t>(k) * m_snap_num, m_snap_den);
-    m_changed = (target != m_pos);
-    m_new_pos = target;
-    if (m_changed) chart.notes[*idx].pos = target;
+    m_changed = (m_new_pos != m_pos);
+    if (m_changed) chart.notes[*idx].pos = m_new_pos;
 }
 
 void QuantizeNoteCommand::invert(Chart& chart) {

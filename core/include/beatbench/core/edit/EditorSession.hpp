@@ -240,14 +240,15 @@ class DeleteNoteCommand : public EditCommand {
 
 /// 量化 note 位置（M3「量化(quantize)」设计 → note.quantize）。
 /// 语义：把 (measure, pos, lane, sample) 处匹配 note 的 pos 吸附到 snapNum/snapDen 网格
-/// （目标 pos = k*snapNum/snapDen，k = round(pos*snapDen/snapNum)）。
-/// 只改 pos，**不动 lane/sample/ln_pair**（量化不该拆 LN——头尾各自吸附到网格）。
+/// 吸附到同小节内最近的有效网格（pos ∈ [0, 1)），不把节尾写成不存在的槽位。
+/// 只改 pos，不换轨、不改采样或源子行；LN 连接由会话重建。
 /// 逆操作：精确恢复原 pos。批量 = CompositeCommand 包装多个（一个 undo 步）。
 class QuantizeNoteCommand : public EditCommand {
    public:
     QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
                         std::int64_t snap_num, std::int64_t snap_den, std::uint32_t sub_line = 0);
     std::string name() const override { return "note.quantize"; }
+    Rational target_pos() const { return m_new_pos; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
@@ -258,12 +259,8 @@ class QuantizeNoteCommand : public EditCommand {
     Lane m_lane;
     std::uint32_t m_sample;
     std::uint32_t m_sub_line;  ///< BGM 源子通道身份，量化和撤销均须保留
-    std::int64_t m_snap_num;
-    std::int64_t m_snap_den;
-    /// apply 实际执行时是否发生了改变（pos 已在网格上 → false，invert 无操作）
     bool m_changed = false;
-    /// apply 后的新 pos（invert 恢复用）
-    Rational m_new_pos;
+    Rational m_new_pos;  ///< apply 与协议返回选区共用的目标位置
 };
 
 /// 变换选中 note（M3「镜像/旋转（LR2 式 mirror/random）」设计 → note.transform）。

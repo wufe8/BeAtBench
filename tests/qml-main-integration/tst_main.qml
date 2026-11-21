@@ -1450,6 +1450,100 @@ TestCase {
         verify(remaining.some(n => n.ln_channel))
         verify(remaining.some(n => n.note_kind === "mine"))
     }
+    function test_quantizeBoxMixedMeasureEnd_data() {
+        return [{tag: "no-backup", backup: false}, {tag: "with-backup", backup: true}]
+    }
+    function test_quantizeBoxMixedMeasureEnd(data) {
+        start(true)
+        split.collapse()
+        tryVerify(function() { return split.referenceWidth < 120 })
+        const path = mainFixture.snapshot(a).path
+        // Loading installs the real BMS crash-backup hook; the test fixture otherwise omits it.
+        paneProtocol(a, "session.load", {path: path})
+        main.adoptChart(path)
+        const key = {player: 0, kind: "key", index: 7}
+        const bgm = {player: 0, kind: "bgm", index: 0}
+        const seeds = [{lane: key, sample: 2, sub_line: 0, num: 14},
+                       {lane: bgm, sample: 3, sub_line: 0, num: 15},
+                       {lane: bgm, sample: 4, sub_line: 1, num: 14}]
+        for (const n of seeds) {
+            verify(main.sessionCmd("note.put", {measure: 0, pos: {num: n.num, den: 16},
+                                                lane: n.lane, sample: n.sample,
+                                                sub_line: n.sub_line}) !== null)
+        }
+        compare(paneProtocol(a, "session.autosave", {backup: data.backup}).backup, data.backup)
+        verify(!mainFixture.fileExists(path + ".bak"))
+        const before = mainFixture.snapshot(a), beforeB = mainFixture.snapshot(b)
+        main.editorTool = "select"
+        main.snapNum = 1
+        main.snapDen = 16
+        const primary = mainFixture.primaryView(main)
+        primary.bgmExpanded = false
+        primary.measureHeight = 160
+        const view = primary.viewportItem
+        wait(0)
+        view.scrollToStart()
+        view.scrollX = Math.max(0, view.contentWidth - view.width)
+        const columns = view.probe(0, 40).columns
+        function centerX(ref) {
+            const index = view.columnIndexForRef(ref)
+            verify(index >= 0 && index < columns.length)
+            const c = columns[index]
+            return Math.round(c.x + c.w / 2)
+        }
+        function yNear(measure) {
+            for (let y = 20; y < view.height - 2; ++y) {
+                if (Math.abs(view.measureAtY(y) - measure) < 0.008) return y
+            }
+            fail("Position outside primary viewport: " + measure)
+        }
+        const x0 = centerX({lane: {player: 0, kind: "key", index: 5}})
+        const x1 = centerX(seeds[1])
+        const y0 = yNear(13 / 16), y1 = yNear(17 / 16)
+        verify(x0 > view.rulerWidth && x1 > x0 && x1 < view.width)
+        verify(!view.objectAt(x0, y0).valid, "Box drag must start on blank space")
+        const hits = view.notesInRect(x0, y0, x1, y1)
+        compare(hits.length, seeds.length, JSON.stringify({hits: hits, keyX: centerX(seeds[0]),
+            x0: x0, x1: x1, y0: y0, y1: y1, columns: columns}))
+        mouseDrag(primary, x0, y0, x1 - x0, y1 - y0, Qt.LeftButton)
+        compare(main.referenceActionTarget, false)
+        compare(main.selectionRefs.length, seeds.length,
+                "Selected: " + JSON.stringify(main.selectionRefs) + "; model: " + JSON.stringify(before.notes))
+        const originalRefs = main.selectionRefs.slice()
+        for (const n of seeds) {
+            const ref = originalRefs.find(r => r.sample === n.sample)
+            verify(ref !== undefined)
+            compare(ref.measure, 0)
+            compare(ref.pos.num / ref.pos.den, n.num / 16)
+            compare(ref.lane, n.lane)
+            compare(ref.sub_line, n.sub_line)
+        }
+
+        main.snapDen = 4
+        verify(uiActions.invoke("tool.quantize", {}))
+        const after = mainFixture.snapshot(a)
+        compare(after.undo, before.undo + 1)
+        compare(after.notes.length, before.notes.length)
+        compare(main.selectionRefs.length, seeds.length)
+        for (const n of seeds) {
+            const note = after.notes.find(r => r.sample === n.sample)
+            verify(note !== undefined)
+            compare(note.measure, 0)
+            compare(note.num, 3)
+            compare(note.den, 4)
+            const ref = main.selectionRefs.find(r => r.sample === n.sample)
+            verify(ref !== undefined)
+            compare(ref.measure, note.measure)
+            compare(ref.pos, {num: note.num, den: note.den})
+            compare(ref.lane, n.lane)
+            compare(ref.sub_line, n.sub_line)
+        }
+        if (data.backup) verify(mainFixture.fileExists(path + ".bak"))
+        verify(uiActions.invoke("edit.undo", {}))
+        compare(mainFixture.snapshot(a).notes, before.notes)
+        compare(mainFixture.snapshot(a).undo, before.undo)
+        compare(mainFixture.snapshot(b), beforeB)
+    }
     function test_loadDoesNotEditModeFieldsOrCreateDraft() {
         start(false, true)
         compare(mainFixture.snapshot(a).meta.LNTYPE, "2")

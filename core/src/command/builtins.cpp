@@ -620,6 +620,24 @@ void write_source_identity(Json& item, const edit::NoteRef& ref) {
         item.set("note_kind", *ref.note_kind == NoteKind::Landmine ? "mine" : "normal");
 }
 
+Json note_ref_json(const edit::NoteRef& ref) {
+    Json item = Json::object();
+    item.set("measure", static_cast<std::int64_t>(ref.measure));
+    Json pos = Json::object();
+    pos.set("num", ref.pos.num);
+    pos.set("den", ref.pos.den);
+    item.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", static_cast<std::int64_t>(ref.lane.player));
+    lane.set("kind", lane_kind_str(ref.lane.kind));
+    lane.set("index", static_cast<std::int64_t>(ref.lane.index));
+    item.set("lane", std::move(lane));
+    item.set("sample", static_cast<std::int64_t>(ref.sample));
+    item.set("sub_line", static_cast<std::int64_t>(ref.sub_line));
+    write_source_identity(item, ref);
+    return item;
+}
+
 // 解析 selection 数组（NoteRef 列表：{measure, pos, lane:{player,kind,index}, sample}）→
 // NoteRef 向量。空数组 / 非数组 → bad_args。lane 支持子对象优先 + 顶层平铺兼容。
 // bonus：可选 sub_line（BGM 行序号，Bgm note 同值消歧；缺省 0）。
@@ -1900,16 +1918,20 @@ class NoteQuantizeCommand : public Command {
             throw CommandError("bad_args", "snap 数值应 > 0");
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
-        for (const auto& r : refs) {
-            comp->add(with_source_identity(
-                std::make_unique<edit::QuantizeNoteCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                            snap_num, snap_den, r.sub_line),
-                r));
+        Json selection = Json::array();
+        for (auto ref : refs) {
+            auto command = std::make_unique<edit::QuantizeNoteCommand>(
+                ref.measure, ref.pos, ref.lane, ref.sample, snap_num, snap_den, ref.sub_line);
+            command->set_source_identity(ref.ln_channel, ref.note_kind);
+            ref.pos = command->target_pos();
+            selection.push_back(note_ref_json(ref));
+            comp->add(std::move(command));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
+        if (ok) out.set("selection", std::move(selection));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }

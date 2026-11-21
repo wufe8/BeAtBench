@@ -620,17 +620,8 @@ QtObject {
             selection: window.selectionRefs.slice(),
             snap: { num: sn, den: sd }
         })
-        if (r) {
-            // 保持选中：pos 更新到吸附值（k*snapNum/snapDen，约分）
-            window.selectionRefs = window.selectionRefs.map(function(ref) {
-                const p = ref.pos.num / ref.pos.den
-                const k = Math.round(p * sd / sn)
-                const nnum = k * sn, nden = sd
-                const g = gcd(nnum, nden)
-                return { measure: ref.measure, pos: { num: nnum / g, den: nden / g },
-                         lane: ref.lane, sample: ref.sample,
-                         sub_line: ref.sub_line, ln_channel: ref.ln_channel, note_kind: ref.note_kind }
-            })
+        if (r && r.ok) {
+            window.selectionRefs = r.selection
             setStatus(qsTr("已量化 %1 个 note（吸附到 %2/%3）").arg(r.notes).arg(sn).arg(sd))
         }
     }

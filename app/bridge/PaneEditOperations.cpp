@@ -352,25 +352,17 @@ QVariantMap PaneEditOperations::quantize(const QVariantMap& settings) {
         return fail("empty_selection", tr("先选中音符"));
     int num, den;
     if (!snap(settings, num, den)) return fail("bad_snap", tr("吸附网格无效"));
-    QVariantList selected;
-    for (const auto& value : m_context->selection()) {
-        auto ref = value.toMap();
-        if (!validPosition(ref)) return fail("bad_ref", tr("音符位置无效"));
-        const auto p = ref.value("pos").toMap();
-        const auto k = static_cast<qint64>(
-            std::round(p.value("num").toDouble() * den / (p.value("den").toDouble() * num)));
-        const QVariantMap target{{"measure", ref.value("measure")},
-                                 {"pos", rational(k * num, den)}};
-        ref.insert("pos", target.value("pos"));
-        ref.remove("lnPartner");
-        selected.append(ref);
+    const auto selection = m_context->selection();
+    for (const auto& value : selection) {
+        if (!validPosition(value.toMap())) return fail("bad_ref", tr("音符位置无效"));
     }
-    const auto response = run(
-        "note.quantize",
-        {{"selection", m_context->selection()}, {"snap", QVariantMap{{"num", num}, {"den", den}}}},
-        tr("已量化选中音符"));
-    if (ok(response)) {
-        m_context->setSelection(selected);
+    const auto response =
+        run("note.quantize",
+            {{"selection", selection}, {"snap", QVariantMap{{"num", num}, {"den", den}}}},
+            tr("已量化选中音符"));
+    const auto result = response.value("result").toMap();
+    if (ok(response) && result.value("ok").toBool()) {
+        m_context->setSelection(result.value("selection").toList());
         m_context->setPendingLnHead({});
     }
     return response;
