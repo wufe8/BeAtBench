@@ -79,7 +79,7 @@ class ThemeManager : public QObject {
     Q_PROPERTY(qreal boxRadius READ boxRadius NOTIFY
                    tokensChanged)  // 复选框/输入框/下拉圆角（= radiusSm）
     Q_PROPERTY(qreal keyLaneTintAlpha READ keyLaneTintAlpha NOTIFY
-                   tokensChanged)  // 键轨底色透明度（0=无，默认 20）
+                   tokensChanged)                                // 键轨底色透明度（0=无，默认 20）
     Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)    // 正文/按钮
     Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)  // 次级/标签（12）
     Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)    // 提示/占位（11）
