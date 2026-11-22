@@ -67,7 +67,7 @@ scripts/backup.sh            # 主仓库：先提交未保存改动，再生成 
 scripts/backup.sh --push     # 另经推送授权后使用；仅处理主仓库远端
 ```
 
-- 默认备份目录：`~/OneDrive/BeAtBench-backup`（找不到云盘就落到 `~/BeAtBench-backup`），保留最近 10 份。
+- 未指定目录时，按 OneDrive、Dropbox 的顺序查找家目录下的云盘目录，备份到其中的 `BeAtBench-backup/`；都不存在时使用 `~/BeAtBench-backup`。默认保留最近 10 份。
 - 建议用系统计划任务每天跑一次 `backup.sh`（Windows 任务计划程序 / cron）。
 
 `local/` 不由此脚本备份或推送；如独立建 git 仓库，只在该目录内单独本地 commit，不添加远端、不 push，也不混入主仓库提交。公开代码与文档不得依赖其中笔记。

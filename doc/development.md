@@ -68,7 +68,8 @@ cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
   -DBEATBENCH_BUILD_TESTS=OFF
 cmake --build build-gui --target beatbench
-# 产物 build-gui/app/beatbench.exe；"$QT_PREFIX/bin/windeployqt.exe" --qmldir app/qml 部署 DLL（QML 必需）
+# 部署 GUI 所需的 Qt DLL 与 QML 依赖
+"$QT_PREFIX/bin/windeployqt.exe" --qmldir app/qml build-gui/app/beatbench.exe
 ```
 
 - **测试分档**：完整回归含真实谱面时序与往返测试；`BB_SKIP_REAL=1` 跳过这类测试，
