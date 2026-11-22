@@ -20,7 +20,7 @@
 
 ```bash
 scripts/check.sh                 # 全量：配置 + 构建 + ctest + GUI 无头冒烟（含 QML 作用域告警断言）
-scripts/check.sh --quick         # 同上，但跳过真实谱面测试（BB_SKIP_REAL=1，秒级）
+scripts/check.sh --quick         # 跳过真实谱面测试（BB_SKIP_REAL=1）
 scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测）
 ```
 
@@ -34,32 +34,17 @@ scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测
   范围 core/audio/cli。CI lint job（clang-tidy 23 钉版）全量 `--warnings-as-errors` 拦截；
   本地复跑需 clang-tidy 23（大版本差异会引入新告警）+ `compile_commands.json`：
   `cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=OFF
-  -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。存量已清零；新增超标
+  -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。新增超标
   一律修复，或 `NOLINTNEXTLINE(检查项)——理由` 显式标注（**必须写在声明上一行**：行尾 NOLINT
-  会被 clang-format 折行搬离诊断行而失效；现有标注全部携带理由）。
+  会被 clang-format 折行搬离诊断行而失效）。
 - 模块边界由 CMake target 可见性结构化强制（core 只暴露 `include/`，模块间 PRIVATE 链接），
   越界即编译错误，无需额外工具；规则见各模块 AGENTS.md。
-- qmllint：`qt_add_qml_module` 自带 `all_qmllint` 目标（构建目录内
-  `cmake --build build --target all_qmllint`），现挂账未进门禁（Theme 为 context property、
-  工具不可见），出口条件见 `doc/pending/`。
+- qmllint 可通过 Qt 构建目标 `all_qmllint` 单独运行，不属于提交门禁。
 - CI（`.github/workflows/ci.yml`）是同一套检查的远端副本：**本地快档 + CI 全量**，两者不重复造轮子。
 
-### 可复用离屏截图验收 可复用离屏截图验收
+### 离屏截图
 
-```bash
-# 先构建 GUI；Windows 需将所用 Qt/MinGW bin 加入 PATH。
-bash scripts/screenshot.sh 本机截图 \
-  --project <歌曲文件夹> --page 3 --screenshot-delay 9000
-# 无需 Qt 的包装器自测：退出异常、旧图、空图、错误格式、超时等失败路径。
-bash scripts/test-screenshot.sh
-```
-
-- `BUILD_DIR` 默认 `build-gui`；`SCREENSHOT_TIMEOUT_SECONDS` 默认 120 秒，必须为正整数。
-- 需要 GNU coreutils 的 `timeout`，macOS 也可使用 `gtimeout`。每次 stdout/stderr 日志单独保留在 `local/tmp/`。
-- 唯一中间图片通过**程序退出码、非空及 PNG 签名**检查后，才替换最终截图；失败返回非零，保留旧最终截图。必须检查命令退出码，不能仅检查最终图片是否存在。
-- 该脚本从仓库根运行以保持皮肤路径一致；尚未隔离应用自身的固定诊断日志，也不宜据此并行运行会修改共享偏好的验收。
-- 截图只证明程序产出了带 PNG 签名的文件，不是完整图片解码、业务状态断言或真实鼠标/音频验收；离屏软件渲染也不作为像素级基线。
-- 项目扫描仍通过延迟等待；样本较大时需增大延迟/超时。状态就绪等待及结构化状态断言是后续增强，不把“有截图”等同于“扫描/编辑正确”。
+构建 GUI 后运行 [截图脚本](../scripts/screenshot.sh)；输出到本地忽略目录。使用退出码判断结果，失败时目标路径可能仍有旧图。截图只证明渲染产物存在，不是业务状态或实机验收。
 
 ## 三、发布（版本与产物）
 

@@ -61,7 +61,7 @@ env:
   # arch 通道声明的运行下限（= 构建面）。快照 tag 只编码日期、看不出 Qt 版本，所以下限
   # 必须单独声明：linux-arch 会拿钉定仓库解析出的 qt6-base 版本与它机械比对，拦下
   # "钉了更晚的快照却忘了抬高下限"。deb/rpm 的下限由容器 tag 本身（debian:12 / fedora:43）
-  # 声明，不另设常量。改这里要同步 doc/11 的「各通道的运行下限」表。
+  # 声明，不另设常量。改这里要同步 doc/packaging.md 的运行基线。
   ARCH_QT_FLOOR: '6.11.2'
 
 jobs:
@@ -236,7 +236,7 @@ jobs:
           base="${ver%-*}"   # 去掉 pkgrel，只比 Qt 版本（6.11.2-3 → 6.11.2）
           echo "钉定仓库的 qt6-base: $ver → $base（声明下限 ${ARCH_QT_FLOOR}）"
           if [ "$base" != "${ARCH_QT_FLOOR}" ]; then
-            echo "::error::快照里的 Qt $base ≠ 声明下限 ${ARCH_QT_FLOOR}——构建面变了就是运行下限变了，须同步抬高 ARCH_QT_FLOOR 与 doc/11 的「各通道的运行下限」表"
+            echo "::error::快照里的 Qt $base ≠ 声明下限 ${ARCH_QT_FLOOR}——构建面变了就是运行下限变了，须同步更新 ARCH_QT_FLOOR 与 doc/packaging.md 的运行基线"
             exit 1
           fi
       - name: Build arch package (pinned snapshot)

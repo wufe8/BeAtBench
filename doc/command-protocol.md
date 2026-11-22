@@ -1,169 +1,82 @@
 # BeAtBench 插件体系与时间单位设计
 
-> 本文件回答两个架构问题：
-> 1. **插件/扩展预留怎么搭**（CLI 作为“非 API 接口”的定位与分层）；
-> 2. **时间单位统一在哪里**（小节拍子 ↔ 时间轴 ↔ 采样率的换算边界，1/3 拍无损）。
-> 配套：协议规范见 三、（命令 JSON 协议的正式规格）。
-
----
+> 插件分层、谱面坐标与时间换算边界、命令 JSON 协议。具体参数和结果以命令实现为准。
 
 ## 一、插件体系：三层接口漏斗（摘要）
 
-同一能力从里到外三层口径，不搞两套逻辑：
-
-| 层 | 形态 | 说明 |
+| 层 | 用途 | 边界 |
 |---|---|---|
-| 1 | 进程内 C++ API | core 头文件；核心/编辑器内部组件直接调用，最深集成 |
-| 2 | JSON 命令协议 | **唯一操作面**：Command 注册表 + `dispatch` 信封；GUI = 协议客户端（进程内），CLI `--json` = 同一协议的进程外入口 |
-| 3 | 外部插件进程 | 非本期能力：独立进程 + `plugin.json` 清单 + 协议收发；语言无关、崩溃隔离、热更新 |
+| 进程内 C++ API | 核心模型、编解码与内部组件 | 不是外部插件 ABI |
+| JSON 命令协议 | GUI 进程内与 CLI 进程外共享已注册的命令 | 信封见三、；动作与命令的区别见 [动作注册表](action-registry.md) |
+| 外部插件进程 | 设计预留：独立进程通过协议交互 | 不提供插件发现、加载或权限审批保证 |
 
-要点：
+先用 `version` 查询协议版本，用 `capabilities` 查询当前注册能力。扩展沿用命令注册面，不另开文档变更旁路。
 
-- **注册表是唯一入口**：所有能力（内建或插件）平等注册；`CodecRegistry` 是“换格式 = 换映射表”的兑现点；
-- **GUI 也是协议客户端**：界面不直接翻模型结构体，而调 `global_registry().dispatch(...)`——插件加的命令 GUI 天然可用，避免两套逻辑漂移；
-- **协议版本化**：`version` 返回 `api` 版本号，`capabilities` 宣告能力清单（客户端启动先问一遍，即外部插件发现内建能力的握手）；
-- **不为插件在 core 开旁路**：插件只能通过注册表接口交互，core 保持零依赖（JSON 自写）；
-- **安全/权限（非本期）**：插件清单声明所需能力（读谱/写文件/执行命令），GUI 审批后放行；命令是权限的最小粒度。
----
-
-## 二、时间单位：换算边界与 1/3 拍无损
+## 二、时间单位：谱面坐标与墙钟换算
 
 ### 1. 问题
 
-- BMS 以**小节拍子**为时间单位（`(measure, pos)`，pos 为有理数）；
-- 有的音游以**时间轴**（秒/毫秒/采样帧）为单位；
-- 播放/导出最终一律落回**采样频率**。
-- 疑虑：`1/3`、`1/6` 拍（BMS 一行奇数组采样，如 `#00111:0102000300`）
-  若先换算成时间，就**无法 100% 精确换算回来**。
+谱面坐标、墙钟时间和采样帧不是同一种量。把谱面位置先舍入为时间再写回，会丢失原始位置精度。
 
 ### 2. 决策：身份坐标与换算边界分离
 
-```
-谱面身份坐标（唯一，永不变换）
-  音乐坐标 (measure: int64, pos: Rational)        ← 事件的唯一标识
-        │
-        │ 只此一处换算（双向、有理数精确）
-        ▼
-  TimingEngine（每格式一个实现，BMS 版）
-  time_us(m, pos) / position_at(us)                ← 含 BPM 分段积分与 STOP 间隙
-        │
-        │ 只在此边界出现，单向
-        ▼
-  采样帧 frame = round(time_us × rate / 1e6)       ← 播放/导出/渲染，不入模型
-```
-
-1. **身份永远是音乐坐标**：`Event<T>.pos` 是事件唯一的标识性坐标，
-   存的就是 (measure, Rational)。**任何地方都不存“先换算好的时间”作为身份**。
-   → 这就是 1/3 拍无损的答案：正因为从不先转时间，往返写回时
-   `Rational(1,3)` 原样回到槽位 `#…3`（LCM 槽位重建），
-   时间换算 `1/3 拍 = 拍数 × 60/BPM ÷ 3` 也是精确有理数。
-2. **换算只有一处**：`TimingEngine`。双向（音乐→墙钟、墙钟→音乐，
-   落在 STOP 间隙内的时间逆映射回 STOP 起点），内部 double 秒 + 边界
-   int64 微秒（llround）。**时间永远是由身份坐标派生的只读缓存**，
-   随 BPM/STOP/节拍事件变化重建（当前全量重建）。
-3. **采样率只在渲染边界出现**：播放/导出时 `frame = round(us × rate / 1e6)`，
-   单向、不入模型。不同格式可以有不同的量化策略（BMS 写回按槽位、
-   WAV 导出按采样帧），互不干扰。
-4. **时间轴格式（osu! 等）怎么进**：codec 读取时按其自带 timing 模型
-   （timing points → BPM 分段）把原生坐标换算成规范音乐坐标 (measure, pos)；
-   写回时再换算回去。换算全程有理数（毫秒与 BPM 都按有理数处理），
-   往返精确。**格式差异收敛在 codec 的映射表里，核心模型不动**
-   ——这正是“换格式 = 换映射表”原则在时间域上的兑现。
-5. **结论：不需要“灵活的多模式位置结构体”**。一个规范坐标
-   (measure, Rational pos) + 一个 TimingEngine 接口就够。若将来出现
-   真正无法表达为 (小节, 拍位置) 的格式（完全自由时间轴），
-   需要扩展的只有 `Event<T>.pos` 一个坐标类型 + TimingEngine 一个缝，
-   设计上已隔离到最小面。
+- 谱面位置是 `(measure, pos)`：`measure` 为小节号，`pos` 为节内比例，保留为有理数。BMS 写回按节内槽位表达位置，不经墙钟往返；例如节内 `1/3` 不先舍入为微秒。这是位置精度，不是字节原样往返或墙钟换算无损的保证。
+- [TimingEngine](../core/include/beatbench/core/timing/TimingEngine.hpp) 按 BPM 与 STOP 换算拍位和微秒；正向取整到微秒，反向近似为有理位置，STOP 间隙映射回 STOP 起点。墙钟时间和播放、渲染所用采样帧都是派生量，不写入谱面位置。
 
 ### 3. ch02 与“拍子”惯例（补充确认）
 
-- ch02 = **每小节拍数**（4/4 = 4，可小数如 2.5）；小节时长 = 拍数 × 60/BPM；
-- 拍 = 四分音符、16 分音符只是槽位粒度（`Rational(i, N)` 的分母），
-  这些对应关系**不存在于谱面文本**，只存在于换算逻辑里（2.2 的 TimingEngine）；
-- 谱师手写惯例（默认 4/4）与模型默认值一致，无需额外建模。
-
----
+BMS 文件的 `02` 通道是标准小节长度的倍率：`1` 相当于四个四分音符的时长；模型用四分音符拍数，即文件值乘 `4`，写回除 `4`。它不是拍号，也不是节内槽位数。示例见 [BMS 格式笔记](<bms-format-notes.md#补充>)。
 
 ## 三、命令 JSON 协议规范（正式规格）
 
 ### 1. 传输
 
-`beatbench-cli --json '<请求>'`（内联）或 `beatbench-cli --json < req.json`（stdin）。
-内容 UTF-8。每调用一个请求一个响应。
+输入与响应使用 UTF-8。CLI 将响应信封写到 stdout，每个信封一行。
+
+- `beatbench-cli --json '<请求>'`：内联输入一条 JSON 请求。
+- `beatbench-cli --json < req.json`：先尝试将 stdin 整体作为一条 JSON 请求（允许多行排版）；再回退为逐非空白行执行，每行一条 JSON 请求。在批处理中按输入顺序执行，错误行不停止后续处理，会话在同一 CLI 进程内保留，不跨进程也不与 GUI 会话共享。
 
 ### 2. 请求/响应信封
 
-```
-请求  { "id"?: 任意, "command": "名称", "args"?: 对象 }
-成功  { "id"?, "ok": true,  "result": 任意 }
-失败  { "id"?, "ok": false, "error": { "code": "稳定码", "message": "中文描述" } }
+```text
+请求  { "id"?: 任意 JSON 值, "command": "名称", "args"?: 对象 }
+成功  { "id"?, "ok": true,  "result": 任意 JSON 值 }
+失败  { "id"?, "ok": false, "error": { "code": "稳定码", "message": "诊断文字" } }
 ```
 
-- `id` 可选，原样回显（便于批处理关联请求/响应）；
-- `args` 缺省 = 空对象；`command` 必须为字符串；
-- **dispatch 自身不抛异常**：信封/参数/命令错误全部收编为 `ok:false` 响应。
+- `command` 必须是字符串；`args` 缺省为空对象，提供时调用方须传对象。各命令负责其参数校验，不依赖注册表统一拒绝非对象 `args`。
+- 请求对象中的可选 `id` 由注册表原样回显；输入无法解析成请求时，不依赖响应含 `id`。
+- 命令错误和注册表处理的 JSON 错误通过 `ok:false` 报告；这不保证任意内部异常都能转为信封。
 
 ### 3. 错误码表（稳定，客户端按 code 分支，不按 message）
 
 | code | 含义 |
 |---|---|
 | `unknown_command` | 命令名未注册 |
-| `bad_request` | 信封结构非法 / args 类型不符 / 缺键 |
-| `bad_args` | 参数语义错误（如未知编码值） |
-| `unsupported_format` | format 参数不是已注册格式（按 CodecRegistry 查找） |
-| `output_exists` | convert 输出已存在且未传 overwrite:true |
-| `read_failed` | 读取存在错误级诊断，拒绝继续 |
+| `bad_request` | 输入 JSON 无法解析，或处理请求时发现 JSON 结构、键或类型错误 |
+| `bad_args` | 命令报告的参数错误，例如缺少其必填参数或编码取值不支持 |
+| `unsupported_format` | 指定或推断的格式不受支持 |
+| `output_exists` | 输出已存在，且未允许覆盖 |
+| `read_failed` | 读取结果含错误级诊断，命令拒绝继续 |
 | `write_failed` | 无法写入输出文件 |
-| `internal` | 不可预期异常（CLI 层兜底） |
+| `internal` | CLI 单请求或批处理逐行路径捕获的非预期标准异常；不保证所有内部故障都有该信封 |
+
+命令可有额外错误码，具体以命令实现为准。
 
 ### 4. 退出码约定（CLI --json）
 
-- `0` = 已产出信封（命令语义**只看信封 ok 字段**）；
-- `2` = 无法产出信封（请求 JSON 非法 / 空输入），stdout 上仍给一个
-  `bad_request` 信封；
-- `1` = 内部异常（不应发生）。
+- `0`：请求传输已处理。命令成功与否看各响应的 `ok`；例如已解析但命令未知可返回 `ok:false`，进程仍退出 `0`。
+- `2`：输入非法或无请求。无法解析的请求和零字节输入会输出 `bad_request`；仅含空白的 stdin 会跳过所有行，不输出信封。
+- `1`：CLI 单请求或批处理逐行路径捕获的非预期标准异常。
+- 批处理继续处理后续行，进程使用首个非零行处理状态（不是首个 `ok:false`）。非预期进程故障不保证符合上述退出码或有信封。
 
 ### 5. 内建命令（分类摘要）
 
-| 类别 | 命令 | 说明 |
-|---|---|---|
-| 基础查询/转换 | `version` / `capabilities` / `info` / `check` / `convert` | 协议版本、能力清单、元信息、lint、编码转换与往返 |
-| 编辑会话 | `session.create` / `load` / `save` / `close` / `activate` / `undo` / `redo` / `autosave` / `lint` / `samples` | 多文档会话、undo/redo、自动保存 |
-| Note 编辑 | `note.put` / `move` / `delete` / `quantize` / `transform` / `setSample` / `moveRegion` / `toggleLn` / `convert` / `convertBack` | 放置/移动/选区批量/LN/类型转换 |
-| 时间轴 / BGA | `timing.list` / `put` / `delete` / `move`；`bga.list` / `put` / `delete` / `move` | BPM/STOP/小节长事件、BGA 图层 |
-| 剪贴板 | `clipboard.copy` / `paste` | BMS 数据行文本出入 |
-| 元数据 / 采样 | `meta.list` / `edit` / `rawEdit`；`sample.rename` / `setFile` / `delete` | 头部字段、`#WAV`/`#BMP` 绑定管理 |
-| 切音 / MIDI | `slice.detect` / `midi.parse` | 网格/MIDI 切片规划、MIDI 解析（headless，不拖 PortAudio） |
-
-`slice.detect` 的 `source` 仅接受 `grid` 或 `midi`（见 `core/src/command/slice_commands.cpp`）；
-GUI 音频源的瞬态检测通过 `SliceWorkspace` 与音频层 `OnsetDetector` 执行，不是该 JSON 命令的第三种源。
-
-完整命令清单与 args/result 语义的**权威**：`core/src/command/`（每个命令一个 `Command` 类，
-`name()` 自述）；机器可读清单：`beatbench-cli --json '{"command":"capabilities"}'`。
-
-`encoding`：读取侧 `auto`（默认）/`utf8`/`sjis`；convert 的 `encoding` 兼作写出编码（不支持 auto）。
-`format`：按 CodecRegistry 动态查找（当前 `"bms"`；省略 = 按扩展名推断）。
-`mode`：游玩模式覆盖（如 `"dp"` / `"pms9k"` / `"pms9k-bmesp"`（BME-SP 型 9key）；省略 = 按
-#PLAYER/扩展名推断，`"pms9k"` 推断后仍参与 BME-SP 写回约定探测，纯 BME-SP 别名证据时
-升级为变体；探测只决定写回约定，读侧键位按统一别名表固定）。
-所有编辑命令支持可选 `session_id`（缺省 = 活动会话）。
-
-`NoteRef` 包含 `measure / pos / lane / sample / sub_line?`，并支持源身份 `ln_channel?:bool`、`note_kind?:"normal"|"mine"`。GUI 总是提供源身份，避免同位置/同采样的普通、LN、地雷 note 混淆；旧调用可省略，但跨身份歧义必须拒绝，不能猜第一条。该身份同样用于删除、改采样、量化、变换、转换和剪贴板；返回的新选择保留它。
-
-`ln_channel` 是待保存的通道身份，`ln_pair` 仅为派生显示/选取。移动只改显式选择的物件位置/轨道，不改伙伴、采样或源通道；目标无法保留该身份（如 LN → BGM）时拒绝，须先显式转换。头尾一起移动须显式选择两端，旧 `move_ln_pair` 不再自动扩张选择。解析/编辑重建统一按 LN 通道时序及普通通道 LNOBJ 各自推导，不由 LNTYPE 决定。
-
-`session.lint` 的 `issues` 包括 `lint.missing_wav` / `lint.wav_ext_mismatch`，按内存绑定检查资源可用性；条目含 id/file/resolved，与采样面板查询形状兼容。
-
-示例：
-
-```
-$ beatbench-cli --json '{"id":1,"command":"info","args":{"path":"/path/to/chart.bms"}}'
-{"id":1,"ok":true,"result":{"path":"...","format":"bms","mode":"sp7k","meta":{"TITLE":"..."},...}}
-```
+- `version` 返回 `name`、`version`、协议版本 `api`、`license`；`capabilities` 返回 `commands`、`formats`、各格式的 `modes`。用 `beatbench-cli --json '{"command":"capabilities"}'` 读取完整清单，参数和结果见 `core/src/command/`。
+- 命令覆盖查询、编解码、项目索引和编辑。支持 `session_id` 的会话操作省略它时使用活动会话。`slice.detect` 的 `source` 只接受 `grid` 或 `midi`，不提供 GUI 的音频瞬态检测。
+- 支持 `format` 的文件命令可显式指定已注册格式；省略时按扩展名识别。读取编码 `encoding` 支持 `auto`（默认）、`utf8`、`sjis`。JSON `convert` 的显式 `utf8` / `sjis` 同时选择写出编码；省略或传 `auto` 时自动判读、按默认 UTF-8 写出。BMS 的 `mode` 及 PMS 写回变体见 [BMS 格式笔记](<bms-format-notes.md#9key-pms模式游玩轨>)。
+- `NoteRef` 以 `measure`、`pos`、`lane`、`sample` 及适用时的 `sub_line` 定位，支持 `ln_channel` 与 `note_kind`（`normal` / `mine`）区分源身份。旧调用省略源身份时，不得把有歧义的匹配当成唯一结果。长音源身份见 [BMS 格式笔记](<bms-format-notes.md#长音>)。
 
 ### 6. 与人类 CLI 的关系
 
-人类子命令（info/check/convert/version）与 JSON 命令共用同一批 core 函数，
-经 CodecRegistry 统一分派（格式 → Codec → read/write），只差在展示层。
-两条入口行为一致，不存在第二套逻辑。
-
+人类子命令与 JSON 命令复用核心编解码与处理能力，但不是一一映射；命令名、参数和退出语义不保证相同。实际人类子命令与选项以 `cli/main.cpp` 为准。

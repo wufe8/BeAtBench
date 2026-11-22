@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 底部页面条（Resolve 式页面切换）：[项目 | 编辑 | 切音 | 测试]。
 // 纯布局组件，不碰逻辑（doc/ui-design.md 四、.1：位置可配置，默认底部）。
-// 按钮样式对照 .seg.active（主色底 + 白字，doc/beatbench-ui-preview.html）。
+// 选中的页面按钮使用主题主色底与对应前景色。
 import QtQuick
 import QtQuick.Controls
 

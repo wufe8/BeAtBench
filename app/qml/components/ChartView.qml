@@ -62,7 +62,7 @@ Item {
     Component.onCompleted: restoreDocumentVisuals()
 
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
-    property bool topHigh: true          // 默认「顶部=高小节」（preview.html，note 自上而下落）
+    property bool topHigh: true          // 默认「顶部=高小节」（音符自上而下）
     property bool zoomToCursor: true     // 缩放锚点：true = 鼠标位置放大（推荐，默认开）；false = 视口中心
     property int snapNum: 1              // 吸附粒度分子（放置吸附 + 槽位弱线）
     property int snapDen: 16             // 吸附粒度分母

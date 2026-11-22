@@ -29,7 +29,7 @@ core 子目录（bms / timing / json / command / edit）均在 `core/include/bea
 
 工具链要求：**C++20**——MSVC ≥ 19.29（VS 2022+）或 GCC ≥ 10 / Clang ≥ 12。
 ⚠️ Git for Windows 自带的 g++ 6.3 不支持 C++20，不可用。
-GUI 需要 **Qt 6.4+**（Linux 系统 Qt 下限；版本矩阵单一来源在 `scripts/check-version.sh` 头部默认值）。
+从源码构建 GUI 的 Qt API 下限为 **6.4**；预编译包的运行基线见 [打包说明](packaging.md#二qt-依赖策略)。
 
 ```bash
 # CLI + 测试（Linux/macOS 单配置；测试需联网拉 GoogleTest）
@@ -71,9 +71,8 @@ cmake --build build-gui --target beatbench
 # 产物 build-gui/app/beatbench.exe；"$QT_PREFIX/bin/windeployqt.exe" --qmldir app/qml 部署 DLL（QML 必需）
 ```
 
-- **测试耗时分档**：完整回归（含真实谱面时序/往返测试）数分钟级；日常快速回归
-  `BB_SKIP_REAL=1`（秒级，真实谱面集缺失自动跳过）；`BB_ONLY=<子串>` 只跑匹配文件名的样本（现象定位）。
-  测试分布见 `tests/` 与 CI；提交前跑完整回归。
+- **测试分档**：完整回归含真实谱面时序与往返测试；`BB_SKIP_REAL=1` 跳过这类测试，
+  缺少真实谱面集时也自动跳过。`BB_ONLY=<子串>` 可筛选样本；门禁按 [开发工作流](dev-workflow.md) 执行。
 - 改动涉及音频/渲染时另跑：
   `cmake --build build --config Debug --target chart_renderer_test sample_cache_test audio_test`。
 - GUI/桥层单测需带 Qt 的构建（`build-uitest`）：`ui_action_registry_test`、`theme_manager_test`、
@@ -88,12 +87,8 @@ cmake --build build-gui --target beatbench
 
 Windows 可选 ASIO 的构建/运行已接入，默认 OFF；ON 不等于硬件验收完成，见 [ASIO 音频输出](<12-ASIO音频输出.md>)。
 
-**当前边界**（未验证/未覆盖路径的完整台账在 `doc/pending/`）：
-
-- macOS `.app` 不内嵌 `BeatBench/` QML 模块目录，双击起不来（需 `QML2_IMPORT_PATH` 指向构建树）。
-- PortAudio 实时输出已在 Manjaro 实机确认播放正常，但只走 **ALSA** host API；
-  Windows/macOS 声卡与 PulseAudio/PipeWire 原生路径未人工验证（CI 无声卡）。
-- GUI 交互中**拖拽**仍只有无头冒烟；悬停高亮可用 X11 指针注入自动化验证（doc/packaging.md 二、）。
+**当前边界**：macOS 构建产物 `.app` 不内嵌 `BeatBench/` QML 模块目录；不要直接双击，运行时需 `QML2_IMPORT_PATH` 指向构建树。
+无头冒烟、组件交互自动化与原生桌面/声卡验收的区别见 [打包说明](packaging.md#六边界与非目标)。
 
 ## 五、代码约定
 
@@ -108,9 +103,7 @@ Windows 可选 ASIO 的构建/运行已接入，默认 OFF；ON 不等于硬件�
 
 ### 代码格式化（clang-format）
 
-- 配置在根目录 `.clang-format`：基于 Google 风格定制（4 空格缩进、列宽 100、左对齐指针），
-  其余沿用 Google 默认（attached 大括号、单行短 if/loop、include 分块排序）。选型时对全仓
-  六种内置 preset 做过实测比对，纯 preset 无一能直接用，详见该文件头注释。
+- 格式规则以根目录 `.clang-format` 为准。
 - `third_party/` 与生成文件 `core/src/bms/sjis_table.hpp` 在 `.clang-format-ignore` 中排除，
   生成表由 `tools/gen_sjis_table.ps1` 重新生成，不参与格式化。
 - 检查入口 `scripts/check-format.sh`（check.sh 第 0 步与 CI format job 同一入口）；版本钉
@@ -119,8 +112,7 @@ Windows 可选 ASIO 的构建/运行已接入，默认 OFF；ON 不等于硬件�
 - 全量重排提交已登记 `.git-blame-ignore-revs`：GitHub blame 自动生效；本地需一次性
   `git config blame.ignoreRevsFile .git-blame-ignore-revs`（换机器 clone 后重跑）。
 - ⚠️ **不要用“锚定排版”的正则从测试抓 C++ 源码**：抓表达式先把目标文本压平空白
-  （`replace(/\s+/g, ' ')`）再匹配语义标记，否则格式化一拆行测试就碎（qml_session_regression
-  踩过）。
+  （`replace(/\s+/g, ' ')`）再匹配语义标记，避免格式化换行导致测试失效。
 
 ## 六、行为边界与已知限制
 

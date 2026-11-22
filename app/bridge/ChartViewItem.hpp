@@ -2,7 +2,7 @@
 // 竖向时间轴自绘视口（M2 第 5 步，doc/project-workflow.md 三、 步 5）：QQuickPaintedItem + QPainter。
 // 绘制（v1）：小节标尺（小节号 + BPM 变化标记 + STOP 段）、槽位网格、轨道列
 // （皿/1-7/BGM/2P，按谱面实际出现的 Lane 数据驱动）、note / LN 头尾 / 地雷
-// 按 (measure,pos) 落位；方向默认「顶部=高小节」（preview.html，note 自上而下落）。
+// 按 (measure,pos) 落位；方向默认「顶部=高小节」（音符自上而下）。
 // 秒标尺与 BGM 波形铺底后置 Phase B（doc/project-workflow.md 四、）。
 // 数据源 = ChartSession（core Chart + TimingEngine 真数据）；只读展示，无编辑（M3）。
 // 滚动/缩放由 QML 侧 ChartView.qml 驱动（Flickable 无 onWheel，doc/development.md 五、）。

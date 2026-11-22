@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // L1 主题 token 单点（doc/skin-system.md 三、5. / doc/ui-design.md 七、）。
-// 默认皮肤骨架：token 默认值以本类成员初始化为准；doc/beatbench-ui-preview.html 仅历史参考。
+// 默认皮肤骨架：token 默认值以本类成员初始化为准。
 // theme.json 加载与 schema 校验后置皮肤系统（doc/skin-system.md 五、 待办）。
 // QML 经 context property `Theme` 只读访问；界面任何颜色/字体不得硬编码（doc/project-workflow.md 四、）。
 // 双语言纪律（doc/skin-system.md 二、）：本类只提供 token 数据，无界面逻辑。
@@ -80,8 +80,7 @@ class ThemeManager : public QObject {
                    tokensChanged)  // 复选框/输入框/下拉圆角（= radiusSm）
     Q_PROPERTY(qreal keyLaneTintAlpha READ keyLaneTintAlpha NOTIFY
                    tokensChanged)  // 键轨底色透明度（0=无，默认 20）
-    Q_PROPERTY(
-        qreal fsBase READ fsBase NOTIFY tokensChanged)  // 正文/按钮（13，= preview.html 基准）
+    Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)    // 正文/按钮
     Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)  // 次级/标签（12）
     Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)    // 提示/占位（11）
     Q_PROPERTY(QString fontSans READ fontSans NOTIFY tokensChanged)

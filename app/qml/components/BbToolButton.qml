@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 通用工具条按钮（对照 doc/beatbench-ui-preview.html .tb / .tool-btn）。
+// 通用工具条按钮。
 // flatStyle=false：.tb 样式（surface2 底 + 边框）——页面工具条普通按钮；
 // flatStyle=true：.tool-btn 样式（透明底，激活时主色底 + 主色边框）——编辑工具/工具选择。
 // 激活态两种来源：
