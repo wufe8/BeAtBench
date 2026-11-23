@@ -383,7 +383,11 @@ Item {
             const scroll = control("audioScrollView")
             const bar = control("audioVerticalScrollBar")
             const view = scroll.contentItem
+            // Create overflow explicitly rather than depending on platform font metrics.
+            dialog.height = 400
             waitForRendering(scroll)
+            tryVerify(function() { return view.contentHeight > view.height }, 5000,
+                      "Scrollbar exercise requires vertically overflowing content")
             tryVerify(function() { return bar.size > 0 && bar.size < 1 })
             tryVerify(function() { return Math.abs(bar.height - scroll.availableHeight) <= 1 },
                       5000, "Scrollbar track must span the viewport, not remain thumb-sized")
