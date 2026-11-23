@@ -384,7 +384,7 @@ Item {
     }
 
     // 手势（M3 接线）：列头命中 → 展开；否则按工具分发：
-    //   拖动（select/pan/note 均可）滚动；select + Shift 拖动 = 框选；note 点击 = 放置。
+    //   select 从空白拖动框选；pan 拖动滚动；note 点击空白放置。
     // ⚠️ press 抓取保证 release 仍回到本 Area（落在滚动条上也不丢）。
     // 状态抽为 root 级（handlePress/Release），MouseArea 与调试入口（--click）共用同一路径。
     property real _lastY: -1
@@ -392,6 +392,11 @@ Item {
     property int _pressX: 0
     property int _pressY: 0
     property bool _boxSelect: false
+    // 框选起点属于谱面内容，另一端始终跟随视口内的指针。
+    property point _boxAnchor: Qt.point(0, 0)
+    property point _boxPointer: Qt.point(0, 0)
+    readonly property point _boxProjectedAnchor: Qt.point(_boxAnchor.x - view.scrollX,
+                                                           _boxAnchor.y - view.scrollY)
     property bool _dragged: false
     property bool _panning: false   // 中键拖动 = 滚动（任何工具下）
     property bool _moving: false    // 拖拽选中 note = 移动（选中 note 上按下即进入，无门控）
@@ -419,7 +424,6 @@ Item {
         _boxSelect = false
         _panning = false
         _lastY = -1
-        if (selRect) selRect.visible = false
         if (view) {
             view.movePreview = false
             view.moveTargetLane = ({})
@@ -579,11 +583,8 @@ Item {
         // select 工具空白 = 框选（拖动）；pan 工具 = 滚动（拖动）；note/ln/mine 空白 = 点击放置
         _boxSelect = root.editorTool === "select"
         if (_boxSelect) {
-            selRect.x = x
-            selRect.y = y
-            selRect.width = 0
-            selRect.height = 0
-            selRect.visible = true
+            _boxAnchor = Qt.point(x + view.scrollX, y + view.scrollY)
+            _boxPointer = Qt.point(x, y)
         }
     }
     function handleMove(x, y) {
@@ -641,10 +642,7 @@ Item {
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (moved > 4) _dragged = true
         if (_boxSelect) {
-            selRect.x = Math.min(_pressX, x)
-            selRect.y = Math.min(_pressY, y)
-            selRect.width = Math.abs(x - _pressX)
-            selRect.height = Math.abs(y - _pressY)
+            _boxPointer = Qt.point(x, y)
             return
         }
         if (_dragged) {
@@ -738,13 +736,11 @@ Item {
             return
         }
         if (_boxSelect) {
-            selRect.visible = false
-            const draggedSel = _dragged && selRect.width > 3 && selRect.height > 3
+            const anchor = _boxProjectedAnchor
             _boxSelect = false
-            if (draggedSel) {
-                root.selectionFinished(view.notesInRect(selRect.x, selRect.y,
-                                                        selRect.x + selRect.width,
-                                                        selRect.y + selRect.height))
+            // 查询用完整范围，不能用裁到当前视口的预览矩形。
+            if (Math.abs(x - anchor.x) > 3 && Math.abs(y - anchor.y) > 3) {
+                root.selectionFinished(view.notesInRect(anchor.x, anchor.y, x, y))
                 return
             }
             // 点击（未拖动）：点选 note / BGA/BPM/STOP 对象（Ctrl = 多选切换）/ 空白清空
@@ -893,14 +889,23 @@ Item {
         }
     }
 
-    // 框选矩形（select + Shift+拖；半透明主色 + 边框）
-    Rectangle {
-        id: selRect
-        visible: false
+    // 只裁剪预览；起点滚出屏幕时，选区仍延伸到谱面中的原始起点。
+    Item {
+        anchors.fill: view
+        anchors.topMargin: 18
+        visible: root._boxSelect
+        clip: true
         z: 3
-        color: Theme.primarySoft
-        border.color: Theme.accent
-        border.width: 1
+        Rectangle {
+            objectName: "chartSelectionPreview"
+            x: Math.min(root._boxProjectedAnchor.x, root._boxPointer.x)
+            y: Math.min(root._boxProjectedAnchor.y, root._boxPointer.y) - parent.y
+            width: Math.abs(root._boxProjectedAnchor.x - root._boxPointer.x)
+            height: Math.abs(root._boxProjectedAnchor.y - root._boxPointer.y)
+            color: Theme.primarySoft
+            border.color: Theme.accent
+            border.width: 1
+        }
     }
 
     // 右侧垂直滚动条（内容高于视口时出现；点击/拖拽滑块滑动）。

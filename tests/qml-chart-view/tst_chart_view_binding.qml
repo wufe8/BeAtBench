@@ -88,6 +88,52 @@ Item {
             editSpy.clear()
         }
 
+        SignalSpy { id: boxSpy; target: testCase.viewA; signalName: "selectionFinished" }
+
+        function test_box_selection_scroll_data() {
+            return [{tag: "earlierAtTop", topHigh: false}, {tag: "laterAtTop", topHigh: true}]
+        }
+        function test_box_selection_scroll(data) {
+            const chart = partsA.chart
+            viewA.topHigh = data.topHigh
+            viewA.editorTool = "select"
+            chart.applyViewportAnchor({valid: true, measure: data.topHigh ? 0 : 4, fraction: 0})
+            const columns = viewA.probe(0, 40).columns
+            const lane = columns.find(c => {
+                const hit = chart.laneAtX(c.x + c.w / 2)
+                return hit.valid && hit.laneKind === "key" && hit.laneIndex === 1
+            })
+            verify(lane !== undefined)
+            const x0 = Math.floor(lane.x + 2)
+            const x1 = Math.floor(lane.x + lane.w - 2)
+            let y0 = 20
+            while (y0 < chart.height - 8 && Math.abs(chart.measureAtY(y0) - 0.5) > 0.04) ++y0
+            verify(y0 < chart.height - 8, "Start must be inside measure 0")
+            const yDrag = y0 + (data.topHigh ? -8 : 8)
+            const preview = findChild(viewA, "chartSelectionPreview")
+            verify(preview !== null)
+            boxSpy.clear()
+            let releaseY = yDrag
+            mousePress(viewA, x0, y0, Qt.LeftButton)
+            try {
+                mouseMove(viewA, x1, yDrag)
+                verify(preview.visible && preview.height > 3)
+                const before = chart.scrollY
+                const oldHeight = preview.height
+                mouseWheel(viewA, x1, yDrag, 0, (data.topHigh ? 1 : -1) * 120 * 44, Qt.LeftButton)
+                verify(Math.abs(chart.scrollY - before) > chart.height, "Scroll past the starting viewport")
+                verify(preview.height > oldHeight + chart.height, "Preview follows the scroll without a mouse move")
+                releaseY = 20
+                while (releaseY < chart.height - 8 && Math.abs(chart.measureAtY(releaseY) - 24.5) > 0.04) ++releaseY
+                verify(releaseY < chart.height - 8, "Release must be inside measure 24")
+            } finally {
+                mouseRelease(viewA, x1, releaseY, Qt.LeftButton)
+            }
+            compare(boxSpy.count, 1)
+            compare(boxSpy.signalArguments[0][0].map(ref => ref.measure), [1, 24])
+            compare(preview.visible, false)
+        }
+
         function test_explicit_session_survives_active_switch() {
             compare(viewA.documentSession, bridgeA) // legacy context fallback
             compare(viewB.documentSession, bridgeB)
