@@ -24,7 +24,7 @@ BbDialog {
     readonly property bool scopeAllowed: !checkedOnly || targetPaths.length > 0
     readonly property bool canApply: scopeAllowed && previewCurrent && !!preview.ok
                                      && preview.changedCount > 0 && !controller.busy
-    signal applied(string message)
+    signal updateSucceeded(string message)
     title: qsTr("修复缺失资源")
     width: Math.max(0, Math.min(1040, (parent ? parent.width : 1064) - 24))
     height: Math.max(0, Math.min(760, (parent ? parent.height : 784) - 24))
@@ -101,7 +101,7 @@ BbDialog {
         const result = controller.commit(preview.planId)
         invalidatePreview()
         if (!result.ok) { localMessage = result.error; return }
-        applied(qsTr("资源引用已在内存更新，待保存；每谱可独立撤销。不复制文件、不自动保存。"))
+        updateSucceeded(qsTr("资源引用已在内存更新，待保存；每谱可独立撤销。不复制文件、不自动保存。"))
         close()
     }
     onOpened: restart()

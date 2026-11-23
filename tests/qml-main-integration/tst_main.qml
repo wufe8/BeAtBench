@@ -276,6 +276,7 @@ TestCase {
         compare(documents.activeId(), a); compare(split.referenceDocumentId, referenceId)
         verify(project.openStates[fixture.aPath].dirty && project.openStates[fixture.bPath].dirty)
         verify(page.saveText.indexOf("待保存") >= 0)
+        compare(main.statusText, page.saveText)
         compare(project.missingCount, 2) // Disk index is not a claim that unsaved edits reached disk.
         compare(mainFixture.disk(a), diskA); compare(mainFixture.disk(b), diskB)
         for (const id of [a, b]) {
@@ -520,6 +521,8 @@ TestCase {
         unchanged(sa, sb)
         clickButton(dialog, "应用内容更新")
         tryCompare(dialog, "visible", false)
+        verify(page.saveText.indexOf("自定义内容已更新") >= 0)
+        compare(main.statusText, page.saveText)
         compare(documents.activeId(), a)
         compare(split.referenceDocumentId, referenceId)
         const aa = mainFixture.snapshot(a), bb = mainFixture.snapshot(b)

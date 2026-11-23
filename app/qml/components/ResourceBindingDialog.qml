@@ -12,7 +12,7 @@ BbDialog {
     property alias rawText: input.text
     property var preview: ({})
     property string message: ""
-    signal applied(string message)
+    signal updateSucceeded(string message)
     readonly property real hostWidth: parent ? parent.width : 824
     readonly property real hostHeight: parent ? parent.height : 624
     title: qsTr("批量更新自定义谱面内容")
@@ -40,7 +40,7 @@ BbDialog {
             message = result.error
             return
         }
-        applied(qsTr("自定义内容已更新；每谱可独立撤销，请检查后保存。"))
+        updateSucceeded(qsTr("自定义内容已更新；每谱可独立撤销，请检查后保存。"))
         close()
     }
     Component.onCompleted: invalidatePreview()

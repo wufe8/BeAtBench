@@ -133,7 +133,7 @@ Item {
         controller: resourceRelocationController
         projectRoot: project.root
         targetPaths: project.sliceTargets.map(path => project.absolutePath(path))
-        onApplied: (message) => {
+        onUpdateSucceeded: (message) => {
             root.saveText = message
             window.setStatus(message)
         }
@@ -148,7 +148,7 @@ Item {
             const selected = project.sliceTargets // Track the existing multi-selection.
             return selected.length > 0 ? project.effectiveSliceTargets("") : []
         }
-        onApplied: (message) => {
+        onUpdateSucceeded: (message) => {
             root.saveText = message
             window.setStatus(message)
         }
