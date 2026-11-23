@@ -20,6 +20,7 @@ ComboBox {
     }
 
     property color textColor: Theme.text
+    property bool wrapPopupText: false
 
     font.pixelSize: Theme.fsSmall
     font.family: Theme.fontSans
@@ -84,6 +85,9 @@ ComboBox {
                     cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 }
                 width: root.popup ? root.popup.width - 8 : root.width
+                height: root.wrapPopupText
+                        ? Math.max(implicitHeight, contentItem.contentHeight + topPadding + bottomPadding)
+                        : implicitHeight
                 required property int index
                 required property var modelData
                 contentItem: Label {
@@ -98,6 +102,8 @@ ComboBox {
                     font: root.font
                     verticalAlignment: Text.AlignVCenter
                     leftPadding: 8
+                    rightPadding: root.wrapPopupText ? 8 : 0
+                    wrapMode: root.wrapPopupText ? Text.Wrap : Text.NoWrap
                 }
                 background: Rectangle {
                     radius: Theme.boxRadius

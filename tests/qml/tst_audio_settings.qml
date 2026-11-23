@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import QtTest
 import "../../app/qml/components" as Components
 
@@ -119,8 +120,28 @@ Item {
             dialog.close()
             tryCompare(dialog, "visible", false)
         }
+        function test_dialog_fits_narrow_host() {
+            const host = window.Window.window
+            const previousWidth = host.width
+            try {
+                host.width = 460
+                tryVerify(function() { return dialog.width < 460 })
+                tryVerify(function() {
+                    const origin = dialog.parent.mapToItem(host.contentItem, dialog.x, dialog.y)
+                    return origin.x >= 0 && origin.x + dialog.width <= host.contentItem.width + 1
+                })
+                const api = control("audioApiFilter")
+                const device = control("audioDeviceCombo")
+                tryVerify(function() { return device.y >= api.y + api.height })
+                selectRow(device, 0)
+                compare(audioEngine.deviceIndex, -1)
+            } finally {
+                host.width = previousWidth
+            }
+        }
         function test_full_windows_api_names_data() {
-            return [{ tag: "default", width: 680 }, { tag: "narrow", width: 520 }]
+            return [{ tag: "default", width: 680 }, { tag: "narrow", width: 520 },
+                    { tag: "veryNarrow", width: 410 }]
         }
         function test_full_windows_api_names(data) {
             dialog.width = data.width
@@ -139,13 +160,19 @@ Item {
                 list.positionViewAtIndex(i, ListView.Contain)
                 tryVerify(function() { return list.itemAtIndex(i) !== null })
                 const label = list.itemAtIndex(i).contentItem
-                verify(label.implicitWidth <= label.width + 1, combo.model[i])
+                const name = combo.model[i]
+                if (data.tag !== "veryNarrow")
+                    verify(label.implicitWidth <= label.width + 1, name)
+                verify(label.contentWidth + label.leftPadding + label.rightPadding <= label.width + 1, name)
+                verify(label.contentHeight + label.topPadding + label.bottomPadding <= label.height + 1, name)
             }
             mouseClick(list.itemAtIndex(2))
             tryCompare(combo.popup, "visible", false)
             compare(combo.displayText, "Windows DirectSound")
             waitForRendering(combo)
-            verify(!combo.contentItem.truncated, "Selected API must fit too")
+            // At extreme widths the closed control may elide; the popup must still show the entire name.
+            if (data.tag !== "veryNarrow")
+                verify(!combo.contentItem.truncated, "Selected API must fit too")
             const device = control("audioDeviceCombo")
             verify(device.width > 80, "Device selector retains usable space")
             verify(device.x + device.width <= control("audioSettingsColumn").width + 1)

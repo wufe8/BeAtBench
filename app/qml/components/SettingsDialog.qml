@@ -15,7 +15,9 @@ Dialog {
     id: root
     title: qsTr("首选项")
     modal: true
-    width: 680
+    width: dialogPositioner.boundsItem
+           ? Math.max(0, Math.min(680, dialogPositioner.boundsItem.width - 2 * dialogPositioner.edgeMargin))
+           : 680
     height: 520
     // 每次打开恢复右上默认位置；拖动后只在越界/窗口 resize 时钳位。
     BbDialogPositioner {
@@ -303,19 +305,22 @@ Dialog {
                         // 输出设备（API 筛选：同一声卡多个 API 混列不便查找（M4.2 用户反馈））
                         Label { text: qsTr("输出设备"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted
                                 Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap }
-                        RowLayout {
+                        GridLayout {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
-                            spacing: 8
+                            columnSpacing: 8
+                            rowSpacing: 8
+                            // 给设备选择器留出空间；不足时改为上下两行。
+                            columns: audioColumn.width >= apiFilterCombo.naturalWidth + 160 + columnSpacing ? 2 : 1
                             // API 筛选（全部 / WASAPI / DirectSound / ASIO / MME / … 从设备列表去重）
                             BbComboBox {
                                 id: apiFilterCombo
                                 objectName: "audioApiFilter"
-                                // Fit full API names (notably Windows DirectSound), including
-                                // popup item padding and the closed control's arrow. Keep
-                                // room for the device selector when the dialog is narrow.
-                                Layout.preferredWidth: Math.min(apiTextWidth + 40, audioColumn.width * 0.65)
+                                readonly property real naturalWidth: apiTextWidth + 40
+                                Layout.preferredWidth: Math.min(naturalWidth, audioColumn.width)
                                 Layout.minimumWidth: Layout.preferredWidth
+                                Layout.fillWidth: parent.columns === 1
+                                wrapPopupText: true
                                 readonly property real apiTextWidth: {
                                     var widest = 90
                                     for (var i = 0; i < model.length; ++i)
@@ -339,6 +344,7 @@ Dialog {
                             BbComboBox {
                                 id: deviceCombo
                                 objectName: "audioDeviceCombo"
+                                wrapPopupText: true
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 model: {
