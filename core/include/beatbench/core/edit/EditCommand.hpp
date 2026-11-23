@@ -98,19 +98,23 @@ class CompositeCommand : public EditCommand {
     std::vector<std::unique_ptr<EditCommand>> m_commands;
 };
 
+enum class TimingPutMode { SetValue, ClearRef, UseDefinition };
+
 /// 放置/更改时间轴事件（BPM/STOP/节拍 → timing.put，doc/ui-design.md 九、「工具栏值放置」）。
 /// 语义：在 (measure, pos) 处设置 kind 事件的值。**同位替换**——已存在同
 /// (measure, pos) 的同类事件则改值，否则插入（与 timing 引擎「同 pos 后者覆盖」一致）。
 /// 逆操作：还原到操作前状态（替换 → 恢复旧值；插入 → 移除）。
-/// BMS 写出时事件值由 codec 自动派生 #BPMxx/#STOPxx 定义，
-/// 因此「值」是唯一编辑维度——ch03 内联/引用的文本差异对编辑透明。
+/// SetValue：有 ref 则绑定，无 ref 则保留同位事件的绑定；同位改值同步共享定义。
+/// ClearRef：设置独立值并解除绑定，不改旧定义。UseDefinition：绑定并采用调用方解析
+/// 的现有定义值，不改定义或其他引用者。未绑定的事件写出时由 codec 自动派生。
 ///
 /// 节拍事件（Measure）约定 pos = 0（BMS ch02 作用于整小节，parser 恒 pos 0）；
 /// 传入非 0 pos 时归一为 0（命令自身保证，调用方无需处理）。
 class PutTimingCommand : public EditCommand {
    public:
     PutTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos, double value,
-                     std::optional<std::uint32_t> ref = std::nullopt);
+                     std::optional<std::uint32_t> ref = std::nullopt,
+                     TimingPutMode mode = TimingPutMode::SetValue);
     std::string name() const override { return "timing.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -121,7 +125,8 @@ class PutTimingCommand : public EditCommand {
     std::uint32_t m_measure;
     Rational m_pos;
     double m_value;
-    std::optional<std::uint32_t> m_ref;  ///< 手动绑定 #BPMxx/#STOPxx id（缺省=由 codec 派生）
+    std::optional<std::uint32_t> m_ref;  ///< 要绑定的 #BPMxx/#STOPxx id
+    TimingPutMode m_mode;
     /// apply 前是否存在同位事件（invert 分支：恢复旧值 / 移除）
     bool m_existed = false;
     /// m_existed 时的旧值（invert 恢复；按类型取 value/count/beats）

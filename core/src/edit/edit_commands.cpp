@@ -880,8 +880,9 @@ void Selection::add_rect(std::uint32_t measure_lo, std::uint32_t measure_hi,
 // ---------- PutTimingCommand ----------
 
 PutTimingCommand::PutTimingCommand(TimingKind kind, std::uint32_t measure, Rational pos,
-                                   double value, std::optional<std::uint32_t> ref)
-    : m_kind(kind), m_measure(measure), m_pos(pos), m_value(value), m_ref(ref) {
+                                   double value, std::optional<std::uint32_t> ref,
+                                   TimingPutMode mode)
+    : m_kind(kind), m_measure(measure), m_pos(pos), m_value(value), m_ref(ref), m_mode(mode) {
     if (m_kind == TimingKind::Measure) m_pos = Rational(0, 1);  // 节拍恒 pos 0
 }
 
@@ -926,14 +927,17 @@ void PutTimingCommand::apply(Chart& chart) {
             if constexpr (std::is_same_v<V, Bpm> || std::is_same_v<V, Stop>)
                 m_old_ref = evs[hi - 1].value.ref_id;
             set_timing_value(evs[hi - 1], m_value);
-            if (m_ref) set_ref_if_supported(evs[hi - 1], m_ref);
+            if (m_mode == TimingPutMode::ClearRef)
+                set_ref_if_supported(evs[hi - 1], std::nullopt);
+            else if (m_ref)
+                set_ref_if_supported(evs[hi - 1], m_ref);
             return;
         }
         Ev ev;
         ev.measure = m_measure;
         ev.pos = m_pos;
         set_timing_value(ev, m_value);
-        if (m_ref) set_ref_if_supported(ev, m_ref);
+        if (m_ref && m_mode != TimingPutMode::ClearRef) set_ref_if_supported(ev, m_ref);
         evs.insert(evs.begin() + static_cast<std::ptrdiff_t>(lo), std::move(ev));
         m_applied_index = lo;
     };
@@ -948,9 +952,8 @@ void PutTimingCommand::apply(Chart& chart) {
             do_apply(chart.measure_events);
             break;
     }
-    // 交叉同步（共享 id 语义，2026-09 用户）：替换的是 ref 绑定事件（含显式新 ref）→
-    // **该 #BPMxx/#STOPxx 的定义值 = 新事件值**，所有引用该 id 的事件同步刷新。
-    // （BMS 语义：ch08/ch09 行引用一个定义，行本身无独立数值——编辑一个对象 = 编辑定义。）
+    // 只有显式改值才同步共享定义；解绑或仅引用已有定义不接触定义表。
+    if (m_mode != TimingPutMode::SetValue) return;
     const std::optional<std::uint32_t> sync_ref = m_ref ? m_ref : m_old_ref;
     if (m_kind != TimingKind::Bpm && m_kind != TimingKind::Stop) return;
     if (!(sync_ref && *sync_ref != 0)) return;

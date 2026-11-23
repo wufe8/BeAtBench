@@ -359,6 +359,9 @@ ColumnLayout {
         width: dialogHostWidth > 0 ? Math.max(0, Math.min(320, dialogHostWidth - 16)) : 320
         height: naturalHeight
         title: qsTr("BGA 事件")
+        acceptGuard: function() {
+            return measureSpin.commitPendingEdit() && numSpin.commitPendingEdit() && denSpin.commitPendingEdit()
+        }
 
         property int dlgLayer: 0
 
@@ -410,7 +413,7 @@ ColumnLayout {
                     Layout.fillWidth: true
                     placeholderText: qsTr("01/ZZ")
                     font.family: Theme.fontMono
-                    onAccepted: eventDialog.accept()
+                    onAccepted: eventDialog.requestAccept()
                     escapeHandler: function() { eventDialog.reject() }
                 }
             }

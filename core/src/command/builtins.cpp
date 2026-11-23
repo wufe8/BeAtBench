@@ -712,7 +712,7 @@ SampleKind sample_kind_arg(const Json& args) {
     return SampleKind::Wav;
 }
 
-// 数值参数（timing.put 的 value：BPM 值 / STOP 微秒 / 每小节拍数；允许小数）
+// 数值参数（timing.put 的 value：BPM 值 / STOP 原始计数 / 每小节拍数；允许小数）
 double number_arg(const Json& args, const char* key) {
     const Json* v = args.find(key);
     if (!v) throw CommandError("bad_args", std::string("缺少参数: ") + key);
@@ -803,9 +803,8 @@ edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
 }  // namespace
 
 // —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/ui-design.md 九、 工具栏值放置 + 右 dock 列表） ——
-// kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 微秒 /
-// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义，
-// 因此「值」是唯一编辑维度——ch03 内联/引用的文本差异对编辑透明。
+// kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 原始计数 /
+// 每小节拍数）。BPM/STOP 可手动绑定；未绑定的事件写回时由 codec 复用或派生定义。
 // 两种 GUI 形态共用同一套接口：
 //   - 工具栏值放置（思路1）：timing.put（同位替换）+ timing.delete；
 //   - 右 dock 管理列表（思路2）：timing.list 数据源 + put/delete 增删改。
@@ -826,6 +825,20 @@ class TimingListCommand : public Command {
     }
 };
 
+// 定义是原始 BPM 数值或 STOP 计数，与客户端的显示单位无关。
+static double timing_definition_value(const Chart& chart, edit::TimingKind kind, std::uint32_t id) {
+    const bool stop = kind == edit::TimingKind::Stop;
+    const auto it = chart.samples.find({stop ? SampleKind::Stop : SampleKind::Bpm, id});
+    if (it == chart.samples.end()) bad_args("ref 没有现有定义，请指定 value");
+    const auto& text = it->second.value;
+    char* end = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || end != text.c_str() + text.size() || !std::isfinite(value) ||
+        (stop && (value < -0x1p63 || value >= 0x1p63)))
+        bad_args("ref 的现有定义不是有效数值，请指定 value");
+    return value;
+}
+
 class TimingPutCommand : public Command {
    public:
     std::string_view name() const override { return "timing.put"; }
@@ -835,17 +848,32 @@ class TimingPutCommand : public Command {
         const auto kind = timing_kind_arg(args);
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
-        const double value = number_arg(args, "value");
-        // 手动绑定 id（可选）：ref:"1A" → #BPMxx/#STOPxx 引用 id（缺省 = 由 codec 自动派生）。
+        const auto& chart = session.chart();
         std::optional<std::uint32_t> ref;
+        auto mode = edit::TimingPutMode::SetValue;
         if (const Json* r = args.find("ref")) {
-            if (!r->is_string()) throw CommandError("bad_args", "ref 应为字符串 id");
-            const auto& chart = session.chart();
-            const std::string s = r->as_str();
-            ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+            if (!r->is_string()) bad_args("ref 应为字符串 id，空串表示解除绑定");
+            if (kind != edit::TimingKind::Measure) {
+                const auto& s = r->as_str();
+                if (s.empty()) {
+                    mode = edit::TimingPutMode::ClearRef;
+                } else {
+                    if (s.size() > 2 || !std::all_of(s.begin(), s.end(), bms::is_c36_digit))
+                        bad_args("ref 应为一至两位字母或数字");
+                    ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s) : bms::c36_to_u32(s);
+                    if (*ref == 0) bad_args("ref 不能绑定到 00");
+                }
+            }
         }
-        const bool ok =
-            session.exec(std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
+        double value = 0;
+        if (ref && !args.find("value")) {
+            value = timing_definition_value(chart, kind, *ref);
+            mode = edit::TimingPutMode::UseDefinition;
+        } else {
+            value = number_arg(args, "value");
+        }
+        const bool ok = session.exec(
+            std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref, mode));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));

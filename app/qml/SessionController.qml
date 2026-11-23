@@ -838,13 +838,16 @@ QtObject {
     }
     /// 添加/改值时间轴事件（timing.put；一个 undo 步；成功后重取列表）。
     function editTiming(kind, measure, num, den, value, ref) {
-        var args = { kind: kind, measure: measure, pos: { num: num, den: den }, value: value }
-        if (ref && ref !== "") args.ref = ref
+        var args = { kind: kind, measure: measure, pos: { num: num, den: den } }
+        const useDefinition = Number.isNaN(value)  // TimelinePanel 的留空哨兵
+        if (!useDefinition) args.value = value
+        if (kind !== "measure" && ref !== undefined) args.ref = ref
         var r = sessionCmd("timing.put", args)
         if (r) {
             refreshTiming()
+            const label = useDefinition ? "#" + kind.toUpperCase() + ref : String(value)
             setStatus(qsTr("已设置 %1 事件：小节 %2 · %3/%4 = %5")
-                      .arg(kind.toUpperCase()).arg(measure).arg(num).arg(den).arg(value))
+                      .arg(kind.toUpperCase()).arg(measure).arg(num).arg(den).arg(label))
         }
     }
     /// 删除时间轴事件（timing.delete；一个 undo 步；成功后重取列表）。

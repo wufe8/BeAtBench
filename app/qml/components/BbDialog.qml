@@ -22,6 +22,12 @@ Dialog {
 
     /// 是否显示「取消」（关于类对话框只留确定）。
     property bool showCancel: true
+    // 可选：确认前提交并校验表单；返回 false 时保留弹窗和输入。
+    property var acceptGuard: null
+    function requestAccept() {
+        if (!acceptGuard || acceptGuard())
+            accept()
+    }
     property alias horizontalAlignment: dialogPositioner.horizontalAlignment
     readonly property real dialogHostWidth: dialogPositioner.boundsItem ? dialogPositioner.boundsItem.width : 0
     /// 内容子项（默认 property：直接写子项即可）。
@@ -54,7 +60,7 @@ Dialog {
             BbToolButton {
                 objectName: "bbDialogAcceptButton"
                 text: qsTr("确定")
-                onClicked: root.accept()
+                onClicked: root.requestAccept()
             }
             BbToolButton {
                 objectName: "bbDialogCancelButton"

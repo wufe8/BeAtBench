@@ -213,6 +213,79 @@ Item {
             const row = list.itemAtIndex(0)
             mouseDoubleClickSequence(row, 25, row.height / 2)
         }
+        function test_dock_numeric_click_accept_data() {
+            return [{ tag: "bga", bga: true }, { tag: "timeline", bga: false }]
+        }
+        function openDockEditor(data) {
+            const panel = data.bga ? bgaPanel : timelinePanel
+            if (!data.bga) {
+                timelinePanel.kind = "bpm"
+                timelinePanel.bpmEvents = [{measure: 2, pos: {num: 1, den: 2}, value: 180, ref: ""}]
+            }
+            const dialog = findChild(panel, data.bga ? "bgaEventDialog" : "timelineEventDialog")
+            verify(dialog !== null)
+            doubleClickFirstEvent(panel, data.bga ? "bgaEventList" : "timelineEventList")
+            tryCompare(dialog, "opened", true)
+            waitForRendering(dialog.contentItem)
+            return dialog
+        }
+        function numericEditors(body) {
+            const editors = []
+            function collect(item) {
+                if (typeof item.commitPendingEdit === "function") {
+                    editors.push(item.contentItem)
+                    return
+                }
+                for (const child of item.children) collect(child)
+            }
+            collect(body)
+            compare(editors.length, 3)
+            return editors
+        }
+        function replaceNumericText(editor, key) {
+            mouseClick(editor)
+            verify(editor.activeFocus)
+            keyClick(Qt.Key_A, Qt.ControlModifier)
+            keyClick(key)
+        }
+        function watchDockSubmit(data) {
+            const spy = createTemporaryQmlObject('import QtTest; SignalSpy {}', window)
+            spy.target = data.bga ? bgaPanel : timelinePanel
+            spy.signalName = data.bga ? "bgaEditRequested" : "timingEditRequested"
+            verify(spy.valid)
+            return spy
+        }
+        function test_dock_numeric_click_accept(data) {
+            const spy = watchDockSubmit(data)
+            const dialog = openDockEditor(data)
+            const measure = numericEditors(dialog.contentItem)[0]
+            replaceNumericText(measure, Qt.Key_7)
+            compare(measure.text, "7")
+            mouseClick(findChild(dialog.footer, "bbDialogAcceptButton"))
+            tryCompare(dialog, "visible", false)
+            compare(spy.count, 1)
+            compare(Array.from(spy.signalArguments[0]).slice(1, 4), [7, 1, 2])
+        }
+        function test_dock_invalid_numeric_click_accept_data() {
+            return test_dock_numeric_click_accept_data()
+        }
+        function test_dock_invalid_numeric_click_accept(data) {
+            const spy = watchDockSubmit(data)
+            const dialog = openDockEditor(data)
+            const den = numericEditors(dialog.contentItem)[2]
+            replaceNumericText(den, Qt.Key_Backspace)
+            compare(den.text, "")
+            verify(!den.acceptableInput)
+            mouseClick(findChild(dialog.footer, "bbDialogAcceptButton"))
+            compare(spy.count, 0)
+            verify(dialog.opened)
+            compare(den.text, "")
+            replaceNumericText(den, Qt.Key_4)
+            mouseClick(findChild(dialog.footer, "bbDialogAcceptButton"))
+            tryCompare(dialog, "visible", false)
+            compare(spy.count, 1)
+            compare(Array.from(spy.signalArguments[0]).slice(1, 4), [2, 1, 4])
+        }
         function test_actual_bga_dialog_drag() {
             const dialog = findChild(bgaPanel, "bgaEventDialog")
             verify(dialog !== null)

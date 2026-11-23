@@ -77,6 +77,18 @@ BMS 文件的 `02` 通道是标准小节长度的倍率：`1` 相当于四个四
 - 支持 `format` 的文件命令可显式指定已注册格式；省略时按扩展名识别。读取编码 `encoding` 支持 `auto`（默认）、`utf8`、`sjis`。JSON `convert` 的显式 `utf8` / `sjis` 同时选择写出编码；省略或传 `auto` 时自动判读、按默认 UTF-8 写出。BMS 的 `mode` 及 PMS 写回变体见 [BMS 格式笔记](<bms-format-notes.md#9key-pms模式游玩轨>)。
 - `NoteRef` 以 `measure`、`pos`、`lane`、`sample` 及适用时的 `sub_line` 定位，支持 `ln_channel` 与 `note_kind`（`normal` / `mine`）区分源身份。旧调用省略源身份时，不得把有歧义的匹配当成唯一结果。长音源身份见 [BMS 格式笔记](<bms-format-notes.md#长音>)。
 
-### 6. 与人类 CLI 的关系
+### 6. `timing.put` 的引用与数值
+
+`timing.put` 按 `kind`（`bpm` / `stop` / `measure`）和 `(measure, pos)` 插入或同位替换。`value` 是 BPM 数值、STOP 原始计数（全音符的 1/192 为一单位，不是毫秒）或每小节拍数。`measure` 类事件不使用 `ref`。
+
+| BPM/STOP 的 `ref` | 行为 |
+|---|---|
+| 省略 | 同位替换保留原绑定；新事件不绑定。 |
+| `""` | 明确解除绑定，不改原定义或其他引用。写出时 codec 可按事件值复用或派生 ID，不保证重载后仍无 ID。 |
+| 非空 ID 文本 | 按谱面进制解码后绑定（允许省略前导零，不接受 `00`）。 |
+
+同位替换若显式传 `value` 且结果仍绑定，则新值更新对应共享定义及其引用者。已有定义也可仅换绑：传非空 `ref` 并省略 `value`，事件采用该定义的原始数值，不改定义文本或其他引用者。定义不存在或数值无效时返回 `bad_args`，不会修改谱面；其他情况必须指定 `value`。
+
+### 7. 与人类 CLI 的关系
 
 人类子命令与 JSON 命令复用核心编解码与处理能力，但不是一一映射；命令名、参数和退出语义不保证相同。实际人类子命令与选项以 `cli/main.cpp` 为准。

@@ -25,7 +25,8 @@ ColumnLayout {
     /// 定义表折叠区是否展开。
     property bool expandDefs: false
     /// 编辑（添加/改值）→ Main 走 timing.put。pos 以 num/den 分开传（避免对象绑定歧义）。
-    /// ref = 手动绑定的 #BPMxx/#STOPxx id 文本（空 = codec 自动派生；小节长度无 ref）。
+    /// ref = 手动绑定的 #BPMxx/#STOPxx id 文本（空 = 解除绑定；小节长度无 ref）。
+    /// 值留空且给定 ref 时，以 NaN 穿过 double 信号；提交层据此省略 value。
     signal timingEditRequested(string kind, int measure, int num, int den, double value, string ref)
     /// 删除 → Main 走 timing.delete。
     signal timingDeleteRequested(string kind, int measure, int num, int den)
@@ -367,6 +368,10 @@ ColumnLayout {
         width: dialogHostWidth > 0 ? Math.max(0, Math.min(320, dialogHostWidth - 16)) : 320
         height: naturalHeight
         title: qsTr("时间轴事件")
+        acceptGuard: function() {
+            return (valueField.text.trim() === "" || valueField.acceptableInput)
+                && measureSpin.commitPendingEdit() && numSpin.commitPendingEdit() && denSpin.commitPendingEdit()
+        }
 
         property string kind: "bpm"
         property bool editing: false
@@ -403,7 +408,7 @@ ColumnLayout {
             measureSpin.value = baseMeasure
             numSpin.value = baseNum
             denSpin.value = Math.max(1, baseDen)
-            // 编辑模式：值字段留空（不填 = 维持原值）；添加模式：填默认值
+            // 编辑模式留空：有 ref 时采用其定义，否则维持当前值。添加模式填默认值。
             valueField.text = editing ? "" : (timelineDialog.kind === "bpm" ? String(baseValue)
                                                                     : (timelineDialog.kind === "stop" ? stopToDisplay(baseValue)
                                                                                               : String(baseValue)))
@@ -448,12 +453,14 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 70   // 覆写隐式宽 → 值输入框不越界
                     placeholderText: timelineDialog.editing
-                                     ? qsTr("不填=维持 %1").arg(timelineDialog.baseValue)
+                                     ? (timelineDialog.kind !== "measure" && refField.text.trim() !== ""
+                                        ? qsTr("不填＝使用该 ID 的定义值")
+                                        : qsTr("不填＝维持原值"))
                                      : (timelineDialog.kind === "bpm" ? qsTr("130") : qsTr("96"))
                     validator: DoubleValidator { bottom: 0; top: 999999 }
                     onAccepted: {
                         if (timelineDialog.kind === "measure")
-                            timelineDialog.accept()
+                            timelineDialog.requestAccept()
                         else
                             refField.forceActiveFocus()
                     }
@@ -476,7 +483,7 @@ ColumnLayout {
                     placeholderText: qsTr("留空=自动")
                     font.family: Theme.fontMono
                     font.pixelSize: Theme.fsSmall
-                    onAccepted: timelineDialog.accept()
+                    onAccepted: timelineDialog.requestAccept()
                     escapeHandler: function() { timelineDialog.reject() }
                 }
             }
@@ -491,30 +498,16 @@ ColumnLayout {
         }
         onAccepted: {
             const valueText = valueField.text.trim()
-            const ref = refField.text.trim()
+            const ref = kind === "measure" ? "" : refField.text.trim()
             let value = baseValue
-            // 值字段为空 = 根据新 id 决定值
-            if (valueText === "") {
-                if (ref !== "" && ref !== baseRef) {
-                    // 改绑到新 id：查找新 id 的原值，保持不变
-                    const newDef = root.defs.find(d => d.id === ref)
-                    if (newDef) {
-                        // 新 id 已有定义：保持其原值
-                        value = root.kind === "bpm" ? parseFloat(newDef.value)
-                                                    : (root.kind === "stop" ? root.stopFromDisplay(newDef.value)
-                                                                             : parseFloat(newDef.value))
-                    }
-                    // 新 id 无定义：保持原值（baseValue）
-                }
-                // ref 未变或为空：保持原值
-            } else {
-                // 用户填了值：用新值（小节长度 = 直接拍数，不做 STOP 单位换算）
-                value = root.kind === "stop" ? root.stopFromDisplay(valueText)
-                                             : parseFloat(valueText)
+            if (valueText !== "") {
+                // 仅换算用户输入；既有定义采用 core 的原始值，不经过显示单位。
+                value = kind === "stop" ? root.stopFromDisplay(valueText) : parseFloat(valueText)
+                if (!isFinite(value)) return
+            } else if (ref !== "") {
+                value = NaN
             }
-            if (!isFinite(value)) value = baseValue
-            root.timingEditRequested(timelineDialog.kind, measureSpin.value,
-                                     numSpin.value, denSpin.value, value, ref)
+            root.timingEditRequested(kind, measureSpin.value, numSpin.value, denSpin.value, value, ref)
         }
     }
 
