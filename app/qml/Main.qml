@@ -1076,7 +1076,6 @@ ApplicationWindow {
                     deleteBga(layer, measure, num, den)
                 onBmpAddRequested: (id, file) => bmpAdd(id, file)
                 onBmpSetFileRequested: (id, file) => bmpSetFile(id, file)
-                onBmpRenameRequested: (fromId, toId) => bmpRename(fromId, toId)
                 onBmpDeleteRequested: (id) => bmpDelete(id)
                 onBmpSelected: (id) => setCurrentBmp(id)
             }
@@ -2305,7 +2304,6 @@ ApplicationWindow {
     function bgaLayerName(l) { return session.bgaLayerName(l) }
     function bmpAdd(id, file) { return session.bmpAdd(id, file) }
     function bmpDelete(id) { return session.bmpDelete(id) }
-    function bmpRename(fromId, toId) { return session.bmpRename(fromId, toId) }
     function bmpSetFile(id, file) { return session.bmpSetFile(id, file) }
     function addWavSample(id, file) { return session.addWavSample(id, file) }
     function cancelPendingLn() {

@@ -98,6 +98,7 @@ ColumnLayout {
         }
 
         ListView {
+            objectName: "timelineEventList"
             anchors.fill: parent
             clip: true
             model: root.events
@@ -168,10 +169,12 @@ ColumnLayout {
                     anchors.fill: parent
                     hoverEnabled: true
                     // 右键删除 / 双击编辑值
-                    onDoubleClicked: timelineDialog.openForEdit(
-                                         root.kind, row.modelData.measure,
-                                         row.modelData.pos.num, row.modelData.pos.den,
-                                         row.modelData.value, row.modelData.ref || "")
+                    onDoubleClicked: (mouse) => {
+                        if (mouse.button === Qt.LeftButton)
+                            timelineDialog.openForEdit(root.kind, row.modelData.measure,
+                                                       row.modelData.pos.num, row.modelData.pos.den,
+                                                       row.modelData.value, row.modelData.ref || "")
+                    }
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: (mouse) => {
                         if (mouse.button === Qt.RightButton)
@@ -448,7 +451,12 @@ ColumnLayout {
                                      ? qsTr("不填=维持 %1").arg(timelineDialog.baseValue)
                                      : (timelineDialog.kind === "bpm" ? qsTr("130") : qsTr("96"))
                     validator: DoubleValidator { bottom: 0; top: 999999 }
-                    onAccepted: refField.forceActiveFocus()
+                    onAccepted: {
+                        if (timelineDialog.kind === "measure")
+                            timelineDialog.accept()
+                        else
+                            refField.forceActiveFocus()
+                    }
                     escapeHandler: function() { timelineDialog.reject() }
                 }
             }
@@ -474,11 +482,9 @@ ColumnLayout {
             }
             Label {
                 visible: timelineDialog.kind !== "measure"
-                text: timelineDialog.kind === "bpm"
-                      ? (refField.text.trim() === "" ? qsTr("值自动派生 #BPMxx") : qsTr("绑定 #%1xx").arg("BPM"))
-                      : (refField.text.trim() === ""
-                         ? (stopUnit === 0 ? qsTr("值自动派生 #STOPxx") : qsTr("值自动派生 #STOPxx"))
-                         : qsTr("绑定 #%1xx").arg("STOP"))
+                text: refField.text.trim() !== ""
+                      ? qsTr("绑定 #%1xx").arg(timelineDialog.kind === "bpm" ? "BPM" : "STOP")
+                      : (timelineDialog.kind === "bpm" ? qsTr("值自动派生 #BPMxx") : qsTr("值自动派生 #STOPxx"))
                 color: Theme.textFaint
                 font.pixelSize: Theme.fsTiny
             }

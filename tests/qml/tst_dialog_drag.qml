@@ -37,7 +37,16 @@ Item {
             }
         }
         Components.SettingsDialog { id: settingsDialog }
-        Components.BgaPanel { id: bgaPanel; x: 660; y: 80; width: 250; height: 500 }
+        QtObject {
+            id: chartSession
+            function idTextOf(value) { return value === 1 ? "01" : "00" }
+        }
+        Components.BgaPanel {
+            id: bgaPanel
+            x: 310; y: 80; width: 250; height: 500
+            events: [{measure: 2, pos: {num: 1, den: 2}, sample: 1}]
+            bmpDefs: [{id: "01", file: "image.png", refs: 1}]
+        }
         Components.TimelinePanel { id: timelinePanel; x: 650; y: 90; width: 260; height: 480 }
         Dialog {
             id: legacyDialog
@@ -197,17 +206,26 @@ Item {
             openDialog(settingsDialog)
             comparePoint(pointOf(settingsDialog), 268, 40)
         }
+        function doubleClickFirstEvent(panel, listName) {
+            const list = findChild(panel, listName)
+            verify(list !== null)
+            tryVerify(() => list.itemAtIndex(0) !== null)
+            const row = list.itemAtIndex(0)
+            mouseDoubleClickSequence(row, 25, row.height / 2)
+        }
         function test_actual_bga_dialog_drag() {
             const dialog = findChild(bgaPanel, "bgaEventDialog")
             verify(dialog !== null)
-            dialog.openForAdd(0)
+            doubleClickFirstEvent(bgaPanel, "bgaEventList")
             tryCompare(dialog, "opened", true)
+            compare(dialog.background.color, Theme.surface)
+            verify(dialog.contentItem.height + 1 >= dialog.contentItem.implicitHeight)
+            verify(dialog.contentItem.mapToItem(dialog.footer, 0, dialog.contentItem.height).y <= 1)
             const before = pointOf(dialog)
             comparePoint(before, (960 - dialog.width) / 2, (720 - dialog.height) / 2)
             drag(dialog, -50, 30)
             comparePoint(pointOf(dialog), before.x - 50, before.y + 30)
-            verify(dialog.standardButton(Dialog.Cancel) !== null)
-            mouseClick(dialog.standardButton(Dialog.Cancel))
+            mouseClick(findChild(dialog.footer, "bbDialogCancelButton"))
             tryCompare(dialog, "visible", false)
         }
         function test_actual_timeline_dialog_drag() {
@@ -230,7 +248,12 @@ Item {
         function test_timeline_initial_theme_and_form_bounds(data) {
             const dialog = findChild(timelinePanel, "timelineEventDialog")
             verify(dialog !== null)
-            dialog.openForEdit(data.kind, 21, 1, 2, data.value, data.ref)
+            const events = [{measure: 21, pos: {num: 1, den: 2}, value: data.value, ref: data.ref}]
+            timelinePanel.bpmEvents = events
+            timelinePanel.stopEvents = events
+            timelinePanel.measureEvents = events
+            timelinePanel.kind = data.kind
+            doubleClickFirstEvent(timelinePanel, "timelineEventList")
             tryCompare(dialog, "opened", true)
             const body = dialog.contentItem
             waitForRendering(body)

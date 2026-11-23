@@ -910,16 +910,6 @@ QtObject {
             setStatus(qsTr("#BMP%1 文件 → %2").arg(id).arg(file || "(已清空)"))
         }
     }
-    /// 重命名 #BMP id（sample.rename kind=bmp）。
-    function bmpRename(fromId, toId) {
-        if (fromId === "" || toId === "") { setStatus(qsTr("#BMP 重命名需 from/to")); return }
-        if (fromId === toId) return
-        const r = sessionCmd("sample.rename", { from: fromId, to: toId, kind: "bmp" })
-        if (r) {
-            if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()
-            setStatus(qsTr("#BMP%1 → #BMP%2").arg(fromId).arg(toId))
-        }
-    }
     /// 删除 #BMP 定义（sample.delete kind=bmp；引用保留原 id，Undo 可恢复）。
     function bmpDelete(id) {
         if (id === "") { setStatus(qsTr("#BMP id 不能为空")); return }

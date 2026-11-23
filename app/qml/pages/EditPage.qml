@@ -133,8 +133,6 @@ Item {
     readonly property string playheadPosText: chartView ? chartView.playheadPosText : ""
     /// 暴露采样面板（Main 在文件编辑后 scrollTo 定位，避免列表回到顶部）
     readonly property var samplePanelObj: samplePanel
-    /// 暴露 BGA 面板（Main 打开谱面/编辑后调 reloadBga）
-    readonly property var bgaPanelObj: bgaPanel
 
     /// 采样被选中（面板点击/键盘确认）→ Main 记录为当前采样（M3 放置落点）
     signal samplePicked(string id, string file)
@@ -198,8 +196,6 @@ Item {
     signal bmpAddRequested(string id, string file)
     /// 设置 #BMP 文件 → Main 走 sample.setFile(kind=bmp)
     signal bmpSetFileRequested(string id, string file)
-    /// 重命名 #BMP id → Main 走 sample.rename(kind=bmp)
-    signal bmpRenameRequested(string fromId, string toId)
     /// 删除 #BMP 定义 → Main 走 sample.delete(kind=bmp)
     signal bmpDeleteRequested(string id)
 
@@ -371,7 +367,6 @@ Item {
                             root.bgaDeleteRequested(layer, measure, num, den)
                         onBmpAddRequested: (id, file) => root.bmpAddRequested(id, file)
                         onBmpSetFileRequested: (id, file) => root.bmpSetFileRequested(id, file)
-                        onBmpRenameRequested: (fromId, toId) => root.bmpRenameRequested(fromId, toId)
                         onBmpDeleteRequested: (id) => root.bmpDeleteRequested(id)
                         onBmpSelected: (id) => root.bmpSelected(id)
                     }
