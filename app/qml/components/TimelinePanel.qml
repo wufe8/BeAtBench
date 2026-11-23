@@ -356,20 +356,14 @@ ColumnLayout {
     }
 
     // ---- 添加 / 编辑对话框 ----
-    Dialog {
+    BbDialog {
         id: timelineDialog
         objectName: "timelineEventDialog"
-        modal: true
-        // 初始右对齐主窗口、纵向居中；逻辑 parent 即使在窄 dock 中也正确映射。
-        width: 260
+        // 按主窗口而非 Dock 限宽；高度计入当前类型的可见表单行。
+        horizontalAlignment: Qt.AlignRight
+        width: dialogHostWidth > 0 ? Math.max(0, Math.min(320, dialogHostWidth - 16)) : 320
+        height: naturalHeight
         title: qsTr("时间轴事件")
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        BbDialogPositioner {
-            id: timelineDialogPositioner
-            dialog: timelineDialog
-            horizontalAlignment: Qt.AlignRight
-        }
-        header: BbDialogHeader { dialog: timelineDialog; positioner: timelineDialogPositioner }
 
         property string kind: "bpm"
         property bool editing: false
@@ -416,9 +410,10 @@ ColumnLayout {
         onOpened: valueField.forceActiveFocus()
 
         ColumnLayout {
-            anchors.fill: parent
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
             spacing: 4
-            // 小节 2 : 0 / 1（冒号分隔；紧凑一行，默认 dock 宽可容纳）
+            // 小节 2 : 0 / 1（冒号分隔；紧凑一行）
             RowLayout {
                 spacing: 4
                 Layout.fillWidth: true
@@ -449,7 +444,6 @@ ColumnLayout {
                     id: valueField
                     Layout.fillWidth: true
                     Layout.minimumWidth: 70   // 覆写隐式宽 → 值输入框不越界
-                    Layout.maximumWidth: 150  // 限制「值(BPM)」列长度（2026-09 用户）
                     placeholderText: timelineDialog.editing
                                      ? qsTr("不填=维持 %1").arg(timelineDialog.baseValue)
                                      : (timelineDialog.kind === "bpm" ? qsTr("130") : qsTr("96"))
@@ -457,7 +451,6 @@ ColumnLayout {
                     onAccepted: refField.forceActiveFocus()
                     escapeHandler: function() { timelineDialog.reject() }
                 }
-                Item { Layout.fillWidth: true }
             }
             // 绑定的 #BPMxx/#STOPxx id（可手动修改；小节长度无 id）
             RowLayout {
@@ -478,7 +471,6 @@ ColumnLayout {
                     onAccepted: timelineDialog.accept()
                     escapeHandler: function() { timelineDialog.reject() }
                 }
-                Item { Layout.fillWidth: true }
             }
             Label {
                 visible: timelineDialog.kind !== "measure"

@@ -22,6 +22,8 @@ Dialog {
 
     /// 是否显示「取消」（关于类对话框只留确定）。
     property bool showCancel: true
+    property alias horizontalAlignment: dialogPositioner.horizontalAlignment
+    readonly property real dialogHostWidth: dialogPositioner.boundsItem ? dialogPositioner.boundsItem.width : 0
     /// 内容子项（默认 property：直接写子项即可）。
     default property alias content: bodyColumn.data
     readonly property int contentPadding: 12
@@ -50,10 +52,12 @@ Dialog {
             spacing: 8
             Item { Layout.fillWidth: true }
             BbToolButton {
+                objectName: "bbDialogAcceptButton"
                 text: qsTr("确定")
                 onClicked: root.accept()
             }
             BbToolButton {
+                objectName: "bbDialogCancelButton"
                 text: qsTr("取消")
                 visible: root.showCancel
                 enabled: root.showCancel

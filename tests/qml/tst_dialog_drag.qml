@@ -219,7 +219,48 @@ Item {
             comparePoint(before, 960 - dialog.width - 12, (720 - dialog.height) / 2)
             drag(dialog, -50, 30)
             comparePoint(pointOf(dialog), before.x - 50, before.y + 30)
-            mouseClick(dialog.standardButton(Dialog.Cancel))
+            mouseClick(findChild(dialog.footer, "bbDialogCancelButton"))
+            tryCompare(dialog, "visible", false)
+        }
+        function test_timeline_initial_theme_and_form_bounds_data() {
+            return [{ tag: "bpm", kind: "bpm", value: 180, ref: "03" },
+                    { tag: "stop", kind: "stop", value: 96, ref: "01" },
+                    { tag: "measure", kind: "measure", value: 4, ref: "" }]
+        }
+        function test_timeline_initial_theme_and_form_bounds(data) {
+            const dialog = findChild(timelinePanel, "timelineEventDialog")
+            verify(dialog !== null)
+            dialog.openForEdit(data.kind, 21, 1, 2, data.value, data.ref)
+            tryCompare(dialog, "opened", true)
+            const body = dialog.contentItem
+            waitForRendering(body)
+            compare(dialog.background.color, Theme.surface)
+            compare(dialog.footer.color, Theme.surface2)
+            const ok = findChild(dialog.footer, "bbDialogAcceptButton")
+            const cancel = findChild(dialog.footer, "bbDialogCancelButton")
+            verify(ok !== null && cancel !== null)
+            for (const button of [ok, cancel]) {
+                compare(button.background.color, Theme.surface2)
+                compare(button.contentItem.color, Theme.textMuted)
+            }
+            verify(body.height + 1 >= body.implicitHeight)
+            let fields = 0
+            function inspect(item) {
+                if (!item.visible) return
+                if (item.text !== undefined && item.font !== undefined && item.text !== "") {
+                    const p = item.mapToItem(body, 0, 0)
+                    verify(p.x >= -1 && p.x + item.width <= body.width + 1, item.text)
+                    verify(p.y >= -1 && p.y + item.height <= body.height + 1, item.text)
+                    if (item.contentHeight !== undefined)
+                        verify(item.contentHeight <= item.height + 1, item.text)
+                    ++fields
+                }
+                for (const child of item.children) inspect(child)
+            }
+            inspect(body)
+            verify(fields >= 4)
+            verify(body.mapToItem(dialog.footer, 0, body.height).y <= 1)
+            mouseClick(cancel)
             tryCompare(dialog, "visible", false)
         }
         function test_standalone_header_does_not_break_standard_buttons() {

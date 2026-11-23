@@ -2813,8 +2813,8 @@ TestCase {
     function assertDialogContentBounds(dialog) {
         verify(dialog !== null)
         tryCompare(dialog, "opened", true)
-        wait(0) // Let wrapped labels and ColumnLayout settle.
         const body = dialog.contentItem
+        waitForRendering(body) // Width changes reflow text before the layout's next polish.
         verify(body.height + 1 >= body.implicitHeight, "Dialog body squeezed below content height")
         let textCount = 0
         function inspect(item) {
@@ -2826,7 +2826,10 @@ TestCase {
                 verify(p.x + item.width <= body.width + 1, "Text crosses body right edge: " + item.text)
                 verify(p.y + item.height <= body.height + 1, "Text overlaps footer: " + item.text)
                 if (item.contentHeight !== undefined)
-                    verify(item.contentHeight <= item.height + 1, "Text vertically clipped: " + item.text)
+                    verify(item.contentHeight <= item.height + 1, "Text vertically clipped: " + item.text
+                           + " (content=" + item.contentHeight + ", allocated=" + item.height
+                           + ", implicit=" + item.implicitHeight + ", width=" + item.width
+                           + ", dialog width=" + dialog.width + ")")
                 if (item.contentWidth !== undefined && item.selectByMouse === undefined)
                     verify(item.contentWidth <= item.width + 1, "Label horizontally clipped: " + item.text)
                 verify(item.text.indexOf("©") < 0 && item.text.indexOf("wufe8") < 0)

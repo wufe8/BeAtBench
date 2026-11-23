@@ -2779,9 +2779,15 @@ ApplicationWindow {
                 escapeHandler: function() { noteSampleDialog.reject() }
             }
         }
-        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
-                text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
-                font.pixelSize: Theme.fsTiny }
+        Label {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.minimumHeight: Math.ceil(contentHeight)
+            wrapMode: Text.Wrap
+            text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件")
+            color: Theme.textFaint
+            font.pixelSize: Theme.fsTiny
+        }
         onAccepted: {
             const r = noteSampleDialog.ref
             if (!r) return
