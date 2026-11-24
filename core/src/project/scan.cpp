@@ -251,7 +251,12 @@ void measure_file(const fs::path& path, std::size_t& size_bytes, std::int64_t& m
     std::error_code tec;
     const auto ftime = fs::last_write_time(path, tec);
     if (!tec) {
+        // MSVC 的 file_clock 走 UTC；libstdc++ / libc++ 提供直接转系统时钟的接口。
+#ifdef _MSVC_STL_VERSION
         const auto sys = std::chrono::clock_cast<std::chrono::system_clock>(ftime);
+#else
+        const auto sys = std::chrono::file_clock::to_sys(ftime);
+#endif
         mtime_unix =
             std::chrono::duration_cast<std::chrono::seconds>(sys.time_since_epoch()).count();
     }

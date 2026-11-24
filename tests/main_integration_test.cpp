@@ -361,8 +361,8 @@ class MainIntegrationSetup : public QObject {
         QVariantList notes;
         for (const auto& n : s->chart().notes)
             notes.append(QVariantMap{{"measure", n.measure},
-                                     {"num", n.pos.num},
-                                     {"den", n.pos.den},
+                                     {"num", static_cast<qlonglong>(n.pos.num)},
+                                     {"den", static_cast<qlonglong>(n.pos.den)},
                                      {"lane", n.value.lane.index},
                                      {"sample", n.value.sample.id}});
         QVariantMap definitions;
