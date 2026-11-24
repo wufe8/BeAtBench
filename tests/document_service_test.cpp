@@ -97,6 +97,46 @@ class DocumentServiceTest : public ::testing::Test {
     std::vector<std::string> previousIds_;
 };
 
+TEST_F(DocumentServiceTest, TextFormatFollowsEachDocumentAndAsciiBecomesCp932OnSave) {
+    const auto ascii = service_.open(aPath_);
+    ASSERT_TRUE(ok(ascii));
+    auto* a = service_.session(idOf(ascii));
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->textFormat().value("encoding").toString(), QStringLiteral("ascii"));
+    EXPECT_EQ(a->textFormat().value("lineEnding").toString(), QStringLiteral("lf"));
+
+    const QByteArray utf8 = QByteArray::fromHex("efbbbf") + "#TITLE 日本語\r\n#BPM 120\r\n";
+    QFile bFile(bPath_);
+    ASSERT_TRUE(bFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    ASSERT_EQ(bFile.write(utf8), utf8.size());
+    bFile.close();
+    const auto unicode = service_.openReference(bPath_);
+    ASSERT_TRUE(ok(unicode));
+    auto* b = service_.session(idOf(unicode));
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(b->textFormat().value("encoding").toString(), QStringLiteral("utf8"));
+    EXPECT_TRUE(b->textFormat().value("utf8Bom").toBool());
+    EXPECT_EQ(b->textFormat().value("lineEnding").toString(), QStringLiteral("crlf"));
+    EXPECT_EQ(a->textFormat().value("encoding").toString(), QStringLiteral("ascii"));
+
+    auto req = beatbench::json::Json::parse(
+        R"({"command":"meta.edit","args":{"edits":[{"key":"TITLE","value":"日本語"}]}})");
+    req.find("args")->set("session_id", idOf(ascii).toStdString());
+    const auto edited = beatbench::cmd::global_registry().dispatch(req);
+    ASSERT_TRUE(edited.find("ok")->as_bool()) << edited.dump();
+    ASSERT_TRUE(ok(service_.save(idOf(ascii))));
+    const QByteArray bytes = readBytes(aPath_);
+    EXPECT_TRUE(bytes.contains(QByteArray::fromHex("93fa967b8cea")));
+    EXPECT_FALSE(bytes.contains('\r'));
+    EXPECT_EQ(a->textFormat().value("encoding").toString(), QStringLiteral("sjis"));
+
+    const auto copied = temporary_->filePath(QStringLiteral("unicode-copy.bms"));
+    ASSERT_TRUE(ok(service_.save(idOf(unicode), copied)));
+    const QByteArray copiedBytes = readBytes(copied);
+    EXPECT_TRUE(copiedBytes.startsWith(QByteArray::fromHex("efbbbf")));
+    EXPECT_TRUE(copiedBytes.contains("#TITLE 日本語\r\n"));
+}
+
 TEST_F(DocumentServiceTest, CreatesSelectedModesWithoutOverwritingExistingDocuments) {
     const auto a = service_.open(aPath_);
     const auto b = service_.openReference(bPath_);

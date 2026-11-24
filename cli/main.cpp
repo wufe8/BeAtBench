@@ -244,25 +244,39 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
     beatbench::codec::ReadOptions ropts;
     const auto result = codec->read(in_path, ropts);
     print_diagnostics(result.diagnostics);
+    if (std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                    [](const auto& d) { return d.severity == beatbench::codec::Severity::Error; }))
+        return 1;
 
     beatbench::codec::WriteOptions opts;
     if (encoding == "sjis" || encoding == "shift_jis" || encoding == "shift-jis") {
         opts.encoding = "sjis";
+        opts.strict_encoding = true;
     } else if (encoding == "utf8" || encoding == "utf-8") {
         opts.encoding = "utf8";
     } else {
         std::printf("[ERROR] 未知编码 '%s'（支持 utf8 / sjis）\n", encoding.c_str());
         return 2;
     }
-    const auto text = codec->write(result.chart, opts);
-    const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(out_path), text);
-    if (!wr.ok) {
-        std::printf("[ERROR] %s\n", wr.error.c_str());
+    try {
+        const auto output = std::filesystem::u8path(out_path);
+        if (result.encoding_ambiguous && std::filesystem::exists(output)) {
+            std::printf("[ERROR] 输入编码有歧义，不能覆盖现有输出；请改用新路径\n");
+            return 1;
+        }
+        const auto text = codec->write(result.chart, opts);
+        const auto wr = beatbench::io::atomic_write_file(output, text);
+        if (!wr.ok) {
+            std::printf("[ERROR] %s\n", wr.error.c_str());
+            return 1;
+        }
+        std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(),
+                    text.size(), encoding.c_str());
+        return 0;
+    } catch (const std::exception& e) {
+        std::printf("[ERROR] 写出失败: %s\n", e.what());
         return 1;
     }
-    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(), text.size(),
-                encoding.c_str());
-    return 0;
 }
 
 /// M4.3b：渲染谱面 → 混音 WAV（可听验证用；M5 播放的前置产物）。

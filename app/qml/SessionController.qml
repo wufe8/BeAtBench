@@ -981,6 +981,8 @@ QtObject {
             window.chartPath = r.output
             project.refreshOpenStates()  // 干净文档直接保存也要从“未修改”更新为“已保存”
             var msg = qsTr("已保存：%1（%2 字节）").arg(r.output).arg(r.bytes) + pmsSuffixWarning(r.output)
+            if (r.text_format && r.text_format.normalized_mixed_line_endings)
+                msg += normalizedLineEndingNotice(r.text_format.line_ending)
             if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
             setStatus(msg)
             return true
@@ -1007,6 +1009,9 @@ QtObject {
                   ? qsTr("元信息已保存 %1 处（写文件时随整体保存落盘）").arg(n)
                   : qsTr("元信息无改动"))
     }
+    function normalizedLineEndingNotice(lineEnding) {
+        return qsTr(" · 混合换行已统一为 %1").arg(lineEnding.toUpperCase())
+    }
     function pmsSuffixWarning(path) {
         // parser 只由 .pms 后缀自动识别 9key；#PLAYER/内容不能恢复 PMS 模式。
         return window.isPmsChart && !String(path).toLowerCase().endsWith(".pms")
@@ -1026,6 +1031,7 @@ QtObject {
             if (typeof editPage !== "undefined" && editPage) editPage.commitMeta()
             window.chartPath = r.path
             var msg = qsTr("已另存为：%1").arg(r.path) + pmsSuffixWarning(r.path)
+            if (r.normalizedLineEnding) msg += normalizedLineEndingNotice(r.normalizedLineEnding)
             if (r.backup_error) msg += qsTr(" · 崩溃备份失败：") + r.backup_error
             setStatus(msg)
             return true

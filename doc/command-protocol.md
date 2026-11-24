@@ -75,6 +75,7 @@ BMS 文件的 `02` 通道是标准小节长度的倍率：`1` 相当于四个四
 - `version` 返回 `name`、`version`、协议版本 `api`、`license`；`capabilities` 返回 `commands`、`formats`、各格式的 `modes`。用 `beatbench-cli --json '{"command":"capabilities"}'` 读取完整清单，参数和结果见 `core/src/command/`。
 - 命令覆盖查询、编解码、项目索引和编辑。支持 `session_id` 的会话操作省略它时使用活动会话。`slice.detect` 的 `source` 只接受 `grid` 或 `midi`，不提供 GUI 的音频瞬态检测。
 - 支持 `format` 的文件命令可显式指定已注册格式；省略时按扩展名识别。读取编码 `encoding` 支持 `auto`（默认）、`utf8`、`sjis`。JSON `convert` 的显式 `utf8` / `sjis` 同时选择写出编码；省略或传 `auto` 时自动判读、按默认 UTF-8 写出。BMS 的 `mode` 及 PMS 写回变体见 [BMS 格式笔记](<bms-format-notes.md#9key-pms模式游玩轨>)。
+- `session.load` / `session.new` 可传 `preserve_text_format:true`，使此文档的默认保存沿用来源字节格式，新建采用 [BMS 编辑器默认值](<bms-format-notes.md#编码换行与-bom>)。`session.dirty` 和保存结果的 `text_format` 描述文档的编码、行尾和 BOM；ASCII 是字节特征，不是对来源编码的判定。
 - `NoteRef` 以 `measure`、`pos`、`lane`、`sample` 及适用时的 `sub_line` 定位，支持 `ln_channel` 与 `note_kind`（`normal` / `mine`）区分源身份。旧调用省略源身份时，不得把有歧义的匹配当成唯一结果。长音源身份见 [BMS 格式笔记](<bms-format-notes.md#长音>)。
 
 ### 6. `timing.put` 的引用与数值
@@ -91,4 +92,4 @@ BMS 文件的 `02` 通道是标准小节长度的倍率：`1` 相当于四个四
 
 ### 7. 与人类 CLI 的关系
 
-人类子命令与 JSON 命令复用核心编解码与处理能力，但不是一一映射；命令名、参数和退出语义不保证相同。实际人类子命令与选项以 `cli/main.cpp` 为准。
+人类子命令与 JSON 命令复用核心编解码与处理能力，但不是一一映射；命令名、参数和退出语义不保证相同。人类 `convert --encoding` 只选择输出编码，输入仍自动判读；读失败或无法无损转码时不会修改目标文件。实际人类子命令与选项以 [CLI 入口](<../cli/main.cpp>) 为准。

@@ -206,6 +206,9 @@ void EditorSession::load(Chart chart) {
     m_redo.clear();
     m_selection.clear();
     m_path.clear();
+    m_text_format = {};
+    m_preserve_text_format = false;
+    m_last_backup_error.clear();
     m_generation = 0;
     m_next_generation = 1;
     m_clean_generation = 0;
@@ -283,19 +286,31 @@ bool EditorSession::redo() {
     return true;
 }
 
+void EditorSession::set_persist_hook(PersistHook hook) {
+    if (!hook) {
+        m_persist_hook = {};
+        return;
+    }
+    m_persist_hook = [hook = std::move(hook)](const EditorSession& session, const std::string& path,
+                                              DocumentTextFormat*, std::string* error) {
+        return hook(session.chart(), path, error);
+    };
+}
+
 void EditorSession::maybe_persist() {
     if (!m_chart || !m_persist_hook || m_path.empty()) return;
     if (m_backup) {
         std::string err;
-        if (!m_persist_hook(*m_chart, m_path + ".bak", &err)) {
+        if (!m_persist_hook(*this, m_path + ".bak", nullptr, &err)) {
             m_last_backup_error = err.empty() ? ("崩溃备份写入失败: " + m_path + ".bak") : err;
         } else {
             m_last_backup_error.clear();
         }
     }
     if (m_autosave) {
-        (void)m_persist_hook(*m_chart, m_path,
-                             nullptr);  // 自动保存失败下次再试；不覆盖 backup 错误
+        auto written = m_text_format;
+        if (m_persist_hook(*this, m_path, &written, nullptr)) m_text_format = std::move(written);
+        // 自动保存失败下次再试；不覆盖 backup 错误。
     }
 }
 

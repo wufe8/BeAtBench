@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -102,6 +103,40 @@ inline std::string fmt_id(const Chart& chart, std::uint32_t id) {
     return chart.id_base == IdBase::Base62 ? u32_to_c62(id, 2) : u32_to_c36(id, 2);
 }
 
+std::string apply_line_ending(std::string text, std::string_view kind) {
+    if (kind.empty() || kind == "lf") return text;
+    if (kind == "cr") {
+        std::ranges::replace(text, '\n', '\r');
+        return text;
+    }
+    if (kind != "crlf") throw std::invalid_argument("BMS 写出行尾必须为 lf、crlf 或 cr");
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        if (c == '\n') out.push_back('\r');
+        out.push_back(c);
+    }
+    return out;
+}
+
+std::string apply_byte_format(std::string text, const BmsWriteOptions& opts) {
+    if (opts.encoding == BmsEncoding::ShiftJis) {
+        if (opts.utf8_bom) throw std::invalid_argument("CP932 BMS 不能带 UTF-8 BOM");
+        text = utf8_to_shiftjis(text, opts.strict_encoding);
+    } else {
+        if (opts.strict_encoding && !is_valid_utf8(text))
+            throw std::invalid_argument("BMS 写出文本不是合法的 UTF-8");
+        if (opts.utf8_bom) text.insert(0, kUtf8Bom);
+    }
+    auto bytes = apply_line_ending(std::move(text), opts.line_ending);
+    if (opts.ascii_only) *opts.ascii_only = is_ascii(bytes);
+    if (opts.encoding_ambiguous) {
+        *opts.encoding_ambiguous = opts.encoding == BmsEncoding::ShiftJis &&
+                                   inspect_encoding(bytes, BmsEncoding::Auto).ambiguous;
+    }
+    return bytes;
+}
+
 }  // namespace
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BMS 写回通道聚合状态机
@@ -121,7 +156,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         for (const auto& [key, value] : chart.meta) {
             (void)value;
             const auto up = upper_ascii(key);
-            if (up == "BASE") continue;  // id 进制已由 id_base 结构化输出，meta 不重复
+            // 进制与编码声明都由专用逻辑生成，不能从通用 meta 伪造。
+            if (up == "BASE" || up == "ENCODING") continue;
             const bool is_known =
                 std::find(std::begin(kMetaOrder), std::end(kMetaOrder), up) != std::end(kMetaOrder);
             (is_known ? known : unknown).push_back(up);
@@ -540,21 +576,12 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
 
     // ---- 4. raw_lines 原样（#ENCODING 行按写出编码规范化） ----
     bool raw_started = false;
+    bool raw_block_comment = false;
+    bool has_encoding_declaration = false;
     for (const auto& line : chart.raw_lines) {
-        std::string_view lv(line);
-        std::size_t p = 0;
-        while (p < lv.size() && std::isspace(static_cast<unsigned char>(lv[p]))) ++p;
-        const bool is_encoding_decl =
-            lv.substr(p).starts_with('#') && upper_ascii(lv.substr(p + 1, 8)) == "ENCODING";
-        if (is_encoding_decl) {
-            if (opts.encoding == BmsEncoding::Utf8) {
-                if (!raw_started) {
-                    emit_section_comment(out, detail::kSectionRawLine);
-                    raw_started = true;
-                }
-                out += "#ENCODING UTF-8\n";
-            }
-            continue;  // SJIS 写回不输出编码声明（传统无声明）
+        if (encoding_declaration(line, raw_block_comment)) {
+            has_encoding_declaration = true;
+            continue;  // 真正的声明集中到文件头；CP932 写出省略声明。
         }
         if (!raw_started) {
             emit_section_comment(out, detail::kSectionRawLine);
@@ -563,11 +590,14 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         out += line;
         out.push_back('\n');
     }
-
-    if (opts.encoding == BmsEncoding::ShiftJis) {
-        return utf8_to_shiftjis(out);
+    if (opts.encoding != BmsEncoding::ShiftJis &&
+        (has_encoding_declaration ||
+         (!opts.utf8_bom && !is_ascii(out) && is_valid_utf8(out) && is_valid_cp932(out)))) {
+        // 已有声明规范化；无 BOM 的双可解 UTF-8 必须自描述，让默认重开不失真。
+        out.insert(0, "#ENCODING UTF-8\n");
     }
-    return out;
+
+    return apply_byte_format(std::move(out), opts);
 }
 
 }  // namespace beatbench::bms

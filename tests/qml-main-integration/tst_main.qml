@@ -1666,6 +1666,20 @@ TestCase {
         assertPmsPrimary(profile.mode, id)
         return id
     }
+    function test_statusShowsAsciiThenCp932AfterSavingJapanese() {
+        start(true)
+        const id = openPmsFixture(pmsProfileData()[0])
+        const label = mainFixture.objectNamed(main, "chartTextFormatLabel")
+        verify(label !== null)
+        compare(label.text, "ASCII  LF")
+        const response = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.edit", args: {
+            session_id: id, edits: [{key: "TITLE", value: "日本語"}]
+        }})))
+        verify(response.ok)
+        main.adoptChart(main.chartPath)
+        verify(main.saveChart())
+        tryCompare(label, "text", "CP932  LF")
+    }
     function seedPmsHistory(id) {
         for (const edit of [{key: "GENRE", value: "PMS history"},
                             {key: "ARTIST", value: "PMS redo"}]) {

@@ -17,6 +17,16 @@
 
 namespace beatbench::edit {
 
+/// 文档的磁盘文本格式（不属于 Chart、编辑事务或撤销栈）。空字段表示未识别或不适用。
+struct DocumentTextFormat {
+    std::string encoding;     ///< ascii / sjis / utf8
+    std::string line_ending;  ///< lf / crlf / cr / mixed
+    std::string preferred_line_ending;
+    bool utf8_bom = false;
+    bool encoding_ambiguous = false;
+    bool normalized_mixed_line_endings = false;  ///< 本次打开以来曾统一混合行尾
+};
+
 /// 编辑会话：持有可编辑文档（Chart）+ undo/redo 栈 + 执行编辑命令。
 /// 纯 core 零 Qt；GUI/CLI/测试三方复用（doc/core-model.md 二、「命令对象 = 唯一操作面」的文档侧承载）。
 /// 会话状态（Selection/Viewport/Playhead）不入 undo 栈——由调用方自持。
@@ -39,6 +49,11 @@ class EditorSession {
     /// 文档路径（load 时设置；另存为后由调用方 set_path 更新；未设置 = 空串）。
     const std::string& path() const { return m_path; }
     void set_path(std::string path) { m_path = std::move(path); }
+
+    const DocumentTextFormat& text_format() const { return m_text_format; }
+    void set_text_format(DocumentTextFormat format) { m_text_format = std::move(format); }
+    bool preserve_text_format() const { return m_preserve_text_format; }
+    void set_preserve_text_format(bool preserve) { m_preserve_text_format = preserve; }
 
     /// 执行编辑命令：apply → 入 undo 栈（清空 redo）；返回是否成功。
     /// 失败（命令抛出）→ 文档回滚到执行前（undo 栈不变）。
@@ -89,7 +104,12 @@ class EditorSession {
     /// 默认无钩子（不自动落盘）。由调用方（builtins/GUI）注入：用 codec->write + 原子写。
     using PersistHook =
         std::function<bool(const Chart&, const std::string& path, std::string* error)>;
-    void set_persist_hook(PersistHook hook) { m_persist_hook = std::move(hook); }
+    void set_persist_hook(PersistHook hook);
+
+    /// 对话外保存复用手动保存的格式策略；仅自动保存成功时更新主文档格式（备份不更新）。
+    using TextPersistHook = std::function<bool(const EditorSession&, const std::string& path,
+                                               DocumentTextFormat* written, std::string* error)>;
+    void set_text_persist_hook(TextPersistHook hook) { m_persist_hook = std::move(hook); }
 
     /// 最近一次崩溃备份失败原因（成功或未尝试则为空）。
     const std::string& last_backup_error() const { return m_last_backup_error; }
@@ -117,7 +137,9 @@ class EditorSession {
     std::uint64_t m_revision = 0;
     std::vector<std::uint64_t> m_undo_generation;  ///< 与 m_undo 平行：该命令 apply 后的代际
     std::vector<std::uint64_t> m_redo_generation;  ///< 与 m_redo 平行
-    PersistHook m_persist_hook;
+    DocumentTextFormat m_text_format;
+    bool m_preserve_text_format = false;
+    TextPersistHook m_persist_hook;
     bool m_backup = true;
     bool m_autosave = false;
     std::string m_last_backup_error;

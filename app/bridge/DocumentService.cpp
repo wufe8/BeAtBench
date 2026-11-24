@@ -128,6 +128,7 @@ QVariantMap DocumentService::create(const QString& mode) {
     if (!reg.create(id)) return result(false, {}, {}, QStringLiteral("create_failed"));
     Json args = Json::object();
     args.set("session_id", id);
+    args.set("preserve_text_format", true);
     if (!mode.isEmpty()) args.set("mode", utf8(mode));
     const Json response = dispatch("session.new", std::move(args));
     if (!responseOk(response)) {
@@ -199,6 +200,7 @@ QVariantMap DocumentService::openDocument(const QString& path, bool activateDocu
         Json args = Json::object();
         args.set("session_id", id);
         args.set("path", utf8(absolute));
+        args.set("preserve_text_format", true);
         const Json response = dispatch("session.load", std::move(args));
         if (!responseOk(response)) {
             rollback();
@@ -274,7 +276,11 @@ QVariantMap DocumentService::save(const QString& id, const QString& path) {
         if (!saved || !saved->is_bool() || !saved->as_bool() || session->is_dirty())
             return result(false, id, target, QStringLiteral("save_failed: 文档未保存成功"));
         refresh();
-        return result(true, id, normalizedPath(qs(session->path())));
+        QVariantMap out = result(true, id, normalizedPath(qs(session->path())));
+        const auto& format = session->text_format();
+        if (format.normalized_mixed_line_endings)
+            out.insert(QStringLiteral("normalizedLineEnding"), qs(format.line_ending));
+        return out;
     } catch (const std::exception& e) {
         return result(false, id, target,
                       QStringLiteral("save_failed: ") + QString::fromUtf8(e.what()));

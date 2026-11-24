@@ -27,6 +27,10 @@ target_compile_definitions(beatbench_tests PRIVATE
     BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 beatbench_set_warnings(beatbench_tests)
 add_test(NAME core_tests COMMAND beatbench_tests)
+add_test(NAME cli_convert_guard_tests
+    COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:beatbench-cli>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-convert-guard
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cli_convert_guard_test.cmake")
 
 # 可选 Node >=18：执行真实 QML 函数级回归（不等同于 Qt/鼠标集成测试）。
 find_program(BEATBENCH_NODE_EXECUTABLE NAMES node nodejs)

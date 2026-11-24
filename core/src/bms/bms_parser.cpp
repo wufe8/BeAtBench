@@ -164,11 +164,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     Chart& chart = result.chart;
 
     // 剥 UTF-8 BOM（read_bms_file 已剥，这里防御）
-    if (text.size() >= 3 && static_cast<unsigned char>(text[0]) == 0xEF &&
-        static_cast<unsigned char>(text[1]) == 0xBB &&
-        static_cast<unsigned char>(text[2]) == 0xBF) {
-        text.remove_prefix(3);
-    }
+    if (text.starts_with(kUtf8Bom)) text.remove_prefix(kUtf8Bom.size());
 
     // ---- 拆行（保留行号，1-based） ----
     struct Line {
@@ -177,18 +173,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     };
     std::vector<Line> lines;
     {
-        std::size_t start = 0;
         int number = 1;
-        while (start <= text.size()) {
-            const auto end = text.find('\n', start);
-            auto line = (end == std::string_view::npos) ? text.substr(start)
-                                                        : text.substr(start, end - start);
-            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-            lines.push_back({line, number});
-            if (end == std::string_view::npos) break;
-            start = end + 1;
-            ++number;
-        }
+        while (!text.empty()) lines.push_back({take_text_line(text).text, number++});
     }
 
     // ---- 预扫描 0：#BASE（id 进制扩展）。#BASE 62 → 大小写敏感 base62（62×62=3844，
@@ -671,7 +657,23 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         result.diagnostics.push_back({Severity::Error, "无法打开文件: " + path, 0});
         return result;
     }
-    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const std::string bytes((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+    const auto detected = inspect_encoding(bytes, opts.encoding);
+    const auto endings = inspect_line_endings(bytes);
+    const auto set_byte_format = [&](BmsReadResult& out) {
+        out.detected = detected.encoding;
+        out.utf8_bom = detected.utf8_bom;
+        out.encoding_ambiguous = detected.ambiguous;
+        out.line_ending = endings.kind;
+        out.preferred_line_ending = endings.preferred;
+    };
+    if (!detected.error.empty()) {
+        set_byte_format(result);
+        result.diagnostics.push_back(
+            {Severity::Error, std::string(detected.error) + ": " + path, 0});
+        return result;
+    }
 
     // 模式推断优先级（2026-09 修正：.pms 后缀语义优先于 #PLAYER）：
     //   1. 显式 opts.mode（调用方指定，最高）；
@@ -687,12 +689,9 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     if (effective.mode.empty() || effective.mode == "auto") {
         int player = 0;
         std::string_view bv(bytes);
-        std::size_t pos = 0;
-        while (pos <= bv.size()) {
-            const auto e = bv.find('\n', pos);
-            auto line = (e == std::string_view::npos) ? bv.substr(pos) : bv.substr(pos, e - pos);
-            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-            const auto line_view = line;  // 原始字节行（未解码）
+        if (detected.utf8_bom) bv.remove_prefix(kUtf8Bom.size());
+        while (!bv.empty()) {
+            const auto line_view = take_text_line(bv).text;
             // 找 #PLAYER（大小写不敏感；行首可有空白）
             std::size_t p = 0;
             while (p < line_view.size() && (line_view[p] == ' ' || line_view[p] == '\t')) ++p;
@@ -720,8 +719,6 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
                     break;
                 }
             }
-            if (e == std::string_view::npos) break;
-            pos = e + 1;
         }
         std::string ext = fs_path.extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(),
@@ -739,42 +736,21 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         // 否则留空 → read_bms 内按 #PLAYER 推断 sp7k
     }
 
-    // UTF-16 BOM：本阶段不支持（后续按需）
-    if (bytes.size() >= 2 && ((static_cast<unsigned char>(bytes[0]) == 0xFF &&
-                               static_cast<unsigned char>(bytes[1]) == 0xFE) ||
-                              (static_cast<unsigned char>(bytes[0]) == 0xFE &&
-                               static_cast<unsigned char>(bytes[1]) == 0xFF))) {
-        result.diagnostics.push_back(
-            {Severity::Error, "暂不支持 UTF-16 编码的 BMS 文件: " + path, 0});
-        return result;
-    }
-
-    BmsEncoding enc = effective.encoding;
-    if (enc == BmsEncoding::Auto) {
-        enc = detect_encoding(bytes) == DetectedEncoding::Utf8 ? BmsEncoding::Utf8
-                                                               : BmsEncoding::ShiftJis;
-    }
-    result.detected =
-        enc == BmsEncoding::Utf8 ? DetectedEncoding::Utf8 : DetectedEncoding::ShiftJis;
-
-    std::string_view view(bytes);
-    if (enc == BmsEncoding::Utf8) {
-        // 剥 UTF-8 BOM（若有）
-        if (view.size() >= 3 && static_cast<unsigned char>(view[0]) == 0xEF &&
-            static_cast<unsigned char>(view[1]) == 0xBB &&
-            static_cast<unsigned char>(view[2]) == 0xBF) {
-            view.remove_prefix(3);
-        }
-        result = read_bms(view, effective);
+    if (detected.encoding == DetectedEncoding::ShiftJis) {
+        result = read_bms(shiftjis_to_utf8(bytes), effective);
     } else {
-        result = read_bms(shiftjis_to_utf8(view), effective);
+        result = read_bms(bytes, effective);
     }
-
+    set_byte_format(result);
+    if (detected.ambiguous) {
+        result.diagnostics.push_back(
+            {Severity::Warning, "BMS 文件同时可按 UTF-8 和 CP932 解码，按 CP932 读取: " + path, 0});
+    }
+    const auto* name = detected.encoding == DetectedEncoding::ShiftJis ? "Shift_JIS"
+                       : detected.encoding == DetectedEncoding::Ascii  ? "ASCII"
+                                                                       : "UTF-8";
     result.diagnostics.push_back(
-        {Severity::Info,
-         "encoding: " + std::string(enc == BmsEncoding::Utf8 ? "UTF-8" : "Shift_JIS") + " (" +
-             path + ")",
-         0});
+        {Severity::Info, std::string("encoding: ") + name + " (" + path + ")", 0});
     return result;
 }
 

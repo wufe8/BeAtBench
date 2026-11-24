@@ -6,6 +6,7 @@
 #include "beatbench/core/command/Builtins.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -66,6 +67,15 @@ bool arg_bool(const Json& args, const char* key, bool fallback) {
 void write_chart_or_throw(const std::string& out_path, const std::string& text) {
     const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(out_path), text);
     if (!wr.ok) throw CommandError("write_failed", wr.error);
+}
+
+std::string serialize_or_throw(const Codec& codec, const Chart& chart,
+                               const beatbench::codec::WriteOptions& options) {
+    try {
+        return codec.write(chart, options);
+    } catch (const std::exception& e) {
+        throw CommandError("write_failed", e.what());
+    }
 }
 
 // 格式参数（M3：走 CodecRegistry 动态解析；未知格式 → unsupported_format）。
@@ -442,6 +452,7 @@ class ConvertCommand : public Command {
                 const std::string& e = v->as_str();
                 if (e == "sjis" || e == "shift_jis" || e == "shift-jis") {
                     wopts.encoding = "sjis";
+                    wopts.strict_encoding = true;
                     enc_name = "sjis";
                 } else if (e == "utf8" || e == "utf-8") {
                     wopts.encoding = "utf8";
@@ -451,7 +462,8 @@ class ConvertCommand : public Command {
             }
         }
 
-        if (!overwrite && std::filesystem::exists(out_path)) {
+        const bool output_exists = std::filesystem::exists(std::filesystem::u8path(out_path));
+        if (!overwrite && output_exists) {
             throw CommandError("output_exists",
                                "输出文件已存在: " + out_path + "（传 overwrite:true 覆盖）");
         }
@@ -464,7 +476,11 @@ class ConvertCommand : public Command {
             throw CommandError("read_failed", "读取失败（存在错误级诊断），未写出: " + in_path);
         }
 
-        const std::string text = codec->write(result.chart, wopts);
+        if (result.encoding_ambiguous && output_exists) {
+            throw CommandError("encoding_ambiguous",
+                               "输入编码有歧义，无法覆盖现有输出；请明确指定编码或改用新路径");
+        }
+        const std::string text = serialize_or_throw(*codec, result.chart, wopts);
         write_chart_or_throw(out_path, text);
 
         Json res = Json::object();
@@ -476,6 +492,7 @@ class ConvertCommand : public Command {
         res.set("from_encoding",
                 result.detected_encoding.empty() ? enc_name : result.detected_encoding);
         res.set("to_encoding", enc_name);
+        res.set("encoding_ambiguous", result.encoding_ambiguous);
         res.set("diagnostics", diags_json(result.diagnostics));
         return res;
     }
@@ -778,17 +795,73 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
     return arr;
 }
 
-// 持久化钩子工厂：用 codec 把 chart 写到 path（崩溃备份/自动保存用）。
-// core/edit 不依赖 codec，由协议层注入——session.load 成功时绑定。
-edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
-    return [codec](const Chart& chart, const std::string& path, std::string* error) -> bool {
+Json text_format_json(const edit::DocumentTextFormat& format) {
+    Json out = Json::object();
+    out.set("encoding", format.encoding);
+    out.set("line_ending", format.line_ending);
+    out.set("preferred_line_ending", format.preferred_line_ending);
+    out.set("utf8_bom", format.utf8_bom);
+    out.set("encoding_ambiguous", format.encoding_ambiguous);
+    out.set("normalized_mixed_line_endings", format.normalized_mixed_line_endings);
+    return out;
+}
+
+bool preserve_text_format_arg(const Json& args) {
+    if (!args.is_object()) return false;
+    if (const auto* v = args.find("preserve_text_format")) {
+        if (!v->is_bool()) bad_args("preserve_text_format 应为布尔值");
+        return v->as_bool();
+    }
+    return false;
+}
+
+struct SerializedDocument {
+    std::string bytes;
+    edit::DocumentTextFormat format;
+};
+
+// 手动保存、另存、备份和自动保存使用同一策略。先在内存完成编码转换，再打开目标。
+SerializedDocument serialize_document(const Codec& codec, const edit::EditorSession& session,
+                                      std::string encoding = {}) {
+    beatbench::codec::WriteOptions options;
+    const auto& source = session.text_format();
+    const bool preserve = session.preserve_text_format() && codec.id() == "bms";
+    const bool explicit_encoding = !encoding.empty();
+    if (preserve) {
+        if (!explicit_encoding) encoding = source.encoding == "utf8" ? "utf8" : "sjis";
+        options.line_ending =
+            source.preferred_line_ending.empty() ? "crlf" : source.preferred_line_ending;
+        options.utf8_bom = encoding == "utf8" && source.utf8_bom;
+    }
+    options.encoding = std::move(encoding);
+    options.strict_encoding = preserve || options.encoding == "sjis";
+    bool ascii_only = false;
+    bool encoding_ambiguous = false;
+    options.ascii_only = &ascii_only;
+    options.encoding_ambiguous = &encoding_ambiguous;
+    auto bytes = serialize_or_throw(codec, session.chart(), options);
+    edit::DocumentTextFormat format;
+    if (codec.id() == "bms") {
+        format.encoding = options.encoding.empty() ? "utf8" : options.encoding;
+        // CP932 输出全为 ASCII 时保留中性标签；明确的 UTF-8 写回策略不变。
+        if (ascii_only && options.encoding == "sjis") format.encoding = "ascii";
+        format.line_ending = options.line_ending.empty() ? "lf" : options.line_ending;
+        format.preferred_line_ending = format.line_ending;
+        format.utf8_bom = options.utf8_bom;
+        format.encoding_ambiguous = encoding_ambiguous;
+        format.normalized_mixed_line_endings = source.line_ending == "mixed";
+    }
+    return {std::move(bytes), std::move(format)};
+}
+
+// core/edit 不依赖 codec，由协议层在装载/新建成功后注入。
+edit::EditorSession::TextPersistHook make_persist_hook(const Codec* codec) {
+    return [codec](const edit::EditorSession& session, const std::string& path,
+                   edit::DocumentTextFormat* written, std::string* error) -> bool {
         try {
-            const std::string text = codec->write(chart, beatbench::codec::WriteOptions{});
-            const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(path), text);
-            if (!wr.ok) {
-                if (error) *error = wr.error;
-                return false;
-            }
+            auto document = serialize_document(*codec, session);
+            write_chart_or_throw(path, document.bytes);
+            if (written) *written = std::move(document.format);
             return true;
         } catch (const std::exception& e) {
             if (error) *error = e.what();
@@ -839,6 +912,14 @@ static double timing_definition_value(const Chart& chart, edit::TimingKind kind,
     return value;
 }
 
+std::uint32_t timing_ref_id(std::string_view text, IdBase base) {
+    if (text.size() > 2 || !std::all_of(text.begin(), text.end(), bms::is_c36_digit))
+        bad_args("ref 应为一至两位字母或数字");
+    const auto id = base == IdBase::Base62 ? bms::c62_to_u32(text) : bms::c36_to_u32(text);
+    if (id == 0) bad_args("ref 不能绑定到 00");
+    return id;
+}
+
 class TimingPutCommand : public Command {
    public:
     std::string_view name() const override { return "timing.put"; }
@@ -858,10 +939,7 @@ class TimingPutCommand : public Command {
                 if (s.empty()) {
                     mode = edit::TimingPutMode::ClearRef;
                 } else {
-                    if (s.size() > 2 || !std::all_of(s.begin(), s.end(), bms::is_c36_digit))
-                        bad_args("ref 应为一至两位字母或数字");
-                    ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s) : bms::c36_to_u32(s);
-                    if (*ref == 0) bad_args("ref 不能绑定到 00");
+                    ref = timing_ref_id(s, chart.id_base);
                 }
             }
         }
@@ -1460,20 +1538,26 @@ class SessionLoadCommand : public Command {
         const Codec* codec = resolve_codec(args, path);
         beatbench::codec::ReadOptions opts;
         opts.encoding = read_encoding_arg(args);
-        const auto result = codec->read(path, opts);
+        const bool preserve = preserve_text_format_arg(args);
+        auto result = codec->read(path, opts);
         for (const auto& d : result.diagnostics) {
             if (d.severity == beatbench::codec::Severity::Error) {
                 throw CommandError("read_failed", "读取失败: " + d.message);
             }
         }
         auto& session = session_from_args(args);
-        session.load(result.chart, path);
+        session.load(std::move(result.chart), path);
+        session.set_preserve_text_format(preserve);
+        session.set_text_format({std::move(result.detected_encoding), std::move(result.line_ending),
+                                 std::move(result.preferred_line_ending), result.utf8_bom,
+                                 result.encoding_ambiguous});
         // 注入持久化钩子（崩溃备份/自动保存用；按本文件 codec 写出）
-        session.set_persist_hook(make_persist_hook(codec));
+        session.set_text_persist_hook(make_persist_hook(codec));
         Json out = Json::object();
         out.set("loaded", true);
         out.set("path", path);
         out.set("format", std::string(codec->id()));
+        out.set("text_format", text_format_json(session.text_format()));
         return out;
     }
 };
@@ -1484,6 +1568,7 @@ class SessionNewCommand : public Command {
    public:
     std::string_view name() const override { return "session.new"; }
     Json run(const Json& args) const override {
+        const bool preserve = preserve_text_format_arg(args);
         auto& session = session_from_args(args);
         beatbench::Chart chart;  // 空谱面（0 小节）
         // 可选 mode（2026-10 模式系统阶段一，issue #26）：显式指定新建谱面的游玩模式，
@@ -1502,13 +1587,17 @@ class SessionNewCommand : public Command {
             chart.mode_id = m->as_str();
         }
         session.load(std::move(chart), "");
+        session.set_preserve_text_format(preserve);
+        session.set_text_format(preserve ? edit::DocumentTextFormat{"sjis", "crlf", "crlf"}
+                                         : edit::DocumentTextFormat{"utf8", "lf", "lf"});
         // 注入 BMS 持久化钩子（另存为/自动保存用）
         if (const Codec* bms = global_codec_registry().by_id("bms"))
-            session.set_persist_hook(make_persist_hook(bms));
+            session.set_text_persist_hook(make_persist_hook(bms));
         Json out = Json::object();
         out.set("loaded", true);
         out.set("path", "");
         out.set("format", "bms");
+        out.set("text_format", text_format_json(session.text_format()));
         return out;
     }
 };
@@ -1545,32 +1634,32 @@ class SessionSaveCommand : public Command {
         }
         // 用 codec 写出（format 推断：显式 format 或按扩展名）
         const Codec* codec = resolve_codec(args, out_path);
-        beatbench::codec::WriteOptions wopts;
-        if (args.is_object()) {
-            if (const Json* v = args.find("encoding")) {
-                if (!v->is_string()) bad_args("参数类型错误: encoding 应为字符串");
-                const std::string& e = v->as_str();
-                if (e == "sjis" || e == "shift_jis" || e == "shift-jis") {
-                    wopts.encoding = "sjis";
-                } else if (e == "utf8" || e == "utf-8") {
-                    wopts.encoding = "utf8";
-                } else if (e != "auto") {
-                    bad_args("未知编码 '" + e + "'（支持 utf8 / sjis）");
-                }
+        std::string encoding;
+        if (const Json* v = args.find("encoding")) {
+            if (!v->is_string()) bad_args("参数类型错误: encoding 应为字符串");
+            const std::string& e = v->as_str();
+            if (e == "sjis" || e == "shift_jis" || e == "shift-jis") {
+                encoding = "sjis";
+            } else if (e == "utf8" || e == "utf-8") {
+                encoding = "utf8";
+            } else if (e != "auto") {
+                bad_args("未知编码 '" + e + "'（支持 utf8 / sjis）");
             }
         }
-        const std::string text = codec->write(session.chart(), wopts);
-        write_chart_or_throw(out_path, text);
+        auto document = serialize_document(*codec, session, std::move(encoding));
+        write_chart_or_throw(out_path, document.bytes);
 
-        // 另存为后更新会话路径（后续「保存」写新路径）
+        // 写成功后才更新路径和磁盘格式（另存为后沿用新路径）。
         if (session.path() != out_path) session.set_path(out_path);
+        session.set_text_format(std::move(document.format));
         session.mark_clean();
 
         Json res = Json::object();
         res.set("saved", true);
         res.set("output", out_path);
-        res.set("bytes", static_cast<std::int64_t>(text.size()));
+        res.set("bytes", static_cast<std::int64_t>(document.bytes.size()));
         res.set("format", std::string(codec->id()));
+        res.set("text_format", text_format_json(session.text_format()));
         res.set("dirty", false);
         if (!session.last_backup_error().empty())
             res.set("backup_error", session.last_backup_error());
@@ -2321,6 +2410,20 @@ class MetaListCommand : public Command {
     }
 };
 
+bool contains_line_break(std::string_view text) {
+    return text.find_first_of("\r\n") != std::string_view::npos;
+}
+
+void validate_single_line_meta(std::string_view key, std::string_view value) {
+    if (contains_line_break(key) || contains_line_break(value))
+        bad_args("元信息字段名和值不能含换行");
+    const auto token = key.substr(0, key.find_first_of(" \t\f\v:"));
+    constexpr std::string_view kEncoding = "ENCODING";
+    if (std::equal(token.begin(), token.end(), kEncoding.begin(), kEncoding.end(),
+                   [](unsigned char a, char b) { return std::toupper(a) == b; }))
+        bad_args("ENCODING 由写出编码决定，不是可编辑的元信息字段");
+}
+
 class MetaEditCommand : public Command {
    public:
     std::string_view name() const override { return "meta.edit"; }
@@ -2343,6 +2446,8 @@ class MetaEditCommand : public Command {
             if (!key || !key->is_string()) throw CommandError("bad_args", "edits 元素缺 key");
             const Json* val = item.find("value");
             if (!val || !val->is_string()) throw CommandError("bad_args", "edits 元素缺 value");
+            if (session.preserve_text_format())
+                validate_single_line_meta(key->as_str(), val->as_str());
             // 无变化 = 不执行（2026-10-14）：值与原值相同（含"删一个不存在的字段"）时
             // 不产生 undo 步、**不把文档标脏**。防御性守卫——UI 侧绑定求值误报一次
             // meta.edit 就会让"打开谱面"即变未保存（见 MetaPanel onTextEdited 注释）。
@@ -2392,6 +2497,7 @@ class MetaRawEditCommand : public Command {
         std::vector<std::string> lv;
         for (const auto& e : lines->as_array()) {
             if (!e.is_string()) throw CommandError("bad_args", "lines 元素应为字符串");
+            if (contains_line_break(e.as_str())) bad_args("lines 每个元素只能包含一行");
             lv.push_back(e.as_str());
         }
         session.exec(std::make_unique<edit::RawLinesEditCommand>(std::move(lv)));
@@ -2411,6 +2517,7 @@ class SessionDirtyCommand : public Command {
         out.set("dirty", session.is_dirty());
         out.set("has_chart", session.has_chart());
         out.set("path", session.path());
+        out.set("text_format", text_format_json(session.text_format()));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         out.set("redo_depth", static_cast<std::int64_t>(session.redo_depth()));
         return out;

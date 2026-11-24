@@ -24,7 +24,11 @@ struct Diagnostic {
 struct ReadResult {
     Chart chart;
     std::vector<Diagnostic> diagnostics;
-    std::string detected_encoding;  ///< 如 "utf8"/"sjis"（空 = 不适用）
+    std::string detected_encoding;      ///< 如 "ascii"/"utf8"/"sjis"（空 = 未识别或不适用）
+    std::string line_ending;            ///< "crlf"/"lf"/"cr"/"mixed"（空 = 无换行或不适用）
+    std::string preferred_line_ending;  ///< 主导行尾；并列取最先出现的种类
+    bool utf8_bom = false;
+    bool encoding_ambiguous = false;  ///< 自动判码时，非 ASCII 字节可按两种编码解码
 };
 
 /// 读取选项（格式无关）：encoding 为 codec 相关的字符串（如 bms 的 auto/utf8/sjis）。
@@ -39,6 +43,11 @@ struct ReadOptions {
 struct WriteOptions {
     std::string encoding;  ///< 空 = codec 默认（bms 为 utf8）
     bool overwrite = false;
+    std::string line_ending;  ///< 空 = codec 默认；BMS 支持 "lf"/"crlf"/"cr"
+    bool utf8_bom = false;
+    bool strict_encoding = false;        ///< 拒绝会损坏文字的编码转换
+    bool* ascii_only = nullptr;          ///< 成功后返回输出字节是否全为 ASCII（含 BOM）
+    bool* encoding_ambiguous = nullptr;  ///< 成功后返回输出是否会产生双可解歧义
 };
 
 /// 格式编解码器接口（doc/command-protocol.md 规划、M3 落地）：

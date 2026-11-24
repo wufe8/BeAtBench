@@ -91,9 +91,23 @@ ApplicationWindow {
     function stopUnitLabel() {
         return window.stopUnit === 0 ? qsTr("unit") : qsTr("ms")
     }
-    // 文件格式/编码（底部状态栏右下角显示；info/check 返回）
-    property string chartFormat: ""
-    property string chartEncoding: ""
+    // 只读显示当前文档的字节格式；切换和保存后由会话刷新，无需重读磁盘。
+    readonly property var chartTextFormat: typeof chartSession !== "undefined" && chartSession
+                                           ? chartSession.textFormat : null
+    readonly property string chartEncoding: {
+        if (!chartTextFormat) return ""
+        switch (chartTextFormat.encoding) {
+        case "ascii": return "ASCII"
+        case "utf8": return chartTextFormat.utf8Bom ? "UTF-8 BOM" : "UTF-8"
+        case "sjis": return chartTextFormat.encodingAmbiguous ? qsTr("CP932（推断）") : "CP932"
+        default: return ""
+        }
+    }
+    readonly property string chartLineEnding: {
+        const ending = chartTextFormat && chartTextFormat.lineEnding
+        if (ending === "mixed") return qsTr("混合换行")
+        return ending ? ending.toUpperCase() : ""
+    }
     /// 游玩模式（info 的 mode；"" = 未打开/未知，显示 SP 7K 缺省）。
     property string chartMode: ""
     readonly property bool isPmsChart: chartMode === "pms9k" || chartMode === "pms9k-bmesp"
@@ -1169,14 +1183,15 @@ ApplicationWindow {
                     Layout.rightMargin: 2
                 }
                 Label {
-                    text: window.chartFormat !== "" ? window.chartFormat.toUpperCase() : ""
+                    text: "BMS"
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
-                    visible: window.chartFormat !== ""
+                    visible: typeof chartSession !== "undefined" && chartSession && chartSession.hasChart
                 }
                 Label {
-                    text: window.chartEncoding !== "" ? window.chartEncoding : ""
+                    objectName: "chartTextFormatLabel"
+                    text: [window.chartEncoding, window.chartLineEnding].filter(part => part !== "").join("  ")
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
-                    visible: window.chartEncoding !== ""
+                    visible: text !== ""
                 }
             }
             // 切音页专用摘要（视口/光标/参考音频/播放/切片/MIDI；与上方编辑页状态互斥）
@@ -2160,24 +2175,6 @@ ApplicationWindow {
             sampleModel.loadFromInfo(JSON.stringify(
                 { result: { samples: ss.result.samples, id_base: chartSession.idBase() } }))
         }
-        var ri = d.result.path !== ""
-                 ? JSON.parse(beatbench.dispatch(JSON.stringify({ command: "info", args: { path: d.result.path } })))
-                 : { ok: true, result: { format: "bms", mode: "", diagnostics: [] } }
-        if (ri.ok) {
-            window.chartFormat = ri.result.format !== undefined ? ri.result.format : ""
-            var enc = ""
-            if (ri.result.diagnostics) {
-                for (var di = 0; di < ri.result.diagnostics.length; ++di) {
-                    var dm = ri.result.diagnostics[di].message
-                    if (dm && dm.indexOf("encoding:") === 0) {
-                        var mm = dm.match(/^encoding:\s*(\S+)/)
-                        if (mm) enc = mm[1]
-                        break
-                    }
-                }
-            }
-            window.chartEncoding = enc
-        }
         // 模式取固定文档桥的内存态；未命名文档/未落盘模式不能被旧磁盘 info 覆盖。
         window.chartMode = chartSession.chartMode()
         window.pendingLnHead = null
@@ -2368,9 +2365,7 @@ ApplicationWindow {
             return
         }
         window.chartPath = ""
-        window.chartFormat = "bms"
         window.chartMode = mode || "sp7k"
-        window.chartEncoding = "utf8"
         // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）。
         // ⚠️ 不预设 PLAYER（2026-10 复核）：草稿回填 "1" 会覆盖模式推导——DP/Battle 新建
         // 保存后 PLAYER 由 writer 按 mode_id 推导（dp=3/battle=4），重开不再退回 SP。

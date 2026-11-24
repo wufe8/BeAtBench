@@ -98,7 +98,7 @@ class CompositeCommand : public EditCommand {
     std::vector<std::unique_ptr<EditCommand>> m_commands;
 };
 
-enum class TimingPutMode { SetValue, ClearRef, UseDefinition };
+enum class TimingPutMode : std::uint8_t { SetValue, ClearRef, UseDefinition };
 
 /// 放置/更改时间轴事件（BPM/STOP/节拍 → timing.put，doc/ui-design.md 九、「工具栏值放置」）。
 /// 语义：在 (measure, pos) 处设置 kind 事件的值。**同位替换**——已存在同

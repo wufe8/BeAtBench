@@ -10,11 +10,13 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 #include "beatbench/core/Version.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/command/Builtins.hpp"
+#include "beatbench/core/edit/SessionRegistry.hpp"
 
 using beatbench::cmd::CommandError;
 using beatbench::cmd::register_builtin_commands;
@@ -40,6 +42,11 @@ std::string write_temp(const std::string& name, const std::string& content) {
     return path;
 }
 
+std::string read_temp(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
 Json request(std::string_view command, Json args, Json id = Json()) {
     Json req = Json::object();
     req.set("command", std::string(command));
@@ -50,7 +57,7 @@ Json request(std::string_view command, Json args, Json id = Json()) {
 
 // 合成小谱面：含 #WAV01、BPM、节拍、note、LN
 constexpr const char* kSmallChart =
-    "#TITLE JSON 测试谱\n"
+    "#TITLE JSON test chart\n"
     "#ARTIST tester\n"
     "#RANK 3\n"
     "#TOTAL 300\n"
@@ -224,7 +231,7 @@ TEST(Command, InfoOnSyntheticChart) {
     ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
     const auto& result = resp.at("result");
 
-    EXPECT_EQ(result.at("meta").at("TITLE").as_str(), "JSON 测试谱");
+    EXPECT_EQ(result.at("meta").at("TITLE").as_str(), "JSON test chart");
     EXPECT_EQ(result.at("meta").at("RANK").as_str(), "3");
     const auto& samples = result.at("samples");
     // 2026-09：Wav 枚举全部槽位（00..ZZ，36 进制 = 1296），含未绑定（空 file）。
@@ -318,8 +325,9 @@ TEST(Command, ConvertRoundtripAndOverwriteGuard) {
         ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
         const auto& result = resp.at("result");
         EXPECT_TRUE(result.at("written").as_bool());
-        EXPECT_EQ(result.at("from_encoding").as_str(), "utf8");
+        EXPECT_EQ(result.at("from_encoding").as_str(), "ascii");
         EXPECT_EQ(result.at("to_encoding").as_str(), "utf8");
+        EXPECT_FALSE(result.at("encoding_ambiguous").as_bool());
         EXPECT_GT(result.at("bytes").as_i64(), 0);
         EXPECT_TRUE(std::filesystem::exists(out));
     }
@@ -344,13 +352,215 @@ TEST(Command, ConvertRoundtripAndOverwriteGuard) {
     {
         const std::string out2 = (temp_dir() / "out_sjis.bms").string();
         Json args = Json::object();
-        args.set("input", in);
+        args.set("input", write_temp("convert_cp932.bms", "#TITLE \x93\xfa\x96\x7b\r\n"));
         args.set("output", out2);
         args.set("encoding", "sjis");
         const Json resp = reg.dispatch(request("convert", std::move(args)));
         ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
         EXPECT_EQ(resp.at("result").at("to_encoding").as_str(), "sjis");
     }
+}
+
+TEST(Command, ConvertReadFailureLeavesOutputUnchanged) {
+    Registry reg;
+    register_builtin_commands(reg);
+    const std::string in =
+        write_temp("convert_utf8_bom.bms", "\xef\xbb\xbf#TITLE \xf0\x9f\x98\x80\n");
+    const std::string out = write_temp("convert_guard.bms", "sentinel");
+    Json args = Json::object();
+    args.set("input", in);
+    args.set("output", out);
+    // JSON 的显式编码同时约束读侧，不能把 UTF-8 BOM 伪读成 CP932。
+    args.set("encoding", "sjis");
+    args.set("overwrite", true);
+    const auto result = reg.dispatch(request("convert", std::move(args)));
+    EXPECT_EQ(result.at("error").at("code").as_str(), "read_failed") << result.dump();
+    EXPECT_EQ(read_temp(out), "sentinel");
+}
+
+TEST(Command, ConvertReportsAmbiguityAndProtectsExistingOutputs) {
+    Registry reg;
+    register_builtin_commands(reg);
+    // C2 A9 是 UTF-8 的 ©，也是两个合法但含义不同的 CP932 单字节。
+    constexpr const char* kAmbiguous = "#TITLE \xc2\xa9\n";
+    const auto input = write_temp("convert_ambiguous.bms", kAmbiguous);
+    const auto existing = write_temp("convert_ambiguous_existing.bms", "sentinel");
+    const auto new_output = (temp_dir() / "convert_ambiguous_new.bms").string();
+    auto convert = [&](const std::string& output, std::string_view encoding = {}) {
+        Json args = Json::object();
+        args.set("input", input);
+        args.set("output", output);
+        args.set("overwrite", true);
+        if (!encoding.empty()) args.set("encoding", std::string(encoding));
+        return reg.dispatch(request("convert", std::move(args)));
+    };
+    for (const auto& output : {input, existing}) {
+        const auto response = convert(output);
+        EXPECT_EQ(response.at("error").at("code").as_str(), "encoding_ambiguous")
+            << response.dump();
+    }
+    EXPECT_EQ(read_temp(input), kAmbiguous);
+    EXPECT_EQ(read_temp(existing), "sentinel");
+
+    const auto fresh = convert(new_output);
+    ASSERT_TRUE(fresh.at("ok").as_bool()) << fresh.dump();
+    EXPECT_TRUE(fresh.at("result").at("encoding_ambiguous").as_bool());
+    EXPECT_EQ(fresh.at("result").at("from_encoding").as_str(), "sjis");
+
+    const auto explicit_utf8 = convert(existing, "utf8");
+    ASSERT_TRUE(explicit_utf8.at("ok").as_bool()) << explicit_utf8.dump();
+    EXPECT_FALSE(explicit_utf8.at("result").at("encoding_ambiguous").as_bool());
+    EXPECT_NE(read_temp(existing).find(kAmbiguous), std::string::npos);
+}
+
+class SessionTextFormatTest : public testing::Test {
+   protected:
+    void SetUp() override {
+        ASSERT_TRUE(beatbench::edit::session_registry().create("byte-format-test", false));
+        register_builtin_commands(reg);
+    }
+    void TearDown() override { beatbench::edit::session_registry().close("byte-format-test"); }
+
+    Json call(std::string_view cmd, Json args = Json::object()) {
+        args.set("session_id", "byte-format-test");
+        return reg.dispatch(request(cmd, std::move(args)));
+    }
+    Json load(const std::string& path, bool preserve = true) {
+        auto args = Json::object();
+        args.set("path", path);
+        args.set("preserve_text_format", preserve);
+        return call("session.load", std::move(args));
+    }
+    Json save(const std::string& path) {
+        auto args = Json::object();
+        args.set("path", path);
+        args.set("overwrite", true);
+        return call("session.save", std::move(args));
+    }
+
+    Registry reg;
+};
+
+TEST_F(SessionTextFormatTest, PreservesCp932MixedAndLegacyDefaults) {
+    const auto input =
+        write_temp("session_mixed.bms", "#TITLE \x93\xfa\x96\x7b\r\n#BPM 130\r\n#TOTAL 100\n");
+    const auto output = (temp_dir() / "session_mixed_saved.bms").string();
+    auto loaded = load(input);
+    ASSERT_TRUE(loaded.at("ok").as_bool()) << loaded.dump();
+    const auto& source = loaded.at("result").at("text_format");
+    EXPECT_EQ(source.at("encoding").as_str(), "sjis");
+    EXPECT_EQ(source.at("line_ending").as_str(), "mixed");
+    EXPECT_EQ(source.at("preferred_line_ending").as_str(), "crlf");
+    const auto saved = save(output);
+    ASSERT_TRUE(saved.at("ok").as_bool()) << saved.dump();
+    const auto& written = saved.at("result").at("text_format");
+    EXPECT_EQ(written.at("line_ending").as_str(), "crlf");
+    EXPECT_TRUE(written.at("normalized_mixed_line_endings").as_bool());
+    EXPECT_NE(read_temp(output).find("#TITLE \x93\xfa\x96\x7b\r\n"), std::string::npos);
+    EXPECT_EQ(call("session.dirty").at("result").at("text_format").dump(), written.dump());
+    const auto saved_again = save(output);
+    ASSERT_TRUE(saved_again.at("ok").as_bool()) << saved_again.dump();
+    EXPECT_FALSE(
+        saved_again.at("result").at("text_format").at("normalized_mixed_line_endings").as_bool());
+
+    loaded = load(input, false);
+    EXPECT_EQ(loaded.at("result").at("text_format").at("encoding").as_str(), "sjis");
+    const auto legacy_save = save(output);
+    ASSERT_TRUE(legacy_save.at("ok").as_bool()) << legacy_save.dump();
+    const auto bytes = read_temp(output);
+    EXPECT_NE(bytes.find("#TITLE 日本\n"), std::string::npos);
+    EXPECT_EQ(bytes.find('\r'), std::string::npos);
+}
+
+TEST_F(SessionTextFormatTest, SavedCp932ReportsAmbiguityLikeReopen) {
+    const auto input = write_temp("session_ambiguous.bms", "#TITLE \xc2\xa9\n");
+    const auto output = (temp_dir() / "session_ambiguous_saved.bms").string();
+    const auto loaded = load(input);
+    ASSERT_TRUE(loaded.at("ok").as_bool()) << loaded.dump();
+    EXPECT_TRUE(loaded.at("result").at("text_format").at("encoding_ambiguous").as_bool());
+    const auto saved = save(output);
+    ASSERT_TRUE(saved.at("ok").as_bool()) << saved.dump();
+    EXPECT_TRUE(saved.at("result").at("text_format").at("encoding_ambiguous").as_bool());
+    const auto reopened = load(output);
+    ASSERT_TRUE(reopened.at("ok").as_bool()) << reopened.dump();
+    EXPECT_EQ(saved.at("result").at("text_format").dump(),
+              reopened.at("result").at("text_format").dump());
+}
+
+TEST_F(SessionTextFormatTest, StructuredAndRawEditsCannotInjectLines) {
+    const auto loaded = load(write_temp("metadata_single_line.bms", "#TITLE Original\n"));
+    ASSERT_TRUE(loaded.at("ok").as_bool()) << loaded.dump();
+    for (const auto* edit :
+         {R"({"edits":[{"key":"TITLE","value":"first"},{"key":"encoding","value":"UTF-8"}]})",
+          R"({"edits":[{"key":"eNcOdInG:UTF-8","value":"x"}]})",
+          R"({"edits":[{"key":"TITLE\r#ENCODING","value":"UTF-8"}]})",
+          R"({"edits":[{"key":"TITLE","value":"value\n#ENCODING UTF-8"}]})"}) {
+        const auto rejected = call("meta.edit", Json::parse(edit));
+        EXPECT_EQ(rejected.at("error").at("code").as_str(), "bad_args") << rejected.dump();
+    }
+    EXPECT_EQ(call("meta.list").at("result").at("meta").at("TITLE").as_str(), "Original");
+    EXPECT_FALSE(call("session.dirty").at("result").at("dirty").as_bool());
+
+    const auto valid = Json::parse(R"({"lines":["#RANDOM 2","#IF 1","","#ENDIF"]})");
+    const auto raw = call("meta.rawEdit", valid);
+    ASSERT_TRUE(raw.at("ok").as_bool()) << raw.dump();
+    for (const auto* edit : {R"({"lines":["first","second\n#ENCODING UTF-8"]})",
+                             R"({"lines":["first","second\r#ENCODING UTF-8"]})"}) {
+        const auto rejected = call("meta.rawEdit", Json::parse(edit));
+        EXPECT_EQ(rejected.at("error").at("code").as_str(), "bad_args") << rejected.dump();
+    }
+    EXPECT_EQ(call("meta.raw").at("result").at("lines").dump(), valid.at("lines").dump());
+}
+
+TEST_F(SessionTextFormatTest, UpdatesAsciiAfterSaveAndProtectsUnmappableOutput) {
+    const auto input = write_temp("session_ascii.bms", "#TITLE ASCII\n");
+    const auto output = write_temp("session_ascii_saved.bms", "sentinel");
+    const auto loaded = load(input);
+    ASSERT_TRUE(loaded.at("ok").as_bool()) << loaded.dump();
+    EXPECT_EQ(loaded.at("result").at("text_format").at("encoding").as_str(), "ascii");
+    const auto edited =
+        call("meta.edit", Json::parse(R"({"edits":[{"key":"TITLE","value":"日本"}]})"));
+    ASSERT_TRUE(edited.at("ok").as_bool()) << edited.dump();
+    EXPECT_NE(read_temp(input + ".bak").find("#TITLE \x93\xfa\x96\x7b\n"), std::string::npos);
+    EXPECT_EQ(call("session.dirty").at("result").at("text_format").at("encoding").as_str(),
+              "ascii");
+    const auto written = save(output);
+    ASSERT_TRUE(written.at("ok").as_bool()) << written.dump();
+    EXPECT_EQ(written.at("result").at("text_format").at("encoding").as_str(), "sjis");
+    const auto prior = read_temp(output);
+    ASSERT_NE(prior.find("#TITLE \x93\xfa\x96\x7b\n"), std::string::npos);
+    ASSERT_TRUE(call("meta.edit", Json::parse(R"({"edits":[{"key":"TITLE","value":"😀"}]})"))
+                    .at("ok")
+                    .as_bool());
+    const auto failed = save(output);
+    EXPECT_EQ(failed.at("error").at("code").as_str(), "write_failed") << failed.dump();
+    EXPECT_EQ(read_temp(output), prior);
+    EXPECT_TRUE(call("session.dirty").at("result").at("dirty").as_bool());
+}
+
+TEST_F(SessionTextFormatTest, PreservesUtf8BomOnAutosaveAndChoosesNewDefaults) {
+    const auto input = write_temp("session_utf8_bom.bms", "\xef\xbb\xbf#TITLE ASCII\r\n");
+    const auto loaded = load(input);
+    ASSERT_TRUE(loaded.at("ok").as_bool()) << loaded.dump();
+    const auto toggled = call("session.autosave", Json::parse(R"({"autosave":true})"));
+    ASSERT_TRUE(toggled.at("ok").as_bool()) << toggled.dump();
+    const auto edited =
+        call("meta.edit", Json::parse(R"({"edits":[{"key":"TITLE","value":"日本"}]})"));
+    ASSERT_TRUE(edited.at("ok").as_bool()) << edited.dump();
+    for (const auto& path : {input, input + ".bak"}) {
+        const auto bytes = read_temp(path);
+        EXPECT_TRUE(bytes.starts_with("\xef\xbb\xbf"));
+        EXPECT_NE(bytes.find("#TITLE 日本\r\n"), std::string::npos);
+    }
+    const auto created = call("session.new", Json::parse(R"({"preserve_text_format":true})"));
+    ASSERT_TRUE(created.at("ok").as_bool()) << created.dump();
+    const auto& profile = created.at("result").at("text_format");
+    EXPECT_EQ(profile.at("encoding").as_str(), "sjis");
+    EXPECT_EQ(profile.at("line_ending").as_str(), "crlf");
+    EXPECT_FALSE(profile.at("utf8_bom").as_bool());
+    const auto first_save = save((temp_dir() / "new_ascii_saved.bms").string());
+    ASSERT_TRUE(first_save.at("ok").as_bool()) << first_save.dump();
+    EXPECT_EQ(first_save.at("result").at("text_format").at("encoding").as_str(), "ascii");
 }
 
 // —— 进程级注册表 ——

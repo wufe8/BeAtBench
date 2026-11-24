@@ -31,6 +31,7 @@ class ChartSession : public QObject {
     Q_PROPERTY(bool hasChart READ hasChart NOTIFY documentChanged)
     Q_PROPERTY(int measureCount READ measureCount NOTIFY documentChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
+    Q_PROPERTY(QVariantMap textFormat READ textFormat NOTIFY textFormatChanged)
 
    public:
     explicit ChartSession(QObject* parent = nullptr);
@@ -60,6 +61,7 @@ class ChartSession : public QObject {
 
     /// 当前活动会话相对最近一次 load/save 是否未保存。
     bool dirty() const { return m_dirty; }
+    QVariantMap textFormat() const { return m_textFormat; }
 
     /// 测试/诊断：当前缓存的内容/时序/采样指纹（refresh 后更新）。
     Q_INVOKABLE quint64 debugContentHash() const { return m_contentHash; }
@@ -175,6 +177,7 @@ class ChartSession : public QObject {
     void documentChanged();  ///< 活动会话/文档切换（QML 应重置视图滚动）
     void contentChanged();   ///< 同文档内容变化（QML 保持视图滚动）
     void dirtyChanged();     ///< 未保存状态变化
+    void textFormatChanged();
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
 
@@ -182,6 +185,7 @@ class ChartSession : public QObject {
     void attachSession(bool rebuildTiming);
     void resetRenderState();  ///< 换文档：丢弃 PCM/金字塔并作废 in-flight
     void syncDirty();
+    void syncTextFormat();
     std::uint64_t contentHash() const;  ///< notes + bga + 采样定义指纹
     std::uint64_t timingHash() const;   ///< 初始 BPM + bpm/stop/measure + 全事件最远小节
     std::uint64_t samplesHash() const;  ///< #WAV/#BMP/#BPM/#STOP 定义表
@@ -193,6 +197,7 @@ class ChartSession : public QObject {
     const beatbench::Chart* m_chart = nullptr;  ///< 活动会话 chart（core 所有）
     QString m_path;
     QString m_error;
+    QVariantMap m_textFormat;
     std::unique_ptr<beatbench::TimingEngine> m_timing;
     std::uint64_t m_contentHash = 0;
     std::uint64_t m_timingHash = 0;

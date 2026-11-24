@@ -72,6 +72,7 @@ bool ChartSession::openChart(const QString& path) {
     req.set("command", "session.load");
     Json args = Json::object();
     args.set("path", path.toStdString());
+    args.set("preserve_text_format", true);
     if (!m_boundSessionId.isEmpty()) args.set("session_id", m_boundSessionId.toStdString());
     req.set("args", std::move(args));
     const Json res = beatbench::cmd::global_registry().dispatch(req);
@@ -107,6 +108,7 @@ bool ChartSession::newChart(const QString& mode) {
     Json req = Json::object();
     req.set("command", "session.new");
     Json args = Json::object();
+    args.set("preserve_text_format", true);
     if (!m_boundSessionId.isEmpty()) args.set("session_id", m_boundSessionId.toStdString());
     if (!mode.isEmpty()) args.set("mode", mode.toStdString());
     req.set("args", std::move(args));
@@ -170,6 +172,7 @@ void ChartSession::refresh() {
         if (pathChanged && m_chart && m_timing) renderAsync();  // 另存为后按新目录解码资源
         return;
     }
+    syncTextFormat();
     const std::uint64_t ch = contentHash();
     const std::uint64_t th = timingHash();
     const std::uint64_t sh = samplesHash();
@@ -659,11 +662,27 @@ void ChartSession::attachSession(bool rebuildTiming) {
     m_timingHash = timingHash();
     m_samplesHash = samplesHash();
     m_initialized = true;
+    syncTextFormat();
     const bool dirty = s && s->has_chart() && s->is_dirty();
     if (m_dirty != dirty) {
         m_dirty = dirty;
         emit dirtyChanged();
     }
+}
+
+void ChartSession::syncTextFormat() {
+    QVariantMap next;
+    const auto* session = beatbench::edit::session_registry().by_id(m_sessionId);
+    if (session && session->has_chart()) {
+        const auto& format = session->text_format();
+        next.insert(QStringLiteral("encoding"), QString::fromStdString(format.encoding));
+        next.insert(QStringLiteral("lineEnding"), QString::fromStdString(format.line_ending));
+        next.insert(QStringLiteral("utf8Bom"), format.utf8_bom);
+        next.insert(QStringLiteral("encodingAmbiguous"), format.encoding_ambiguous);
+    }
+    if (m_textFormat == next) return;
+    m_textFormat = std::move(next);
+    emit textFormatChanged();
 }
 
 void ChartSession::syncDirty() {
