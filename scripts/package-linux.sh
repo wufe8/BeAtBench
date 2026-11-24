@@ -59,7 +59,7 @@ install_build_deps() {
       qml6-module-qtqml qml6-module-qtqml-workerscript \
       qml6-module-qtquick qml6-module-qtquick-controls \
       qml6-module-qtquick-layouts qml6-module-qtquick-templates \
-      qml6-module-qtquick-window qml6-module-qtquick-dialogs \
+      qml6-module-qtquick-window qml6-module-qtquick-dialogs qml6-module-qtquick-shapes \
       libasound2-dev
   elif [ -f /etc/fedora-release ]; then
     dnf install -y -q gcc-c++ cmake ninja-build git rpm-build \
@@ -150,7 +150,7 @@ EOF
     | sed -E 's/^[[:space:]]*([^ ]+)( \(.*\))?$/\1\2 | \1t64\2/' \
     | paste -sd, -)"
   # dlopen 的运行时依赖（ELF shlibs 不含）：QML 模块
-  deps="$deps, qml6-module-qtqml, qml6-module-qtqml-workerscript, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-dialogs, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window"
+  deps="$deps, qml6-module-qtqml, qml6-module-qtqml-workerscript, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-dialogs, qml6-module-qtquick-layouts, qml6-module-qtquick-shapes, qml6-module-qtquick-templates, qml6-module-qtquick-window"
 
   mkdir -p "$PKGROOT/DEBIAN"
   cat > "$PKGROOT/DEBIAN/control" <<EOF

@@ -236,7 +236,8 @@ Item {
                     editors.push(item.contentItem)
                     return
                 }
-                for (const child of item.children) collect(child)
+                const children = item.children
+                for (let i = 0; i < children.length; ++i) collect(children[i])
             }
             collect(body)
             compare(editors.length, 3)
@@ -351,7 +352,8 @@ Item {
                         verify(item.contentHeight <= item.height + 1, item.text)
                     ++fields
                 }
-                for (const child of item.children) inspect(child)
+                const children = item.children
+                for (let i = 0; i < children.length; ++i) inspect(children[i])
             }
             inspect(body)
             verify(fields >= 4)

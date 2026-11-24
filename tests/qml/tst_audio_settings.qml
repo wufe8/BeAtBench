@@ -144,6 +144,10 @@ Item {
                     { tag: "veryNarrow", width: 410 }]
         }
         function test_full_windows_api_names(data) {
+            // Apply the narrow layout before opening; Qt 6.4 can retain the old
+            // scroll/clip geometry for a frame when an open popup is resized.
+            dialog.close()
+            tryCompare(dialog, "visible", false)
             dialog.width = data.width
             const names = ["MME", "Windows DirectSound", "ASIO",
                            "Windows WASAPI", "Windows WDM-KS"]
@@ -151,7 +155,10 @@ Item {
                 return { index: i, name: "Output", api: api, apiType: i,
                          isAsio: api === "ASIO", sampleRate: 48000 }
             })
+            dialog.open()
+            tryCompare(dialog, "opened", true)
             const combo = control("audioApiFilter")
+            waitForRendering(combo)
             reveal(combo)
             mouseClick(combo)
             tryCompare(combo.popup, "opened", true)

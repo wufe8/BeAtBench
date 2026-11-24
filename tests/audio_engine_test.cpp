@@ -7,7 +7,6 @@
 #include <QDir>
 #include <QEvent>
 #include <QFile>
-#include <QFileInfo>
 #include <QScopeGuard>
 #include <QSemaphore>
 #include <QSettings>
@@ -223,11 +222,8 @@ class AudioEngineTest : public ::testing::Test {
         return std::make_shared<const std::vector<float>>(48000 * 4, 0.25f);
     }
     static QString previewBase() {
-        const auto base = QFileInfo(QString::fromUtf8(__FILE__))
-                              .absoluteDir()
-                              .absoluteFilePath(QStringLiteral("../local/tmp"));
-        QDir().mkpath(base);
-        return base;
+        // 与 QSettings 测试共用 main 已创建的可写基目录；容器源码树可以只读。
+        return qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
     }
     static QString previewFile(const QTemporaryDir& dir, const QString& name) {
         const auto path = QDir(dir.path()).filePath(name);

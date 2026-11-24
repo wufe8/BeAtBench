@@ -33,7 +33,10 @@ Item {
         SignalSpy { id: seeks; target: tc.wave; signalName: "seekRequested" }
         SignalSpy { id: selections; target: tc.source; signalName: "selectionFinished" }
         function verticalBar(view) {
-            for (const child of view.children) if ("maxY" in child) return child
+            const children = view.children
+            for (let i = 0; i < children.length; ++i) {
+                if ("maxY" in children[i]) return children[i]
+            }
             fail("Missing production vertical scrollbar")
             return null
         }
