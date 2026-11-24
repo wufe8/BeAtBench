@@ -49,7 +49,7 @@ Windows 在 Git Bash 运行 [打包脚本](../scripts/package-release.sh)，用�
 
 ## 五、发布流程（release-please 自动发版 → tag 触发产物流水线）
 
-1. 用 Conventional Commits 提交变更。release-please 生成版本 PR，联动 CMake、`Version.hpp`、README 的单行普通正文版本标记与 CHANGELOG。README 的安装命令接受实际下载的文件名，不另钉某一版资产名。
+1. 用 Conventional Commits 提交变更。`dev` 合入 `master` 时保留功能提交；若 squash，最终提交的标题须体现这一批变更应有的版本增量，不能把含 `feat` 的版本压成 `fix` 或 `chore`。release-please 在 `master` 上生成版本 PR，联动 CMake、`Version.hpp`、README 的单行普通正文版本标记与 CHANGELOG。README 的安装命令接受实际下载的文件名，不另钉某一版资产名。
 2. 在版本 PR 分支运行 `scripts/check-version.sh vx.y.z --strict`。版本与发布内容确认后再合并，不手动补写 CHANGELOG 或推进版本。
 3. 合并版本 PR 后生成 tag 和 Release，触发一、所述产物流水线。核对 Release 上 Windows zip、deb、rpm、pkg.tar.zst 及各自 `.sha256`（`gh release view vx.y.z`）。定时构建不替代当前版本验收。
 4. 原生交互或实时音频相关的发布变更，按六、的边界补实机验收，不以无头截图或单测作为硬件验证。
