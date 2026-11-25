@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -262,6 +263,30 @@ TEST_F(DocumentServiceTest, ReusesNormalizedPathWithoutReloadingDirtyDocument) {
     EXPECT_TRUE(session(idOf(a))->is_dirty());
     EXPECT_EQ(session(idOf(a))->undo_depth(), 1u);
     EXPECT_TRUE(QDir::isAbsolutePath(reused.value("path").toString()));
+}
+
+TEST_F(DocumentServiceTest, SaveAsThroughDirectoryAliasKeepsCanonicalIdentity) {
+    const QString directory = temporary_->filePath(QStringLiteral("real"));
+    ASSERT_TRUE(QDir().mkpath(directory));
+    const QString alias = temporary_->filePath(QStringLiteral("alias"));
+    std::error_code error;
+    std::filesystem::create_directory_symlink(
+        std::filesystem::u8path(QDir(directory).absolutePath().toStdString()),
+        std::filesystem::u8path(alias.toStdString()), error);
+    if (error) GTEST_SKIP() << "Host cannot create directory symlinks: " << error.message();
+
+    const QString target = QDir(alias).filePath(QStringLiteral("new.bms"));
+    ASSERT_FALSE(QFileInfo::exists(target));
+    const QString id = newUnnamed();
+    ASSERT_FALSE(id.isEmpty());
+    const auto saved = service_.save(id, target);
+    ASSERT_TRUE(ok(saved));
+    const QString canonical = QFileInfo(target).canonicalFilePath();
+    ASSERT_FALSE(canonical.isEmpty());
+    EXPECT_EQ(service_.session(id)->path(), canonical);
+    EXPECT_EQ(saved.value("path").toString(), canonical);
+    ASSERT_TRUE(QFile::remove(target));
+    EXPECT_EQ(DocumentService::findSessionId(target), id);
 }
 
 #ifdef Q_OS_WIN

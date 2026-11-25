@@ -191,7 +191,11 @@ class MainIntegrationSetup : public QObject {
         workspace.setExportTargets({});
         const QString scratch = qEnvironmentVariable("BB_TEST_TMPDIR", QDir::tempPath());
         if (!QDir{}.mkpath(scratch)) qFatal("Cannot create Main integration scratch root");
-        temp = std::make_unique<QTemporaryDir>(scratch + "/main-integration-XXXXXX");
+        // 夹具导出给 QML 的路径要与项目索引/资源重定位用同一种身份（包括 macOS 的 /var 别名）。
+        const auto canonicalScratch = QDir(scratch).canonicalPath();
+        if (canonicalScratch.isEmpty()) qFatal("Cannot resolve Main integration scratch root");
+        temp = std::make_unique<QTemporaryDir>(
+            QDir(canonicalScratch).filePath("main-integration-XXXXXX"));
         if (!temp->isValid()) qFatal("Cannot create Main integration scratch directory");
         auto& registry = beatbench::edit::session_registry();
         for (const auto* id : {aId, bId}) {

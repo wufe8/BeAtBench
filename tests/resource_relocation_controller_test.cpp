@@ -57,7 +57,9 @@ class RelocationTest : public ::testing::Test {
         ASSERT_TRUE(QDir().mkpath(base));
         temporary = std::make_unique<QTemporaryDir>(QDir(base).filePath("relocation-XXXXXX"));
         ASSERT_TRUE(temporary->isValid());
-        root = temporary->path();
+        // 重定位的内部路径基于规范项目根，且只接受无链接的目标与候选路径。
+        root = QDir(temporary->path()).canonicalPath();
+        ASSERT_FALSE(root.isEmpty());
         oldFormat = QSettings::defaultFormat();
         oldOrganization = QCoreApplication::organizationName();
         oldApplication = QCoreApplication::applicationName();
@@ -168,7 +170,7 @@ TEST_F(RelocationTest, SelectionHeadersMixedBasesUndoRedoKeepOtherDirtyChangesAn
     const auto diskA = bytes(a), diskB = bytes(b);
     const auto activeId = session_registry().active_id();
     ASSERT_TRUE(ok(controller.start()));
-    chooseAll();
+    ASSERT_NO_FATAL_FAILURE(chooseAll());
     // Deliberately leave C untouched although it has the same basename.
     auto other = row("old2/shared.wav");
     controller.setUseSelected(other.value("key").toString(),

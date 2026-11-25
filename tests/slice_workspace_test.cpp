@@ -1220,6 +1220,29 @@ TEST_F(SliceWorkspaceTest, InputAlphabetMustMatchResolvedTargetBeforeAnyWrite) {
     EXPECT_TRUE(result.value("raw").toString().contains(QStringLiteral("#WAV10")));
 }
 
+TEST_F(SliceWorkspaceTest, NamedPlacementUsesRelativePathThroughDirectoryAlias) {
+    const auto dir = makeTempDir("placement-alias");
+    const auto project = dir / "project";
+    ASSERT_TRUE(std::filesystem::create_directory(project));
+    const auto alias = dir / "alias";
+    std::error_code error;
+    std::filesystem::create_directory_symlink(std::filesystem::absolute(project), alias, error);
+    if (error) GTEST_SKIP() << "Host cannot create directory symlinks: " << error.message();
+
+    prepareAudio(dir);
+    const auto target = project / "target.bms";
+    touchFile(target, "#BPM 120\n");
+    workspace_.setExportTargets({qpath(target)});
+    const auto plan = prepare(alias / "output");
+    ASSERT_TRUE(plan.value("ok").toBool()) << plan.value("error").toString().toStdString();
+    const auto result = workspace_.commitExport(plan.value("planId").toString());
+    ASSERT_TRUE(result.value("ok").toBool()) << result.value("error").toString().toStdString();
+    ASSERT_NE(sessionAt(target), nullptr);
+    EXPECT_EQ(sessionAt(target)->chart().samples.at({beatbench::SampleKind::Wav, 1}).file,
+              "output/slice_000.wav");
+    EXPECT_TRUE(std::filesystem::exists(project / "output" / "slice_000.wav"));
+}
+
 TEST_F(SliceWorkspaceTest, IdConflictOffersSkipOverwriteAndReadOnlyCancel) {
     const auto dir = makeTempDir("id-choice");
     prepareAudio(dir);

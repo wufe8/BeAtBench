@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QSemaphore>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -174,7 +175,7 @@ TEST_F(ProjectControllerTest, OpenRequestsConfirmationBeforeAnyActivation) {
     QObject::connect(&project, &beatbench::app::ProjectController::chartOpenRequested,
                      [&](const QString& path) { requested = path; });
     project.openChart("A.bms");
-    EXPECT_EQ(requested, QDir::cleanPath(temp->filePath("A.bms")));
+    EXPECT_EQ(requested, QFileInfo(temp->filePath("A.bms")).canonicalFilePath());
     EXPECT_EQ(beatbench::edit::session_registry().active_id(), active);
 }
 

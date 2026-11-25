@@ -143,9 +143,13 @@ QVariantMap DocumentService::create(const QString& mode) {
 QString DocumentService::normalizedPath(const QString& path) {
     if (path.isEmpty()) return {};
     const QFileInfo info(QDir::fromNativeSeparators(path));
-    // 已存在文件归一符号链接；文件已被外部删除时仍可按干净绝对路径复用内存文档。
     const QString canonical = info.canonicalFilePath();
-    return QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical);
+    if (!canonical.isEmpty()) return QDir::cleanPath(canonical);
+    // 新建或已删除的谱面也要解析父目录别名，让创建前后的路径身份一致。
+    const QFileInfo absolute(QDir::cleanPath(info.absoluteFilePath()));
+    const QString parent = QDir(absolute.absolutePath()).canonicalPath();
+    return parent.isEmpty() ? absolute.absoluteFilePath()
+                            : QDir(parent).filePath(absolute.fileName());
 }
 
 QString DocumentService::findSessionId(const QString& path) {

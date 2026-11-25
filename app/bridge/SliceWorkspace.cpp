@@ -662,19 +662,23 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
     // M7：勾选目标非空 → 对每个目标铺放（每谱一个撤销步）；未勾选 → 回退当前编辑谱。
     // 回退直接走**活动会话**（允许"新建未保存谱面"这种没有路径的情况）。
     QVariantList targetResults;
+    // 有名谱面统一两侧目录别名，避免同一目录（如 /var 和 /private/var）变成长距离回跳。
+    const QString canonicalOutDir = DocumentService::normalizedPath(outDir);
     for (const auto& target : plan.targets) {
         if (!errors.isEmpty()) break;  // 磁盘未全部成功时不铺放引用缺失文件的 raw
         const auto& sid = target.id;
         const auto& label = target.label;
         auto targetItems = items;
-        // 未命名谱面没有基准目录：采用绝对路径，另存为后仍能解析到同一输出。
+        const bool named = !target.path.isEmpty();
+        const QDir chartDir(
+            named ? DocumentService::normalizedPath(QFileInfo(target.path).absolutePath())
+                  : QString{});
+        const QDir outputDir(named ? canonicalOutDir : outDir);
+        // 未命名谱面没有基准目录，仍保留绝对输出路径。
         for (auto& item : targetItems) {
             const QString absolute =
-                QDir(outDir).absoluteFilePath(QString::fromStdString(item.fileName));
-            const QString relative =
-                target.path.isEmpty()
-                    ? absolute
-                    : QFileInfo(target.path).absoluteDir().relativeFilePath(absolute);
+                outputDir.absoluteFilePath(QString::fromStdString(item.fileName));
+            const QString relative = named ? chartDir.relativeFilePath(absolute) : absolute;
             item.fileName = relative.toUtf8().toStdString();
         }
         const std::string targetRaw =

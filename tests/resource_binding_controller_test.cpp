@@ -267,11 +267,14 @@ TEST_F(ResourceBindingTest, ClosedTargetAndRootRenameRejectWholePlan) {
     EXPECT_EQ(session(a)->undo_depth(), 0u);
     p = prepare();
     ASSERT_TRUE(ok(p));
+    const auto* sa = session(a);
+    ASSERT_NE(sa, nullptr);
     const QString moved = root + "-moved";
     ASSERT_TRUE(QDir().rename(root, moved));
     const auto result = controller.commitBindings(planId(p));
     EXPECT_FALSE(ok(result));
-    EXPECT_EQ(session(a)->undo_depth(), 0u);
+    // 目录已移走，旧文件路径不再有可解析的文件身份；直接观察同一个会话。
+    EXPECT_EQ(sa->undo_depth(), 0u);
     EXPECT_TRUE(QDir().rename(moved, root));
 }
 TEST_F(ResourceBindingTest, PortableSubdirectoryMissingPathsAndCrLfAreAccepted) {
