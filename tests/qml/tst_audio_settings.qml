@@ -140,8 +140,9 @@ Item {
             }
         }
         function test_full_windows_api_names_data() {
-            return [{ tag: "default", width: 680 }, { tag: "narrow", width: 520 },
-                    { tag: "veryNarrow", width: 410 }]
+            // Exercise the default and narrow desktop layouts. Host-window
+            // resizing and stacked selectors are covered in test_dialog_fits_narrow_host.
+            return [{ tag: "default", width: 680 }, { tag: "narrow", width: 520 }]
         }
         function test_full_windows_api_names(data) {
             // Apply the narrow layout before opening; Qt 6.4 can retain the old
@@ -168,8 +169,7 @@ Item {
                 tryVerify(function() { return list.itemAtIndex(i) !== null })
                 const label = list.itemAtIndex(i).contentItem
                 const name = combo.model[i]
-                if (data.tag !== "veryNarrow")
-                    verify(label.implicitWidth <= label.width + 1, name)
+                verify(label.implicitWidth <= label.width + 1, name)
                 verify(label.contentWidth + label.leftPadding + label.rightPadding <= label.width + 1, name)
                 verify(label.contentHeight + label.topPadding + label.bottomPadding <= label.height + 1, name)
             }
@@ -177,9 +177,7 @@ Item {
             tryCompare(combo.popup, "visible", false)
             compare(combo.displayText, "Windows DirectSound")
             waitForRendering(combo)
-            // At extreme widths the closed control may elide; the popup must still show the entire name.
-            if (data.tag !== "veryNarrow")
-                verify(!combo.contentItem.truncated, "Selected API must fit too")
+            verify(!combo.contentItem.truncated, "Selected API must fit too")
             const device = control("audioDeviceCombo")
             verify(device.width > 80, "Device selector retains usable space")
             verify(device.x + device.width <= control("audioSettingsColumn").width + 1)
