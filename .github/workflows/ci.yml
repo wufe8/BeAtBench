@@ -103,7 +103,7 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:?missing build parallel limit}"
       - name: ccache stats
         if: always()
         continue-on-error: true
@@ -162,10 +162,8 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=ON -DBEATBENCH_BUILD_APP=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
-        # 并行度由 setup-ccache.sh 写入 CMAKE_BUILD_PARALLEL_LEVEL（macos 上限 3）：
-        # 不带值的 --parallel 原本会向 make 传裸 -j 无限并发，147 个编译单元同起跑
-        # 曾把 3 vCPU/7GB 压到 27–35 分钟；有界后冷构建 116s（run 37993321189）
-        run: cmake --build build --parallel
+        # 显式传入 setup-ccache.sh 写入的上限；裸 --parallel 会让 Make 无上限并发（见 #14）。
+        run: cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:?missing build parallel limit}"
       - name: ccache stats
         if: always()
         continue-on-error: true
