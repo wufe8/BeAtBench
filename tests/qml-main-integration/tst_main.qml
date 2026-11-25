@@ -77,6 +77,28 @@ TestCase {
         verify(button.enabled)
         mouseClick(button, button.width / 2, button.height / 2)
     }
+    function openBindingDialog(page) {
+        clickButton(page, "自定义…")
+        const dialog = mainFixture.dialog(main, "批量更新自定义谱面内容")
+        verify(dialog !== null)
+        // onOpened resets the preview. Do not send input into that transition.
+        tryCompare(dialog, "opened", true)
+        return dialog
+    }
+    function clickBindingPreview(dialog) {
+        const scroll = mainFixture.objectNamed(dialog, "resourceBindingScroll")
+        const button = mainFixture.objectNamed(dialog, "resourceBindingPreviewButton")
+        verify(scroll !== null && button !== null && button.enabled)
+        const view = scroll.contentItem
+        // At compact heights the preview action is below the initial viewport.
+        tryVerify(() => {
+            const center = button.mapToItem(view.contentItem, button.width / 2, button.height / 2)
+            view.contentY = Math.max(0, Math.min(view.contentHeight - view.height, center.y - view.height / 2))
+            const point = button.mapToItem(view, button.width / 2, button.height / 2)
+            return button.height > 0 && point.y >= 0 && point.y < view.height
+        })
+        mouseClick(button, button.width / 2, button.height / 2)
+    }
     function swap() { clickButton(split, "交换") }
     function draft() {
         const field = mainFixture.textEditor(main, "Fixture A")
@@ -343,11 +365,11 @@ TestCase {
         relocationClick(dialog, "resourceRelocationPreviewButton")
         compare(dialog.preview.changedCount, 1)
         unchanged(sa, sb)
-        clickButton(dialog, "取消")
+        clickButton(dialog.footer, "取消")
         tryCompare(dialog, "visible", false)
+        tryVerify(() => resourceRelocationController.rows.length === 0)
         unchanged(sa, sb)
         compare(mainFixture.disk(a), diskA); compare(mainFixture.disk(b), diskB)
-        compare(resourceRelocationController.rows.length, 0)
     }
     function test_resourceRelocation_manualCandidate_partialSelection_andInvalidation() {
         const setup = relocationSetup(), page = setup.page, fixture = setup.fixture
@@ -370,7 +392,8 @@ TestCase {
         verify(!dialog.canApply)
         dialog.applyPreview()
         unchanged(sa, sb)
-        clickButton(dialog, "取消")
+        clickButton(dialog.footer, "取消")
+        tryCompare(dialog, "visible", false)
     }
     function test_resourceRelocation_panelDraftRefusesOpening() {
         const setup = relocationSetup(), page = setup.page
@@ -506,11 +529,9 @@ TestCase {
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         const diskA = mainFixture.disk(a), diskB = mainFixture.disk(b)
         const referenceId = split.referenceDocumentId
-        clickButton(page, "自定义…")
-        const dialog = mainFixture.dialog(main, "批量更新自定义谱面内容")
-        verify(dialog !== null)
+        const dialog = openBindingDialog(page)
         dialog.rawText = "#WAV01 audio/new.wav\n#BMP02 bga/new.png"
-        clickButton(dialog, "预览内容更新")
+        clickBindingPreview(dialog)
         compare(dialog.preview.ok, true)
         compare(dialog.preview.targetCount, 2)
         compare(dialog.preview.changedCount, 4)
@@ -548,22 +569,24 @@ TestCase {
             session_id: b, id: "01", file: "old.wav"}}))).ok)
         documents.refresh()
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
-        clickButton(page, "自定义…")
-        let dialog = mainFixture.dialog(main, "批量更新自定义谱面内容")
+        let dialog = openBindingDialog(page)
         dialog.rawText = "#WAV01 new.wav"
         clickButton(dialog, "预览内容更新")
         compare(dialog.preview.collisionCount, 1)
+        const initialApply = mainFixture.objectNamed(dialog, "resourceBindingApplyButton")
+        const initialConsent = mainFixture.objectNamed(dialog, "resourceBindingOverwriteConsent")
+        verify(initialApply !== null && !initialApply.enabled)
+        verify(initialConsent !== null && initialConsent.visible && !initialConsent.checked)
+        // Qt 6.4 can retain the replaced base footer as a nonvisual QObject child.
+        clickButton(dialog.footer, "取消")
+        tryCompare(dialog, "visible", false)
+        unchanged(sa, sb)
+        dialog = openBindingDialog(page)
+        dialog.rawText = "#WAV01 new.wav"
+        clickButton(dialog, "预览内容更新")
         const apply = mainFixture.objectNamed(dialog, "resourceBindingApplyButton")
         const consent = mainFixture.objectNamed(dialog, "resourceBindingOverwriteConsent")
-        verify(apply !== null && !apply.enabled)
-        verify(consent.visible && !consent.checked)
-        wait(50)
-        verify(mainFixture.screenshot())
-        clickButton(dialog, "取消")
-        unchanged(sa, sb)
-        clickButton(page, "自定义…")
-        dialog = mainFixture.dialog(main, "批量更新自定义谱面内容")
-        clickButton(dialog, "预览内容更新")
+        verify(apply !== null && consent !== null)
         mouseClick(consent, consent.width / 2, consent.height / 2)
         verify(apply.enabled)
         project.setSliceTargetChecked("main-integration-a.bms", false)
@@ -582,11 +605,19 @@ TestCase {
         const page = bindingSetup()
         project.setSliceTargetChecked("main-integration-a.bms", false)
         const sa = mainFixture.snapshot(a), diskA = mainFixture.disk(a)
+        const diskB = mainFixture.disk(b)
+        verify(sa.dirty && mainFixture.snapshot(b).dirty)
+        const list = mainFixture.objectNamed(page, "projectChartList")
+        verify(list !== null)
+        // Qt 6.4 can evaluate visibility before polishing the newly shown SplitView.
+        tryVerify(() => list.width > 0 && list.height > 0)
         clickButton(page, "保存勾选")
+        tryVerify(() => !mainFixture.snapshot(b).dirty)
         tryCompare(main, "pendingDocAction", "")
         compare(mainFixture.snapshot(a), sa)
         compare(mainFixture.disk(a), diskA)
-        compare(mainFixture.snapshot(b).dirty, false)
+        verify(!diskB.includes("#GENRE history"))
+        verify(mainFixture.disk(b).includes("#GENRE history"))
         compare(documents.activeId(), a)
     }
     function test_selectedSave_nonactivePms_cancelAcceptStale_data() {
@@ -648,35 +679,34 @@ TestCase {
         main.currentPage = 3
         const page = mainFixture.objectNamed(main, "projectPage")
         verify(page !== null)
-        clickButton(page, "谱面历史")
-        compare(page.detailTab, 1)
+        const tabs = mainFixture.objectNamed(page, "projectDetailTabs")
+        verify(tabs !== null)
+        tryVerify(() => tabs.width > 0)
+        clickButton(tabs, "谱面历史")
         const panel = mainFixture.objectNamed(page, "projectHistoryPanel")
-        verify(panel !== null && panel.visible)
-        compare(chartHistoryController.documentId, a)
-        verify(panel.saveAllowed)
+        verify(panel !== null)
+        tryCompare(panel, "visible", true)
+        tryCompare(chartHistoryController, "documentId", a)
         chartHistoryController.enabled = true
         tryCompare(chartHistoryController, "busy", false)
         clickButton(panel, "保存并创建快照")
-        tryCompare(chartHistoryController, "busy", false)
-        compare(chartHistoryController.entries.length, 1)
+        tryVerify(() => chartHistoryController.entries.length === 1)
         compare(mainFixture.dialog(main, "本地谱面历史"), null)
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         page.selectedChart = mainFixture.snapshot(b).path
+        tryCompare(chartHistoryController, "documentId", b)
+        // Loading temporarily disables Save even for a valid target. Check
+        // the persistent permission only after B's history request settles.
         tryCompare(chartHistoryController, "busy", false)
-        compare(chartHistoryController.documentId, b)
-        compare(panel.saveAllowed, false)
-        verify(!mainFixture.button(panel, "保存并创建快照").enabled)
+        const save = mainFixture.button(panel, "保存并创建快照")
+        verify(save !== null && !save.enabled)
         compare(documents.activeId(), a)
         unchanged(sa, sb)
         page.selectedChart = ""
-        tryCompare(chartHistoryController, "busy", false)
-        compare(chartHistoryController.documentId, a)
-        compare(chartHistoryController.entries.length, 1)
-        wait(50)
-        verify(mainFixture.screenshot())
+        tryCompare(chartHistoryController, "documentId", a)
+        tryVerify(() => !chartHistoryController.busy && chartHistoryController.entries.length === 1)
         clickButton(page, "资源")
-        compare(page.detailTab, 0)
-        compare(panel.visible, false)
+        tryCompare(panel, "visible", false)
     }
 
     function test_chartHistory_pmsCancellationCreatesNoSnapshot() {
@@ -953,8 +983,7 @@ TestCase {
         activeChanges.clear()
         projectAction(sb.path, "对照 B")
         compare(main.currentPage, 3)
-        compare(split.referenceShare, 0.5)
-        main.currentPage = 0 // Hidden SplitView defers layout until the editor is shown.
+        main.currentPage = 0 // Assert the visible result, not hidden SplitView geometry.
         tryCompare(split, "expanded", true)
         compare(split.referenceDocumentId, b)
         compare(split.referenceView.documentSession, bridge)
@@ -978,8 +1007,7 @@ TestCase {
         activeChanges.clear()
         projectAction(path, "对照 B")
         compare(main.currentPage, 3)
-        compare(split.referenceShare, 0.5)
-        main.currentPage = 0 // Hidden SplitView defers layout until the editor is shown.
+        main.currentPage = 0 // Assert the visible result, not hidden SplitView geometry.
         tryCompare(split, "expanded", true)
         const id = split.referenceDocumentId
         verify(id !== a && id !== b && id !== "")

@@ -51,6 +51,7 @@ BbDialog {
 
     ScrollView {
         id: bodyScroll
+        objectName: "resourceBindingScroll"
         Layout.fillWidth: true
         Layout.fillHeight: true
         clip: true
