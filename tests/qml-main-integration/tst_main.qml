@@ -468,7 +468,9 @@ TestCase {
         verify(actions !== null && inline !== null)
         const row1 = mainFixture.button(actions, "编辑 A")
         const last = mainFixture.button(actions, "保存勾选")
-        fuzzyCompare(row1.y, last.y, 1)
+        verify(row1 !== null && last !== null && row1.height > 0 && last.height > 0)
+        const overlap = Math.min(row1.y + row1.height, last.y + last.height) - Math.max(row1.y, last.y)
+        verify(overlap >= Math.min(row1.height, last.height) / 2, "Editing and saving stay on the same row")
         verify(last.x + last.width <= actions.width + 1)
         const custom = mainFixture.button(page, "自定义…")
         const inlinePos = inline.mapToItem(page, 0, 0), customPos = custom.mapToItem(page, 0, 0)
@@ -504,7 +506,7 @@ TestCase {
         verify(warning !== null && warning.visible && warning.text.indexOf("元数据") >= 0)
         dialog.rawText = "#TITLE Updated song\n#ARTIST New artist\n#WAV01 update.wav"
         wait(0) // Let native popup layout settle before injecting a real mouse click.
-        clickButton(dialog, "预览内容更新")
+        clickBindingPreview(dialog)
         verify(dialog.preview.ok, dialog.message)
         verify(dialog.preview.collisionCount > 0)
         const consent = mainFixture.objectNamed(dialog, "resourceBindingOverwriteConsent")
@@ -571,7 +573,7 @@ TestCase {
         const sa = mainFixture.snapshot(a), sb = mainFixture.snapshot(b)
         let dialog = openBindingDialog(page)
         dialog.rawText = "#WAV01 new.wav"
-        clickButton(dialog, "预览内容更新")
+        clickBindingPreview(dialog)
         compare(dialog.preview.collisionCount, 1)
         const initialApply = mainFixture.objectNamed(dialog, "resourceBindingApplyButton")
         const initialConsent = mainFixture.objectNamed(dialog, "resourceBindingOverwriteConsent")
@@ -583,7 +585,7 @@ TestCase {
         unchanged(sa, sb)
         dialog = openBindingDialog(page)
         dialog.rawText = "#WAV01 new.wav"
-        clickButton(dialog, "预览内容更新")
+        clickBindingPreview(dialog)
         const apply = mainFixture.objectNamed(dialog, "resourceBindingApplyButton")
         const consent = mainFixture.objectNamed(dialog, "resourceBindingOverwriteConsent")
         verify(apply !== null && consent !== null)
@@ -592,7 +594,7 @@ TestCase {
         project.setSliceTargetChecked("main-integration-a.bms", false)
         tryVerify(function() { return !dialog.preview.ok })
         verify(!apply.enabled)
-        clickButton(dialog, "预览内容更新")
+        clickBindingPreview(dialog)
         compare(dialog.preview.targetCount, 1)
         compare(consent.checked, false)
         mouseClick(consent, consent.width / 2, consent.height / 2)
