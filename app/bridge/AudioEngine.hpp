@@ -16,8 +16,10 @@
 #include <QStringList>
 #include <QThreadPool>
 #include <QVariantList>
+#include <QVariantMap>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "beatbench/audio/AudioBackend.hpp"
 #include "beatbench/audio/PcmPlayback.hpp"
@@ -34,6 +36,7 @@ class AudioEngine : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
+    Q_PROPERTY(bool asioCompiled READ asioCompiled CONSTANT)
 
     // ---- M5 播放状态（QML 绑定：播放/暂停按钮、状态栏时间） ----
     Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
@@ -58,11 +61,21 @@ class AudioEngine : public QObject {
 
    public:
     explicit AudioEngine(QObject* parent = nullptr);
+    /// Injected backend uses the same initialization/settings path as production.
+    explicit AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend,
+                         QObject* parent = nullptr);
     ~AudioEngine() override;
 
     /// 试听一个采样文件（相对 = 谱面目录；绝对路径直接用）。
     /// 返回 false = 立即失败（文件缺失/格式不支持/无文档）；解码失败异步报 statusText。
     Q_INVOKABLE bool playPreview(const QString& file);
+    /// 分栏 B 单音试听：只从传入文档取 WAV 定义与路径，不改变主播放来源。
+    Q_INVOKABLE bool playReferenceNotePreview(QObject* owner, int sampleId);
+    /// 仅取消 B 音符的试听，不影响 A 的试听或主播放。
+    Q_INVOKABLE void stopReferenceNotePreview();
+
+    /// Cancel pending decode and audition only; main/reference playback is preserved.
+    Q_INVOKABLE void stopPreview();
 
     /// 停掉所有试听/播放（换谱面/关文档；幂等）。
     Q_INVOKABLE void stopAll();
@@ -75,8 +88,12 @@ class AudioEngine : public QObject {
     Q_INVOKABLE bool applySettings(int device, int sampleRate, int framesPerBuffer,
                                    qreal masterVolumePercent);
 
-    /// 重新打开流（启动/换设备后；用当前 m_settings；失败回退）。供测试/诊断。
+    /// 用当前已接受的设置重开流（也可在流不可用时重试）。供测试/诊断。
     Q_INVOKABLE bool reopenStream();
+    bool asioCompiled() const { return m_backend && m_backend->asioAvailable(); }
+    Q_INVOKABLE QVariantMap deviceCapabilities(int device) const;
+    Q_INVOKABLE QVariantList bufferOptions(int device) const;
+    Q_INVOKABLE bool showDeviceControlPanel();
 
     /// 设置谱面目录（相对路径解析基准；openChart 后调用）。
     Q_INVOKABLE void setSourceDir(const QString& dir);
@@ -159,11 +176,14 @@ class AudioEngine : public QObject {
     /// 主音量（0-100 百分比；QML 滑杆直接绑定）。
     qreal masterVolume() const { return static_cast<qreal>(m_player.masterVolume()) * 100.0; }
     /// 实际流采样率（设备可能调整；显示真实值）。
-    int actualRate() const { return m_backend ? m_backend->streamInfo().sampleRate : 0; }
+    int actualRate() const {
+        return m_backend && m_initialized ? m_backend->streamInfo().sampleRate : 0;
+    }
     /// 实际延迟（ms；设置页显示）。
     qreal latencyMs() const {
-        return m_backend ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
-                         : 0.0;
+        return m_backend && m_initialized
+                   ? static_cast<qreal>(m_backend->streamInfo().latencySeconds * 1000.0)
+                   : 0.0;
     }
     /// 当前活动设备描述（"设备名（API）"；空 = 无）。
     QString activeDeviceText() const;
@@ -196,6 +216,7 @@ class AudioEngine : public QObject {
     void waitRenderSettingChanged();
 
    private:
+    friend struct AudioEngineTestAccess;  // Deterministic synthetic PCM clock tests.
     /// 音频路径解析 + **扩展名回退**：原路径存在 → 用它；否则按相同 basename
     /// 试其它音频扩展名；全无 → 空串。BMS 播放器惯例（beatoraja 同款）。
     static QString resolveAudioPath(const QString& resolved);
@@ -206,16 +227,41 @@ class AudioEngine : public QObject {
     void saveSettings() const;
     /// 重建设备列表（devices() 快照；设置页下拉）。
     void rebuildDevices();
+    bool startStream(const beatbench::audio::AudioSettings& settings, std::string& error);
+    void clearSettingsError();
+    bool ensureBackend(std::string& error);
+    void resolveSavedDevice();
+    void pauseForStreamChange();
+    void setSettingsError(const QString& error);
+    bool playPreviewFrom(const QString& file, const QString& sourceDir, bool referenceNote);
+    void completePreviewDecodes();
 
     /// 回调上下文（render 直达内核；deviceRate 更新一次，原子读）
     struct RenderCtx {
         beatbench::audio::SamplePlayer* player = nullptr;
         std::atomic<double> deviceRate{48000.0};
+        std::atomic<bool> ready{false};
     };
 
     std::unique_ptr<beatbench::audio::AudioBackend> m_backend;
+    bool m_backendReady = false;
+    std::vector<beatbench::audio::AudioDeviceInfo> m_deviceSnapshot;
+    QString m_savedDeviceName;
+    int m_savedDeviceApiType = 0;
+    bool m_hasSavedDeviceIdentity = false;
     beatbench::audio::SamplePlayer m_player;
     beatbench::audio::SampleCache m_cache;  ///< 采样解码缓存（M4.3a：LRU+预算+合并）
+    // Workers only publish owned results; GUI drains or releases them, including at teardown.
+    struct PreviewDecode {
+        std::uint64_t generation;
+        beatbench::audio::SampleCacheResult result;
+    };
+    QThreadPool m_previewPool;
+    std::mutex m_previewResultsMutex;
+    std::vector<PreviewDecode> m_previewResults;
+    std::uint64_t m_previewGeneration = 0;
+    bool m_previewDecoding = false;
+    bool m_referenceNotePreview = false;
     RenderCtx m_renderCtx;
     QString m_sourceDir;  ///< 谱面目录（绝对路径；空 = 未打开）
     std::atomic<bool> m_busy{false};

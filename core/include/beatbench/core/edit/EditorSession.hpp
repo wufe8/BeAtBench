@@ -17,6 +17,16 @@
 
 namespace beatbench::edit {
 
+/// 文档的磁盘文本格式（不属于 Chart、编辑事务或撤销栈）。空字段表示未识别或不适用。
+struct DocumentTextFormat {
+    std::string encoding;     ///< ascii / sjis / utf8
+    std::string line_ending;  ///< lf / crlf / cr / mixed
+    std::string preferred_line_ending;
+    bool utf8_bom = false;
+    bool encoding_ambiguous = false;
+    bool normalized_mixed_line_endings = false;  ///< 本次打开以来曾统一混合行尾
+};
+
 /// 编辑会话：持有可编辑文档（Chart）+ undo/redo 栈 + 执行编辑命令。
 /// 纯 core 零 Qt；GUI/CLI/测试三方复用（doc/core-model.md 二、「命令对象 = 唯一操作面」的文档侧承载）。
 /// 会话状态（Selection/Viewport/Playhead）不入 undo 栈——由调用方自持。
@@ -40,6 +50,11 @@ class EditorSession {
     const std::string& path() const { return m_path; }
     void set_path(std::string path) { m_path = std::move(path); }
 
+    const DocumentTextFormat& text_format() const { return m_text_format; }
+    void set_text_format(DocumentTextFormat format) { m_text_format = std::move(format); }
+    bool preserve_text_format() const { return m_preserve_text_format; }
+    void set_preserve_text_format(bool preserve) { m_preserve_text_format = preserve; }
+
     /// 执行编辑命令：apply → 入 undo 栈（清空 redo）；返回是否成功。
     /// 失败（命令抛出）→ 文档回滚到执行前（undo 栈不变）。
     bool exec(std::unique_ptr<EditCommand> cmd);
@@ -58,7 +73,15 @@ class EditorSession {
     /// 文档是否相对最近一次 load / mark_clean 有未保存编辑（含 undo 到非清洁点）。
     bool is_dirty() const { return m_generation != m_clean_generation; }
     /// 保存成功后调用：当前 generation 成为清洁点。load() 也会清脏。
-    void mark_clean() { m_clean_generation = m_generation; }
+    void mark_clean() {
+        m_clean_generation = m_generation;
+        m_saved_since_load = true;
+    }
+    /// 区分“载入后尚未保存”与“已成功保存”；不参与 undo，重新 load 时重置。
+    bool saved_since_load() const { return m_saved_since_load; }
+    /// 进程内唯一的文档变更版本；load/exec/undo/redo 成功后更新，不随 undo 回退。
+    /// 用于预览计划过期检查，与用于脏标记的 generation 分离；保存不改变内容版本。
+    std::uint64_t revision() const { return m_revision; }
 
     /// 撤销/重做栈顶命令描述（菜单显示；空 → 空串）。
     std::string undo_label() const;
@@ -81,7 +104,12 @@ class EditorSession {
     /// 默认无钩子（不自动落盘）。由调用方（builtins/GUI）注入：用 codec->write + 原子写。
     using PersistHook =
         std::function<bool(const Chart&, const std::string& path, std::string* error)>;
-    void set_persist_hook(PersistHook hook) { m_persist_hook = std::move(hook); }
+    void set_persist_hook(PersistHook hook);
+
+    /// 对话外保存复用手动保存的格式策略；仅自动保存成功时更新主文档格式（备份不更新）。
+    using TextPersistHook = std::function<bool(const EditorSession&, const std::string& path,
+                                               DocumentTextFormat* written, std::string* error)>;
+    void set_text_persist_hook(TextPersistHook hook) { m_persist_hook = std::move(hook); }
 
     /// 最近一次崩溃备份失败原因（成功或未尝试则为空）。
     const std::string& last_backup_error() const { return m_last_backup_error; }
@@ -102,12 +130,16 @@ class EditorSession {
     std::vector<std::unique_ptr<EditCommand>> m_redo;
     Selection m_selection;
     std::string m_path;
-    std::uint64_t m_generation = 0;                ///< 当前文档状态代际（undo 回到该状态号）
-    std::uint64_t m_next_generation = 1;           ///< 只增不复用，避免保存点号被新编辑撞上
-    std::uint64_t m_clean_generation = 0;          ///< 最近一次 load/mark_clean 的 generation
+    std::uint64_t m_generation = 0;        ///< 当前文档状态代际（undo 回到该状态号）
+    std::uint64_t m_next_generation = 1;   ///< 只增不复用，避免保存点号被新编辑撞上
+    std::uint64_t m_clean_generation = 0;  ///< 最近一次 load/mark_clean 的 generation
+    bool m_saved_since_load = false;
+    std::uint64_t m_revision = 0;
     std::vector<std::uint64_t> m_undo_generation;  ///< 与 m_undo 平行：该命令 apply 后的代际
     std::vector<std::uint64_t> m_redo_generation;  ///< 与 m_redo 平行
-    PersistHook m_persist_hook;
+    DocumentTextFormat m_text_format;
+    bool m_preserve_text_format = false;
+    TextPersistHook m_persist_hook;
     bool m_backup = true;
     bool m_autosave = false;
     std::string m_last_backup_error;
@@ -158,18 +190,18 @@ class PutNoteCommand : public EditCommand {
 /// 跨通道（2026-09，M2 自由 2D 拖动）：`to_lane` 可选——传了 = 移动同时改到目标轨道
 /// （时间 + 通道一起动）；缺省 nullopt = 纯时间移动（向后兼容，行为与旧版完全一致）。
 ///
-/// LN 处理（2026-08 对齐 BMS 编辑器惯例，用户确认）：
-/// - move_ln_pair = false（默认）：LN 当作单个 note 处理——只移动该 note，
-///   配对解除（伙伴 ln_pair 清空）。配对断了由解析器自然延续/ lint 告警，
-///   编辑器不主动修复（BMS 编辑器常见行为）。
-/// - move_ln_pair = true：识别到 LN 则整体头尾一起移动（保持相对位置），配对保留；
-///   跨通道时伙伴 lane 同步改为 to_lane（LN 头尾恒同轨道）。
+/// LN 只移动显式选中的物件，保持源 ln_channel / kind / sample，不修改伙伴。
+/// 连接由原始数据独立推导；不能成型仅 lint。批量先绑定全部源，避免目标串作后续源。
+/// move_ln_pair 仅保留旧调用签名，不自动扩张选择；成对移动须显式选择两端。
 class MoveNoteCommand : public EditCommand {
    public:
     MoveNoteCommand(std::uint32_t from_measure, Rational from_pos, Lane lane, std::uint32_t sample,
                     std::uint32_t to_measure, Rational to_pos, bool move_ln_pair = false,
                     std::optional<Lane> to_lane = std::nullopt, std::uint32_t from_sub_line = 0,
                     std::optional<std::uint32_t> to_sub_line = std::nullopt);
+    void preflight(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+        bind_source(chart, claimed);
+    }
     std::string name() const override { return "note.move"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
@@ -190,14 +222,16 @@ class MoveNoteCommand : public EditCommand {
     std::uint32_t m_from_sub_line = 0;
     /// 目标 BGM 行序号（nullopt = 不指定：按目标小节 ch01 行数自动分配；非 BGM 目标忽略）
     std::optional<std::uint32_t> m_to_sub_line;
-    /// apply 快照（invert 恢复；找不到 note 时为空）
+    friend class CompositeCommand;
+    void bind_source(const Chart&, std::unordered_set<std::size_t>& claimed);
+    void bind_target(const Chart&, std::unordered_set<std::size_t>& claimed);
+    void apply_bound(Chart&);
+    void invert_bound(Chart&);
+    static void reposition(Chart&, const std::vector<MoveNoteCommand*>&, bool undo);
+    std::optional<std::size_t> m_original_index;
+    std::optional<std::size_t> m_index;
     std::optional<Event<Note>> m_moved;
-    std::optional<Event<Note>> m_partner;
-    /// 单 note 模式 apply 后移动端重连的新伙伴（m_paired_at = 移动端新下标，m_paired_with = 伙伴）；
-    /// invert 时用于清理该临时配对（否则新伙伴会悬挂指向已移回主 note 的旧下标）。
-    std::optional<std::size_t> m_paired_at;
-    std::optional<std::size_t> m_paired_with;
-    Rational m_last_delta{0, 1};
+    std::optional<Event<Note>> m_target;
 };
 
 /// 删除 note（doc/ui-design.md 九、「选择集删除」→ note.delete）。
@@ -228,14 +262,15 @@ class DeleteNoteCommand : public EditCommand {
 
 /// 量化 note 位置（M3「量化(quantize)」设计 → note.quantize）。
 /// 语义：把 (measure, pos, lane, sample) 处匹配 note 的 pos 吸附到 snapNum/snapDen 网格
-/// （目标 pos = k*snapNum/snapDen，k = round(pos*snapDen/snapNum)）。
-/// 只改 pos，**不动 lane/sample/ln_pair**（量化不该拆 LN——头尾各自吸附到网格）。
+/// 吸附到同小节内最近的有效网格（pos ∈ [0, 1)），不把节尾写成不存在的槽位。
+/// 只改 pos，不换轨、不改采样或源子行；LN 连接由会话重建。
 /// 逆操作：精确恢复原 pos。批量 = CompositeCommand 包装多个（一个 undo 步）。
 class QuantizeNoteCommand : public EditCommand {
    public:
     QuantizeNoteCommand(std::uint32_t measure, Rational pos, Lane lane, std::uint32_t sample,
-                        std::int64_t snap_num, std::int64_t snap_den);
+                        std::int64_t snap_num, std::int64_t snap_den, std::uint32_t sub_line = 0);
     std::string name() const override { return "note.quantize"; }
+    Rational target_pos() const { return m_new_pos; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
     std::string describe() const override;
@@ -245,12 +280,9 @@ class QuantizeNoteCommand : public EditCommand {
     Rational m_pos;  ///< 原始 pos（命令目标 = 量化后；invert 恢复此值）
     Lane m_lane;
     std::uint32_t m_sample;
-    std::int64_t m_snap_num;
-    std::int64_t m_snap_den;
-    /// apply 实际执行时是否发生了改变（pos 已在网格上 → false，invert 无操作）
+    std::uint32_t m_sub_line;  ///< BGM 源子通道身份，量化和撤销均须保留
     bool m_changed = false;
-    /// apply 后的新 pos（invert 恢复用）
-    Rational m_new_pos;
+    Rational m_new_pos;  ///< apply 与协议返回选区共用的目标位置
 };
 
 /// 变换选中 note（M3「镜像/旋转（LR2 式 mirror/random）」设计 → note.transform）。

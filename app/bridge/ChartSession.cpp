@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// ChartSession 实现：视图 = core 活动编辑会话（session_registry().active()）。
+// ChartSession 实现：固定文档 ID 的视图桥；空 ID 仅作旧调用的 active 兼容。
 // 加载走协议 session.load（M3）；编辑后 QML 调 refresh()（指纹判定文档/内容变化）。
 #include "bridge/ChartSession.hpp"
 
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QThreadPool>
+#include <algorithm>
 #include <bit>
 
 #include "beatbench/audio/ChartRenderer.hpp"
 #include "beatbench/audio/SampleCache.hpp"
 #include "beatbench/audio/WaveformPyramid.hpp"
 #include "beatbench/core/ChartMode.hpp"
+#include "beatbench/core/LnPairing.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
@@ -39,12 +41,39 @@ struct ChartSession::RenderedAudioHolder {
 
 ChartSession::ChartSession(QObject* parent) : QObject(parent) {}
 
+ChartSession::~ChartSession() { m_renderPool.waitForDone(); }
+
+const beatbench::Chart* ChartSession::chart() const {
+    if (!m_chart) return nullptr;
+    // Other bridges may synchronously query us while only the first bridge has
+    // refreshed after a multi-document reload. Never dereference the cached pointer
+    // before checking the owning session; revision also rejects address reuse and
+    // in-place edits whose timing has not yet been rebuilt. Resolve the attached ID,
+    // not active_id(): changing the active tab alone does not invalidate this view.
+    const auto* session = beatbench::edit::session_registry().by_id(m_sessionId);
+    if (!session || !session->has_chart() || session->revision() != m_documentRevision)
+        return nullptr;
+    const auto* liveChart = &session->chart();
+    return liveChart == m_chart ? liveChart : nullptr;
+}
+
+void ChartSession::setSessionId(const QString& id) {
+    if (m_boundSessionId == id) return;
+    m_boundSessionId = id;
+    attachSession(true);
+    emit sessionIdChanged();
+    emit documentChanged();
+    emit chartChanged();
+}
+
 bool ChartSession::openChart(const QString& path) {
     m_error.clear();
     Json req = Json::object();
     req.set("command", "session.load");
     Json args = Json::object();
     args.set("path", path.toStdString());
+    args.set("preserve_text_format", true);
+    if (!m_boundSessionId.isEmpty()) args.set("session_id", m_boundSessionId.toStdString());
     req.set("args", std::move(args));
     const Json res = beatbench::cmd::global_registry().dispatch(req);
     const Json* okp = res.find("ok");
@@ -57,13 +86,13 @@ bool ChartSession::openChart(const QString& path) {
             if (const Json* msg = e->find("message"))
                 m_error += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
         }
-        attachActive(true);
+        attachSession(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
         return false;
     }
-    attachActive(true);
+    attachSession(true);
     emit documentChanged();
     emit chartChanged();
     syncDirty();
@@ -79,6 +108,8 @@ bool ChartSession::newChart(const QString& mode) {
     Json req = Json::object();
     req.set("command", "session.new");
     Json args = Json::object();
+    args.set("preserve_text_format", true);
+    if (!m_boundSessionId.isEmpty()) args.set("session_id", m_boundSessionId.toStdString());
     if (!mode.isEmpty()) args.set("mode", mode.toStdString());
     req.set("args", std::move(args));
     const Json res = beatbench::cmd::global_registry().dispatch(req);
@@ -92,13 +123,13 @@ bool ChartSession::newChart(const QString& mode) {
             if (const Json* msg = e->find("message"))
                 m_error += QStringLiteral(": ") + QString::fromStdString(msg->as_str());
         }
-        attachActive(true);
+        attachSession(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
         return false;
     }
-    attachActive(true);
+    attachSession(true);
     emit documentChanged();
     emit chartChanged();
     syncDirty();
@@ -113,48 +144,61 @@ QStringList ChartSession::codecModes() const {
     return out;
 }
 
+QString ChartSession::chartMode() const {
+    const auto* currentChart = chart();
+    return currentChart ? QString::fromStdString(currentChart->mode_id.value_or("sp7k"))
+                        : QString();
+}
+
 int ChartSession::playKeyCount() const {
-    if (!m_chart) return 7;
-    return beatbench::chart_mode_key_count(m_chart->mode_id.value_or("sp7k"));
+    const auto* currentChart = chart();
+    if (!currentChart) return 7;
+    return beatbench::chart_mode_key_count(currentChart->mode_id.value_or("sp7k"));
 }
 
 void ChartSession::refresh() {
     auto& reg = beatbench::edit::session_registry();
-    auto& s = reg.active();
-    const std::string sid = reg.active_id();
-    const beatbench::Chart* c = s.has_chart() ? &s.chart() : nullptr;
-    const bool docChanged = (sid != m_sessionId) || (c != m_chart);
+    const std::string sid =
+        m_boundSessionId.isEmpty() ? reg.active_id() : m_boundSessionId.toStdString();
+    const auto* s = reg.by_id(sid);
+    const beatbench::Chart* c = s && s->has_chart() ? &s->chart() : nullptr;
+    const bool pathChanged = (s ? QString::fromStdString(s->path()) : QString()) != m_path;
+    const bool docChanged = (sid != m_sessionId) || (c != m_chart) || pathChanged;
     if (docChanged) {
-        attachActive(true);
+        attachSession(true);
         emit documentChanged();
         emit chartChanged();
         syncDirty();
+        if (pathChanged && m_chart && m_timing) renderAsync();  // 另存为后按新目录解码资源
         return;
     }
+    syncTextFormat();
     const std::uint64_t ch = contentHash();
     const std::uint64_t th = timingHash();
     const std::uint64_t sh = samplesHash();
-    const bool changed = (ch != m_contentHash) || (th != m_timingHash) || (sh != m_samplesHash);
+    const auto revision = s ? s->revision() : 0;
+    const bool changed = (revision != m_documentRevision) || (ch != m_contentHash) ||
+                         (th != m_timingHash) || (sh != m_samplesHash);
+    m_documentRevision = revision;
     const bool timingChanged = (th != m_timingHash);
     const bool samplesChanged = (sh != m_samplesHash);
+    const bool renderChanged = (ch != m_contentHash) || timingChanged || samplesChanged;
     if (timingChanged && m_chart && m_timing) m_timing->rebuild(*m_chart);
     m_contentHash = ch;
     m_timingHash = th;
     m_samplesHash = sh;
     if (changed) {
-        // M4.3c+：内容变化 = 旧渲染过期（后台 in-flight 结果的版本校验丢弃）
-        m_renderVersion.fetch_add(1, std::memory_order_relaxed);
-        // M4.3c 增量：timing 变化（BPM/STOP/节拍）→ 下次渲染**全量**（正确性优先）；
-        // 同 ID 换采样文件：note 键不变，增量 diff 看不见，必须全量。
-        m_timingDirty = timingChanged || samplesChanged;
-        // 2026-09 波形消失根因：timing 变化（BPM/STOP/小节长/节拍）此前只置 m_timingDirty 不触发渲染，
-        // 而前端 onContentChanged 会隐藏波形 → 没有 renderFinished 恢复（直到 Ctrl+R/Space）。
-        // 修：任何内容变化（含 timing）都触发后台渲染（renderAsync 内部按 m_timingDirty 定全量/增量）。
-        if (m_rendered && !m_renderInFlight.load()) {
-            const double sr = m_rendered->sampleRate;
-            renderAsync(sr > 0.0 ? sr : 44100.0);
-        } else if (m_rendered) {
-            m_pendingIncremental = true;  // 渲染中 → 完成后补一次
+        // TITLE/ARTIST 等修改也通知视图，但不作废仍有效的首次音频渲染。
+        if (renderChanged) {
+            // 只作废影响渲染的内容；BPM/采样变化必须完整重混。
+            m_renderVersion.fetch_add(1, std::memory_order_relaxed);
+            m_timingDirty = m_timingDirty || timingChanged || samplesChanged;
+            if (m_rendered && !m_renderInFlight.load()) {
+                const double sr = m_rendered->sampleRate;
+                renderAsync(sr > 0.0 ? sr : 44100.0);
+            } else if (m_renderInFlight.load()) {
+                m_pendingIncremental = true;  // 首次渲染也可能尚无 PCM；完成后补最新快照。
+            }
         }
         emit contentChanged();
         emit chartChanged();
@@ -163,9 +207,10 @@ void ChartSession::refresh() {
 }
 
 int ChartSession::sampleValueOf(const QString& idText) const {
-    if (!m_chart) return -1;
+    const auto* currentChart = chart();
+    if (!currentChart) return -1;
     const std::string t = idText.toStdString();
-    const bool b62 = m_chart->id_base == beatbench::IdBase::Base62;
+    const bool b62 = currentChart->id_base == beatbench::IdBase::Base62;
     const std::uint32_t id =
         b62 ? beatbench::bms::c62_to_u32(t, 2) : beatbench::bms::c36_to_u32(t, 2);
     // 2026-09 用户：**未绑定文件的槽位也允许放置**（LNOBJ 尾通常空音、不绑文件）。
@@ -176,21 +221,24 @@ int ChartSession::sampleValueOf(const QString& idText) const {
 }
 
 QString ChartSession::idTextOf(int id) const {
-    if (!m_chart) return QString();
+    const auto* currentChart = chart();
+    if (!currentChart) return QString();
     return QString::fromStdString(
-        beatbench::bms::id_text(*m_chart, static_cast<std::uint32_t>(id)));
+        beatbench::bms::id_text(*currentChart, static_cast<std::uint32_t>(id)));
 }
 
 QString ChartSession::wavFileOfId(int id) const {
-    if (!m_chart || id <= 0) return QString();
+    const auto* currentChart = chart();
+    if (!currentChart || id <= 0) return QString();
     const auto it =
-        m_chart->samples.find({beatbench::SampleKind::Wav, static_cast<std::uint32_t>(id)});
-    if (it == m_chart->samples.end()) return QString();
+        currentChart->samples.find({beatbench::SampleKind::Wav, static_cast<std::uint32_t>(id)});
+    if (it == currentChart->samples.end()) return QString();
     return QString::fromStdString(it->second.file);  // 相对谱面目录（AudioEngine 解析）
 }
 
 bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
-    if (!m_chart || !m_timing) {
+    const auto* currentChart = chart();
+    if (!currentChart || !m_timing) {
         m_error = QStringLiteral("未打开谱面");
         return false;
     }
@@ -201,7 +249,7 @@ bool ChartSession::renderToFile(const QString& outPath, qreal sampleRate) {
     // 渲染器用独立缓存（不占 AudioEngine 的试听缓存；渲染是全量顺序解码，
     // 帧内无并发——简单 SampleCache 即可）
     beatbench::audio::SampleCache cache;
-    const auto r = beatbench::audio::render_chart_w(*m_chart, *m_timing, cache,
+    const auto r = beatbench::audio::render_chart_w(*currentChart, *m_timing, cache,
                                                     static_cast<double>(sampleRate), sourceDir);
     if (!r.ok) {
         m_error = QString::fromStdString(r.message);
@@ -233,7 +281,8 @@ static QString noteSnapKey(const beatbench::Event<beatbench::Note>& n) {
 static constexpr double kTailSec = 8.0;
 
 bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
-    if (!m_chart || !m_timing) return false;
+    const auto* currentChart = chart();
+    if (!currentChart || !m_timing) return false;
     // 去重：渲染中忽略（完成信号回 UI；再次触发等 finish）
     bool expected = false;
     if (!m_renderInFlight.compare_exchange_strong(expected, true)) return false;
@@ -241,7 +290,7 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
     // 快照（后台线程独占）：chart 值拷贝（值语义安全）+ 路径 + 版本号
     // ⚠️ chart/timing 是 core 所有、编辑会变——后台必须用快照（拷贝），
     // 否则边渲染边编辑 → 竞态。TimingEngine move-only → 后台 rebuild。
-    const beatbench::Chart chartCopy = *m_chart;
+    const beatbench::Chart chartCopy = *currentChart;
     // 输出 = 谱面同目录 <stem>.render.wav（去原扩展名；与 CLI render 命名一致）
     // ⚠️ M5 saveWav=false（自动/增量）：不写盘（PCM 内存驻留；发布行为）
     const QFileInfo outFi(m_path);
@@ -256,7 +305,7 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
     // 增量脏区间帧（UI 线程算好传入；无脏 = 全量）
     std::size_t dirtyLo = 0, dirtyHi = 0;
     if (incremental) {
-        const auto dirty = computeDirtyRange(*m_chart, *m_timing, sr);
+        const auto dirty = computeDirtyRange(*currentChart, *m_timing, sr);
         if (dirty.first >= 0) {
             dirtyLo = dirty.first;
             dirtyHi = dirty.second;
@@ -266,116 +315,64 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
         }  // 无脏 note（仅 BGA 变化等）
     }
 
-    QThreadPool::globalInstance()->start(
-        [this, chartCopy, sourceDir, sr, outPath, version, incremental, dirtyLo, dirtyHi, saveWav] {
-            // 后台：重建 timing（快照 chart；全量/增量都需要——增量仅用于事件→秒换算）
-            beatbench::TimingEngine timing;
-            timing.rebuild(chartCopy);
-            beatbench::audio::SampleCache cache;
-            if (incremental) {
-                // ---- 增量：只重混脏区间（新区间 → 替换共享 PCM 缓冲元素） ----
-                auto holder = m_rendered;  // 现有结果（UI 线程已有；共享缓冲）
-                if (!holder) {
-                    m_renderInFlight.store(false);
-                    return;
-                }
-                const double t0 = static_cast<double>(dirtyLo) / sr;
-                const double t1 = static_cast<double>(dirtyHi) / sr;
-                auto rPtr = std::make_shared<beatbench::audio::RenderResult>(
-                    beatbench::audio::render_chart_range_w(chartCopy, timing, cache, sr, t0, t1,
-                                                           sourceDir));
-                std::shared_ptr<const beatbench::audio::WaveformPyramid> wfNew;
-                if (rPtr->ok) {
-                    // 替换共享 PCM 缓冲的对应帧（缓冲长不变——总长未变的编辑）
-                    const std::size_t bufFrames = holder->pcm->size() / 2;
-                    const std::size_t f0 = std::min(dirtyLo, bufFrames);
-                    const std::size_t f1 = std::min(dirtyHi, bufFrames);
-                    const std::size_t n = std::min(rPtr->audio.frameCount(), f1 - f0);
-                    for (std::size_t i = 0; i < n; ++i) {
-                        (*holder->pcm)[2 * (f0 + i)] = rPtr->audio.interleavedStereo[2 * i];
-                        (*holder->pcm)[2 * (f0 + i) + 1] = rPtr->audio.interleavedStereo[2 * i + 1];
-                    }
-                    // 金字塔：**后台线程拷贝重建**（并发安全：UI 线程只读旧指针；
-                    // 完成后指针替换——见 UI 侧回传）。⚠️ 不直接改 m_waveform 内容。
-                    auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
-                    wf->build(holder->pcm, 2, holder->sampleRate);
-                    // 增量只扫脏桶（重建 level0 后上级传播；比全量 rebuild 快）
-                    wf->rebuild_range(f0, f1);
-                    wfNew = wf;
-                }
-                // 结果回 UI（queued；波形已就地更新 → 只发 renderFinished 刷新状态栏）
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, rPtr, outPath, version, holder, chartCopy, sr, wfNew] {
-                        m_renderInFlight.store(false);
-                        if (version != m_renderVersion.load()) return;
-                        if (rPtr->ok) {
-                            m_error.clear();
-                            m_waveform = wfNew;  // 指针替换（UI 线程原子读；旧金字塔被引用者释放）
-                            // 增量完成后推进 note 快照（下次 diff 基准 = 当前状态）
-                            updateNoteSnapshot(chartCopy, *m_timing);
-                            emit renderFinished(true, outPath, holder->durationSec);
-                        } else {
-                            m_error = QString::fromStdString(rPtr->message);
-                            emit renderFinished(false, outPath, 0.0);
-                        }
-                        // 渲染期间收到内容变化（m_pendingIncremental）→ 完成后补一次增量
-                        if (m_pendingIncremental && m_rendered) {
-                            m_pendingIncremental = false;
-                            if (!m_timingDirty) renderAsync(m_rendered->sampleRate);
-                        }
-                    },
-                    Qt::QueuedConnection);
+    const auto previousRender = m_rendered;
+    m_renderPool.start([this, chartCopy, sourceDir, sr, outPath, version, incremental, dirtyLo,
+                        dirtyHi, saveWav, previousRender] {
+        // 后台：重建 timing（快照 chart；全量/增量都需要——增量仅用于事件→秒换算）
+        beatbench::TimingEngine timing;
+        timing.rebuild(chartCopy);
+        beatbench::audio::SampleCache cache;
+        if (incremental) {
+            // ---- 增量：只重混脏区间（新区间 → 替换共享 PCM 缓冲元素） ----
+            auto holder = previousRender;  // UI 线程捕获本次所属实例的结果，后台不读取成员指针
+            if (!holder) {
+                m_renderInFlight.store(false);
                 return;
             }
-            // ---- 全量（首次 / timing 变化 / 无旧结果） ----
+            const double t0 = static_cast<double>(dirtyLo) / sr;
+            const double t1 = static_cast<double>(dirtyHi) / sr;
             auto rPtr = std::make_shared<beatbench::audio::RenderResult>(
-                beatbench::audio::render_chart_w(chartCopy, timing, cache, sr, sourceDir));
-            // M5：saveWav 手动（Ctrl+R）才写 .wav（debug 验证产物）；载入自动/增量只内存
-            if (rPtr->ok && saveWav) {
-                std::string werr;
-                beatbench::audio::write_wav_file_w(outPath.toStdWString(), rPtr->audio, &werr);
-            }
-            // M4.3c 波形：渲染线程建 min/max 金字塔（不占 UI 线程；PCM 消费后即释，
-            // 金字塔常驻供波形组件查询——RenderedAudio 大 PCM 由 UI 线程显式释放）。
-            // ⚠️ 自持版（shared_ptr 共享缓冲）：增量重建（rebuild_range）需要 PCM 保活。
-            std::shared_ptr<const beatbench::audio::WaveformPyramid> wfPtr;
-            std::shared_ptr<std::vector<float>> pcmShared;
+                beatbench::audio::render_chart_range_w(chartCopy, timing, cache, sr, t0, t1,
+                                                       sourceDir));
+            std::shared_ptr<const beatbench::audio::WaveformPyramid> wfNew;
             if (rPtr->ok) {
+                // 替换共享 PCM 缓冲的对应帧（缓冲长不变——总长未变的编辑）
+                const std::size_t bufFrames = holder->pcm->size() / 2;
+                const std::size_t f0 = std::min(dirtyLo, bufFrames);
+                const std::size_t f1 = std::min(dirtyHi, bufFrames);
+                const std::size_t n = std::min(rPtr->audio.frameCount(), f1 - f0);
+                for (std::size_t i = 0; i < n; ++i) {
+                    (*holder->pcm)[2 * (f0 + i)] = rPtr->audio.interleavedStereo[2 * i];
+                    (*holder->pcm)[2 * (f0 + i) + 1] = rPtr->audio.interleavedStereo[2 * i + 1];
+                }
+                // 金字塔：**后台线程拷贝重建**（并发安全：UI 线程只读旧指针；
+                // 完成后指针替换——见 UI 侧回传）。⚠️ 不直接改 m_waveform 内容。
                 auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
-                pcmShared = std::make_shared<std::vector<float>>(
-                    rPtr->audio.interleavedStereo);  // 拷贝（rendered 保持独立；共享给金字塔）
-                wf->build(pcmShared, 2, rPtr->audio.sampleRate);
-                wfPtr = wf;
+                wf->build(holder->pcm, 2, holder->sampleRate);
+                // 增量只扫脏桶（重建 level0 后上级传播；比全量 rebuild 快）
+                wf->rebuild_range(f0, f1);
+                wfNew = wf;
             }
-            // 结果回 UI（queued；QML 响应 renderFinished）
+            // 结果回 UI（queued；波形已就地更新 → 只发 renderFinished 刷新状态栏）
             QMetaObject::invokeMethod(
                 this,
-                [this, rPtr, outPath, version, wfPtr, chartCopy, sr, pcmShared] {
+                [this, rPtr, outPath, version, holder, chartCopy, sr, wfNew] {
                     m_renderInFlight.store(false);
-                    const auto& r = *rPtr;
-                    // 版本校验：期间有更新的渲染启动 → 丢弃旧结果（简单粗暴：仅最新保留）
-                    if (version != m_renderVersion.load()) return;
-                    if (r.ok) {
-                        // ⚠️ 先取时长再 move（move 后 r.audio 为空，durationSeconds()=0——
-                        // 2026-09 曾把 holder->durationSec 放在 move 之后 → 状态栏恒 0 秒）
-                        const double dur = r.audio.durationSeconds();
-                        auto holder = std::make_shared<RenderedAudioHolder>();
-                        holder->pcm = pcmShared;  // 共享缓冲（金字塔同源；增量重混写这里）
-                        holder->frames = r.audio.frameCount();
-                        holder->sampleRate = r.audio.sampleRate;
-                        holder->durationSec = dur;
-                        holder->outPath = outPath;
-                        m_rendered = holder;
-                        // 金字塔自持 PCM（增量重建需要）；⚠️ 与 holder->pcm 共享同一缓冲
-                        m_waveform = wfPtr;
+                    if (version != m_renderVersion.load()) {
+                        if (m_pendingIncremental && m_chart) {
+                            m_pendingIncremental = false;
+                            renderAsync(sr);
+                        }
+                        return;
+                    }
+                    if (rPtr->ok) {
                         m_error.clear();
-                        m_timingDirty = false;
-                        // 全量渲染成功 → 更新 note 快照（下次增量 diff 的基准）
+                        m_waveform = wfNew;  // 指针替换（UI 线程原子读；旧金字塔被引用者释放）
+                        // 增量完成后推进 note 快照（下次 diff 基准 = 当前状态）
                         updateNoteSnapshot(chartCopy, *m_timing);
-                        emit renderFinished(true, outPath, dur);
+                        emit renderFinished(true, outPath, holder->durationSec);
                     } else {
-                        m_error = QString::fromStdString(r.message);
+                        m_error = QString::fromStdString(rPtr->message);
                         emit renderFinished(false, outPath, 0.0);
                     }
                     // 渲染期间收到内容变化（m_pendingIncremental）→ 完成后补一次增量
@@ -385,7 +382,72 @@ bool ChartSession::renderAsync(qreal sampleRate, bool saveWav) {
                     }
                 },
                 Qt::QueuedConnection);
-        });
+            return;
+        }
+        // ---- 全量（首次 / timing 变化 / 无旧结果） ----
+        auto rPtr = std::make_shared<beatbench::audio::RenderResult>(
+            beatbench::audio::render_chart_w(chartCopy, timing, cache, sr, sourceDir));
+        // M5：saveWav 手动（Ctrl+R）才写 .wav（debug 验证产物）；载入自动/增量只内存
+        if (rPtr->ok && saveWav) {
+            std::string werr;
+            beatbench::audio::write_wav_file_w(outPath.toStdWString(), rPtr->audio, &werr);
+        }
+        // M4.3c 波形：渲染线程建 min/max 金字塔（不占 UI 线程；PCM 消费后即释，
+        // 金字塔常驻供波形组件查询——RenderedAudio 大 PCM 由 UI 线程显式释放）。
+        // ⚠️ 自持版（shared_ptr 共享缓冲）：增量重建（rebuild_range）需要 PCM 保活。
+        std::shared_ptr<const beatbench::audio::WaveformPyramid> wfPtr;
+        std::shared_ptr<std::vector<float>> pcmShared;
+        if (rPtr->ok) {
+            auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
+            pcmShared = std::make_shared<std::vector<float>>(
+                rPtr->audio.interleavedStereo);  // 拷贝（rendered 保持独立；共享给金字塔）
+            wf->build(pcmShared, 2, rPtr->audio.sampleRate);
+            wfPtr = wf;
+        }
+        // 结果回 UI（queued；QML 响应 renderFinished）
+        QMetaObject::invokeMethod(
+            this,
+            [this, rPtr, outPath, version, wfPtr, chartCopy, sr, pcmShared] {
+                m_renderInFlight.store(false);
+                const auto& r = *rPtr;
+                // 丢弃旧快照；首次渲染期间有编辑时，继续生成最新版本而不是停在无 PCM。
+                if (version != m_renderVersion.load()) {
+                    if (m_pendingIncremental && m_chart) {
+                        m_pendingIncremental = false;
+                        renderAsync(sr);
+                    }
+                    return;
+                }
+                if (r.ok) {
+                    // ⚠️ 先取时长再 move（move 后 r.audio 为空，durationSeconds()=0——
+                    // 2026-09 曾把 holder->durationSec 放在 move 之后 → 状态栏恒 0 秒）
+                    const double dur = r.audio.durationSeconds();
+                    auto holder = std::make_shared<RenderedAudioHolder>();
+                    holder->pcm = pcmShared;  // 共享缓冲（金字塔同源；增量重混写这里）
+                    holder->frames = r.audio.frameCount();
+                    holder->sampleRate = r.audio.sampleRate;
+                    holder->durationSec = dur;
+                    holder->outPath = outPath;
+                    m_rendered = holder;
+                    // 金字塔自持 PCM（增量重建需要）；⚠️ 与 holder->pcm 共享同一缓冲
+                    m_waveform = wfPtr;
+                    m_error.clear();
+                    m_timingDirty = false;
+                    // 全量渲染成功 → 更新 note 快照（下次增量 diff 的基准）
+                    updateNoteSnapshot(chartCopy, *m_timing);
+                    emit renderFinished(true, outPath, dur);
+                } else {
+                    m_error = QString::fromStdString(r.message);
+                    emit renderFinished(false, outPath, 0.0);
+                }
+                // 渲染期间收到内容变化（m_pendingIncremental）→ 完成后补一次增量
+                if (m_pendingIncremental && m_rendered) {
+                    m_pendingIncremental = false;
+                    if (!m_timingDirty) renderAsync(m_rendered->sampleRate);
+                }
+            },
+            Qt::QueuedConnection);
+    });
     return true;
 }
 
@@ -518,7 +580,8 @@ QVariantMap ChartSession::waveformRange(qlonglong frameLo, qlonglong frameHi) co
 }
 
 QString ChartSession::laneChannel(int player, const QString& kindStr, int index) const {
-    if (!m_chart) return QString();
+    const auto* currentChart = chart();
+    if (!currentChart) return QString();
     beatbench::Lane lane;
     lane.player = static_cast<std::uint8_t>(player);
     lane.index = static_cast<std::uint8_t>(index);
@@ -533,34 +596,40 @@ QString ChartSession::laneChannel(int player, const QString& kindStr, int index)
     // 按**当前谱面模式**反向映射（2026-10 复核：legacy bms_channel_for 恒 7key 表，
     // PMS 键6/7 显示成 ch18/19、键8/9 为空）。显示的是规范化**写出通道**（保存时按
     // mode_id 约定落盘的通道号，与列头同源）。
-    const std::string mode = m_chart->mode_id.value_or("sp7k");
+    const std::string mode = currentChart->mode_id.value_or("sp7k");
     const std::string ch =
         beatbench::bms::bms_channel_for_mode(mode, lane, false, beatbench::NoteKind::Normal);
     return ch.empty() ? QString() : QString::fromStdString(ch);
 }
 
 int ChartSession::lnType() const {
-    if (!m_chart) return 1;
-    const auto it = m_chart->meta.find("LNTYPE");
-    if (it == m_chart->meta.end()) return 1;
+    const auto* currentChart = chart();
+    if (!currentChart) return 1;
+    const auto it = currentChart->meta.find("LNTYPE");
+    if (it == currentChart->meta.end()) return 1;
     if (it->second == "2") return 2;
     if (it->second == "0") return 0;
     return 1;
 }
 
+bool ChartSession::useLnObjPlacement() const {
+    const auto* currentChart = chart();
+    return currentChart && currentChart->meta.find("LNTYPE") == currentChart->meta.end() &&
+           lnobjSample() > 0;
+}
+
 int ChartSession::lnobjSample() const {
-    if (!m_chart) return -1;
-    const auto it = m_chart->meta.find("LNOBJ");
-    if (it == m_chart->meta.end() || it->second.empty()) return -1;
-    return static_cast<int>(m_chart->id_base == beatbench::IdBase::Base62
-                                ? beatbench::bms::c62_to_u32(it->second, 2)
-                                : beatbench::bms::c36_to_u32(it->second, 2));
+    const auto* currentChart = chart();
+    if (!currentChart) return -1;
+    const auto id = beatbench::lnobj_sample_id(*currentChart);
+    return id ? static_cast<int>(*id) : -1;
 }
 
 int ChartSession::decodeId(const QString& idText) const {
-    if (!m_chart || idText.isEmpty()) return -1;
+    const auto* currentChart = chart();
+    if (!currentChart || idText.isEmpty()) return -1;
     const std::string t = idText.toStdString();
-    return static_cast<int>(m_chart->id_base == beatbench::IdBase::Base62
+    return static_cast<int>(currentChart->id_base == beatbench::IdBase::Base62
                                 ? beatbench::bms::c62_to_u32(t, 2)
                                 : beatbench::bms::c36_to_u32(t, 2));
 }
@@ -577,12 +646,13 @@ void ChartSession::resetRenderState() {
     }
 }
 
-void ChartSession::attachActive(bool rebuildTiming) {
+void ChartSession::attachSession(bool rebuildTiming) {
     auto& reg = beatbench::edit::session_registry();
-    auto& s = reg.active();
-    m_sessionId = reg.active_id();
-    m_chart = s.has_chart() ? &s.chart() : nullptr;
-    m_path = QString::fromStdString(s.path());
+    m_sessionId = m_boundSessionId.isEmpty() ? reg.active_id() : m_boundSessionId.toStdString();
+    const auto* s = reg.by_id(m_sessionId);
+    m_chart = s && s->has_chart() ? &s->chart() : nullptr;
+    m_path = s ? QString::fromStdString(s->path()) : QString();
+    m_documentRevision = s ? s->revision() : 0;
     if (m_chart && rebuildTiming) {
         if (!m_timing) m_timing = std::make_unique<beatbench::TimingEngine>();
         m_timing->rebuild(*m_chart);
@@ -592,32 +662,51 @@ void ChartSession::attachActive(bool rebuildTiming) {
     m_timingHash = timingHash();
     m_samplesHash = samplesHash();
     m_initialized = true;
-    const bool dirty = s.has_chart() && s.is_dirty();
+    syncTextFormat();
+    const bool dirty = s && s->has_chart() && s->is_dirty();
     if (m_dirty != dirty) {
         m_dirty = dirty;
         emit dirtyChanged();
     }
 }
 
+void ChartSession::syncTextFormat() {
+    QVariantMap next;
+    const auto* session = beatbench::edit::session_registry().by_id(m_sessionId);
+    if (session && session->has_chart()) {
+        const auto& format = session->text_format();
+        next.insert(QStringLiteral("encoding"), QString::fromStdString(format.encoding));
+        next.insert(QStringLiteral("lineEnding"), QString::fromStdString(format.line_ending));
+        next.insert(QStringLiteral("utf8Bom"), format.utf8_bom);
+        next.insert(QStringLiteral("encodingAmbiguous"), format.encoding_ambiguous);
+    }
+    if (m_textFormat == next) return;
+    m_textFormat = std::move(next);
+    emit textFormatChanged();
+}
+
 void ChartSession::syncDirty() {
-    auto& s = beatbench::edit::session_registry().active();
-    const bool dirty = s.has_chart() && s.is_dirty();
+    auto& reg = beatbench::edit::session_registry();
+    const auto* s =
+        reg.by_id(m_boundSessionId.isEmpty() ? reg.active_id() : m_boundSessionId.toStdString());
+    const bool dirty = s && s->has_chart() && s->is_dirty();
     if (m_dirty == dirty) return;
     m_dirty = dirty;
     emit dirtyChanged();
 }
 
 int ChartSession::measureCount() const {
-    if (!m_chart) return 0;
+    const auto* currentChart = chart();
+    if (!currentChart) return 0;
     std::uint32_t maxMeasure = 0;
     const auto touch = [&](std::uint32_t m) {
         if (m > maxMeasure) maxMeasure = m;
     };
-    for (const auto& e : m_chart->notes) touch(e.measure);
-    for (const auto& e : m_chart->bpm_events) touch(e.measure);
-    for (const auto& e : m_chart->stop_events) touch(e.measure);
-    for (const auto& e : m_chart->measure_events) touch(e.measure);
-    for (const auto& e : m_chart->bga_events) touch(e.measure);
+    for (const auto& e : currentChart->notes) touch(e.measure);
+    for (const auto& e : currentChart->bpm_events) touch(e.measure);
+    for (const auto& e : currentChart->stop_events) touch(e.measure);
+    for (const auto& e : currentChart->measure_events) touch(e.measure);
+    for (const auto& e : currentChart->bga_events) touch(e.measure);
     // ⚠️ 空谱保底 1 小节（2026-09：空文件载入后编辑区至少 1 小节 + 模式默认列
     // → 可立即放置编辑；此前返回 0 → paint 显示「打开谱面开始编辑」占位、无网格）。
     return static_cast<int>(maxMeasure + 1);
@@ -683,23 +772,33 @@ std::uint64_t ChartSession::timingHash() const {
     } else {
         h = fnv1a(h, 0xB0);
     }
+    // TimingEngine indexes every measure through the furthest event, including
+    // notes/BGA. Extending or shrinking that extent must rebuild the index even
+    // when BPM/STOP/measure definitions themselves did not change.
+    std::uint32_t maxMeasure = 0;
+    const auto touch = [&](std::uint32_t measure) { maxMeasure = std::max(maxMeasure, measure); };
+    for (const auto& e : m_chart->notes) touch(e.measure);
+    for (const auto& e : m_chart->bga_events) touch(e.measure);
     for (const auto& e : m_chart->bpm_events) {
+        touch(e.measure);
         h = fnv1a(h, e.measure);
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.num));
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.den));
         h = fnv1a(h, f64(e.value.value));
     }
     for (const auto& e : m_chart->stop_events) {
+        touch(e.measure);
         h = fnv1a(h, e.measure);
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.num));
         h = fnv1a(h, static_cast<std::uint64_t>(e.pos.den));
         h = fnv1a(h, static_cast<std::uint64_t>(e.value.count));
     }
     for (const auto& e : m_chart->measure_events) {
+        touch(e.measure);
         h = fnv1a(h, e.measure);
         h = fnv1a(h, f64(e.value.beats));
     }
-    return h;
+    return fnv1a(h, maxMeasure);
 }
 
 }  // namespace beatbench::app

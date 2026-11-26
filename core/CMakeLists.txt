@@ -18,12 +18,14 @@ add_library(beatbench_core STATIC
     src/command/builtins.cpp
     src/command/midi_commands.cpp
     src/command/slice_commands.cpp
+    src/command/project_commands.cpp
     src/codec/codec_registry.cpp
     src/codec/bms_adapter.cpp
     src/codec/bms_channel_maps.cpp
     src/codec/chart_modes.cpp
     src/edit/edit_commands.cpp
     src/edit/session_registry.cpp
+    src/project/scan.cpp
 )
 target_include_directories(beatbench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(beatbench_core PUBLIC cxx_std_20)

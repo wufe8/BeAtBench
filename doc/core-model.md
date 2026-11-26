@@ -1,7 +1,7 @@
 # BeAtBench — 核心模型与调用架构
 
 > **现行权威**：格式无关模型、命令即接口的调用面、切音工作台设计、note 移动机制。
-> 关联：`doc/development.md`（现状手册）、`doc/command-protocol.md`（命令 JSON 协议规格）、`doc/skin-system.md`（GUI/皮肤）。
+> 关联：`doc/development.md`（手册）、`doc/command-protocol.md`（命令 JSON 协议规格）、`doc/skin-system.md`（GUI/皮肤）。
 
 ## 一、核心模型解耦（格式无关、模式无关）
 
@@ -40,9 +40,9 @@ lane 抽象；未来加 codec 不触碰模型。
 
 - **GUI = 交互式命令执行器**：执行命令 → 入 undo 栈 → 视图刷新（经 `CommandDispatcher.dispatch()`）；
 - **CLI = 批处理命令执行器**：同一套命令 headless 运行（`beatbench-cli info/check/convert/render`）；
-- 未来 **Lua 脚本 = 第三种执行器**（Phase D，P4）。
+- 未来 **Lua 脚本 = 第三种执行器**。
 
-**部署形态（P1，已落地）**：core 静态库 + GUI 进程内链接 + 独立 `beatbench-cli`（无 Qt；查询/编辑使用 core，离线 `render` 还链接 audio，构建仍需 PortAudio）。
+**部署形态**：core 静态库 + GUI 进程内链接 + 独立 `beatbench-cli`（无 Qt；查询/编辑使用 core，离线 `render` 还链接 audio，构建仍需 PortAudio）。
 收益：CI/黄金测试直接跑 CLI；外部工具调用 CLI 无 GUI 依赖；扩展 = 加命令，不动 UI。
 （P2 单二进制 headless 不推荐；P3 常驻守护 + IPC 仅在出现“外部工具驱动运行中的 GUI”真实需求时再设计
 ——命令可序列化已天然预留接口。）
@@ -51,7 +51,7 @@ lane 抽象；未来加 codec 不触碰模型。
 编辑操作 = Command（apply/invert/merge），BPM/STOP 编辑与 note 编辑共用命令栈；同一命令既是 undo 单元，
 也是 CLI 与脚本的调用单元。
 
-## 三、切音工作台设计（M6）
+## 三、切音工作台设计
 
 **定位：工作区/模式切换。** 与编辑模式平级的顶层工作区（`SlicePage`），共享同一文档与音频引擎；
 进入切音 = 切换视图/工具条，不是另起工具。
@@ -63,14 +63,14 @@ offset 对齐（MIDI ↔ audio）
    ↓ 切片位置来源（可切换）
    ├── MIDI notes（推荐：边界 = note on/off，同时给出切分与铺放位置）
    ├── 网格（BPM/拍/细分，确定性、可单测）
-   └── 瞬态检测（M6.5 已实现：complex-domain 谱通量，audio 源；无 MIDI 时的自动切分）
+   └── 瞬态检测（complex-domain 谱通量，audio 源；无 MIDI 时的自动切分）
    ↓
 分片落盘（边界 fade 防爆音）+ #WAV id 分配（冲突检测 / 占用）
    ↓
 ch01 一键铺放（note.put + sub_line）  或  只入库（独立采样库）
 ```
 
-**已拍板决策**：① 网格切分先行、MIDI 驱动为推荐音乐切分源，瞬态检测 M6.5 兑现（audio 源：
+**已拍板决策**：① 网格切分先行、MIDI 驱动为推荐音乐切分源，瞬态检测（audio 源：
 onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替换/追加双模式，异步执行）；② 与谱面关系两者兼顾
 （独立采样库 + 可选对齐铺放）；③ 产物 = 真分片 .wav（BMS 原生可播放）；④ MIDI 一把驱动“切哪 + 放哪”，
 省掉 onset 检测（参考 woslicer 的边界 fade 防 pop）。
@@ -79,13 +79,12 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
 `sub_line`；id = `idTextOf`/`sampleValueOf`；时间↔拍位 = timing 引擎。
 **新增组件**：MIDI 解析器（core 模块 + `midi.parse` 命令，headless 可测）。
 
-**实现状态**：`doc/development.md` 六、。
-
-## 四、note 移动机制与数据模型抽象（M3 权威说明）
+## 四、note 移动机制与数据模型抽象（权威说明）
 
 > note 移动逻辑的单一权威说明；厘清“轨道类别”与“note 类型”的关系，
 > 便于将来导入其它格式时判断扩展点。实现细则（函数行为、参数表）以
-> `app/bridge/ChartViewItem.hpp` 头注释与实现处注释为准。
+> [视口](<../app/bridge/ChartViewItem.hpp>)、[移动计划](<../app/bridge/NoteMovePlan.hpp>)与
+> [窗格拖动控制器](<../app/bridge/PaneDragController.hpp>)的头注释与实现处注释为准。
 
 ### 1. 两个 kind 必须区分
 
@@ -94,14 +93,21 @@ onset 检测检出点落手动点集合，敏感度/最小间隔两参数 + 替�
   （当前模式 1..9，类型本身可到 255）；Scratch/Pedal/Bgm 的 index 恒 0。
 - **`Note.kind`（`NoteKind`）= note 的属性类型**：`enum class NoteKind { Normal, Landmine, /* 预留 Hidden */ }`。
 
-即：**note 的角色（判定键/皿/背景）由 `lane` 决定；附加属性（地雷/LN/Hidden）由 `Note.kind`/
-`ln_channel` 决定；note 的身份是 `sample`（WAV id）**。BMS 里 note 本身没有“类型”——身份是 id，
-角色来自通道，属性来自通道段（D1-E9 地雷、51-69 LN、`#LNOBJ`）。`BmsChannelRule` 把通道解读为
+即：**note 的角色（判定键/皿/背景）由 `lane` 决定；`Note.kind` 表示地雷等属性，
+`ln_channel` 记录是否来自 LN 通道；`sample` 是采样引用（WAV id），不是 LN 配对键或音符唯一身份**。
+LNOBJ 端点来自普通音通道，不能仅凭 `ln_channel` 判定全部长音。BMS 通道段与头部定义共同提供语义
+（D1-E9 地雷、51-69 LN、`#LNOBJ`）。`BmsChannelRule` 把通道解读为
 `{ semantics, lane, note_kind, ln_channel, bga_layer }`。
 
 ### 2. Note / Lane / Column 结构要点
 
 - `Note = { lane, sample, kind(NoteKind), ln_pair?, ln_channel, sub_line }`；`lane = {player, kind, index}`。
+- **LN 源身份与连接分离**：`ln_channel` 保留源通道身份，未配对也不能清除；`ln_pair` 是可重建的派生连接，
+  不是源数据。LN 通道按同 lane 时间相邻端点第 1–2、3–4……配对，不比较 sample ID；LNOBJ 在普通音
+  通道独立配对。前端连接两套记法时忽略 LNTYPE，不能跨记法抢端点。新增 LN 仅在“有效 LNOBJ 已定义且
+  LNTYPE 未声明”时用 LNOBJ，否则用 LN 通道。真正 LNTYPE2（废弃 MGQ）未实现且不计划实现。
+- **不自动修谱**：重建 `ln_pair` 不补删/移动音符，不改变源通道或 sample；孤立端点只报告 lint。
+  格式定义、放置条件与例子见 [BMS 笔记“长音”](<bms-format-notes.md#长音>)。
 - ⚠️ `sub_line` 对非 BGM note 恒为 0（解析器非 ch01 一律写 0）；判别“是否 BGM note”必须看
   `lane.kind === "bgm"`，**不能**看 `sub_line >= 0`。
 - `Column = { lane, label, subLine, bgmCol, bgaLayer, bpm, stop, ... }`，把通道渲染成一列。
@@ -154,7 +160,7 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
   （加枚举值 + 若干分派，受控扩展点）。保持 `Lane{player,kind,index}` 不变；新**属性**走 `NoteKind`
   或新字段（勿往 Lane 塞通道号）；仅新**轨道角色**才扩 `LaneKind`。
 
-### 7. `bgm_line` → `sub_line` 泛化（已实施）
+### 7. `bgm_line` → `sub_line` 泛化
 
 > 把 BGM 专属的 `bgm_line` 泛化成通用的 `sub_line`（子通道/子行），让“任意基础通道同小节多行”被统一建模。
 

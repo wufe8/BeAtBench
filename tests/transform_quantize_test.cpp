@@ -223,6 +223,98 @@ TEST(TransformQuantize, ProtocolQuantize) {
     EXPECT_TRUE(found);
 }
 
+TEST(TransformQuantize, ProtocolQuantizePreservesBgmSubLineAndSourceKind) {
+    Chart chart;
+    for (const auto line : {0u, 4u}) {
+        Event<Note> note{1, Rational(1, 3), {}};
+        note.value.lane = {0, LaneKind::Bgm, 0};
+        note.value.sample.id = 1;
+        note.value.sub_line = line;
+        chart.notes.push_back(note);
+        if (line == 4) {
+            note.value.kind = NoteKind::Landmine;
+            chart.notes.push_back(note);
+        }
+    }
+    auto& session = global_editor_session();
+    session.load(std::move(chart));
+    const auto request = Json::parse(
+        R"({"command":"note.quantize","args":{"selection":[{"measure":1,"pos":{"num":1,"den":3},"lane":{"player":0,"kind":"bgm","index":0},"sample":1,"sub_line":4,"ln_channel":false,"note_kind":"normal"}],"snap":{"num":1,"den":16}}})");
+    const auto response = global_registry().dispatch(request);
+    ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
+    EXPECT_EQ(session.undo_depth(), 1u);
+    const auto check = [&](bool quantized) {
+        ASSERT_EQ(session.chart().notes.size(), 3u);
+        for (const auto& note : session.chart().notes) {
+            const bool selected = note.value.sub_line == 4 && note.value.kind == NoteKind::Normal;
+            EXPECT_EQ(note.pos, quantized && selected ? Rational(5, 16) : Rational(1, 3));
+            EXPECT_EQ(note.value.sample.id, 1u);
+            EXPECT_FALSE(note.value.ln_channel);
+        }
+    };
+    check(true);
+    ASSERT_TRUE(session.undo());
+    check(false);
+    ASSERT_TRUE(session.redo());
+    check(true);
+}
+
+TEST(TransformQuantize, MeasureEndQuantizeWritesBackupAndKeepsBgmSubLine) {
+    const std::string original =
+        "#BPM 120\n#00101:0000\n"
+        "#00101:00000000000000000000000000000002\n"
+        "#00111:00000000000000000000000000000100\n";
+    auto& registry = session_registry();
+    constexpr auto id = "measure-end-quantize-test";
+    ASSERT_TRUE(registry.create(id, false));
+    auto* entry = registry.by_id(id);
+    const auto cleanup = [&](EditorSession*) { registry.close(id); };
+    const std::unique_ptr<EditorSession, decltype(cleanup)> owned(entry, cleanup);
+    auto& session = *entry;
+    std::string backup;
+    session.load(bms::read_bms(original).chart, "quantize-test.bms");
+    ASSERT_EQ(session.chart().notes.size(), 2u);
+    const auto before = norm_notes(session.chart().notes);
+    session.set_persist_hook([&backup](const Chart& c, const std::string& path, std::string*) {
+        EXPECT_EQ(path, "quantize-test.bms.bak");
+        backup = bms::write_bms(c);
+        return true;
+    });
+    session.set_backup_enabled(true);
+    const auto request = Json::parse(R"({"command":"note.quantize","args":{
+        "session_id":"measure-end-quantize-test",
+        "selection":[
+            {"measure":1,"pos":[14,16],"lane":{"player":0,"kind":"key","index":1},"sample":1},
+            {"measure":1,"pos":[15,16],"lane":{"player":0,"kind":"bgm","index":0},"sample":2,"sub_line":1}
+        ],"snap":[1,4]}})");
+    const auto response = global_registry().dispatch(request);
+    ASSERT_TRUE(response.at("ok").as_bool()) << response.dump();
+    const auto& result = response.at("result");
+    ASSERT_TRUE(result.at("ok").as_bool());
+    ASSERT_EQ(result.at("selection").size(), 2u);
+    for (const auto& ref : result.at("selection").as_array()) {
+        EXPECT_EQ(ref.at("measure").as_i64(), 1);
+        EXPECT_EQ(ref.at("pos").at("num").as_i64(), 3);
+        EXPECT_EQ(ref.at("pos").at("den").as_i64(), 4);
+    }
+    EXPECT_EQ(result.at("selection").as_array().back().at("sub_line").as_i64(), 1);
+    EXPECT_EQ(session.undo_depth(), 1u);
+    const auto check_backup = [&] {
+        const auto chart = bms::read_bms(backup).chart;
+        ASSERT_EQ(chart.notes.size(), 2u);
+        for (const auto& note : chart.notes) {
+            EXPECT_EQ(note.measure, 1u);
+            EXPECT_EQ(note.pos, Rational(3, 4));
+            EXPECT_EQ(note.value.sub_line, note.value.lane.kind == LaneKind::Bgm ? 1u : 0u);
+        }
+    };
+    check_backup();
+    ASSERT_TRUE(session.undo());
+    EXPECT_EQ(norm_notes(bms::read_bms(backup).chart.notes), before);
+    ASSERT_TRUE(session.redo());
+    check_backup();
+}
+
 TEST(TransformQuantize, ProtocolTransformMirror) {
     using beatbench::cmd::global_registry;
     auto& session = beatbench::edit::global_editor_session();
@@ -342,6 +434,8 @@ Json transform_request(const Chart& chart, const std::vector<int>& order, bool m
         item.set("lane", std::move(lane));
         item.set("sample", static_cast<std::int64_t>(e.value.sample.id));
         item.set("sub_line", static_cast<std::int64_t>(e.value.sub_line));
+        item.set("ln_channel", e.value.ln_channel);
+        item.set("note_kind", e.value.kind == NoteKind::Landmine ? "mine" : "normal");
         sel.push_back(std::move(item));
     }
     Json args = Json::object();
@@ -355,8 +449,10 @@ Json transform_request(const Chart& chart, const std::vector<int>& order, bool m
 }
 
 std::unique_ptr<TransformNoteCommand> mirror_note(const Event<Note>& e) {
-    return std::make_unique<TransformNoteCommand>(e.measure, e.pos, e.value.lane, e.value.sample.id,
-                                                  true, 0, e.value.sub_line);
+    auto command = std::make_unique<TransformNoteCommand>(
+        e.measure, e.pos, e.value.lane, e.value.sample.id, true, 0, e.value.sub_line);
+    command->set_source_identity(e.value.ln_channel, e.value.kind);
+    return command;
 }
 
 class FailingTransformBatchCommand : public EditCommand {
@@ -484,7 +580,7 @@ TEST(TransformQuantize, MixedNestedCompositeRebindsAfterInsertion) {
     expect_pairs(session.chart(), 1);
 }
 
-TEST(TransformQuantize, TransformUndoRebindsAfterLaterMoveUndoReordersNotes) {
+TEST(TransformQuantize, TransformUndoAfterLaterMoveUndoPreservesSourceOrder) {
     Chart chart = collision_chart(false);
     std::stable_sort(chart.notes.begin(), chart.notes.end(), [](const auto& a, const auto& b) {
         if (a.pos != b.pos) return a.pos < b.pos;
@@ -500,8 +596,8 @@ TEST(TransformQuantize, TransformUndoRebindsAfterLaterMoveUndoReordersNotes) {
         0, Rational(1, 4), Lane{0, LaneKind::Key, 1}, 1, 1, Rational(0, 1))));
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(full_notes(session.chart()), transformed);
-    // Move 撤销在同拍段首重插，此时原 Transform 的索引已过期。
-    EXPECT_FALSE(session.chart().notes[2].value.ln_channel);
+    // Move undo now restores original same-position source ordering exactly.
+    EXPECT_TRUE(session.chart().notes[2].value.ln_channel);
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(full_notes(session.chart()), full_notes(chart));
     expect_pairs(session.chart(), 1);

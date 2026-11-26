@@ -184,7 +184,7 @@ int ThemeManager::applyTheme(const QString& path) {
 }
 
 void ThemeManager::resetDefault() {
-    // 恢复内置默认皮肤骨架（doc/skin-system.md 三、4.；= doc/beatbench-ui-preview.html :root 常量）。
+    // 恢复内置默认皮肤骨架（doc/skin-system.md 三、4.；常量见成员初始化）。
     // 全部 token 逐项重置回默认值（与头文件成员默认值一致）。
 #define BB_THEME_RESET_COLOR(name, def) set_##name(QColor(QStringLiteral(def)));
     BB_THEME_RESET_COLOR(bg, "#0b0d10")

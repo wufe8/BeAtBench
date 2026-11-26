@@ -1,6 +1,6 @@
-# BeAtBench 开发手册（现状 + 开工引导）
+# BeAtBench 开发手册（构建、约定与边界）
 
-> **简版**：项目现状、构建命令、约定要点——读完即可开工。
+> **简版**：构建命令、约定要点、行为边界——读完即可开工。
 > 文档地图（按任务查该读哪份）见根 [AGENTS.md](../AGENTS.md) §6。
 > 模块硬规则见各目录 `AGENTS.md`（core / audio / cli / app）。
 
@@ -12,11 +12,12 @@ BMS 谱面编辑器（替代 BMSE/iBMSC）。C++20 + Qt 6（GUI 层 Qt Quick/QML
 
 - 平台：Windows 优先；架构保持跨平台（不引入 Win 专有 API 进 core）。
 - 格式：v1 只做 .bms 文本（零第三方依赖手写解析）；bmson 仅架构预留（codec 接口先立）。
-- 现行范围（M1–M6 已完成）：谱面信息 + 文件绑定 + note 摆放（含 LN/地雷/变速/undo）+ 随时播放 + 切音工作台。**不含**完整试玩（判定/计分；可选/外置）。
+- 当前范围：谱面信息 + 文件绑定 + note 摆放（含 LN/地雷/变速/undo）+ 随时播放 + 切音工作台。**不含**完整试玩（判定/计分；可选/外置）。
 - 核心模型**格式无关**：无通道号、无 36 进制 ID、无 1296 上限——全是 bms codec 层的映射（doc/core-model.md 一、）。
-- 调用架构：**命令对象 = 唯一操作面**（`core/include/beatbench/core/command/`，命名空间 `beatbench::cmd`），GUI/CLI/未来 Lua 三种执行器共用（doc/core-model.md 二、）；不存在复数 `commands/` 目录（M0 遗留已删）。
+- 调用架构：**命令对象 = 唯一操作面**（`core/include/beatbench/core/command/`，命名空间 `beatbench::cmd`），GUI/CLI/未来 Lua 三种执行器共用（doc/core-model.md 二、）；不存在复数 `commands/` 目录。
 - GUI 栈：**Qt Quick/QML + 分层皮肤系统**（doc/skin-system.md）；core 零 Qt 依赖不变。
-- 采样：wav/ogg，44100/48000Hz 优先（M4 起有解码）。
+- 采样：wav/ogg，44100/48000Hz 优先。
+- LN：`ln_channel` 保留源身份，`ln_pair` 为派生连接；LN 通道同 lane 时间相邻端点两两配对，与采样 ID 无关；LNOBJ 独立连接，前端忽略 LNTYPE。完整语义见 [BMS 笔记](<bms-format-notes.md#长音>)。
 
 ## 三、仓库布局
 
@@ -28,7 +29,7 @@ core 子目录（bms / timing / json / command / edit）均在 `core/include/bea
 
 工具链要求：**C++20**——MSVC ≥ 19.29（VS 2022+）或 GCC ≥ 10 / Clang ≥ 12。
 ⚠️ Git for Windows 自带的 g++ 6.3 不支持 C++20，不可用。
-GUI 需要 **Qt 6.4+**（Linux 系统 Qt 下限；版本矩阵单一来源在 `scripts/check-version.sh` 头部默认值）。
+从源码构建 GUI 的 Qt API 下限为 **6.4**；预编译包的运行基线见 [打包说明](packaging.md#二qt-依赖策略)。
 
 ```bash
 # CLI + 测试（Linux/macOS 单配置；测试需联网拉 GoogleTest）
@@ -67,12 +68,12 @@ cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
   -DBEATBENCH_BUILD_TESTS=OFF
 cmake --build build-gui --target beatbench
-# 产物 build-gui/app/beatbench.exe；"$QT_PREFIX/bin/windeployqt.exe" --qmldir app/qml 部署 DLL（QML 必需）
+# 部署 GUI 所需的 Qt DLL 与 QML 依赖
+"$QT_PREFIX/bin/windeployqt.exe" --qmldir app/qml build-gui/app/beatbench.exe
 ```
 
-- **测试耗时分档**：完整回归（含真实谱面时序/往返测试）数分钟级；日常快速回归
-  `BB_SKIP_REAL=1`（秒级，真实谱面集缺失自动跳过）；`BB_ONLY=<子串>` 只跑匹配文件名的样本（现象定位）。
-  测试分布见 `tests/` 与 CI；提交前跑完整回归。
+- **测试分档**：完整回归含真实谱面时序与往返测试；`BB_SKIP_REAL=1` 跳过这类测试，
+  缺少真实谱面集时也自动跳过。`BB_ONLY=<子串>` 可筛选样本；门禁按 [开发工作流](dev-workflow.md) 执行。
 - 改动涉及音频/渲染时另跑：
   `cmake --build build --config Debug --target chart_renderer_test sample_cache_test audio_test`。
 - GUI/桥层单测需带 Qt 的构建（`build-uitest`）：`ui_action_registry_test`、`theme_manager_test`、
@@ -85,12 +86,10 @@ cmake --build build-gui --target beatbench
 - CI 与发布流水线（三平台回归、deb/rpm/arch、Windows 包）见 `doc/dev-workflow.md`、`doc/packaging.md`；
   本地门禁 `scripts/check.sh`（pre-push 自动跑快速档）。
 
-**当前边界**（未验证/未覆盖路径的完整台账在 `doc/pending/`）：
+Windows 可选 ASIO 的构建/运行已接入，默认 OFF；ON 不等于硬件验收完成，见 [ASIO 音频输出](<12-ASIO音频输出.md>)。
 
-- macOS `.app` 不内嵌 `BeatBench/` QML 模块目录，双击起不来（需 `QML2_IMPORT_PATH` 指向构建树）。
-- PortAudio 实时输出已在 Manjaro 实机确认播放正常，但只走 **ALSA** host API；
-  Windows/macOS 声卡与 PulseAudio/PipeWire 原生路径未人工验证（CI 无声卡）。
-- GUI 交互中**拖拽**仍只有无头冒烟；悬停高亮可用 X11 指针注入自动化验证（doc/packaging.md 二、）。
+**当前边界**：macOS 构建产物 `.app` 不内嵌 `BeatBench/` QML 模块目录；不要直接双击，运行时需 `QML2_IMPORT_PATH` 指向构建树。
+无头冒烟、组件交互自动化与原生桌面/声卡验收的区别见 [打包说明](packaging.md#六边界与非目标)。
 
 ## 五、代码约定
 
@@ -105,102 +104,41 @@ cmake --build build-gui --target beatbench
 
 ### 代码格式化（clang-format）
 
-- 配置在根目录 `.clang-format`：基于 Google 风格定制（4 空格缩进、列宽 100、左对齐指针），
-  其余沿用 Google 默认（attached 大括号、单行短 if/loop、include 分块排序）。选型时对全仓
-  六种内置 preset 做过实测比对，纯 preset 无一能直接用，详见该文件头注释。
+- 格式规则以根目录 `.clang-format` 为准。
 - `third_party/` 与生成文件 `core/src/bms/sjis_table.hpp` 在 `.clang-format-ignore` 中排除，
-  生成表由 `tools/gen_sjis_table.py` 重新生成（数据源 `tools/cp932_map.tsv`），不参与格式化。
+  生成表用 `python tools/gen_sjis_table.py` 重新生成（Python 3.9+），不参与格式化。
+  常规构建使用已提交的表，不依赖 Python；装有 Python 的测试构建可通过 `ctest -R sjis_table_`
+  校验与原表的映射一致性以及生成文件是否过期。
 - 检查入口 `scripts/check-format.sh`（check.sh 第 0 步与 CI format job 同一入口）；版本钉
   23.1.3（本机版本不符只警告不拦截，以 CI 为准）。修复命令：
   `git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format -i`。
 - 全量重排提交已登记 `.git-blame-ignore-revs`：GitHub blame 自动生效；本地需一次性
   `git config blame.ignoreRevsFile .git-blame-ignore-revs`（换机器 clone 后重跑）。
 - ⚠️ **不要用“锚定排版”的正则从测试抓 C++ 源码**：抓表达式先把目标文本压平空白
-  （`replace(/\s+/g, ' ')`）再匹配语义标记，否则格式化一拆行测试就碎（qml_session_regression
-  踩过）。
+  （`replace(/\s+/g, ' ')`）再匹配语义标记，避免格式化换行导致测试失效。
 
-## 六、当前状态与下一步
+## 六、行为边界与已知限制
 
-> 基线：**M1–M6 全部收尾**（0.4.x）：BMS codec + 时序 + CLI → 页面式 GUI 外壳 → 编辑命令
-> （undo/选择集/批量/多文档）→ 音频（试听/设置页/解码缓存/离线渲染/波形/秒标尺）→
-> 编辑期间随时播放（播放头红线/A-B 循环/scrub）→ 切音工作台（导入/切分/导出/键盘/瞬态检测）。
-> 各里程碑范围见 七、 里程碑表；逐轮实现记录归 git 历史与 Release 说明。
+方向与顺序见 [路线图](roadmap.md)；本文只记录当前行为与边界。
 
 **红线语义**（现行规则）：红线 = 当前播放位置——非播放时跟视口光标（滚动即动）、播放中跟播放头
 （推进）；“跟随”只控播放期间视口是否与红线同步滚动；暂停不回 90%（停在播放位置）；
 scrub 拖动静音定位（拖动只滚红线、松手落音频）。
 
-**切音工作台**（M6，设计权威 doc/core-model.md 三、）：音频/MIDI/瞬态三类切片源；网格/MIDI/手动切分点与
+**切音工作台**（设计权威 doc/core-model.md 三、）：音频/MIDI/瞬态三类切片源；网格/MIDI/手动切分点与
 “到下一起点”开关；导出分片+fade+`#WAV` id 分配，可复制 raw 或“同时铺入编辑区”；
 woslicer 系键盘走 `UiActionRegistry`；切音页有独立撤销栈（不碰谱面）。
 
-**M6 遗留待做**：`#WAV` 占用视图 UI、CSV 时标表、变速谱 BPM 自动（MIDI tempo/timeSig 已解析未接入）
-——排期见 七、 未来功能状态表。变速谱网格漂移已挂账（`doc/pending/`）。
+### note 移动机制与数据模型抽象
 
-### 已知限制（一句话）
+设计权威在 **doc/core-model.md 四、**（Lane/Note 两个 kind、目标列识别、moveSelection 分派与优先级、连续轨道统一变换与钳制、ghost 预览镜像、`sub_line` 泛化）；实现细则以 `app/bridge/ChartViewItem.hpp` 头注释为准。
 
-- LN 头尾采样不同与孤立端点的编辑/保存存在降为普通音的风险，触发条件与使用建议见根 [README“已知问题”](<../README.md#已知问题>)；本分支未修复该限制。
+### 已知限制
 
+- LN 孤立端点仅 lint，不自动补删/移动或改源通道、采样；头尾采样不同不再是失配条件。真正 LNTYPE2（MGQ）未实现且不计划实现，详见 [BMS 笔记](<bms-format-notes.md#长音>)。
 - **#RANDOM/#IF 块内容编辑**：块内数据行/头部字段的往返不正确（编辑模型 = 非块内容 + raw 兜底）；
-  播放/时序链路走 `expand_variants`，不受影响。修复需要 parser 控制块感知（中等偏上），按需立项（M9）。
+  播放/时序链路走 `expand_variants`，不受影响。修复需要 parser 控制块感知。
 - **.pms 另存为 .bms** 会按 sp/dp 重解释（跨扩展名另存属已知边界，产品不承诺）。
 - **切音页撤销**：独立撤销栈（切片表/启用开关/手动点）；文本框内仍撤文本；
   切音工作区未导出切片**不**并入谱面脏标记。
-- **变速谱切片网格**按单一 BPM 均分、变速处漂移——已挂账 `doc/pending/`（M8 排期）。
-- **AA 起始 id 崩溃未复现**（埋点已就位：`beatbench-crash.txt` + 导出步骤日志）——已挂账 `doc/pending/`。
-
-### note 移动机制与数据模型抽象
-
-设计权威在 **doc/core-model.md 四、**（Lane/Note 两个 kind、目标列识别、moveSelection 分派与优先级、
-连续轨道统一变换与钳制、ghost 预览镜像、`sub_line` 泛化）；实现细则以
-`app/bridge/ChartViewItem.hpp` 头注释与实现处注释为准。
-
-## 七、里程碑速览
-
-| 里程碑 | 内容 | 状态 |
-|---|---|---|
-| M1 | BMS codec + timing + CLI check/convert + 黄金测试 | ✅ |
-| M2 | 元信息表单 + 文件绑定管理 + 时间轴 + 页面式外壳 | ✅ |
-| M3 | 编辑命令/undo、时间轴事件、变换/量化、自动保存、LN/地雷、BGA、剪贴板/批量、多文档会话、前端接线 | ✅ |
-| M4 | 试听、设置页、采样解码缓存、离线渲染器、波形显示、秒标尺、增量重渲染 | ✅ |
-| M5 | 编辑期间随时播放（播放头红线 + 视口跟随 + A-B 循环 + scrub 静音定位）+ 02 通道小节长编辑 + 变拍渲染 + File→新建 | ✅ |
-| M6 | 切音工作台（导入/切分/导出/交互/键盘）+ 瞬态检测（audio 源 onset） | ✅ |
-| M7 | 项目化工作流（文件夹即项目、多谱面会话/对比/批量、打包校验、`#WAV` 占用查询）——设计见 doc/project-workflow.md | ⏳ |
-| M8 | 边界与协议（SliceWorkspace 拆分、CSV exporter、MIDI tempo、下沉 SessionController、codec capabilities；跨平台 CI 与发布产物已先行落地，macOS 发布产物未做） | 🚧 |
-| M9 | 格式与项目模型（bmson codec 原型、持久化格式、`#RANDOM/#IF` 结构化 AST） | — |
-| M10+ | 生态与体验（i18n、可选试玩判定、性能基准、外部预览适配器、Lua/脚本接口、L2 布局皮肤） | — |
-
-### 未来功能状态
-
-> 状态口径：🚧 进行中（已有可用部分）/ ⏳ 计划中（方向已定，未动工）/ — 仅记录（未排期）。
-> “计划中”不构成版本承诺；本表只登记用户可见或影响接口的能力。
-
-| 功能 | 里程碑 | 状态 | 说明 / 前置 |
-|---|---|---|---|
-| 文件夹导入 / 项目面板（一首歌多谱面） | M7 | ⏳ | 文件夹为导入单位；只索引/分析，不合并文档（见 doc/project-workflow.md） |
-| 多谱面会话 | M7 | ⏳ | 复用 SessionRegistry；共享采样解码缓存 |
-| 谱面对比（统计/结构/叠加） | M7 | ⏳ | 只读分析；共享播放头 |
-| 多谱面批量操作 | M7 | ⏳ | dry-run 预览 + 每谱面独立 undo 步 |
-| 项目打包 / 引用校验 | M7 | ⏳ | 独立 ArchiveExporter；`scripts/package-release.sh` 是应用发布打包，与此无关 |
-| `#WAV` 占用查询 | M7 | ⏳ | core 查询命令 + 项目面板；**不进 SliceWorkspace** |
-| CSV 时标表（切片导出） | M8 | ⏳ | 独立 exporter；先定时间基准/变拍/STOP/行号 |
-| 变速谱 BPM 自动 | M8 | ⏳ | MIDI tempo/拍号已解析；依赖切片边界整理 |
-| SliceWorkspace / bridge 拆分 | M8 | ⏳ | 最小拆分：import/export/preview controller + boundary model |
-| codec capabilities / lossiness 声明 | M8 | ⏳ | 现仅 `version.api` + `capabilities` 的 formats/modes |
-| 命令协议版本化与 capabilities 扩展 | M8 | 🚧 | `version.api = 1` 已落地；插件能力协商未做 |
-| 跨平台 CI / 验证 | M8 | 🚧 | 三平台 CI 与 Linux/Windows 发布产物已落地（doc/packaging.md）；音频后端与交互覆盖面见 `doc/pending/` |
-| bmson codec 原型 | M9 | ⏳ | core 模型已格式无关（doc/core-model.md 一、） |
-| 项目/工作区持久化格式 | M9 | ⏳ | 多文档会话目前为内存态 |
-| `#RANDOM/#IF` 结构化 AST 与可靠往返 | M9 | ⏳ | 现为 raw 兜底，见 六、 已知限制 |
-| 外部预览适配器（beatoraja/raindrop） | M10+ | ⏳ | 独立 adapter |
-| i18n 全文 | M10+ | ⏳ | 现有中文界面 + Qt 内置翻译 |
-| 性能基准 / 音频实时线程 | M10+ | ⏳ | — |
-| Lua / 脚本接口 | M10+ | ⏳ | 命令注册表已为第三执行器预留（doc/core-model.md 二、） |
-| 可选试玩判定模块 | M10+ | ⏳ | M5 已建 PlaybackPlan 映射层 |
-| L2 布局皮肤（`layout.json`） | M10+ | ⏳ | 设计见 doc/skin-system.md 三、6. |
-
-## 八、生态观察清单（每里程碑扫一遍）
-
-- [BmsTWO](https://github.com/Roganis/BmsTWO)（Qt6/GPL-3.0，头号参照：试听/MIDI 导入/keysound 面板）
-- [imbms](https://github.com/dfroji/imbms)（C++/Linux 向）、Rhytica（lscyane）、[bemake](https://github.com/MikuroXina/bemake)（Tauri+TS）
-- [beatoraja](https://github.com/exch-bms2/beatoraja)（播放器事实标准，PortAudio）、[raindrop](https://github.com/zardoru/raindrop)（外部预览集成候选）
+- **变速谱切片网格**按单一 BPM 均分、变速处漂移——已挂账 `doc/pending/`。

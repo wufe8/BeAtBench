@@ -12,13 +12,17 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-find_package(Python3 QUIET COMPONENTS Interpreter)
+# Python 仅用于校验已提交的 CP932 表，不参与产品构建。
+find_package(Python3 3.9 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     add_test(NAME sjis_table_parity
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/gen_sjis_table.py --check)
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/sjis_table_parity_test.py")
+    add_test(NAME sjis_table_regeneration
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/gen_sjis_table.py" --check)
 endif()
 
-add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.cpp
+add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp ln_codec_test.cpp timing_test.cpp
+    ln_identity_test.cpp
     json_test.cpp command_test.cpp codec_registry_test.cpp chart_mode_test.cpp
     pms_variant_test.cpp pms_integrity_test.cpp
     edit_commands_test.cpp session_registry_test.cpp timing_commands_test.cpp
@@ -26,12 +30,16 @@ add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp timing_test.
     meta_lint_test.cpp ln_mine_put_test.cpp move_region_test.cpp
     convert_note_test.cpp sub_line_move_test.cpp ln_move_region_test.cpp
     toggle_ln_test.cpp sample_rename_test.cpp bga_test.cpp midi_parse_test.cpp
-    slice_test.cpp slice_export_test.cpp atomic_write_test.cpp)
+    slice_test.cpp slice_export_test.cpp atomic_write_test.cpp project_scan_test.cpp)
 target_link_libraries(beatbench_tests PRIVATE beatbench_core GTest::gtest_main)
 target_compile_definitions(beatbench_tests PRIVATE
     BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 beatbench_set_warnings(beatbench_tests)
 add_test(NAME core_tests COMMAND beatbench_tests)
+add_test(NAME cli_convert_guard_tests
+    COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:beatbench-cli>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-convert-guard
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cli_convert_guard_test.cmake")
 
 # 可选 Node >=18：执行真实 QML 函数级回归（不等同于 Qt/鼠标集成测试）。
 find_program(BEATBENCH_NODE_EXECUTABLE NAMES node nodejs)
@@ -59,6 +67,23 @@ target_compile_definitions(audio_test PRIVATE
 target_link_libraries(audio_test PRIVATE GTest::gtest_main)
 beatbench_set_warnings(audio_test)
 add_test(NAME audio_tests COMMAND audio_test)
+
+add_test(NAME asio_configuration_tests COMMAND ${CMAKE_COMMAND}
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/asio_configuration_test.cmake")
+
+# ASIO capability checks never initialize PortAudio or load a driver.
+add_executable(audio_backend_capability_test audio_backend_capability_test.cpp)
+target_link_libraries(audio_backend_capability_test PRIVATE beatbench_audio GTest::gtest_main)
+target_compile_definitions(audio_backend_capability_test PRIVATE
+    BEATBENCH_TEST_EXPECT_ASIO=$<BOOL:${BEATBENCH_ENABLE_ASIO}>)
+beatbench_set_warnings(audio_backend_capability_test)
+add_test(NAME audio_backend_capability_tests COMMAND audio_backend_capability_test)
+
+add_executable(asio_buffer_sizes_test asio_buffer_sizes_test.cpp)
+target_include_directories(asio_buffer_sizes_test PRIVATE ${CMAKE_SOURCE_DIR}/audio/include)
+target_link_libraries(asio_buffer_sizes_test PRIVATE GTest::gtest_main)
+beatbench_set_warnings(asio_buffer_sizes_test)
+add_test(NAME asio_buffer_sizes_tests COMMAND asio_buffer_sizes_test)
 
 # SampleCache 单测（M4.3a）：LRU/预算/并发合并/失效；注入解码器（不碰设备 I/O；
 # sample_cache.cpp 引用 decode_audio_file*（默认解码器），须链 decoder_miniaudio.cpp）。
@@ -140,10 +165,162 @@ add_test(NAME reference_track_tests COMMAND reference_track_test)
 # 配置（gtest 走 FetchContent）。
 find_package(Qt6 COMPONENTS Core QUIET)
 if (Qt6Core_FOUND)
+    # 本地谱面历史：纯 Qt Core 文件存储，不依赖 Git/声卡/窗口。
+    add_executable(chart_snapshot_store_test chart_snapshot_store_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSnapshotStore.cpp)
+    target_include_directories(chart_snapshot_store_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(chart_snapshot_store_test PRIVATE Qt6::Core GTest::gtest)
+    beatbench_set_warnings(chart_snapshot_store_test)
+    add_test(NAME chart_snapshot_store_tests COMMAND chart_snapshot_store_test)
+    set_tests_properties(chart_snapshot_store_tests PROPERTIES TIMEOUT 30)
+
+    add_executable(resource_binding_controller_test resource_binding_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ResourceBindingController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ResourceBindingController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(resource_binding_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(resource_binding_controller_test PRIVATE beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(resource_binding_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(resource_binding_controller_test)
+    add_test(NAME resource_binding_controller_tests COMMAND resource_binding_controller_test)
+    set_tests_properties(resource_binding_controller_tests PROPERTIES TIMEOUT 30)
+
+    add_executable(resource_relocation_controller_test resource_relocation_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ResourceRelocationController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ResourceRelocationController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(resource_relocation_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(resource_relocation_controller_test PRIVATE beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(resource_relocation_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(resource_relocation_controller_test)
+    add_test(NAME resource_relocation_controller_tests COMMAND resource_relocation_controller_test)
+    set_tests_properties(resource_relocation_controller_tests PROPERTIES TIMEOUT 45)
+
+    # Settings rollback uses an injected backend and synthetic PCM; Qt Core only, no devices.
+    add_executable(audio_engine_test audio_engine_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(audio_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(audio_engine_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(audio_engine_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(audio_engine_test)
+    add_test(NAME audio_engine_tests COMMAND audio_engine_test)
+    set_tests_properties(audio_engine_tests PROPERTIES TIMEOUT 20)
+
+    # 项目控制器：异步快照/取消/销毁与打开路由（无窗口/音频）。
+    add_executable(project_controller_test project_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp)
+    target_include_directories(project_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(project_controller_test PRIVATE beatbench_core Qt6::Core GTest::gtest_main)
+    set_target_properties(project_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(project_controller_test)
+    add_test(NAME project_controller_tests COMMAND project_controller_test)
+
+    # 多文档服务：持有固定 ID 的 ChartSession；渲染库不启动音频设备。
+    add_executable(document_service_test document_service_test.cpp sample_list_model_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/SampleListModel.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/SampleListModel.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp)  # Q_OBJECT 头须显式列入
+    target_include_directories(document_service_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(document_service_test PRIVATE
+        beatbench_core Qt6::Core GTest::gtest_main)
+    set_target_properties(document_service_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(document_service_test)
+    add_test(NAME document_service_tests COMMAND document_service_test)
+    target_sources(document_service_test PRIVATE document_instances_test.cpp)
+
+    # 窗格编辑上下文：显式文档寻址、独立选区和模态操作凭证（无窗口/音频设备）。
+    add_executable(pane_edit_context_test pane_edit_context_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(pane_edit_context_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(pane_edit_context_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest_main)
+    set_target_properties(pane_edit_context_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(pane_edit_context_test)
+    add_test(NAME pane_edit_context_tests COMMAND pane_edit_context_test)
+    set_tests_properties(pane_edit_context_tests PROPERTIES TIMEOUT 20)
+
+    # 纯 QtCore 冻结快照规划，不依赖文档、QObject、GUI 或音频。
+    add_executable(note_move_plan_test note_move_plan_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.hpp)
+    target_include_directories(note_move_plan_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(note_move_plan_test PRIVATE Qt6::Core GTest::gtest_main)
+    beatbench_set_warnings(note_move_plan_test)
+    add_test(NAME note_move_plan_tests COMMAND note_move_plan_test)
+
+    # 显式窗格编辑操作：列秩/LN/选择/撤销语义（无窗口/音频设备）。
+    add_executable(pane_edit_operations_test pane_edit_operations_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/NoteMovePlan.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditOperations.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditOperations.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/EditUtils.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/EditUtils.hpp)
+    target_include_directories(pane_edit_operations_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(pane_edit_operations_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest_main)
+    set_target_properties(pane_edit_operations_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(pane_edit_operations_test)
+    add_test(NAME pane_edit_operations_tests COMMAND pane_edit_operations_test)
+    set_tests_properties(pane_edit_operations_tests PROPERTIES TIMEOUT 20)
+
+    add_executable(chart_history_controller_test chart_history_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartHistoryController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartHistoryController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSnapshotStore.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSnapshotStore.hpp)
+    target_include_directories(chart_history_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+    target_link_libraries(chart_history_controller_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core GTest::gtest)
+    set_target_properties(chart_history_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(chart_history_controller_test)
+    add_test(NAME chart_history_controller_tests COMMAND chart_history_controller_test)
+    set_tests_properties(chart_history_controller_tests PROPERTIES TIMEOUT 30)
+    target_compile_definitions(document_service_test PRIVATE BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    foreach(document_test project_controller_test document_service_test)
+        target_sources(${document_test} PRIVATE
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+        target_link_libraries(${document_test} PRIVATE beatbench_audio)
+    endforeach()
+
     # Bridge queries use real session/workspace implementations without opening audio devices.
     add_executable(slice_workspace_test slice_workspace_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/SliceWorkspace.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/SliceWorkspace.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/AudioEngine.cpp
@@ -201,6 +378,20 @@ if (Qt6Core_FOUND)
     # 验证 theme.json 颜色 + 非颜色 token 覆写（L2 皮肤布局改动幅度的根基）。
     find_package(Qt6 COMPONENTS Gui QUIET)
     if (Qt6Gui_FOUND)
+        # External file actions use injected launchers: never start desktop applications in tests.
+        add_executable(chart_file_actions_test chart_file_actions_test.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartFileActions.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ChartFileActions.hpp)
+        target_include_directories(chart_file_actions_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(chart_file_actions_test PRIVATE beatbench_core Qt6::Gui GTest::gtest)
+        if(WIN32)
+            target_link_libraries(chart_file_actions_test PRIVATE shell32 ole32)
+        endif()
+        set_target_properties(chart_file_actions_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(chart_file_actions_test)
+        add_test(NAME chart_file_actions_tests COMMAND chart_file_actions_test)
+        set_tests_properties(chart_file_actions_tests PROPERTIES TIMEOUT 20)
+
         add_executable(theme_manager_test theme_manager_test.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.hpp)
@@ -215,5 +406,114 @@ if (Qt6Core_FOUND)
             BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
         beatbench_set_warnings(theme_manager_test)
         add_test(NAME theme_manager_tests COMMAND theme_manager_test)
+    endif()
+
+    # Qt Quick 鼠标注入：实际弹窗/设置组件，无声卡、无用户偏好写入；兼容 Qt 6.4。
+    find_package(Qt6 6.4 COMPONENTS QuickTest QuickControls2 QUIET)
+    if (Qt6QuickTest_FOUND AND Qt6QuickControls2_FOUND)
+        add_executable(pane_drag_controller_test pane_drag_controller_test.cpp)
+        foreach(bridge PaneDragController PaneEditContext PaneEditOperations NoteMovePlan
+                DocumentService ChartSession ChartViewItem PlayheadOverlayItem EditUtils ThemeManager)
+            target_sources(pane_drag_controller_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(pane_drag_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(pane_drag_controller_test PRIVATE
+            beatbench_core beatbench_audio Qt6::Quick GTest::gtest)
+        target_compile_definitions(pane_drag_controller_test PRIVATE
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(pane_drag_controller_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(pane_drag_controller_test)
+        add_test(NAME pane_drag_controller_tests COMMAND pane_drag_controller_test)
+        set_tests_properties(pane_drag_controller_tests PROPERTIES
+            TIMEOUT 40
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
+        add_executable(dialog_drag_test dialog_drag_test.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/ThemeManager.hpp)
+        target_include_directories(dialog_drag_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(dialog_drag_test PRIVATE
+            beatbench_core Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(dialog_drag_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(dialog_drag_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(dialog_drag_test)
+        add_test(NAME dialog_drag_tests COMMAND dialog_drag_test)
+        set_tests_properties(dialog_drag_tests PROPERTIES
+            TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
+        # Full production Main/SessionController integration; audio is a no-device spy.
+        add_executable(main_integration_test main_integration_test.cpp
+            ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
+        foreach(bridge ChartSession DocumentService PaneEditContext PaneEditOperations NoteMovePlan PaneDragController ResourceBindingController ResourceRelocationController ChartHistoryController ChartSnapshotStore CommandDispatcher SampleListModel LintListModel
+                ChartViewItem PlayheadOverlayItem WaveformOverviewItem SliceWaveformItem
+                SliceWorkspace AudioEngine ThemeManager UiActionRegistry KeyMonitor ClipboardBridge EditUtils ProjectController)
+            target_sources(main_integration_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(main_integration_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(main_integration_test PRIVATE
+            beatbench_core beatbench_audio Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(main_integration_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml-main-integration"
+            BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(main_integration_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(main_integration_test)
+        add_test(NAME main_integration_tests COMMAND main_integration_test)
+        # Isolate this case: leaving the final snapshot alive exercises setup teardown
+        # after QGuiApplication/global QThreadPool destruction (the full suite resets it).
+        add_test(NAME main_project_scan_teardown_tests COMMAND main_integration_test
+            ProductionMainIntegration::test_project_large_snapshot_publication_keeps_visible_models_and_details_live)
+        set_tests_properties(main_project_scan_teardown_tests PROPERTIES
+            TIMEOUT 45
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+        set_tests_properties(main_integration_tests PROPERTIES
+            TIMEOUT 150
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
+        add_executable(chart_view_binding_test chart_view_binding_test.cpp)
+        foreach(bridge ChartSession DocumentService ChartViewItem PlayheadOverlayItem WaveformOverviewItem ThemeManager)
+            target_sources(chart_view_binding_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(chart_view_binding_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(chart_view_binding_test PRIVATE
+            beatbench_core beatbench_audio Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(chart_view_binding_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml-chart-view"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(chart_view_binding_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(chart_view_binding_test)
+        add_test(NAME chart_view_binding_tests COMMAND chart_view_binding_test)
+        set_tests_properties(chart_view_binding_tests PROPERTIES
+            TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
+
+        add_executable(slice_export_confirmation_test slice_export_confirmation_test.cpp
+            ${CMAKE_SOURCE_DIR}/audio/src/onset_detector.cpp)
+        foreach(bridge ChartSession SliceWorkspace SliceWaveformItem DocumentService AudioEngine ThemeManager UiActionRegistry KeyMonitor)
+            target_sources(slice_export_confirmation_test PRIVATE
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.cpp
+                ${CMAKE_SOURCE_DIR}/app/bridge/${bridge}.hpp)
+        endforeach()
+        target_include_directories(slice_export_confirmation_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
+        target_link_libraries(slice_export_confirmation_test PRIVATE
+            beatbench_core beatbench_audio Qt6::QuickTest Qt6::QuickControls2)
+        target_compile_definitions(slice_export_confirmation_test PRIVATE
+            QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml-slice-export"
+            BEATBENCH_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/beatbench")
+        set_target_properties(slice_export_confirmation_test PROPERTIES AUTOMOC ON)
+        beatbench_set_warnings(slice_export_confirmation_test)
+        add_test(NAME slice_export_confirmation_tests COMMAND slice_export_confirmation_test)
+        set_tests_properties(slice_export_confirmation_tests PROPERTIES
+            TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QML_DISABLE_DISK_CACHE=1")
     endif()
 endif()

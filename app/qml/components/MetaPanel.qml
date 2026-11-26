@@ -170,6 +170,20 @@ ColumnLayout {
             root.fields[i].orig = root.fields[i].value
         root.dirtyTick = 0
     }
+    // Repeater/filter modelData may be a QVariant-converted copy. Always stage
+    // by key into the authoritative fields array; never rely on JS object aliasing.
+    function editField(key, value) {
+        for (let i = 0; i < root.fields.length; ++i) {
+            if (root.fields[i].key !== key) continue
+            root.fields[i].value = value
+            root.dirtyTick++
+            if (key === "LNTYPE" || key === "LNOBJ") {
+                root.fields[i].orig = value
+                root.modeEditRequested(key, value)
+            }
+            return
+        }
+    }
     /// 脏字段编辑集（保存用；value 空串=删除）
     function collectEdits() {
         const edits = []
@@ -193,7 +207,7 @@ ColumnLayout {
     }
     property var _rawOrig: []
 
-    /// 保存扩展代码（Main 在保存前调用：先 meta.rawEdit 再 session.save）
+    /// 保存扩展代码：true=已应用、false=无改动、null=失败（调用方必须停止保存）。
     function applyRawEdits() {
         if (!root.meta) return false
         const lines = root.rawEdits()
@@ -203,7 +217,7 @@ ColumnLayout {
         const r = JSON.parse(resp)
         if (r.ok) { root._rawOrig = lines.slice(); root.expandRaw = false; return true }
         root.metaMessage(r.error.code + ": " + r.error.message)
-        return false
+        return null
     }
 
     spacing: 2
@@ -264,11 +278,19 @@ ColumnLayout {
                         visible: !root.comboOptions(modelData.key, modelData.value)
                         Layout.fillWidth: true
                         text: modelData.value
-                        onTextChanged: { modelData.value = text; root.dirtyTick++
-                                         if (modelData.key === "LNOBJ") { modelData.orig = text; root.modeEditRequested("LNOBJ", text) } }
+                        // ⚠️ 必须用 onTextEdited（**用户**编辑）而非 onTextChanged：后者在
+                        // `text:` 绑定首次求值/重新载入时也会触发（"" → "ZZ" 算一次变化），
+                        // 于是"打开谱面"本身就会 dispatch meta.edit ——2026-10-14 实测：
+                        // 打开含 `#LNOBJ ZZ` 的谱面会写一次 LNOBJ=<原值>，把文档标成未保存
+                        // （标题出现 *、关闭必弹确认、项目页"未保存"徽标误报）。
+                        onTextEdited: { modelData.value = text; root.editField(modelData.key, text) }
                     }
                     ComboBox {
                         id: combo
+                        HoverHandler {
+                            objectName: "semanticCursor"
+                            cursorShape: combo.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
                         visible: !!root.comboOptions(modelData.key, modelData.value)
                         model: root.comboOptions(modelData.key, modelData.value)
                         textRole: "label"
@@ -301,11 +323,8 @@ ColumnLayout {
                             if (idx >= 0) {
                                 const v = root.comboOptions(source.key, source.value)[idx].value
                                 if (source.value !== v) {
-                                    source.value = v; root.dirtyTick++
-                                    if (source.key === "LNTYPE") {
-                                        source.orig = v
-                                        root.modeEditRequested("LNTYPE", v)
-                                    }
+                                    source.value = v
+                                    root.editField(source.key, v)
                                 }
                             }
                         }
@@ -353,6 +372,11 @@ ColumnLayout {
                                 model: combo.model
                                 currentIndex: combo.highlightedIndex
                                 delegate: ItemDelegate {
+                                    enabled: combo.enabled
+                                    HoverHandler {
+                                        objectName: "semanticCursor"
+                                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    }
                                     width: combo.popup ? combo.popup.width - 8 : combo.width
                                     required property int index
                                     contentItem: Label {
@@ -405,10 +429,14 @@ ColumnLayout {
                             visible: !root.comboOptions(modelData.key, modelData.value)
                             Layout.fillWidth: true
                             text: modelData.value
-                            onTextChanged: { modelData.value = text; root.dirtyTick++ }
+                            onTextEdited: { modelData.value = text; root.editField(modelData.key, text) }
                         }
                         ComboBox {
                             id: combo
+                            HoverHandler {
+                                objectName: "semanticCursor"
+                                cursorShape: combo.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
                             visible: !!root.comboOptions(modelData.key, modelData.value)
                             model: root.comboOptions(modelData.key, modelData.value)
                             textRole: "label"
@@ -437,7 +465,7 @@ ColumnLayout {
                                 const idx = currentIndex
                                 if (idx >= 0) {
                                     const v = root.comboOptions(source.key, source.value)[idx].value
-                                    if (source.value !== v) { source.value = v; root.dirtyTick++ }
+                                    if (source.value !== v) { source.value = v; root.editField(source.key, v) }
                                 }
                             }
                             indicator: Item {
@@ -482,6 +510,11 @@ ColumnLayout {
                                     model: combo.model
                                     currentIndex: combo.highlightedIndex
                                     delegate: ItemDelegate {
+                                        enabled: combo.enabled
+                                        HoverHandler {
+                                            objectName: "semanticCursor"
+                                            cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        }
                                         width: combo.popup ? combo.popup.width - 8 : combo.width
                                         required property int index
                                         contentItem: Label {

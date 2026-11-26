@@ -5,7 +5,11 @@
 .githooks/**   text eol=lf
 *.yml          text eol=lf
 
-# 生成数据与源表：生成器按 LF 逐字比较，Windows 检出不得转 CRLF
+# 可重置测试基准需跨平台保持生成器校验一致；WAV 必须按二进制原样保存。
+testdata/m7-mini-project/*       text eol=lf
+testdata/m7-mini-project/*.wav   binary
+
+# CP932 生成数据与源表使用 LF，保证 Windows 检出也可按字节校验。
 core/src/bms/sjis_table.hpp text eol=lf
 tools/cp932_map.tsv         text eol=lf
 

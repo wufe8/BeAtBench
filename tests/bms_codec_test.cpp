@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 
@@ -18,6 +19,7 @@
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/bms/ChartCheck.hpp"
+#include "beatbench/core/codec/CodecRegistry.hpp"
 
 using namespace beatbench;
 using namespace beatbench::bms;
@@ -532,6 +534,220 @@ TEST(BmsReadFile, Utf8BomStripped) {
     EXPECT_EQ(res.chart.meta.at("TITLE"), "x");
 }
 
+namespace {
+
+class BmsByteFormat : public testing::Test {
+   protected:
+    std::filesystem::path path = std::filesystem::temp_directory_path() / "bb_byte_format.bms";
+    const codec::Codec& bms = *codec::global_codec_registry().by_id("bms");
+
+    void TearDown() override {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+    }
+
+    codec::ReadResult read(std::string_view bytes, std::string encoding = {}) const {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f << bytes;
+        f.close();
+        EXPECT_TRUE(f);
+        return bms.read(path, {.encoding = std::move(encoding), .mode = {}});
+    }
+
+    static bool rejected(const codec::ReadResult& result) {
+        return std::ranges::any_of(result.diagnostics, [](const codec::Diagnostic& d) {
+            return d.severity == codec::Severity::Error;
+        });
+    }
+};
+
+TEST_F(BmsByteFormat, DetectsAsciiUtf8AndCp932IndependentlyOfLineEndings) {
+    auto result = read("#TITLE ascii\r\n#BPM 120\r\n");
+    EXPECT_EQ(result.detected_encoding, "ascii");
+    EXPECT_EQ(result.line_ending, "crlf");
+    EXPECT_EQ(result.preferred_line_ending, "crlf");
+    EXPECT_FALSE(result.utf8_bom);
+    EXPECT_FALSE(result.encoding_ambiguous);
+
+    result = read("#TITLE \xE3\x81\x92\n");
+    EXPECT_EQ(result.detected_encoding, "utf8");
+    EXPECT_EQ(result.line_ending, "lf");
+    EXPECT_EQ(result.chart.meta.at("TITLE"), "\xE3\x81\x92");
+
+    result = read("#TITLE \x82\xB0");
+    EXPECT_EQ(result.detected_encoding, "sjis");
+    EXPECT_TRUE(result.line_ending.empty());
+    EXPECT_TRUE(result.preferred_line_ending.empty());
+    EXPECT_EQ(result.chart.meta.at("TITLE"), "\xE3\x81\x92");
+}
+
+TEST_F(BmsByteFormat, BareCrAndMixedLineEndingsStillParseEachDirective) {
+    auto result = read("\xEF\xBB\xBF#PLAYER 3\r#TITLE x\r#00121:01\r");
+    ASSERT_FALSE(rejected(result));
+    EXPECT_EQ(result.line_ending, "cr");
+    EXPECT_EQ(result.preferred_line_ending, "cr");
+    EXPECT_TRUE(result.utf8_bom);
+    EXPECT_EQ(result.detected_encoding, "utf8");
+    EXPECT_EQ(result.chart.mode_id, "dp");
+    EXPECT_EQ(result.chart.notes.size(), 1u);
+    EXPECT_EQ(result.chart.meta.at("TITLE"), "x");
+
+    result = read("#TITLE x\r#BPM 120\r\n#00111:01\r\n#ARTIST a\n");
+    EXPECT_EQ(result.line_ending, "mixed");
+    EXPECT_EQ(result.preferred_line_ending, "crlf");
+    EXPECT_EQ(result.chart.meta.at("ARTIST"), "a");
+    result = read("#TITLE x\r#ARTIST a\n");
+    EXPECT_EQ(result.line_ending, "mixed");
+    EXPECT_EQ(result.preferred_line_ending, "cr");
+}
+
+TEST_F(BmsByteFormat, CommentsAndOtherFieldsAreNotDeclarations) {
+    const auto result = read(
+        "// #ENCODING UTF-8\r* #ENCODING UTF-8\r\n"
+        " /* comment\n#ENCODING UTF-8\r*/\n"
+        "#ENCODING_OTHER UTF-8\n#ARTIST x #ENCODING UTF-8\n"
+        "#TITLE \x82\xB0\n");
+    ASSERT_FALSE(rejected(result));
+    EXPECT_EQ(result.detected_encoding, "sjis");
+    EXPECT_EQ(result.chart.meta.at("TITLE"), "\xE3\x81\x92");
+    codec::WriteOptions opts;
+    opts.encoding = "sjis";
+    const std::string saved = bms.write(result.chart, opts);
+    EXPECT_NE(saved.find("/* comment\n#ENCODING UTF-8\n*/"), std::string::npos);
+    EXPECT_NE(saved.find("#ENCODING_OTHER UTF-8"), std::string::npos);
+}
+
+TEST_F(BmsByteFormat, DualDecodableNonAsciiDefaultsToCp932UnlessEvidenceResolvesIt) {
+    const std::string text = "#TITLE \xC2\xA9\n";  // UTF-8 © / CP932 ﾂｩ
+    auto result = read(text);
+    EXPECT_EQ(result.detected_encoding, "sjis");
+    EXPECT_TRUE(result.encoding_ambiguous);
+    EXPECT_TRUE(std::ranges::any_of(result.diagnostics, [](const auto& d) {
+        return d.severity == codec::Severity::Warning &&
+               d.message.find("CP932") != std::string::npos;
+    }));
+    EXPECT_NE(result.chart.meta.at("TITLE"), "\xC2\xA9");
+    codec::WriteOptions opts;
+    opts.encoding = "sjis";
+    bool ambiguous = false;
+    opts.encoding_ambiguous = &ambiguous;
+    EXPECT_TRUE(read(bms.write(result.chart, opts)).encoding_ambiguous);
+    EXPECT_TRUE(ambiguous);
+
+    result = read(std::string(5000, ' ') + "\n#eNcOdInG: UTF-8\n" + text);
+    EXPECT_EQ(result.detected_encoding, "utf8");
+    EXPECT_FALSE(result.encoding_ambiguous);
+    EXPECT_EQ(result.chart.meta.at("TITLE"), "\xC2\xA9");
+    result = read("#ENCODING CP932\n#TITLE ASCII\n");
+    EXPECT_EQ(result.detected_encoding, "sjis");
+    EXPECT_TRUE(rejected(read("#ENCODING unsupported\n#TITLE ASCII\n")));
+    EXPECT_TRUE(rejected(read("#ENCODING\n#TITLE ASCII\n")));
+    EXPECT_TRUE(rejected(read("#ENCODING CP932\n#ENCODING UTF-8\n#TITLE ASCII\n")));
+    EXPECT_TRUE(rejected(read("\xEF\xBB\xBF#ENCODING CP932\n#TITLE ASCII\n")));
+    EXPECT_TRUE(rejected(read("#ENCODING CP932\n#TITLE ASCII\n", "utf8")));
+    result = read(text, "utf8");
+    EXPECT_EQ(result.detected_encoding, "utf8");
+    EXPECT_FALSE(result.encoding_ambiguous);
+}
+
+TEST_F(BmsByteFormat, RejectsInvalidBytesAndUnsupportedBoms) {
+    EXPECT_TRUE(rejected(read("#TITLE \x81\n")));
+    EXPECT_TRUE(rejected(read("#TITLE \x82\xB0\n", "utf8")));
+    EXPECT_TRUE(rejected(read("#TITLE \xE3\x81\x92\n", "sjis")));
+    EXPECT_TRUE(rejected(read("#ENCODING UTF-8\n#TITLE \x82\xB0\n")));
+    EXPECT_TRUE(rejected(read("\xEF\xBB\xBF#TITLE \x82\xB0\n")));
+    EXPECT_TRUE(rejected(read("\xEF\xBB\xBF#TITLE ASCII\n", "sjis")));
+    const auto error = read(std::string_view("\x00\x00\xFE\xFF", 4));
+    ASSERT_TRUE(rejected(error));
+    EXPECT_TRUE(error.detected_encoding.empty());
+    EXPECT_NE(error.diagnostics.front().message.find("UTF-32"), std::string::npos);
+    EXPECT_TRUE(rejected(read("\xFF\xFE#TITLE ASCII\n")));
+}
+
+TEST_F(BmsByteFormat, RejectsBomlessWideTextButNotIsolatedNul) {
+    constexpr std::string_view text = "#TITLE ascii\r\n#BPM 120\r\n";
+    for (const std::size_t width : {2u, 4u}) {
+        for (const std::size_t lane : {std::size_t{0}, width - 1}) {
+            std::string bytes(text.size() * width, '\0');
+            for (std::size_t i = 0; i < text.size(); ++i) bytes[i * width + lane] = text[i];
+            EXPECT_TRUE(rejected(read(bytes)));
+            EXPECT_TRUE(rejected(read(bytes, "utf8")));
+        }
+    }
+    std::string bytes(text);
+    bytes.insert(8, 1, '\0');
+    bytes += '\0';
+    const auto result = read(bytes);
+    EXPECT_FALSE(rejected(result));
+    EXPECT_EQ(result.detected_encoding, "ascii");
+}
+
+TEST_F(BmsByteFormat, WritesChosenEolAndBomAndReportsAsciiBytes) {
+    Chart c;
+    c.meta["TITLE"] = "ascii";
+    codec::WriteOptions opts;
+    bool ascii = false;
+    opts.ascii_only = &ascii;
+    for (const auto* ending : {"crlf", "lf", "cr"}) {
+        opts.line_ending = ending;
+        opts.utf8_bom = false;
+        auto result = read(bms.write(c, opts));
+        ASSERT_FALSE(rejected(result));
+        EXPECT_EQ(result.line_ending, ending);
+        EXPECT_EQ(result.detected_encoding, "ascii");
+        EXPECT_TRUE(ascii);
+        opts.utf8_bom = true;
+        result = read(bms.write(c, opts));
+        EXPECT_EQ(result.line_ending, ending);
+        EXPECT_EQ(result.detected_encoding, "utf8");
+        EXPECT_TRUE(result.utf8_bom);
+        EXPECT_FALSE(ascii);
+    }
+}
+
+TEST_F(BmsByteFormat, OutputCannotInheritEncodingFromGenericMeta) {
+    Chart c;
+    c.meta["TITLE"] = "ascii";
+    c.meta["ENCODING"] = "CP932";
+    codec::WriteOptions opts;
+    opts.utf8_bom = true;
+    const auto bytes = bms.write(c, opts);
+    EXPECT_EQ(bytes.find("#ENCODING"), std::string::npos);
+    const auto result = read(bytes);
+    EXPECT_FALSE(rejected(result));
+    EXPECT_EQ(result.detected_encoding, "utf8");
+}
+
+TEST_F(BmsByteFormat, Utf8OutputDeclaresAmbiguousBytesWithoutChangingBomPolicy) {
+    Chart c;
+    c.meta["TITLE"] = "\xC2\xA9";
+    const auto bytes = bms.write(c, {});
+    EXPECT_TRUE(bytes.starts_with("#ENCODING UTF-8\n"));
+    const auto result = read(bytes);
+    EXPECT_EQ(result.detected_encoding, "utf8");
+    EXPECT_FALSE(result.utf8_bom);
+    EXPECT_EQ(result.chart.meta.at("TITLE"), "\xC2\xA9");
+    EXPECT_EQ(bms.write(result.chart, {}), bytes);
+}
+
+TEST_F(BmsByteFormat, StrictCp932RejectsCharacterLossAndSupportsExtensionBytes) {
+    Chart c;
+    c.meta["TITLE"] = "\xF0\x9F\x98\x80";  // 😀
+    codec::WriteOptions opts;
+    opts.encoding = "sjis";
+    EXPECT_NE(bms.write(c, opts).find("#TITLE ?"), std::string::npos);
+    opts.strict_encoding = true;
+    EXPECT_THROW((void)bms.write(c, opts), std::invalid_argument);
+    c.meta["TITLE"] = "\xEF\xA3\xB0";  // U+F8F0 ↔ CP932 A0
+    auto result = read(bms.write(c, opts));
+    EXPECT_EQ(result.detected_encoding, "sjis");
+    EXPECT_EQ(result.chart.meta.at("TITLE"), c.meta.at("TITLE"));
+    opts.utf8_bom = true;
+    EXPECT_THROW((void)bms.write(c, opts), std::invalid_argument);
+}
+
+}  // namespace
+
 // ---------- 通道映射表（字符串 → 语义；换格式 = 换表） ----------
 
 TEST(BmsChannelMap, Semantics) {
@@ -695,8 +911,8 @@ TEST(BmsRead, LnPairType1TwoP) {
     EXPECT_EQ(res.chart.notes[0].value.lane, (Lane{1, LaneKind::Key, 1}));
 }
 
-TEST(BmsRead, LnPairType2) {
-    // LNTYPE 2（#LNOBJ）：头尾同在普通通道；值==#LNOBJ 的物件为尾；
+TEST(BmsRead, LnPairLnobj) {
+    // LNOBJ: ordinary-channel markers pair independently of LNTYPE.
     // 非 LNOBJ 值 → 普通 note（kSample 例 2：#02412:3C…ZZ 即通道 12 内头尾）
     const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n#00311:02\n");
     ASSERT_EQ(res.chart.notes.size(), 3u);
@@ -706,12 +922,12 @@ TEST(BmsRead, LnPairType2) {
 }
 
 TEST(BmsRead, LnDualType1And2) {
-    // LNTYPE 2 下两机制并存：51-59 LN 通道件（#00151/#00251）仍按 LNTYPE 1 交替配对；
-    // 普通通道内 头(11)+#LNOBJ 尾(ZZ) 按 LNTYPE 2 配对。二者互不干扰。
+    // Under LNTYPE 2, preserve both independent LN-channel and LNOBJ pairing.
+    // Ordinary-channel LNOBJ pairing does not implement MGQ.
     const auto res = read_bms(
         "#LNTYPE 2\n#LNOBJ ZZ\n"
         "#00151:01\n#00251:02\n"    // 51 通道 LN 头尾（LNTYPE 1 交替）
-        "#00311:03\n#00411:ZZ\n");  // 普通通道 头 + LNOBJ 尾（LNTYPE 2）
+        "#00311:03\n#00411:ZZ\n");  // Ordinary head + LNOBJ tail
     const auto pair_of = [&](const Event<Note>& n) {
         if (n.value.ln_pair && *n.value.ln_pair < res.chart.notes.size())
             return static_cast<int>(*n.value.ln_pair);
@@ -739,7 +955,7 @@ TEST(BmsRead, LnUnclosedWarns) {
 }
 
 TEST(BmsRead, LnOrphanTailWarns) {
-    // LNTYPE 2 尾没有可配对的头
+    // LNOBJ tail without a preceding ordinary head
     const auto res = read_bms("#LNTYPE 2\n#LNOBJ ZZ\n#00111:ZZ\n");
     bool warned = false;
     for (const auto& d : res.diagnostics) {
@@ -779,10 +995,11 @@ TEST(BmsWrite, EncodingDeclNormalized) {
     Chart c;
     c.raw_lines = {"#ENCODING Shift_JIS", "#00111:01"};
     EXPECT_EQ(write_bms(c),
+              "#ENCODING UTF-8\n"
               "\n*---------------------- HEADER FIELD\n\n"
               "*---------------------- DEFINITION FIELD\n\n"
               "*---------------------- EXPANSION FIELD\n\n"
-              "#ENCODING UTF-8\n#00111:01\n");  // 默认 UTF-8 → 声明更新
+              "#00111:01\n");  // 默认 UTF-8 → 声明更新并放到文件头
     BmsWriteOptions sjis;
     sjis.encoding = BmsEncoding::ShiftJis;
     EXPECT_EQ(write_bms(c, sjis),
@@ -833,10 +1050,12 @@ TEST(BmsRoundTrip, UserCommentsStillPreserved) {
     EXPECT_EQ(write_bms(r2.chart), out);  // 幂等
 }
 
-TEST(BmsRoundTrip, SamePosConflictSplitsRows) {
-    // 未配对 LN 头（#00151:01）退化普通通道后与 #00111:01 同 pos 撞位 → 写回分裂两行
+TEST(BmsRoundTrip, OrdinaryAndOrphanLnKeepDistinctChannels) {
+    // Same-position ordinary and orphan LN notes retain their stored channel identities.
     const auto r1 = read_bms("#00111:01\n#00151:01\n");
     const auto out = write_bms(r1.chart);
+    EXPECT_NE(out.find("#00111:01"), std::string::npos);
+    EXPECT_NE(out.find("#00151:01"), std::string::npos);
     const auto r2 = read_bms(out);
     EXPECT_EQ(r2.chart.notes.size(), 2u);
     EXPECT_EQ(normalize_notes(r2.chart.notes), normalize_notes(r1.chart.notes));  // 全部保留
@@ -880,8 +1099,8 @@ TEST(BmsRoundTrip, BgmMultiLineKeepsRows) {
     EXPECT_EQ(r2.chart.notes.size(), r1.chart.notes.size());
 }
 
-TEST(BmsRoundTrip, LnType2RoundTrip) {
-    // LNTYPE 2：头尾同在普通通道；尾槽位写回 #LNOBJ 文本
+TEST(BmsRoundTrip, LnobjRoundTripPreservesLntypeMeta) {
+    // Preserve the actual ordinary-channel samples and the unrelated LNTYPE metadata.
     const auto src = "#LNTYPE 2\n#LNOBJ ZZ\n#00111:01\n#00211:ZZ\n";
     const auto r1 = read_bms(src);
     ASSERT_EQ(r1.chart.notes.size(), 2u);
@@ -1124,6 +1343,12 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
         const auto& b = r2.chart;
         const auto na = normalize_notes(a.notes);
         const auto nb = normalize_notes(b.notes);
+        // 防止 UTF-8 输出被重开为 CP932 时，允许文件头新增一条规范声明，其余 raw 原样。
+        const bool generated_utf8_declaration =
+            out.starts_with("#ENCODING UTF-8\n") && b.raw_lines.size() == a.raw_lines.size() + 1 &&
+            b.raw_lines.front() == "#ENCODING UTF-8" &&
+            std::equal(a.raw_lines.begin(), a.raw_lines.end(), b.raw_lines.begin() + 1);
+        const bool same_raw = a.raw_lines == b.raw_lines || generated_utf8_declaration;
         // 失败时输出容器规模差异（避免 gtest 打印整个谱面文本）
         bool samples_ok = b.samples.size() >= a.samples.size();
         if (samples_ok) {
@@ -1139,14 +1364,14 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
             norm_events(a.bpm_events) != norm_events(b.bpm_events) ||
             norm_events(a.stop_events) != norm_events(b.stop_events) ||
             norm_events(a.measure_events) != norm_events(b.measure_events) ||
-            norm_events(a.bga_events) != norm_events(b.bga_events) || a.raw_lines != b.raw_lines ||
+            norm_events(a.bga_events) != norm_events(b.bga_events) || !same_raw ||
             write_bms(b) != out) {
             std::printf(
                 "  [diff] %s notes:%d bpm:%d stop:%d measure:%d bga:%d raw:%d samples:%d idem:%d\n",
                 ascii_safe(entry.path().filename().string()).c_str(), na != nb,
                 a.bpm_events != b.bpm_events, a.stop_events != b.stop_events,
-                a.measure_events != b.measure_events, a.bga_events != b.bga_events,
-                a.raw_lines != b.raw_lines, !samples_ok, write_bms(b) != out);
+                a.measure_events != b.measure_events, a.bga_events != b.bga_events, !same_raw,
+                !samples_ok, write_bms(b) != out);
             if (a.bpm_events.size() != b.bpm_events.size()) {
                 const auto n = std::min(a.bpm_events.size(), b.bpm_events.size());
                 for (std::size_t i = 0; i < n; ++i) {
@@ -1179,7 +1404,7 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
         EXPECT_EQ(norm_events(b.stop_events), norm_events(a.stop_events));
         EXPECT_EQ(norm_events(b.measure_events), norm_events(a.measure_events));
         EXPECT_EQ(norm_events(b.bga_events), norm_events(a.bga_events));
-        EXPECT_EQ(b.raw_lines, a.raw_lines);
+        EXPECT_TRUE(same_raw);
         EXPECT_EQ(write_bms(b), out);
         ++verified;
     }

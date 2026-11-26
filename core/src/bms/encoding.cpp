@@ -3,16 +3,19 @@
 #include "encoding.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <iterator>
+#include <limits>
+#include <stdexcept>
 
 #include "sjis_table.hpp"
 
-static_assert(sizeof(beatbench::bms::kSjisToUcs) / sizeof(beatbench::bms::kSjisToUcs[0]) ==
-                  beatbench::bms::kSjisLeadRows * beatbench::bms::kSjisTrailCols,
-              "sjis_table.hpp 正表尺寸与生成器常量不一致");
-
 namespace beatbench::bms {
 namespace {
+
+static_assert(std::size(kSjisToUcs) == kSjisLeadRows * kSjisTrailCols);
+static_assert(sizeof(SjisRev) == 4);
 
 // ---- UTF-8 码点工具（严格校验） ----
 
@@ -88,9 +91,8 @@ inline void append_utf8(std::string& out, std::uint32_t cp) {
     }
 }
 
-// 正表直接索引：行 = lead（0x81-0x9F 顺排 0-30，0xE0-0xFC 续排 31-59），
-// 列 = trail（b - 0x40，跳过 0x7F）；无映射返回 0。
-inline std::uint16_t lookup_sjis_to_ucs(std::uint8_t lead, std::uint8_t trail) {
+// 正表直接索引：两段 lead 顺排为行，trail 跳过 0x7F 后为列；0 表示无映射。
+std::uint16_t lookup_sjis_to_ucs(std::uint8_t lead, std::uint8_t trail) {
     if (trail < kSjisTrailBase || trail == 0x7F || trail > 0xFC) return 0;
     std::size_t row;
     if (lead >= 0x81 && lead <= 0x9F) {
@@ -100,13 +102,12 @@ inline std::uint16_t lookup_sjis_to_ucs(std::uint8_t lead, std::uint8_t trail) {
     } else {
         return 0;
     }
-    const std::size_t col =
-        static_cast<std::size_t>(trail - kSjisTrailBase) - (trail > 0x7F ? 1 : 0);
+    const auto col = static_cast<std::size_t>(trail - kSjisTrailBase) - (trail > 0x7F ? 1 : 0);
     return kSjisToUcs[row * kSjisTrailCols + col];
 }
 
-// 反表二分查找（kUcsToSjis 按 ucs 升序）；无映射返回 0（sjis 高字节最小 0x81，0 不可为合法值）。
-inline std::uint16_t lookup_ucs_to_sjis(std::uint32_t ucs) {
+// 反表按 ucs 升序；未收录的码点返回 0，不与合法双字节值冲突。
+std::uint16_t lookup_ucs_to_sjis(std::uint32_t ucs) {
     const auto* begin = kUcsToSjis;
     const auto* end = begin + kUcsToSjisCount;
     while (begin < end) {
@@ -135,7 +136,85 @@ inline bool ascii_iequals(std::string_view a, std::string_view b) {
     return true;
 }
 
+// 单字节优先；首字节区在单字节表中的项为空，随后再查合法双字节对。
+Utf8Cp decode_cp932(std::string_view in, std::size_t at) {
+    const auto b = static_cast<unsigned char>(in[at]);
+    if (b < 0x80) return {b, 1};
+    if (const auto u = kSjisSingle[b - 0x80]; u != 0) return {u, 1};
+    if (at + 1 < in.size()) {
+        const auto t = static_cast<unsigned char>(in[at + 1]);
+        if (const auto cp = lookup_sjis_to_ucs(b, t); cp != 0) return {cp, 2};
+    }
+    return {};
+}
+
+// CP932 还定义了五个半角假名区之外的扩展单字节。
+int cp932_single(std::uint32_t cp) {
+    if (cp < 0x80) return static_cast<int>(cp);
+    if (cp >= 0xFF61 && cp <= 0xFF9F) return static_cast<int>(0xA1 + (cp - 0xFF61));
+    if (cp == 0x0080) return 0x80;
+    if (cp == 0xF8F0) return 0xA0;
+    if (cp >= 0xF8F1 && cp <= 0xF8F3) return static_cast<int>(0xFD + (cp - 0xF8F1));
+    return -1;
+}
+
+DetectedEncoding encoding_from_name(std::string_view value) {
+    if (ascii_iequals(value, "UTF-8") || ascii_iequals(value, "UTF8"))
+        return DetectedEncoding::Utf8;
+    constexpr std::array<std::string_view, 5> aliases = {"SHIFT_JIS", "SJIS", "SHIFT-JIS", "CP932",
+                                                         "MS932"};
+    if (std::ranges::any_of(aliases, [value](auto a) { return ascii_iequals(value, a); }))
+        return DetectedEncoding::ShiftJis;
+    return DetectedEncoding::Unknown;
+}
+
+ByteEncoding declared_encoding(std::string_view bytes) {
+    ByteEncoding result;
+    bool block_comment = false;
+    while (!bytes.empty()) {
+        const auto decl = encoding_declaration(take_text_line(bytes).text, block_comment);
+        if (!decl) continue;
+        const auto enc = encoding_from_name(*decl);
+        if (enc == DetectedEncoding::Unknown) {
+            result.error = "BMS 文件含不支持或空的 #ENCODING 声明";
+            break;
+        }
+        if (result.encoding != DetectedEncoding::Unknown && result.encoding != enc) {
+            result.error = "BMS 文件中的 #ENCODING 声明互相冲突";
+            break;
+        }
+        result.encoding = enc;
+    }
+    return result;
+}
+
+// 无 BOM 的 UTF-16/32：识别 ASCII 指令逐码元的规则 NUL，不误拒零散 NUL。
+bool resembles_wide_text(std::string_view sample, std::size_t width) {
+    if (sample.find('\0') == std::string_view::npos) return false;
+    const std::size_t words = sample.size() / width;
+    if (words < 4) return false;
+    std::array<std::size_t, 4> zeros{};
+    std::array<std::size_t, 4> printable{};
+    for (std::size_t i = 0; i < words * width; ++i) {
+        const auto ch = static_cast<unsigned char>(sample[i]);
+        if (ch == 0) ++zeros[i % width];
+        if (ch >= 0x20 && ch <= 0x7E) ++printable[i % width];
+    }
+    const auto begin = printable.begin();
+    const auto text_lane = static_cast<std::size_t>(
+        std::max_element(begin, begin + static_cast<std::ptrdiff_t>(width)) - begin);
+    if (printable[text_lane] * 2 < words || zeros[text_lane] * 4 > words) return false;
+    for (std::size_t lane = 0; lane < width; ++lane) {
+        if (lane != text_lane && zeros[lane] * 4 < words * 3) return false;
+    }
+    return true;
+}
+
 }  // namespace
+
+bool is_ascii(std::string_view in) {
+    return std::ranges::all_of(in, [](unsigned char byte) { return byte < 0x80; });
+}
 
 bool is_valid_utf8(std::string_view in) {
     std::size_t i = 0;
@@ -147,113 +226,181 @@ bool is_valid_utf8(std::string_view in) {
     return true;
 }
 
-// NOLINTNEXTLINE(readability-function-size)——Shift-JIS 双字节解码状态机
+bool is_valid_cp932(std::string_view in) {
+    std::size_t i = 0;
+    while (i < in.size()) {
+        const auto d = decode_cp932(in, i);
+        if (d.len == 0) return false;
+        i += static_cast<std::size_t>(d.len);
+    }
+    return true;
+}
+
 std::string shiftjis_to_utf8(std::string_view in) {
     std::string out;
     out.reserve(in.size() + in.size() / 4);
     std::size_t i = 0;
     while (i < in.size()) {
-        const auto b = static_cast<unsigned char>(in[i]);
-        if (b < 0x80) {
-            out.push_back(in[i]);
-            ++i;
-            continue;
-        }
-        if (b >= 0xA1 && b <= 0xDF) {  // 半角假名（单字节）
-            append_utf8(out, kSjisSingle[b - 0x80]);
-            ++i;
-            continue;
-        }
-        if ((b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC)) {
-            if (i + 1 < in.size()) {
-                const auto t = static_cast<unsigned char>(in[i + 1]);
-                if (const std::uint16_t u = lookup_sjis_to_ucs(b, t); u != 0) {
-                    append_utf8(out, u);
-                    i += 2;
-                    continue;
-                }
-            }
-        }
-        // 0x80 / 0xA0 等孤字节：查单字节表，无映射 → U+FFFD
-        if (const auto u = kSjisSingle[b - 0x80]; u != 0) {
-            append_utf8(out, u);
-        } else {
-            append_utf8(out, 0xFFFDu);
-        }
-        ++i;
+        const auto d = decode_cp932(in, i);
+        append_utf8(out, d.len == 0 ? 0xFFFDu : d.cp);
+        i += static_cast<std::size_t>(std::max(1, d.len));
     }
     return out;
 }
 
-std::string utf8_to_shiftjis(std::string_view in) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——转码及兼容/严格失败分支
+std::string utf8_to_shiftjis(std::string_view in, bool strict) {
     std::string out;
     out.reserve(in.size());
     std::size_t i = 0;
     while (i < in.size()) {
         const auto d = decode_utf8(in, i);
-        if (d.len == 0) {  // 无效 UTF-8 字节：透传原字节（宽容）
-            out.push_back(in[i]);
+        if (d.len == 0) {
+            if (strict) throw std::invalid_argument("BMS 写出文本不是合法的 UTF-8");
+            out.push_back(in[i]);  // 宽容模式保留旧字节透传行为
             ++i;
             continue;
         }
         i += static_cast<std::size_t>(d.len);
-        if (d.cp < 0x80) {
-            out.push_back(static_cast<char>(d.cp));
-            continue;
-        }
-        // 半角假名区（0xA1-0xDF 单字节）优先于双字节表
-        if (d.cp >= 0xFF61 && d.cp <= 0xFF9F) {
-            out.push_back(static_cast<char>(0xA1 + (d.cp - 0xFF61)));
-            continue;
-        }
-        if (const std::uint16_t s = lookup_ucs_to_sjis(d.cp); s != 0) {
-            out.push_back(static_cast<char>(s >> 8));
-            out.push_back(static_cast<char>(s & 0xFF));
+        if (const int single = cp932_single(d.cp); single >= 0) {
+            out.push_back(static_cast<char>(single));
+        } else if (const auto sjis = lookup_ucs_to_sjis(d.cp); sjis != 0) {
+            out.push_back(static_cast<char>(sjis >> 8));
+            out.push_back(static_cast<char>(sjis & 0xFF));
         } else {
-            out.push_back('?');  // 不可映射（BMSE 惯例）
+            if (strict) throw std::invalid_argument("BMS 含 CP932 无法表示的字符");
+            out.push_back('?');  // 宽容模式保留旧 BMSE 行为
         }
     }
     return out;
 }
 
-DetectedEncoding detect_encoding(std::string_view bytes) {
-    // 1) BOM
-    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF &&
-        static_cast<unsigned char>(bytes[1]) == 0xBB &&
-        static_cast<unsigned char>(bytes[2]) == 0xBF) {
-        return DetectedEncoding::Utf8;
+TextLine take_text_line(std::string_view& text) {
+    const auto pos = text.find_first_of("\r\n");
+    const auto line = text.substr(0, pos);
+    if (pos == std::string_view::npos) {
+        text = {};
+        return {line, {}};
     }
-    // 2) #ENCODING 声明（前 4KB 内）
-    constexpr std::size_t kScan = 4096;
-    const auto scan = bytes.substr(0, std::min(bytes.size(), kScan));
-    std::size_t pos = 0;
-    while ((pos = scan.find('#', pos)) != std::string_view::npos) {
-        const auto rest = scan.substr(pos + 1);
-        if (ascii_iequals(rest.substr(0, 8), "ENCODING")) {
-            // 取声明值（跳过空白到行尾）
-            auto v = rest.substr(8);
-            std::size_t s = 0;
-            while (s < v.size() && std::isspace(static_cast<unsigned char>(v[s]))) ++s;
-            auto e = s;
-            while (e < v.size() && !std::isspace(static_cast<unsigned char>(v[e])) &&
-                   v[e] != '\r' && v[e] != '\n') {
-                ++e;
-            }
-            v = v.substr(s, e - s);
-            if (ascii_iequals(v, "UTF-8") || ascii_iequals(v, "UTF8")) {
-                return DetectedEncoding::Utf8;
-            }
-            if (ascii_iequals(v, "SHIFT_JIS") || ascii_iequals(v, "SJIS") ||
-                ascii_iequals(v, "SHIFT-JIS") || ascii_iequals(v, "CP932") ||
-                ascii_iequals(v, "MS932")) {
-                return DetectedEncoding::ShiftJis;
-            }
-            break;  // 声明无法识别 → 落入启发式
+    const auto ending = text.substr(pos, text.substr(pos).starts_with("\r\n") ? 2 : 1);
+    text.remove_prefix(pos + ending.size());
+    return {line, ending};
+}
+
+LineEndings inspect_line_endings(std::string_view bytes) {
+    constexpr std::array<std::string_view, 3> names = {"crlf", "lf", "cr"};
+    constexpr std::size_t kNone = std::numeric_limits<std::size_t>::max();
+    std::array<std::size_t, names.size()> counts{};
+    std::array<std::size_t, names.size()> first = {kNone, kNone, kNone};
+    for (std::size_t sequence = 0; !bytes.empty(); ++sequence) {
+        const auto ending = take_text_line(bytes).ending;
+        if (ending.empty()) break;
+        const std::size_t type = ending.size() == 2 ? 0 : (ending.front() == '\n' ? 1 : 2);
+        ++counts[type];
+        first[type] = std::min(first[type], sequence);
+    }
+    std::size_t dominant = 0;
+    std::size_t kinds = 0;
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+        if (counts[i] == 0) continue;
+        ++kinds;
+        if (counts[i] > counts[dominant] ||
+            (counts[i] == counts[dominant] && first[i] < first[dominant]))
+            dominant = i;
+    }
+    if (kinds == 0) return {};
+    return {kinds > 1 ? "mixed" : names[dominant], names[dominant]};
+}
+
+std::optional<std::string_view> encoding_declaration(std::string_view line, bool& block_comment) {
+    if (block_comment) {
+        block_comment = line.find("*/") == std::string_view::npos;
+        return std::nullopt;
+    }
+    const auto begin = line.find_first_not_of(" \t\f\v");
+    if (begin == std::string_view::npos) return std::nullopt;
+    line.remove_prefix(begin);
+    if (line.starts_with("/*")) {
+        block_comment = line.find("*/", 2) == std::string_view::npos;
+        return std::nullopt;
+    }
+    constexpr std::string_view kTag = "#ENCODING";
+    if (!ascii_iequals(line.substr(0, kTag.size()), kTag)) return std::nullopt;
+    line.remove_prefix(kTag.size());
+    if (!line.empty() && line.front() == ':')
+        line.remove_prefix(1);
+    else if (!line.empty() && !std::isspace(static_cast<unsigned char>(line.front())))
+        return std::nullopt;
+    const auto value_start = line.find_first_not_of(" \t\f\v");
+    if (value_start == std::string_view::npos) return std::string_view{};
+    line.remove_prefix(value_start);
+    return line.substr(0, line.find_first_of(" \t\f\v"));
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——字节编码的证据优先级和错误分支
+ByteEncoding inspect_encoding(std::string_view bytes, BmsEncoding requested) {
+    ByteEncoding result;
+    if (bytes.starts_with(std::string_view("\x00\x00\xFE\xFF", 4)) ||
+        bytes.starts_with(std::string_view("\xFF\xFE\x00\x00", 4))) {
+        result.error = "暂不支持 UTF-32 编码的 BMS 文件";
+        return result;
+    }
+    if (bytes.starts_with("\xFF\xFE") || bytes.starts_with("\xFE\xFF")) {
+        result.error = "暂不支持 UTF-16 编码的 BMS 文件";
+        return result;
+    }
+    result.utf8_bom = bytes.starts_with(kUtf8Bom);
+    if (result.utf8_bom) bytes.remove_prefix(kUtf8Bom.size());
+    const auto sample = bytes.substr(0, 4096);
+    if (resembles_wide_text(sample, 4) || resembles_wide_text(sample, 2)) {
+        result.error = "BMS 文件疑似无 BOM 的 UTF-16/UTF-32 编码";
+        return result;
+    }
+    const auto declared = declared_encoding(bytes);
+    if (!declared.error.empty()) {
+        result.error = declared.error;
+        return result;
+    }
+    auto preferred = declared.encoding;
+    if (result.utf8_bom) {
+        if (requested == BmsEncoding::ShiftJis || preferred == DetectedEncoding::ShiftJis) {
+            result.error = "CP932 与 UTF-8 BOM 冲突";
+            return result;
         }
-        ++pos;
+        preferred = DetectedEncoding::Utf8;
+    } else if (requested != BmsEncoding::Auto) {
+        const auto explicit_encoding =
+            requested == BmsEncoding::Utf8 ? DetectedEncoding::Utf8 : DetectedEncoding::ShiftJis;
+        if (preferred != DetectedEncoding::Unknown && preferred != explicit_encoding) {
+            result.error = "指定的编码与 BMS 文件的 #ENCODING 声明冲突";
+            return result;
+        }
+        preferred = explicit_encoding;
     }
-    // 3) 启发式：整文件严格 UTF-8 → UTF-8，否则 SJIS（BMS 传统默认）
-    return is_valid_utf8(bytes) ? DetectedEncoding::Utf8 : DetectedEncoding::ShiftJis;
+    if (preferred == DetectedEncoding::Utf8) {
+        if (is_valid_utf8(bytes))
+            result.encoding = preferred;
+        else
+            result.error = "BMS 文件含无效的 UTF-8 字节";
+    } else if (preferred == DetectedEncoding::ShiftJis) {
+        if (is_valid_cp932(bytes))
+            result.encoding = preferred;
+        else
+            result.error = "BMS 文件含无效的 CP932 字节";
+    } else if (is_ascii(bytes)) {
+        result.encoding = DetectedEncoding::Ascii;
+    } else {
+        const bool utf8 = is_valid_utf8(bytes);
+        const bool cp932 = is_valid_cp932(bytes);
+        result.ambiguous = utf8 && cp932;
+        if (cp932)
+            result.encoding = DetectedEncoding::ShiftJis;
+        else if (utf8)
+            result.encoding = DetectedEncoding::Utf8;
+        else
+            result.error = "BMS 文件既不是有效 UTF-8，也不是有效 CP932";
+    }
+    return result;
 }
 
 }  // namespace beatbench::bms

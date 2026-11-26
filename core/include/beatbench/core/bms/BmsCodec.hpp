@@ -13,7 +13,7 @@ namespace beatbench::bms {
 enum class BmsEncoding : std::uint8_t { Auto, ShiftJis, Utf8 };
 
 /// 编码检测结果（read_bms_file 填写；read_bms 输入约定已是 UTF-8）。
-enum class DetectedEncoding : std::uint8_t { Utf8, ShiftJis };
+enum class DetectedEncoding : std::uint8_t { Utf8, ShiftJis, Ascii, Unknown };
 
 struct BmsReadOptions {
     BmsEncoding encoding = BmsEncoding::Auto;
@@ -30,7 +30,12 @@ struct BmsReadOptions {
 struct BmsWriteOptions {
     BmsEncoding encoding = BmsEncoding::Utf8;  ///< 写回默认 UTF-8，可切换 SJIS
     bool preserve_comments = true;
-    bool normalize = true;  ///< 槽位最小化 + 通道按行聚合
+    bool normalize = true;    ///< 槽位最小化 + 通道按行聚合
+    std::string line_ending;  ///< 空或 "lf" 输出 LF；也可指定 "crlf"/"cr"
+    bool utf8_bom = false;
+    bool strict_encoding = false;
+    bool* ascii_only = nullptr;
+    bool* encoding_ambiguous = nullptr;
 };
 
 enum class Severity : std::uint8_t { Error, Warning, Info };
@@ -44,7 +49,11 @@ struct Diagnostic {
 struct BmsReadResult {
     Chart chart;
     std::vector<Diagnostic> diagnostics;
-    DetectedEncoding detected = DetectedEncoding::Utf8;  ///< read_bms_file 的检测结果
+    DetectedEncoding detected = DetectedEncoding::Unknown;  ///< read_bms_file 的检测结果
+    std::string line_ending;
+    std::string preferred_line_ending;
+    bool utf8_bom = false;
+    bool encoding_ambiguous = false;
 };
 
 /// 解析 BMS 文本。

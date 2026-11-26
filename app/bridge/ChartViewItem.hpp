@@ -2,7 +2,7 @@
 // 竖向时间轴自绘视口（M2 第 5 步，doc/project-workflow.md 三、 步 5）：QQuickPaintedItem + QPainter。
 // 绘制（v1）：小节标尺（小节号 + BPM 变化标记 + STOP 段）、槽位网格、轨道列
 // （皿/1-7/BGM/2P，按谱面实际出现的 Lane 数据驱动）、note / LN 头尾 / 地雷
-// 按 (measure,pos) 落位；方向默认「顶部=高小节」（preview.html，note 自上而下落）。
+// 按 (measure,pos) 落位；方向默认「顶部=高小节」（音符自上而下）。
 // 秒标尺与 BGM 波形铺底后置 Phase B（doc/project-workflow.md 四、）。
 // 数据源 = ChartSession（core Chart + TimingEngine 真数据）；只读展示，无编辑（M3）。
 // 滚动/缩放由 QML 侧 ChartView.qml 驱动（Flickable 无 onWheel，doc/development.md 五、）。
@@ -14,7 +14,9 @@
 #include <QColor>
 #include <QFont>
 #include <QImage>
+#include <QPointer>
 #include <QQuickPaintedItem>
+#include <QVariantMap>
 #include <unordered_map>
 #include <vector>
 
@@ -34,12 +36,26 @@ class ChartViewItem : public QQuickPaintedItem {
     QML_ELEMENT
 
     Q_PROPERTY(QObject* session READ session WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(QObject* referenceSession READ referenceSession WRITE setReferenceSession NOTIFY
+                   referenceSessionChanged)
+    Q_PROPERTY(bool referenceOverlayEnabled READ referenceOverlayEnabled WRITE
+                   setReferenceOverlayEnabled NOTIFY referenceOverlayEnabledChanged)
+    Q_PROPERTY(QColor referenceOverlayColor READ referenceOverlayColor WRITE
+                   setReferenceOverlayColor NOTIFY referenceOverlayColorChanged)
+    Q_PROPERTY(qreal referenceOverlayOpacity READ referenceOverlayOpacity WRITE
+                   setReferenceOverlayOpacity NOTIFY referenceOverlayOpacityChanged)
+    Q_PROPERTY(bool referenceOverlayHideSecondaryChannels READ referenceOverlayHideSecondaryChannels
+                   WRITE setReferenceOverlayHideSecondaryChannels NOTIFY
+                       referenceOverlayHideSecondaryChannelsChanged)
+    Q_PROPERTY(QVariantMap referenceOverlayInfo READ referenceOverlayInfo NOTIFY
+                   referenceOverlayInfoChanged)
     Q_PROPERTY(QObject* theme READ theme WRITE setTheme NOTIFY themeChanged)
     Q_PROPERTY(
         qreal measureHeight READ measureHeight WRITE setMeasureHeight NOTIFY measureHeightChanged)
     Q_PROPERTY(qreal rulerWidth READ rulerWidth WRITE setRulerWidth NOTIFY rulerWidthChanged)
     Q_PROPERTY(qreal laneWidth READ laneWidth WRITE setLaneWidth NOTIFY laneWidthChanged)
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollYChanged)
+    Q_PROPERTY(QVariantMap viewportAnchor READ viewportAnchor NOTIFY viewportAnchorChanged)
     Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentHeightChanged)
     Q_PROPERTY(bool topHigh READ topHigh WRITE setTopHigh NOTIFY topHighChanged)
     /// 吸附粒度 = snapNum/snapDen 小节（分子分母皆可调；1/16 = 每小节 16 槽，3/16 = 3/16 步长）。
@@ -58,6 +74,8 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(bool lnSelectMode READ lnSelectMode WRITE setLnSelectMode NOTIFY lnSelectModeChanged)
     /// 显示更多轨道（BGA 图层通道列，位于游玩轨与背景轨之间；iBMSC 式）
     Q_PROPERTY(bool showExtras READ showExtras WRITE setShowExtras NOTIFY showExtrasChanged)
+    Q_PROPERTY(bool hideSecondaryChannels READ hideSecondaryChannels WRITE setHideSecondaryChannels
+                   NOTIFY hideSecondaryChannelsChanged)
     /// 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
     /// 水平滚动（列区；轨道列超宽时用——底部滚动条 / Shift+滚轮 / Shift+拖拽）
@@ -91,6 +109,10 @@ class ChartViewItem : public QQuickPaintedItem {
     Q_PROPERTY(QString cursorPosText READ cursorPosText NOTIFY cursorChanged)
     /// M6 编辑预览：放置工具（note/ln/mine）下鼠标悬浮 → 画 ghost note（"normal"/"ln"/"mine"；
     /// 空 = 关闭）。用户 2026-09：操作前先看到落点。
+    Q_PROPERTY(
+        QVariantList plannedMovePreview READ plannedMovePreview NOTIFY plannedMovePreviewChanged)
+    Q_PROPERTY(bool plannedMovePreviewActive READ plannedMovePreviewActive NOTIFY
+                   plannedMovePreviewChanged)
     Q_PROPERTY(QString previewNoteKind READ previewNoteKind WRITE setPreviewNoteKind NOTIFY
                    previewNoteKindChanged)
     /// M6 编辑预览：拖拽移动选中 note → 各画 ghost @ 原始+moveDeltaF（位移拍位小数）。
@@ -114,6 +136,22 @@ class ChartViewItem : public QQuickPaintedItem {
 
     QObject* session() const { return m_session; }
     void setSession(QObject* session);
+    QObject* referenceSession() const { return m_referenceSession.data(); }
+    void setReferenceSession(QObject* session);
+    bool referenceOverlayEnabled() const { return m_referenceOverlayEnabled; }
+    void setReferenceOverlayEnabled(bool enabled);
+    QColor referenceOverlayColor() const { return m_referenceOverlayColor; }
+    void setReferenceOverlayColor(const QColor& color);
+    qreal referenceOverlayOpacity() const { return m_referenceOverlayOpacity; }
+    void setReferenceOverlayOpacity(qreal opacity);
+    bool referenceOverlayHideSecondaryChannels() const {
+        return m_referenceOverlayHideSecondaryChannels;
+    }
+    void setReferenceOverlayHideSecondaryChannels(bool hide);
+    /// Counts are source note endpoints, not differences or viewport-culling counts.
+    /// A's columns/measure lengths remain authoritative; B may extend view-only extent.
+    QVariantMap referenceOverlayInfo() const;
+    Q_INVOKABLE QVariantMap referenceOverlayProbe(int sourceIndex) const;
     QObject* theme() const { return m_theme; }
     void setTheme(QObject* theme);
 
@@ -153,6 +191,10 @@ class ChartViewItem : public QQuickPaintedItem {
     /// M5 收尾 2026-09：**播放头**（playheadSec）所在小节号文本（播放中状态栏用，随播放推进；
     /// 非播放/未渲染 → 空，回落视口光标 cursorPosText）。与 cursorPosText 区分：后者=视口光标。
     Q_INVOKABLE QString playheadPosText() const;
+    QVariantList plannedMovePreview() const { return m_plannedMovePreview; }
+    bool plannedMovePreviewActive() const { return m_plannedMovePreviewActive; }
+    /// 只绘制共用移动计划给出的最终 refs；active=true 且空列表表示无效落点，不画旧 ghost。
+    Q_INVOKABLE void setPlannedMovePreview(const QVariantList& refs, bool active);
     QString previewNoteKind() const { return m_previewNoteKind; }
     void setPreviewNoteKind(const QString& v);
     bool movePreview() const { return m_movePreview; }
@@ -167,6 +209,18 @@ class ChartViewItem : public QQuickPaintedItem {
     void setMoveSourceBgmLine(int v);
     qreal scrollY() const { return m_scrollY; }
     void setScrollY(qreal v);
+    /// Musical position at normalized viewport y=0.9; negative lead/tail positions are valid.
+    QVariantMap viewportAnchor() const;
+    Q_INVOKABLE void applyViewportAnchor(const QVariantMap& anchor);
+    /// Compare with another ChartSession: timing/layout only, not note contents or view-local state.
+    Q_INVOKABLE QVariantMap compareStructure(QObject* other) const;
+    /// Own timing, no audio dependency. Invalid input returns -1 / {valid:false}.
+    /// Fractions are [0,1], including a measure-end boundary; seconds beyond the end clamp.
+    Q_INVOKABLE double secondsForPosition(int measure, double fraction) const;
+    Q_INVOKABLE QVariantMap positionForSeconds(double sec) const;
+    /// Visible own-timing interval using live variable-measure geometry. Lead and
+    /// decorative B tail clamp to A endpoints; valid=false means no overlap.
+    Q_INVOKABLE QVariantMap viewportTimeWindow() const;
     qreal contentHeight() const;
     bool topHigh() const { return m_topHigh; }
     void setTopHigh(bool v);
@@ -187,6 +241,8 @@ class ChartViewItem : public QQuickPaintedItem {
     void setLnSelectMode(bool v);
     bool showExtras() const { return m_showExtras; }
     void setShowExtras(bool v);
+    bool hideSecondaryChannels() const { return m_hideSecondaryChannels; }
+    void setHideSecondaryChannels(bool v);
     bool showGrid() const { return m_showGrid; }
     void setShowGrid(bool v);
     qreal scrollX() const { return m_scrollX; }
@@ -255,6 +311,10 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 屏幕 y → 拍位（measure + pos 小数；时间轴工具（平移等）距离换算用）。
     Q_INVOKABLE qreal measureAtY(qreal y) const;
 
+    /// 拖动原始落点：{valid,musicalF,columnRank,column}，不吸附、不夹到小节末槽。
+    /// 坐标属于本 viewport；边界/固定头/标尺外返回 invalid。业务权限由窗格控制器验证。
+    Q_INVOKABLE QVariantMap dragSampleAt(qreal x, qreal y) const;
+
     /// 屏幕 x → 命中的可放置列（{valid, lanePlayer, laneKind, laneIndex}；横向改轨移动用）。
     /// 扩展（2026-09 跨命名空间移动）：额外带 subLine（BGM 展开列行号；-1 非 BGM）、
     /// bgaLayer（BGA 图层列 0..3；-1 非 BGA）、metaKind（"bpm"/"stop"；空 = 非元事件轨）。
@@ -265,6 +325,10 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 非演出列（BPM/STOP/BGA/BGM）或越界 → valid=false。与 laneAtX 互补（BMS 通道文件层面无差异，
     /// 只是 id/效果不同——编辑视图把它们当连续演出轨道，2026-09 用户）。
     Q_INVOKABLE QVariantMap laneAtColumn(int col) const;
+
+    /// 当前完整显示列序（含 BPM/STOP/BGA 占位与 BGM 子通道）；显式窗格编辑几何使用。
+    /// 每项同 laneAtX，不依赖滚动/宽度，避免按列反复命中测试的平方开销。
+    Q_INVOKABLE QVariantList editColumns() const;
 
     /// 给定 note 引用（{lane:{player,kind,index}, sub_line?}）→ 该 note 当前**显示列下标**
     /// （columnFor 封装：BGM 展开列按 sub_line 精确匹配、玩乐列按 lane 匹配；-1 = 无对应列）。
@@ -278,6 +342,12 @@ class ChartViewItem : public QQuickPaintedItem {
 
    signals:
     void sessionChanged();
+    void referenceSessionChanged();
+    void referenceOverlayEnabledChanged();
+    void referenceOverlayColorChanged();
+    void referenceOverlayOpacityChanged();
+    void referenceOverlayHideSecondaryChannelsChanged();
+    void referenceOverlayInfoChanged();
     void themeChanged();
     void measureHeightChanged();
     void rulerWidthChanged();
@@ -294,6 +364,7 @@ class ChartViewItem : public QQuickPaintedItem {
     void noteSampleModeChanged();
     void lnSelectModeChanged();
     void showExtrasChanged();
+    void hideSecondaryChannelsChanged();
     void showGridChanged();
     void scrollXChanged();
     void contentWidthChanged();
@@ -308,8 +379,11 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 视口光标（红线）读数变化：scrollY / contentHeight / topHigh / measureHeight /
     /// 尺寸（height）任一变化 → 红线下方内容拍位变 → 状态栏时间随之刷新。
     void cursorChanged();
+    /// Coalesced until the current scroll/layout/chart update has settled.
+    void viewportAnchorChanged();
     /// 滚动上限变化（height/contentHeight/topHigh/measureHeight 任一变化）。
     void maxScrollYChanged();
+    void plannedMovePreviewChanged();
     void previewNoteKindChanged();
     void movePreviewChanged();
     void moveDeltaFChanged();
@@ -338,6 +412,8 @@ class ChartViewItem : public QQuickPaintedItem {
         bool stop = false;        // STOP 元事件轨（同上）
     };
 
+    void scheduleViewportAnchorChanged();
+    bool m_viewportAnchorNotificationPending = false;
     void onSessionChartChanged();
     void onSessionContentChanged();
     void updateHover(const QPointF& pos);
@@ -345,16 +421,33 @@ class ChartViewItem : public QQuickPaintedItem {
     ThemeManager* themeObj() const;
     /// M6 预览：paint 尾部绘制 ghost note（放置 + 移动预览共用）。
     void drawPreview(QPainter* p) const;
+    struct ReferenceGeometry {
+        QString status = QStringLiteral("invalid");
+        int column = -1;
+        QRectF rect;
+        QRectF body;
+        bool mine = false;
+        bool paired = false;
+    };
+    std::vector<QRectF> columnRects() const;
+    QRectF referenceOverlayClip() const;
+    ReferenceGeometry referenceGeometry(int sourceIndex, const std::vector<QRectF>& columns,
+                                        int sourceCount = -1, int viewCount = -1) const;
+    void drawReferenceOverlay(QPainter* painter) const;
+    void invalidateReferenceOverlay();
+    void onReferenceContentChanged();
+    void rebuildReferenceExtent(const QVariantMap& anchor);
     /// 画一个半透明 ghost note（normal 矩形 / mine 菱形 / ln 有帽矩形）。
     void drawNoteGhost(QPainter* p, qreal measureFloat, const beatbench::Lane& lane,
                        const QString& noteKind, std::uint32_t sample, int subLine) const;
     /// paint 前按当前 theme 刷新标尺/note 标签字体族（皮肤可换；避免硬编码 Consolas）。
     void applyThemeFonts(const ThemeManager* th);
-    /// NoteRef 语义键（measure|num|den|player|kind|index|sample|sub_line）：选中判定用。
+    /// NoteRef identity includes optional ln_channel/note_kind (-1/empty = legacy wildcard).
     /// ⚠️ sub_line 入键：BGM 同位置不同子通道行须彼此区分，否则选中会误高亮整组。
     static QString noteRefKey(std::uint32_t measure, const beatbench::Rational& pos,
                               const beatbench::Lane& lane, std::uint32_t sample = 0,
-                              std::uint32_t sub_line = 0);
+                              std::uint32_t sub_line = 0, int lnChannel = -1,
+                              const QString& noteKind = {});
 
     /// BGA/BPM/STOP 对象选中判定（按 kind/measure/pos/layer/sample 键；layer/sample -1 = n/a）。
     bool metaSelected(std::uint32_t measure, const beatbench::Rational& pos, int layer,
@@ -406,12 +499,14 @@ class ChartViewItem : public QQuickPaintedItem {
     /// 有效小节数（2026-09 谱面从头/末尾追加）：max(编辑 floor, 真实小节数)。
     /// floor = m_editableMeasures（「加一小节」抬升）；真实小节数 = session.measureCount()。
     int effectiveCount() const;
+    /// Decorative extent only; never used to extend editable floor or hit-test bounds.
+    int viewMeasureCount() const;
     qreal measureHeightAt(int measure) const;
     /// 内容坐标（不含 scrollY，自顶向下）中某拍位的线性位置（含开头留白；topHigh 感知交 contentPosOf）。
     qreal linearPosOf(qreal measureFloat) const;
     /// linearPosOf 的逆（内容 lin 坐标 → 拍位；留白区返回负拍位）。
     qreal inverseLinearPos(qreal lin) const;
-    /// 重建每小节高度缓存（谱面/内容/缩放变化时；O(有效小节数+measure_events)）。
+    /// 重建每小节高度缓存（谱面/内容/缩放变化时；O(显示小节数+measure_events)）。
     void rebuildMeasureHeights();
     /// 尾部留白小节数（2026-09 结尾红线钳制修复）：保证红线(90%)能滚到「最后小节结尾」。
     /// = max(2, ceil(0.9·height()/measureHeight))，使尾部高度 ≈ 0.9·视口高（纯视口偏移，不改时序/渲染）。
@@ -419,7 +514,15 @@ class ChartViewItem : public QQuickPaintedItem {
 
     void drawHint(QPainter* p, const QString& text);
 
-    QObject* m_session = nullptr;
+    QPointer<QObject> m_session;
+    std::vector<QMetaObject::Connection> m_sessionConnections;
+    QPointer<QObject> m_referenceSession;
+    std::vector<QMetaObject::Connection> m_referenceConnections;
+    bool m_referenceOverlayEnabled = false;
+    QColor m_referenceOverlayColor =
+        QColor(QStringLiteral("#38c6b0"));  // QML may bind Theme.accent2
+    qreal m_referenceOverlayOpacity = 0.45;
+    bool m_referenceOverlayHideSecondaryChannels = true;
     QObject* m_theme = nullptr;
     qreal m_measureHeight = 96.0;
     // —— 02 通道小节长度：每小节高度按拍数等比（base=4/4；变拍/长小节视觉可见） ——
@@ -441,9 +544,9 @@ class ChartViewItem : public QQuickPaintedItem {
     qreal m_leadMeasures = 2.0;
     bool m_startPending = false;  // 未布局时的起点定位待办（geometryChange 就绪后执行）
     bool m_topHigh = true;
-    int m_snapNum = 1;   // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）
-    int m_snapDen = 16;  // 吸附粒度分母
-    bool m_bgmExpanded = false;
+    int m_snapNum = 1;          // 吸附粒度分子（槽位步长 = snapNum/snapDen 小节）
+    int m_snapDen = 16;         // 吸附粒度分母
+    bool m_bgmExpanded = true;  // 默认显露 BGM 子通道，列头仍可切换收起。
     /// BGM 展开子通道高水位（本会话单调不减，2026-09）：列数 = max(m_subMaxLine, 实际行)+1+PAD；
     /// 空白尾行保存时天然丢弃（bms_writer 按 max(sub_line)+1 写），故只增不减安全，新谱面也能放。
     std::uint32_t m_subMaxLine = 0;
@@ -451,7 +554,8 @@ class ChartViewItem : public QQuickPaintedItem {
     int m_noteSampleMode = 0;     // note 采样标签：0=隐藏 1=id 2=文件名
     bool m_lnSelectMode = false;  // LN 选取模式（默认关）：点 LN 任一段自动返回配对
     bool m_showExtras = false;    // BGA 图层通道列（d场景更多轨道）
-    bool m_showGrid = true;       // 槽位弱线显示开关（「网格」按钮）
+    bool m_hideSecondaryChannels = false;
+    bool m_showGrid = true;  // 槽位弱线显示开关（「网格」按钮）
     qreal m_scrollX = 0.0;
     bool m_perfLog = false;        // paint 帧耗时采样（--perf-log）
     double m_playheadSec = -1.0;   // M5.2 播放头秒（负 = 隐藏；暂停/停止也显示）
@@ -473,7 +577,6 @@ class ChartViewItem : public QQuickPaintedItem {
                        qreal metaRight);
     bool m_debugLaneTint = false;  // 调试：打印 key 轨列底色（排查深色皮肤下 key 轨显黑）
     std::vector<Column> m_columns;
-    std::vector<QRectF> m_colRects;  // 最近一次 paint 的列 rect（列头点击命中用）
     QFont m_rulerFont;
     QFont m_noteLabelFont;  // note 内采样标签（9px）
     // —— M7 性能：note 标签 halo 文本预渲染缓存（同一 label+色 → QImage；paint 一次
@@ -503,6 +606,8 @@ class ChartViewItem : public QQuickPaintedItem {
     qreal m_hoverY = -1.0;  // 悬停线（屏幕 y；-1 = 无）
     qreal m_hoverX = -1.0;  // 悬停 x（M6 预览：列命中用；-1 = 无）
     // —— M6 编辑预览（用户 2026-09）——
+    QVariantList m_plannedMovePreview;
+    bool m_plannedMovePreviewActive = false;
     QString m_previewNoteKind;     // 放置工具 ghost 类型（"normal"/"ln"/"mine"；空 = 关）
     bool m_movePreview = false;    // 移动预览总开关（拖拽时 QML 置 true）
     qreal m_moveDeltaF = 0.0;      // 移动预览位移（拍位小数）

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// core↔QML 桥接：活动编辑会话的只读视图（时间轴视图数据源，M2 第 5 步，doc/project-workflow.md 三、 步 5）。
-// M3 编辑体系落地后（handoff-m2-m3）：文档由 core EditorSession（session_registry 活动会话）
-// 持有——加载走协议 session.load（与 CLI/info/check 同源，doc/command-protocol.md 三、6.），编辑命令（note.put
-// 等）由 QML dispatch 后调 refresh() 让视图追踪文档/内容变化。本类不再自行解析文件。
+// core↔QML 文档桥：绑定明确 sessionId，独立缓存时序与渲染，不拥有谱面/撤销栈。
+// DocumentService 统一持有各文档桥；主视图只切换当前项，副视图可固定另一项。
+// 空 sessionId 的跟随 active 行为仅保留兼容既有桥层调用/测试。
+// 文档由 core EditorSession 持有；编辑后 refresh() 追踪本实例版本，不自行解析文件。
 // 双语言纪律（doc/skin-system.md 二、）：数据加载/持有/指纹判定在 C++（QML 只消费信号）。
 #pragma once
 
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
+#include <QVariantMap>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -23,13 +25,19 @@ namespace beatbench::app {
 
 class ChartSession : public QObject {
     Q_OBJECT
+    // 空 ID 保留兼容的跟随 active 模式；文档集合创建的桥始终绑定明确 ID。
+    Q_PROPERTY(QString sessionId READ sessionId WRITE setSessionId NOTIFY sessionIdChanged)
     Q_PROPERTY(QString path READ path NOTIFY documentChanged)
     Q_PROPERTY(bool hasChart READ hasChart NOTIFY documentChanged)
     Q_PROPERTY(int measureCount READ measureCount NOTIFY documentChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
+    Q_PROPERTY(QVariantMap textFormat READ textFormat NOTIFY textFormatChanged)
 
    public:
     explicit ChartSession(QObject* parent = nullptr);
+    ~ChartSession() override;
+    QString sessionId() const { return m_boundSessionId; }
+    void setSessionId(const QString& id);
 
     /// 打开谱面：走协议 session.load（活动会话；与 CLI/info 同源解析，doc/command-protocol.md 三、6.）。
     /// 存在 Error 级诊断 → 失败并记录 errorMessage（协议语义：read_failed）。
@@ -41,6 +49,8 @@ class ChartSession : public QObject {
     Q_INVOKABLE bool newChart(const QString& mode = {});
     /// 各格式支持的游玩模式 id（Codec::modes，capabilities 同源）——新建对话框/子菜单用。
     Q_INVOKABLE QStringList codecModes() const;
+    /// 固定绑定文档的内存模式；未命名文档也可查询，失效桥不回退全局活动文档。
+    Q_INVOKABLE QString chartMode() const;
     /// 当前谱面模式的 1P 键轨数（sp7k/dp/battle=7、pms9k=9；chart_mode_key_count 同源）。
     /// 无谱面/未知模式返回 7。拖动落点夹边的单一事实源（QML 侧不再硬编码 7）。
     Q_INVOKABLE int playKeyCount() const;
@@ -51,6 +61,7 @@ class ChartSession : public QObject {
 
     /// 当前活动会话相对最近一次 load/save 是否未保存。
     bool dirty() const { return m_dirty; }
+    QVariantMap textFormat() const { return m_textFormat; }
 
     /// 测试/诊断：当前缓存的内容/时序/采样指纹（refresh 后更新）。
     Q_INVOKABLE quint64 debugContentHash() const { return m_contentHash; }
@@ -66,17 +77,20 @@ class ChartSession : public QObject {
     /// 当前谱面 id 进制（62 = 声明 #BASE 62；36 = 默认/无文档）。
     /// QML 用于 Base62 粘贴警告（目标 Base36 时两位 id 数值与来源不同）。
     Q_INVOKABLE int idBase() const {
-        return (m_chart && m_chart->id_base == beatbench::IdBase::Base62) ? 62 : 36;
+        const auto* currentChart = chart();
+        return (currentChart && currentChart->id_base == beatbench::IdBase::Base62) ? 62 : 36;
     }
 
     /// 轨道 → 实际 BMS 通道号文本（"11"=键1、"16"=皿…；属性检查器显示用；
     /// 无法表示 / 无文档 → 空串）。kind：key/scratch/pedal/bgm。
     Q_INVOKABLE QString laneChannel(int player, const QString& kind, int index) const;
 
-    /// 当前谱面 #LNTYPE（chart.meta["LNTYPE"]）：0=关闭 / 1=RDM(默认) / 2=#LNOBJ。
-    /// 无文档 → 1。前端 LN 放置工具分支（LNTYPE 1 vs 2 交互不同）。
+    /// Legacy metadata API: #LNTYPE value (absent/unknown/no chart -> 1).
+    /// This does not choose the LN placement mechanism; use useLnObjPlacement().
     Q_INVOKABLE int lnType() const;
-    /// 当前谱面 #LNOBJ 的数值 id（未定义 → -1）。LNTYPE 2 的 LN 尾采样值。
+    /// LNOBJ placement is enabled only with valid #LNOBJ and no #LNTYPE declaration.
+    Q_INVOKABLE bool useLnObjPlacement() const;
+    /// Valid nonzero two-digit #LNOBJ id, or -1 (absent/invalid/no chart).
     Q_INVOKABLE int lnobjSample() const;
 
     /// id 文本 → 数值（按活动文档 id_base 解码；**不做存在性校验**）。
@@ -145,37 +159,45 @@ class ChartSession : public QObject {
     /// QML 侧不自用（ChartSession 内部 diff），仅诊断/测试。
     Q_INVOKABLE QString renderSnapshotFingerprint() const;
 
-    /// 活动会话视图（core 所有；不可 delete；documentChanged 后须 refresh 或重取）。
-    const beatbench::Chart* chart() const { return m_chart; }
-    const beatbench::TimingEngine* timing() const { return m_timing.get(); }
+    /// Borrowed GUI-thread view of the last refreshed document. Reload/close/edit
+    /// invalidates access until refresh(); never pair a new core chart with old timing.
+    const beatbench::Chart* chart() const;
+    const beatbench::TimingEngine* timing() const { return chart() ? m_timing.get() : nullptr; }
     QString path() const { return m_path; }
     Q_INVOKABLE QString errorMessage() const { return m_error; }
-    bool hasChart() const { return m_chart != nullptr; }
+    bool hasChart() const { return chart() != nullptr; }
     Q_INVOKABLE QString activeSessionId() const { return QString::fromStdString(m_sessionId); }
 
     /// 小节数 = 最大事件小节 + 1（空谱 = 0）。
     int measureCount() const;
 
    signals:
+    void sessionIdChanged();
     void chartChanged();     ///< 兼容旧接口：文档或内容任一变化
     void documentChanged();  ///< 活动会话/文档切换（QML 应重置视图滚动）
     void contentChanged();   ///< 同文档内容变化（QML 保持视图滚动）
     void dirtyChanged();     ///< 未保存状态变化
+    void textFormatChanged();
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
 
    private:
-    void attachActive(bool rebuildTiming);
+    void attachSession(bool rebuildTiming);
     void resetRenderState();  ///< 换文档：丢弃 PCM/金字塔并作废 in-flight
     void syncDirty();
+    void syncTextFormat();
     std::uint64_t contentHash() const;  ///< notes + bga + 采样定义指纹
-    std::uint64_t timingHash() const;   ///< 初始 BPM + bpm/stop/measure 指纹
+    std::uint64_t timingHash() const;   ///< 初始 BPM + bpm/stop/measure + 全事件最远小节
     std::uint64_t samplesHash() const;  ///< #WAV/#BMP/#BPM/#STOP 定义表
 
+    QString m_boundSessionId;
+    QThreadPool m_renderPool;  ///< 实例析构等待自己的快照任务，不等待其它文档。
+    std::uint64_t m_documentRevision = 0;
     std::string m_sessionId;
     const beatbench::Chart* m_chart = nullptr;  ///< 活动会话 chart（core 所有）
     QString m_path;
     QString m_error;
+    QVariantMap m_textFormat;
     std::unique_ptr<beatbench::TimingEngine> m_timing;
     std::uint64_t m_contentHash = 0;
     std::uint64_t m_timingHash = 0;

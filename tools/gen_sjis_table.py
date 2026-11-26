@@ -4,8 +4,7 @@
 
 数据源 = tools/cp932_map.tsv（权威映射，来源见该文件头注释）；本脚本只做形态
 生成，不重新枚举 codec——Python/.NET 对 NEC 选中区与 IBM 重复区的规范侧选择
-不同，从 codec 再枚举会改变读取行为。当前脚本只处理 CP932：lead/trail 范围与
-输出路径均硬编码；GBK/Big5/CP949 的泛化随 issue #42，不要直接复用本脚本。
+不同，从 codec 再枚举会改变读取行为。本脚本仅为 CP932 生成映射表。
 
 输出形状：
 - 双字节正表 kSjisToUcs：按 (lead, trail) 直接索引的 uint16 平铺数组（0 = 无映射），
@@ -60,11 +59,17 @@ def load_map(tsv: Path) -> tuple[list[tuple[int, int, int]], list[int], int, int
             lead, trail, ucs = line.split("\t")
             pairs.append((int(lead, 16), int(trail, 16), int(ucs, 16)))
         elif section == "single":
-            byte, ucs = line.split("\t")
-            single[int(byte, 16)] = int(ucs, 16)
+            byte, ucs = (int(token, 16) for token in line.split("\t"))
+            if byte in single or not (0x80 <= byte <= 0xFF):
+                raise SystemExit(f"cp932_map.tsv 重复或越界的单字节条目: {byte:02X}")
+            if not (0x80 <= ucs <= 0xFFFF):
+                raise SystemExit(f"cp932_map.tsv 单字节映射码点越界: {ucs:04X}")
+            single[byte] = ucs
     pairs.sort()
     seen = set()
-    for lead, trail, _ in pairs:
+    for lead, trail, ucs in pairs:
+        if lead not in LEAD_ROWS or trail not in TRAIL_COLS or not (0x80 <= ucs <= 0xFFFF):
+            raise SystemExit(f"cp932_map.tsv 双字节映射越界: {lead:02X}{trail:02X} → {ucs:04X}")
         if (lead, trail) in seen:
             raise SystemExit(f"cp932_map.tsv 重复双字节条目: {lead:02X}{trail:02X}")
         seen.add((lead, trail))
@@ -84,14 +89,12 @@ def main() -> int:
     check_only = "--check" in sys.argv[1:]
     tsv = Path(__file__).resolve().parent / "cp932_map.tsv"
     pairs, single, declared_double, declared_single, single_count = load_map(tsv)
-    if declared_double >= 0 and len(pairs) != declared_double:
+    if len(pairs) != declared_double:
         raise SystemExit(
             f"cp932_map.tsv 双字节条目数异常: 实际 {len(pairs)} != 声明 {declared_double}")
-    if declared_single >= 0 and single_count != declared_single:
+    if single_count != declared_single:
         raise SystemExit(
             f"cp932_map.tsv 单字节条目数异常: 实际 {single_count} != 声明 {declared_single}")
-    if len(single) != 128:
-        raise SystemExit(f"cp932_map.tsv 单字节段异常: 生成数组 {len(single)} != 128")
 
     # 正表平铺：行 = lead（60），列 = trail（188）；0 = 无映射。
     fwd = [0] * (N_ROWS * N_COLS)
@@ -145,15 +148,15 @@ def main() -> int:
     )
     parts.append("")
     parts.append("}  // namespace beatbench::bms")
-    text = "\n".join(parts) + "\n"
+    data = ("\n".join(parts) + "\n").encode("utf-8")
     if check_only:
-        current = out.read_text(encoding="utf-8") if out.exists() else ""
-        if current != text:
+        current = out.read_bytes() if out.exists() else b""
+        if current != data:
             print(f"out of date: {out}（运行 tools/gen_sjis_table.py 重新生成）")
             return 1
         print(f"checked: {out}")
         return 0
-    out.write_text(text, encoding="utf-8")
+    out.write_bytes(data)
     print(f"generated: {out} (双字节 {len(pairs)} 项, 单字节 {sum(1 for v in single if v)} 项, "
           f"反表 {len(rev_sorted)} 项)")
     return 0

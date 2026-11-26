@@ -14,8 +14,7 @@
 # 硬性检查（失败即退出 1）:
 #   1. CMakeLists.txt 的 project(... VERSION x.y.z) 与目标版本一致
 #   2. CHANGELOG.md 有 "## [x.y.z]" 小节，且小节里至少有一条内容
-#   3. README.md 的发行物名必须是 beatbench-vX.Y.Z-<后缀>：版本与目标一致，
-#      且发行物后缀（-win64.zip / deb / rpm / pkg.tar.zst）没被截断
+#   3. README.md 的唯一正文版本标记与目标一致；安装示例不硬编码版本化资产名
 #   4. core/.../Version.hpp 的 kVersion 与 CMakeLists 版本一致
 #      （CLI `version`、JSON 协议 version、GUI「关于」都读它；v0.3.2 首发漏改过它）
 # 警告（--strict 时视为失败）:
@@ -29,7 +28,7 @@ STRICT=0
 PRINT_NOTES=0
 # Qt 版本矩阵的**单一来源**（文档里出现这些版本都算有效，其它 Qt 6.x 判为过期示例）：
 #   6.11 = CI/打包所用 minor；6.12 = 有意记录的上游缺陷绕过说明；
-#   6.4  = 代码/发行版宣传的 Qt 下限。
+#   6.4  = 源码 API 下限，不等同于各发行包的运行基线。
 # 矩阵变化时只改这两行；pre-push 钩子与 release.yml 都用默认值，避免多处漂移。
 QT_MINOR="6.11,6.12"
 QT_FLOOR="6.4"
@@ -98,39 +97,37 @@ else
   echo "  ✓ CHANGELOG.md: 有 [$VER] 小节且有内容"
 fi
 
-# ---- 3. README 发行物名 ----
-# 正则连后缀一起抓：旧写法只抓版本号（beatbench-vX.Y.Z），四个名字被截断后都塌缩成同一个
-# beatbench-vX.Y.Z——数量与取值都「正确」，看不出截断。要抓的两类问题：
-#   ① 版本不符（残留旧版本）；② 后缀被 release-please 吃掉（beatbench-v0.3.2-win64.zip →
-#   beatbench-v0.4.0）；成因见 README 顶部标记注释。
-# 提取前先剥掉行内 HTML 注释：标记注释就插在版本号与发行物后缀之间，不剥的话 token 会在
-# `<!--` 处被截断成 beatbench-vX.Y.Z（正是要抓的形态之一，会自伤）。
-mapfile -t readme_assets < <(sed 's/<!--.*-->//g' README.md | grep -oE 'beatbench-v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9._-]*' | sort -u || true)
-if [ "${#readme_assets[@]}" -eq 0 ]; then
-  fail "README.md 里找不到任何 beatbench-v<版本> 发行物名（下载/安装命令缺失或名字被改坏）"
-else
-  readme_bad=()
-  for _asset in "${readme_assets[@]}"; do
-    case "$_asset" in
-      "beatbench-v$VER-"*) ;;
-      *) readme_bad+=("$_asset") ;;
-    esac
-  done
-  if [ "${#readme_bad[@]}" -eq 0 ]; then
-    echo "  ✓ README.md: ${#readme_assets[@]} 个发行物名均为 beatbench-v$VER-…（版本一致、后缀完整）"
-  else
-    fail "README.md 发行物名不正确：${readme_bad[*]}（期望 beatbench-v$VER-<后缀>；版本不符或后缀被截断，下载会 404）"
+# ---- 3. README 的唯一自动发布版本 ----
+# 普通正文保留给 release-please，不能把 HTML 标记放进安装代码示例。
+readme_marker_count="$({ grep -oF '<!-- x-release-please-version -->' README.md || true; } | wc -l)"
+readme_versions=()
+fence=''
+fence_re='^ {0,3}(```+|~~~+)(.*)$'
+version_re='^当前发布版本：v([0-9]+\.[0-9]+\.[0-9]+)<!-- x-release-please-version -->$'
+while IFS= read -r line || [[ -n $line ]]; do
+  line=${line%$'\r'}
+  if [[ $line =~ $fence_re ]]; then
+    token=${BASH_REMATCH[1]}
+    rest=${BASH_REMATCH[2]}
+    if [[ -z $fence ]]; then
+      fence=$token
+    elif [[ $token == "$fence"* && $rest != *[![:space:]]* ]]; then
+      fence=''
+    fi
+  elif [[ -z $fence && $line =~ $version_re ]]; then
+    readme_versions+=("${BASH_REMATCH[1]}")
   fi
-  # 四类产物各至少要有名字：按后缀特征识别，不钉发行版号（发行版换代不用改这里）
-  for _kind in '-win64.zip' '.deb' '.rpm' '.pkg.tar.zst'; do
-    printf '%s\n' "${readme_assets[@]}" | grep -q -- "$_kind" ||
-      fail "README.md 缺少 $_kind 类型的发行物名（该行被删了？）"
-  done
+done < README.md
+if [ "$readme_marker_count" -ne 1 ] || [ "${#readme_versions[@]}" -ne 1 ]; then
+  fail "README.md 必须在代码块之外保留唯一的“当前发布版本：vX.Y.Z”行和 release-please 标记"
+elif [ "${readme_versions[0]}" != "$VER" ]; then
+  fail "README.md 发布版本为 v${readme_versions[0]}，与目标 v$VER 不一致"
+else
+  echo "  ✓ README.md: v$VER（单一 release-please 标记）"
 fi
-# 旧命名（无 v 前缀 / 下划线分隔）不允许再回到 README（产物文件名已统一为连字符带 v）
-mapfile -t readme_legacy < <(git grep -hoE 'beatbench[_-][0-9]+\.[0-9]+\.[0-9]+' -- README.md | sort -u || true)
-if [ "${#readme_legacy[@]}" -gt 0 ]; then
-  fail "README.md 残留旧命名格式（应统一为 beatbench-v...）：${readme_legacy[*]}"
+# 安装示例不再硬编码版本化资产名；也拒绝旧命名（省略 v 或使用下划线）。
+if grep -qE 'beatbench[_-]v?[0-9]+\.[0-9]+\.[0-9]+' README.md; then
+  fail "README.md 含硬编码的版本化发行物名；安装步骤应使用实际下载的文件名"
 fi
 
 # ---- 4. Version.hpp 的 kVersion（CLI/JSON/关于页的版本来源） ----

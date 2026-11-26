@@ -70,6 +70,9 @@ bool EditUtils::refEquals(const QVariantMap& a, const QVariantMap& b) const {
     const QVariantMap pb = b.value(QStringLiteral("pos")).toMap();
     if (pa.value(QStringLiteral("num")) != pb.value(QStringLiteral("num"))) return false;
     if (pa.value(QStringLiteral("den")) != pb.value(QStringLiteral("den"))) return false;
+    for (const auto& key : {QStringLiteral("ln_channel"), QStringLiteral("note_kind")}) {
+        if (hasValue(a, key) && hasValue(b, key) && a.value(key) != b.value(key)) return false;
+    }
     const bool aSub = hasValue(a, QStringLiteral("sub_line"));
     const bool bSub = hasValue(b, QStringLiteral("sub_line"));
     if (aSub && bSub && a.value(QStringLiteral("sub_line")) != b.value(QStringLiteral("sub_line")))

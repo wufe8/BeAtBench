@@ -3,7 +3,6 @@
 # sjis_table.hpp（commit 4af261d）提取。注意：Python/.NET codec 对 NEC 选中区
 # 与 IBM 重复区（0xED40/0xFA40 侧）的规范编码选择不同，且双射回验会剔除非规范
 # 侧表示——为保证读取行为不变，数据以本文件为准，不从运行时 codec 再枚举。
-# 新增编码（GBK/Big5/CP949）各自固化一份 <encoding>_map.tsv，格式同此文件。
 # 列：lead(hex2) trail(hex2) ucs(hex4)；单字节映射在 single 列段。
 #
 # double_byte	9206

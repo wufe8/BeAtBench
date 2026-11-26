@@ -59,13 +59,14 @@ install_build_deps() {
       qml6-module-qtqml qml6-module-qtqml-workerscript \
       qml6-module-qtquick qml6-module-qtquick-controls \
       qml6-module-qtquick-layouts qml6-module-qtquick-templates \
-      qml6-module-qtquick-window qml6-module-qtquick-dialogs \
+      qml6-module-qtquick-window qml6-module-qtquick-dialogs qml6-module-qtquick-shapes \
       libasound2-dev
   elif [ -f /etc/fedora-release ]; then
     dnf install -y -q gcc-c++ cmake ninja-build git rpm-build \
       qt6-qtbase-devel qt6-qtdeclarative-devel alsa-lib-devel
   elif [ -f /etc/arch-release ]; then
-    pacman -Sy --noconfirm --needed base-devel cmake ninja git qt6-base qt6-declarative alsa-lib
+    source "$(dirname "${BASH_SOURCE[0]}")/arch-pacman-retry.sh"
+    arch_pacman_retry -Sy --noconfirm --needed base-devel cmake ninja git qt6-base qt6-declarative alsa-lib
   else
     echo "错误: 未知发行版（需 debian/fedora/arch 系），无法安装构建依赖" >&2
     exit 1
@@ -150,7 +151,7 @@ EOF
     | sed -E 's/^[[:space:]]*([^ ]+)( \(.*\))?$/\1\2 | \1t64\2/' \
     | paste -sd, -)"
   # dlopen 的运行时依赖（ELF shlibs 不含）：QML 模块
-  deps="$deps, qml6-module-qtqml, qml6-module-qtqml-workerscript, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-dialogs, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window"
+  deps="$deps, qml6-module-qtqml, qml6-module-qtqml-workerscript, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-dialogs, qml6-module-qtquick-layouts, qml6-module-qtquick-shapes, qml6-module-qtquick-templates, qml6-module-qtquick-window"
 
   mkdir -p "$PKGROOT/DEBIAN"
   cat > "$PKGROOT/DEBIAN/control" <<EOF
