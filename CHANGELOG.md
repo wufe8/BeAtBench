@@ -2,6 +2,43 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [0.5.0](https://github.com/wufe8/BeAtBench/compare/v0.4.2...v0.5.0) (2026-11-26)
+
+
+### Features
+
+* **editor:** add explicit pane edit contexts and safe captures ([b880d6e](https://github.com/wufe8/BeAtBench/commit/b880d6e6d6f493e25243067441b6510b486565b1))
+* **editor:** complete pane clipboard and captured metadata edits ([35c73f0](https://github.com/wufe8/BeAtBench/commit/35c73f0b40e3b0564dd21e098aad33ab59a88adb))
+* **editor:** enable isolated reference pane editing ([a677010](https://github.com/wufe8/BeAtBench/commit/a6770109525112fc3e73dee1e013711eabec45c2))
+* **editor:** expose unsnapped viewport drag sampling ([58c1fd9](https://github.com/wufe8/BeAtBench/commit/58c1fd91554b7278b46b2970d587ef4ae86d7683))
+* **editor:** support captured same-document cross-pane note moves ([7b56d2b](https://github.com/wufe8/BeAtBench/commit/7b56d2b07f4588a3d1557ed7e6f6265d6bcabc94))
+* integrate M7 project workflow for v0.5.0 ([53d4a2a](https://github.com/wufe8/BeAtBench/commit/53d4a2a8c20d6e931d8d65e5d45ec8b2b63a2a9d))
+* **project:** add safe bulk missing resource relocation ([fee59d4](https://github.com/wufe8/BeAtBench/commit/fee59d4294031ecb6571763374caa7eda4235916))
+
+
+### Bug Fixes
+
+* **audio:** audition notes from the reference chart directory ([8dce94a](https://github.com/wufe8/BeAtBench/commit/8dce94a2852a96de5dd6285e8325cc50dcef68de))
+* avoid resource dialog signal overrides ([9aba078](https://github.com/wufe8/BeAtBench/commit/9aba078017224c1a4ba4e8c4ac642d77eb9236f4))
+* **ci:** pass explicit Linux and macOS build limits ([4c8d6f5](https://github.com/wufe8/BeAtBench/commit/4c8d6f5428f94c389924619c8d640a7bfd42dd4c))
+* **ci:** retry Arch archive database and package downloads ([96051a7](https://github.com/wufe8/BeAtBench/commit/96051a79a01586a8ef532e6614c7fadf2e30ff59))
+* **ci:** retry Arch archive package download failures ([67f0a2b](https://github.com/wufe8/BeAtBench/commit/67f0a2b61316eeaf26a4ae88eeb94b8576a10764))
+* complete Qt 6.4 packaging and test prerequisites ([df1f67e](https://github.com/wufe8/BeAtBench/commit/df1f67e494e1902ac7c0a000409ccda1b8093d04))
+* **editor:** keep quantized notes inside the measure ([3b93f5f](https://github.com/wufe8/BeAtBench/commit/3b93f5f336ddc99a2f4b458f949479a420f739e8))
+* **editor:** preserve BGM subchannel during note quantization ([a92f501](https://github.com/wufe8/BeAtBench/commit/a92f501cdb965b126c8433dc7c067641384bacea))
+* normalize document and slice paths across directory aliases ([04d22d5](https://github.com/wufe8/BeAtBench/commit/04d22d58c5f2d26aa1938b16d44de3f71362670b))
+* preserve BMS document encoding and line endings ([c0b5a1b](https://github.com/wufe8/BeAtBench/commit/c0b5a1bc92e54726402dcd5e4a84a348c11b8468))
+* preserve timing definitions and commit Dock form input ([ff35d3a](https://github.com/wufe8/BeAtBench/commit/ff35d3afa191323ab8a127923cf6ddc98bf29a30))
+* **project:** resolve directory aliases above missing resource paths ([efe164d](https://github.com/wufe8/BeAtBench/commit/efe164d13d12858a1adc1b25ee66e70bef735d61))
+* support Debian and Qt 6.4 release builds ([6cae355](https://github.com/wufe8/BeAtBench/commit/6cae3558b78fbade13e3823fcf6c34ca23e81fee))
+* **ui:** compact pane headings and unify filename typography ([22892c7](https://github.com/wufe8/BeAtBench/commit/22892c746cb79d1f5cddab0e6975ed10063bbd2a))
+* **ui:** fit audio settings to narrow windows ([c900214](https://github.com/wufe8/BeAtBench/commit/c90021427a5301193480c3ccec4329b47b314cc1))
+* **ui:** keep box selection anchored while scrolling ([74eff2e](https://github.com/wufe8/BeAtBench/commit/74eff2e75093900d4e738f54122777ad3b518b74))
+* **ui:** preserve compare pane proportions and highlight active title ([cbd1db1](https://github.com/wufe8/BeAtBench/commit/cbd1db1b3439c0b17c94e1c23474bef671cd5a3b))
+* **ui:** size and theme timeline event dialogs ([7376d67](https://github.com/wufe8/BeAtBench/commit/7376d67e1d68d4fb56d2253c9b95a23cd5a6a681))
+* **ui:** theme and size BGA dock dialogs ([bd91c8c](https://github.com/wufe8/BeAtBench/commit/bd91c8ce7bf58c5a13ee89f729b43d672f9352b3))
+* **view:** guard waveform and playhead session lifetimes ([94daefb](https://github.com/wufe8/BeAtBench/commit/94daefb35d741d995d736e1a3eead2c9d5fe2f86))
+
 ## [0.4.2](https://github.com/wufe8/BeAtBench/compare/v0.4.1...v0.4.2) (2026-10-23)
 
 
