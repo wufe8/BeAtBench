@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <algorithm>
+#include <filesystem>
 #include <set>
 
 #include "beatbench/core/bms/BmsCodec.hpp"
@@ -586,9 +587,45 @@ TEST_F(ResourceBindingTest, CustomBudgetsRejectBeforeOpeningTargets) {
     EXPECT_FALSE(ok(controller.prepareCustomContent("#TITLE x", root, targets)));
     EXPECT_TRUE(DocumentService::findSessionId(a).isEmpty());
 }
+TEST_F(ResourceBindingTest, AbsoluteWavPathResolvesAliasesAboveMissingDirectories) {
+    QTemporaryDir outside;
+    ASSERT_TRUE(outside.isValid());
+    const QString alias = outside.filePath("project-alias");
+    const QString escape = QDir(root).filePath("outside-alias");
+    const auto linkDirectory = [](const QString& target, const QString& link) {
+        std::error_code error;
+        std::filesystem::create_directory_symlink(QFileInfo(target).filesystemAbsoluteFilePath(),
+                                                  QFileInfo(link).filesystemAbsoluteFilePath(),
+                                                  error);
+        return error;
+    };
+    if (const auto error = linkDirectory(root, alias)) {
+#ifdef Q_OS_WIN
+        GTEST_SKIP() << "Host cannot create directory symlinks: " << error.message();
+#else
+        FAIL() << "Cannot create directory symlink: " << error.message();
+#endif
+    }
+    const QString outsideMedia = outside.filePath("real-outside");
+    ASSERT_TRUE(QDir().mkpath(outsideMedia));
+    ASSERT_FALSE(linkDirectory(outsideMedia, escape));
+
+    ASSERT_FALSE(QDir(alias).exists("media"));
+    const auto p =
+        controller.prepareWavBinding("02", QDir(alias).filePath("media/new.wav"), alias, {a, b});
+    ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString();
+    ASSERT_TRUE(ok(controller.commitBindings(planId(p))));
+    EXPECT_EQ(file(session(a), SampleKind::Wav, 2), "media/new.wav");
+    EXPECT_EQ(file(session(b), SampleKind::Wav, 2), "../media/new.wav");
+
+    const auto rejected =
+        controller.prepareWavBinding("03", QDir(escape).filePath("missing/new.wav"), root, {a});
+    EXPECT_FALSE(ok(rejected));
+    EXPECT_TRUE(rejected.value("error").toString().startsWith("bad_path:"));
+}
 TEST_F(ResourceBindingTest, SimpleWavHelperAcceptsRootRelativeAndAbsoluteButRejectsInjection) {
     auto p = controller.prepareWavBinding("02", QDir(root).filePath("media/new.wav"), root, {a, b});
-    ASSERT_TRUE(ok(p));
+    ASSERT_TRUE(ok(p)) << p.value("error").toString().toStdString();
     ASSERT_TRUE(ok(controller.commitBindings(planId(p))));
     EXPECT_EQ(file(session(b), SampleKind::Wav, 2), "../media/new.wav");
     EXPECT_FALSE(ok(controller.prepareWavBinding("03\n#WAV04", "x.wav", root, {a})));

@@ -145,11 +145,19 @@ QString DocumentService::normalizedPath(const QString& path) {
     const QFileInfo info(QDir::fromNativeSeparators(path));
     const QString canonical = info.canonicalFilePath();
     if (!canonical.isEmpty()) return QDir::cleanPath(canonical);
-    // 新建或已删除的谱面也要解析父目录别名，让创建前后的路径身份一致。
-    const QFileInfo absolute(QDir::cleanPath(info.absoluteFilePath()));
-    const QString parent = QDir(absolute.absolutePath()).canonicalPath();
-    return parent.isEmpty() ? absolute.absoluteFilePath()
-                            : QDir(parent).filePath(absolute.fileName());
+    // 新建目标可能缺少多级父目录；先解析最近的现存目录，再拼回缺失的后缀。
+    const QString absolute = QDir::cleanPath(info.absoluteFilePath());
+    QFileInfo ancestor(absolute);
+    QString suffix;
+    for (;;) {
+        const QString parent = ancestor.absolutePath();
+        if (parent == ancestor.absoluteFilePath() || ancestor.fileName().isEmpty()) break;
+        suffix.prepend('/' + ancestor.fileName());
+        const QString canonicalParent = QDir(parent).canonicalPath();
+        if (!canonicalParent.isEmpty()) return QDir::cleanPath(canonicalParent + suffix);
+        ancestor.setFile(parent);
+    }
+    return absolute;
 }
 
 QString DocumentService::findSessionId(const QString& path) {
