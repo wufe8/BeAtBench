@@ -482,12 +482,18 @@ TestCase {
         const resources = mainFixture.objectNamed(page, "projectResourceList")
         const refs = mainFixture.objectNamed(page, "projectResourceUsesList")
         verify(handle !== null && resources !== null && refs !== null)
-        const oldRefs = vertical.itemAt(1).height, oldResources = resources.height
+        const upperPane = vertical.itemAt(0), lowerPane = vertical.itemAt(1)
+        tryVerify(() => upperPane.height > 0 && lowerPane.height > 0 && handle.height > 0
+                  && resources.height > 20 && !isPolishScheduled(vertical) && !isPolishScheduled(upperPane))
+        const oldUpper = upperPane.height, oldRefs = lowerPane.height, oldResources = resources.height
         mousePress(handle, handle.width / 2, handle.height / 2)
         mouseMove(handle, handle.width / 2, handle.height / 2 - 70, 100)
         mouseRelease(handle, handle.width / 2, handle.height / 2 - 70)
-        tryVerify(function() { return vertical.itemAt(1).height > oldRefs + 25 })
-        verify(resources.height < oldResources - 20)
+        // 先等分隔条两侧窗格更新；内层 ListView 还有独立的 ColumnLayout polish。
+        tryVerify(() => lowerPane.height > oldRefs + 25 && upperPane.height < oldUpper - 20,
+                  5000, "Dragging the resource split handle should enlarge uses and shrink resources")
+        tryVerify(() => resources.height < oldResources - 20, 5000,
+                  "The resource list should shrink with its pane")
         verify(vertical.itemAt(0).height >= vertical.paneMinimumHeight - 1)
         verify(vertical.itemAt(1).height >= vertical.paneMinimumHeight - 1)
         const kept = vertical.itemAt(1).height
