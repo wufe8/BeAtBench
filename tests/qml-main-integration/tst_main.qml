@@ -954,13 +954,39 @@ TestCase {
                         + " chartDelegates=" + chartDelegates + " resourceDelegates=" + resourceDelegates)
         }
     }
+    Component { id: projectActionSpy; SignalSpy {} }
     function projectAction(path, label) {
         main.currentPage = 3
-        wait(0)
-        const page = mainFixture.findProperty(main, "selectedChart")
+        const page = mainFixture.objectNamed(main, "projectPage")
         verify(page !== null)
+        const actions = mainFixture.objectNamed(page, "projectChartActions")
+        verify(actions !== null)
         page.selectedChart = path
-        clickButton(page, label)
+
+        // 切页和选中谱面都会触发布局；visible 在 Qt 6.4 完成 polish 前就可能为 true。
+        const content = main.contentItem
+        let button = null
+        tryVerify(() => {
+            button = mainFixture.button(actions, label)
+            if (!button || !button.enabled || button.width <= 0 || button.height <= 0)
+                return false
+            const x = button.width / 2, y = button.height / 2
+            for (let item = button; item !== null; item = item.parent) {
+                if (isPolishScheduled(item)) return false
+                if ((item === actions || item === page || item === content || item.clip)
+                        && !item.contains(button.mapToItem(item, x, y))) return false
+                if (item === content) return true
+            }
+            return false
+        }, 5000, "Project action did not become reachable: " + label)
+
+        const signalName = label === "对照 B" ? "referenceOpenRequested" : "primaryAssignRequested"
+        const request = createTemporaryObject(projectActionSpy, test, {target: page, signalName: signalName})
+        verify(request !== null && request.valid)
+        mouseClick(button, button.width / 2, button.height / 2)
+        compare(request.count, 1, "Project action did not emit " + signalName + " exactly once: " + label)
+        // 用夹具提供的绝对路径验证派发，不复用按钮的路径转换逻辑。
+        compare(request.signalArguments[0][0], path)
     }
     function primaryState() {
         return { document: mainFixture.snapshot(a), path: main.chartPath,
