@@ -244,25 +244,39 @@ int cmd_convert(const std::string& in_path, const std::string& out_path,
     beatbench::codec::ReadOptions ropts;
     const auto result = codec->read(in_path, ropts);
     print_diagnostics(result.diagnostics);
+    if (std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                    [](const auto& d) { return d.severity == beatbench::codec::Severity::Error; }))
+        return 1;
 
     beatbench::codec::WriteOptions opts;
     if (encoding == "sjis" || encoding == "shift_jis" || encoding == "shift-jis") {
         opts.encoding = "sjis";
+        opts.strict_encoding = true;
     } else if (encoding == "utf8" || encoding == "utf-8") {
         opts.encoding = "utf8";
     } else {
         std::printf("[ERROR] 未知编码 '%s'（支持 utf8 / sjis）\n", encoding.c_str());
         return 2;
     }
-    const auto text = codec->write(result.chart, opts);
-    const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(out_path), text);
-    if (!wr.ok) {
-        std::printf("[ERROR] %s\n", wr.error.c_str());
+    try {
+        const auto output = std::filesystem::u8path(out_path);
+        if (result.encoding_ambiguous && std::filesystem::exists(output)) {
+            std::printf("[ERROR] 输入编码有歧义，不能覆盖现有输出；请改用新路径\n");
+            return 1;
+        }
+        const auto text = codec->write(result.chart, opts);
+        const auto wr = beatbench::io::atomic_write_file(output, text);
+        if (!wr.ok) {
+            std::printf("[ERROR] %s\n", wr.error.c_str());
+            return 1;
+        }
+        std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(),
+                    text.size(), encoding.c_str());
+        return 0;
+    } catch (const std::exception& e) {
+        std::printf("[ERROR] 写出失败: %s\n", e.what());
         return 1;
     }
-    std::printf("转换完成: %s -> %s (%zu B, %s)\n", in_path.c_str(), out_path.c_str(), text.size(),
-                encoding.c_str());
-    return 0;
 }
 
 /// M4.3b：渲染谱面 → 混音 WAV（可听验证用；M5 播放的前置产物）。
@@ -322,12 +336,8 @@ int cmd_render_impl(const std::string& in_path, const std::string& out_path, dou
     return 0;
 }
 
-// --json 模式：解析请求 → 进程内 dispatch → 输出信封。
-// 单请求（内联参数或 stdin 单块）：解析 → dispatch → 输出。
-// stdin 多行模式（doc/command-protocol.md 待办「批处理模式」2026-08 落地）：每行一个请求，
-// 同一进程连续 dispatch——session 状态（编辑会话）跨请求保持，CLI 可脚本编辑
-// （session.load → note.put → session.undo → convert 序列）。
-// 退出码：0 = 全部请求已产出信封；2 = 请求 JSON 非法/无输入；1 = 内部异常。
+// --json 模式：内联参数只处理单请求；stdin 优先按单请求处理，再回退到逐行批处理。
+// 批处理复用同一进程的编辑会话；传输、信封与退出码见 doc/command-protocol.md 三、。
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——JSON 子命令分派与批处理流程
 int run_json(const std::string& request_text, bool multiline) {
     auto dispatch_one = [&](const std::string& text, int& code) -> bool {
@@ -373,7 +383,7 @@ int run_json(const std::string& request_text, bool multiline) {
     } catch (const beatbench::json::JsonError&) {
         // 非单 JSON → 按行批处理
     }
-    // 多行：逐行 dispatch；空行跳过；任一失败 → 退出码取最严重
+    // 多行：逐行 dispatch，跳过空白行；保留首个非零行处理状态。
     std::size_t start = 0;
     bool any = false;
     while (start <= request_text.size()) {

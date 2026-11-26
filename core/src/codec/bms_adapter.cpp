@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // bms 格式 → Codec 接口适配：把现有 read_bms_file/write_bms 包装成统一 Codec。
-// 现有 bms codec（core/src/bms/*）零改动——适配层只做诊断类型转换与参数映射。
+// 适配层只做诊断/字节格式转换与参数映射。
 // 扩展名注册 bms/bml/bme/pms（历史遗留同一语法）；模式见 ChartMode/BmsChannelMaps。
 #include <filesystem>
 #include <string>
@@ -55,8 +55,24 @@ class BmsCodec : public Codec {
             od.line = d.line;
             out.diagnostics.push_back(std::move(od));
         }
-        out.detected_encoding =
-            r.detected == beatbench::bms::DetectedEncoding::Utf8 ? "utf8" : "sjis";
+        using beatbench::bms::DetectedEncoding;
+        switch (r.detected) {
+            case DetectedEncoding::Ascii:
+                out.detected_encoding = "ascii";
+                break;
+            case DetectedEncoding::Utf8:
+                out.detected_encoding = "utf8";
+                break;
+            case DetectedEncoding::ShiftJis:
+                out.detected_encoding = "sjis";
+                break;
+            case DetectedEncoding::Unknown:
+                break;
+        }
+        out.line_ending = r.line_ending;
+        out.preferred_line_ending = r.preferred_line_ending;
+        out.utf8_bom = r.utf8_bom;
+        out.encoding_ambiguous = r.encoding_ambiguous;
         return out;
     }
 
@@ -68,6 +84,11 @@ class BmsCodec : public Codec {
         } else {
             wo.encoding = beatbench::bms::BmsEncoding::Utf8;  // 默认 utf8
         }
+        wo.line_ending = opts.line_ending;
+        wo.utf8_bom = opts.utf8_bom;
+        wo.strict_encoding = opts.strict_encoding;
+        wo.ascii_only = opts.ascii_only;
+        wo.encoding_ambiguous = opts.encoding_ambiguous;
         return beatbench::bms::write_bms(chart, wo);
     }
 };

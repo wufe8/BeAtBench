@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // BGA 面板（左 Dock「BGA」标签页，2026-09）：#BMP 定义 + base/poor/layer/layer2 事件管理。
 // 数据源 = session.samples（bmp 数组）+ bga.list（当前层事件，升序）。
-// 编辑经信号 → Main 走 bga.put/delete、sample.setFile/rename(kind=bmp)，成功后 Main 调 reload()。
+// 编辑经信号转发；Main 调用 BGA 或 #BMP 命令并在成功后刷新列表。
 // 双语言纪律（doc/skin-system.md 二、）：本组件纯展示 + 事件分发，不直接 dispatch 编辑命令（只读 dispatch 可）。
 // 预览（图像解码）后置：此处只编辑定义与事件，不渲染位图。
 import QtQuick
@@ -20,21 +20,12 @@ ColumnLayout {
     property var bmpDefs: []
     property bool expandBmp: false
 
-    /// 当前 #BMP id 文本数组（事件对话框选 BMP 用）。
-    function bmpIdList() {
-        const a = []
-        for (let i = 0; i < root.bmpDefs.length; i++) a.push(root.bmpDefs[i].id)
-        return a
-    }
-
     /// 添加/改值 BGA 事件 → Main 走 bga.put。bmpId 为文本 id。
     signal bgaEditRequested(int layer, int measure, int num, int den, string bmpId)
     /// 删除 BGA 事件 → Main 走 bga.delete。
     signal bgaDeleteRequested(int layer, int measure, int num, int den)
     /// 添加 #BMP 定义 → Main 走 sample.setFile(kind=bmp)。
     signal bmpAddRequested(string id, string file)
-    /// 重命名 #BMP id → Main 走 sample.rename(kind=bmp)。
-    signal bmpRenameRequested(string fromId, string toId)
     /// 删除 #BMP 定义 → Main 走 sample.delete(kind=bmp)。
     signal bmpDeleteRequested(string id)
     /// 选择当前 #BMP（视口 BGA 列放置用）→ Main 设 currentBmpId。
@@ -115,6 +106,7 @@ ColumnLayout {
         }
 
         ListView {
+            objectName: "bgaEventList"
             anchors.fill: parent
             clip: true
             model: root.events
@@ -166,11 +158,12 @@ ColumnLayout {
                     z: -1
                     anchors.fill: parent
                     hoverEnabled: true
-                    // 双击编辑该事件
-                    onDoubleClicked: eventDialog.openForEdit(
-                                         root.bgaLayer, row.modelData.measure,
-                                         row.modelData.pos.num, row.modelData.pos.den,
-                                         "#BMP" + chartSession.idTextOf(row.modelData.sample))
+                    onDoubleClicked: (mouse) => {
+                        if (mouse.button === Qt.LeftButton)
+                            eventDialog.openAt(root.bgaLayer, row.modelData.measure,
+                                               row.modelData.pos.num, row.modelData.pos.den,
+                                               chartSession.idTextOf(row.modelData.sample))
+                    }
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: (mouse) => {
                         if (mouse.button === Qt.RightButton)
@@ -360,48 +353,34 @@ ColumnLayout {
     }
 
     // ---- 添加/改值 BGA 事件对话框 ----
-    Dialog {
+    BbDialog {
         id: eventDialog
-        modal: true
-        width: Math.min(root.width - 4, 240)
-        anchors.centerIn: parent
+        objectName: "bgaEventDialog"
+        width: dialogHostWidth > 0 ? Math.max(0, Math.min(320, dialogHostWidth - 16)) : 320
+        height: naturalHeight
         title: qsTr("BGA 事件")
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        acceptGuard: function() {
+            return measureSpin.commitPendingEdit() && numSpin.commitPendingEdit() && denSpin.commitPendingEdit()
+        }
 
         property int dlgLayer: 0
-        property bool editing: false
-        property int baseMeasure: 0
-        property int baseNum: 0
-        property int baseDen: 1
-        property string baseBmpId: ""
 
         function openForAdd(layer) {
-            eventDialog.dlgLayer = layer
-            eventDialog.editing = false
-            baseMeasure = 0; baseNum = 0; baseDen = 1
-            baseBmpId = root.bmpIdList().length ? root.bmpIdList()[0] : ""
-            applyFields()
-            open()
+            openAt(layer, 0, 0, 1, root.bmpDefs.length ? root.bmpDefs[0].id : "")
         }
-        function openForEdit(layer, measure, num, den, bmpIdText) {
-            eventDialog.dlgLayer = layer
-            eventDialog.editing = true
-            baseMeasure = measure; baseNum = num; baseDen = den
-            // "#BMP01" → "01"
-            baseBmpId = bmpIdText.indexOf("#BMP") === 0 ? bmpIdText.substring(4) : bmpIdText
-            applyFields()
+        function openAt(layer, measure, num, den, bmpId) {
+            dlgLayer = layer
+            measureSpin.value = measure
+            numSpin.value = num
+            denSpin.value = Math.max(1, den)
+            bmpIdField.text = bmpId
             open()
-        }
-        function applyFields() {
-            measureSpin.value = baseMeasure
-            numSpin.value = baseNum
-            denSpin.value = Math.max(1, baseDen)
-            bmpIdField.text = baseBmpId
         }
         onOpened: measureSpin.forceActiveFocus()
 
         ColumnLayout {
-            anchors.fill: parent
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
             spacing: 6
             RowLayout {
                 spacing: 6
@@ -434,7 +413,7 @@ ColumnLayout {
                     Layout.fillWidth: true
                     placeholderText: qsTr("01/ZZ")
                     font.family: Theme.fontMono
-                    onAccepted: eventDialog.accept()
+                    onAccepted: eventDialog.requestAccept()
                     escapeHandler: function() { eventDialog.reject() }
                 }
             }

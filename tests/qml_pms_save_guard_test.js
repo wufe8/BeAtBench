@@ -21,7 +21,21 @@ function setup(mode = 'pms9k', chartPath = 'song.bms') {
         pendingNewMode: '', allowClose: false, saveAsDocumentId: '', pendingPmsSaveDocumentId: '',
         pendingPmsSavePath: '', pendingPmsSaveAs: false, pmsSaveRequestToken: 0,
         chartSession: { id: 'attached-A', hasChart: true, dirty: true,
-            activeSessionId() { return this.id; } },
+            get sessionId() { return this.id; }, chartMode: () => mode },
+        chartHistoryController: { busy: false, enabled: false, finishSave: () => {} },
+        project: { refreshOpenStates: () => {} },
+        pendingOriginalDocument: '', pendingSelectedSaves: [], pendingSelectedSaveIndex: 0,
+        documents: {
+            activeId: () => 'attached-A', refresh: () => {},
+            dirtyDocuments: () => c.chartSession.dirty ? [{ id: 'attached-A' }] : [],
+            saveDirtyNamed: () => ({ ok: true, errors: [], confirmation: [], unnamed: [] }),
+            save: (id, output) => {
+                calls.push('session.save');
+                if (c.failSave) return { ok: false, error: 'write failed' };
+                c.chartSession.dirty = false;
+                return { ok: true, id, path: output };
+            }
+        },
         Qt: { callLater: fn => later.push(fn) }, qsTr: text => text,
         setStatus: text => statuses.push(text),
         editUtils: { // Qt QFileInfo policy itself is covered by edit_utils_test.cpp.
@@ -41,7 +55,11 @@ function setup(mode = 'pms9k', chartPath = 'song.bms') {
         },
         sessionCmd: (name, args) => {
             calls.push(name);
-            if (name === 'session.save') return c.failSave ? null : { output: args.path || c.chartPath, bytes: 1 };
+            if (name === 'session.save') {
+                if (c.failSave) return null;
+                c.chartSession.dirty = false;
+                return { output: args.path || c.chartPath, bytes: 1 };
+            }
             return {};
         }
     });
@@ -57,7 +75,8 @@ function setup(mode = 'pms9k', chartPath = 'song.bms') {
     c.session = { saveChart: () => c.controller_saveChart(), saveChartAs: p => c.controller_saveChartAs(p) };
     for (const name of ['openSaveAsDialog', 'handleSaveAsAccepted', 'completeSaveAttempt',
         'requestPmsSuffixConfirmation', 'clearPmsSuffixConfirmation', 'cancelPmsSuffixSave',
-        'confirmPmsSuffixSave', 'documentIsDirty', 'requestDocumentAction', 'finishPendingDocumentAction',
+        'confirmPmsSuffixSave', 'documentIsDirty', 'anyDocumentIsDirty', 'restoreDocument',
+        'requestDocumentAction', 'finishPendingDocumentAction',
         'cancelPendingDocumentAction', 'saveThenContinue', 'saveChart', 'saveChartAs', 'newChart', 'newChartAs', 'uiActionSaveAs']) {
         vm.runInContext(extract(main, name), c);
     }
@@ -143,7 +162,7 @@ test('native accepted rejects changed session and consumes its identity', () => 
 test('native rejection clears lock, preserves drafts, and cancels pending close', () => {
     const { c, calls } = setup('pms9k', '');
     c.pendingDocAction = 'close'; c.saveThenContinue();
-    const rejected = main.match(/onRejected: \{\s*window\.saveAsDocumentId = ""([^]*?)^        }/m);
+    const rejected = main.match(/onRejected: \{\s*chartHistoryController\.finishSave\(window\.saveAsDocumentId, false\)\s*window\.saveAsDocumentId = ""([^]*?)^        }/m);
     assert.ok(rejected);
     vm.runInContext(`window.saveAsDocumentId = ""; ${rejected[1]}`, c);
     assert.equal(c.saveAsDocumentId, ''); assert.equal(c.pendingDocAction, '');
@@ -176,11 +195,12 @@ for (const [mode, target] of [['sp7k', 'song.bms'], ['dp', 'song.bme'], ['pms9k'
 }
 test('production dialog wiring and public-only interface stay in place', () => {
     assert.match(main, /onAccepted: window\.handleSaveAsAccepted\(urlToPath\(selectedFile\)\)/);
-    assert.match(main, /onRejected: \{\s*window\.saveAsDocumentId = ""/);
+    assert.match(main, /onRejected: \{\s*chartHistoryController\.finishSave\(window\.saveAsDocumentId, false\)\s*window\.saveAsDocumentId = ""/);
     assert.match(main, /onAccepted: window\.confirmPmsSuffixSave\(\)/);
     assert.match(main, /onRejected: window\.cancelPmsSuffixSave\(\)/);
     assert.equal((main.match(/saveAsDialog\.open\(\)/g) || []).length, 1);
-    assert.doesNotMatch(main, /documents\.activeId|chartSession\.chartMode\(/);
+    assert.match(extract(main, 'confirmPmsSuffixSave'), /id !== documents\.activeId\(\) \|\| id !== chartSession\.sessionId/);
+    assert.match(extract(main, 'saveChart'), /chartSession\.chartMode\(\)/);
     const header = fs.readFileSync(path.join(root, 'app/bridge/ChartSession.hpp'), 'utf8');
     assert.match(header, /Q_INVOKABLE QString activeSessionId\(\) const/);
 });

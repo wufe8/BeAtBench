@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <QVariantMap>
+#include <string>
 
 #include "bridge/EditUtils.hpp"
 
@@ -70,6 +71,22 @@ TEST(EditUtils, RefEquals) {
     // 空 map（null ref）→ false
     EXPECT_FALSE(u.refEquals(QVariantMap(), a));
     EXPECT_FALSE(u.refEquals(a, QVariantMap()));
+}
+
+TEST(EditUtils, SourceChannelAndNoteKindAreDistinct) {
+    EditUtils u;
+    auto normal = makeRef(0, 0, 1, 1, "key", 1, 0);
+    normal.insert("ln_channel", false);
+    normal.insert("note_kind", "normal");
+    auto ln = normal;
+    ln.insert("ln_channel", true);
+    auto mine = normal;
+    mine.insert("note_kind", "mine");
+    EXPECT_FALSE(u.refEquals(normal, ln));
+    EXPECT_FALSE(u.refEquals(normal, mine));
+    EXPECT_TRUE(u.refEquals(ln, ln));
+    // addPosDelta returns position only; SessionController preserves identity
+    // explicitly when constructing the moved selection reference.
 }
 
 TEST(EditUtils, AddPosDelta) {

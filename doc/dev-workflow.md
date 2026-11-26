@@ -20,7 +20,7 @@
 
 ```bash
 scripts/check.sh                 # 全量：配置 + 构建 + ctest + GUI 无头冒烟（含 QML 作用域告警断言）
-scripts/check.sh --quick         # 同上，但跳过真实谱面测试（BB_SKIP_REAL=1，秒级）
+scripts/check.sh --quick         # 跳过真实谱面测试（BB_SKIP_REAL=1）
 scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测）
 ```
 
@@ -34,15 +34,17 @@ scripts/check.sh --core          # 只走无 Qt 路径（core/CLI/audio + 单测
   范围 core/audio/cli。CI lint job（clang-tidy 23 钉版）全量 `--warnings-as-errors` 拦截；
   本地复跑需 clang-tidy 23（大版本差异会引入新告警）+ `compile_commands.json`：
   `cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBEATBENCH_BUILD_TESTS=OFF
-  -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。存量已清零；新增超标
+  -DBEATBENCH_BUILD_APP=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。新增超标
   一律修复，或 `NOLINTNEXTLINE(检查项)——理由` 显式标注（**必须写在声明上一行**：行尾 NOLINT
-  会被 clang-format 折行搬离诊断行而失效；现有标注全部携带理由）。
+  会被 clang-format 折行搬离诊断行而失效）。
 - 模块边界由 CMake target 可见性结构化强制（core 只暴露 `include/`，模块间 PRIVATE 链接），
   越界即编译错误，无需额外工具；规则见各模块 AGENTS.md。
-- qmllint：`qt_add_qml_module` 自带 `all_qmllint` 目标（构建目录内
-  `cmake --build build --target all_qmllint`），现挂账未进门禁（Theme 为 context property、
-  工具不可见），出口条件见 `doc/pending/`。
+- qmllint 可通过 Qt 构建目标 `all_qmllint` 单独运行，不属于提交门禁。
 - CI（`.github/workflows/ci.yml`）是同一套检查的远端副本：**本地快档 + CI 全量**，两者不重复造轮子。
+
+### 离屏截图
+
+构建 GUI 后运行 [截图脚本](../scripts/screenshot.sh)；输出到本地忽略目录。使用退出码判断结果，失败时目标路径可能仍有旧图。截图只证明渲染产物存在，不是业务状态或实机验收。
 
 ## 三、发布（版本与产物）
 
@@ -65,7 +67,7 @@ scripts/backup.sh            # 主仓库：先提交未保存改动，再生成 
 scripts/backup.sh --push     # 另经推送授权后使用；仅处理主仓库远端
 ```
 
-- 默认备份目录：`~/OneDrive/BeAtBench-backup`（找不到云盘就落到 `~/BeAtBench-backup`），保留最近 10 份。
+- 未指定目录时，按 OneDrive、Dropbox 的顺序查找家目录下的云盘目录，备份到其中的 `BeAtBench-backup/`；都不存在时使用 `~/BeAtBench-backup`。默认保留最近 10 份。
 - 建议用系统计划任务每天跑一次 `backup.sh`（Windows 任务计划程序 / cron）。
 
 `local/` 不由此脚本备份或推送；如独立建 git 仓库，只在该目录内单独本地 commit，不添加远端、不 push，也不混入主仓库提交。公开代码与文档不得依赖其中笔记。

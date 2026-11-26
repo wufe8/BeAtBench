@@ -20,6 +20,7 @@
 #include <QQuickWindow>
 #include <QStringList>
 #include <QTextStream>
+#include <QThreadPool>
 #include <QTimer>
 #include <QTranslator>
 #include <QUrl>
@@ -34,12 +35,21 @@
 
 #include "beatbench/core/json/Json.hpp"
 #include "bridge/AudioEngine.hpp"
+#include "bridge/ChartFileActions.hpp"
+#include "bridge/ChartHistoryController.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/ClipboardBridge.hpp"
 #include "bridge/CommandDispatcher.hpp"
+#include "bridge/DocumentService.hpp"
 #include "bridge/EditUtils.hpp"
 #include "bridge/KeyMonitor.hpp"
 #include "bridge/LintListModel.hpp"
+#include "bridge/PaneDragController.hpp"
+#include "bridge/PaneEditContext.hpp"
+#include "bridge/PaneEditOperations.hpp"
+#include "bridge/ProjectController.hpp"
+#include "bridge/ResourceBindingController.hpp"
+#include "bridge/ResourceRelocationController.hpp"
 #include "bridge/SampleListModel.hpp"
 #include "bridge/SliceWorkspace.hpp"
 #include "bridge/ThemeManager.hpp"
@@ -84,7 +94,7 @@ static void loadNativeTranslations(QGuiApplication& app) {
 // 否则大谱面 17 分钟级渲染完成前截图 → 波形总览条不可见）。
 static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& outPath,
                                bool waitRender = false, bool expectIncremental = false,
-                               double playDuration = 0.0) {
+                               double playDuration = 0.0, int initialDelayMs = 1500) {
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().value(0));
     if (!win) {
         qWarning("screenshot: root window 不可用");
@@ -93,7 +103,8 @@ static void scheduleScreenshot(QQmlApplicationEngine& engine, const QString& out
     }
     QTimer* wait = nullptr;
     QTimer::singleShot(
-        waitRender ? 0 : 1500, win, [win, outPath, waitRender, expectIncremental, playDuration] {
+        waitRender ? 0 : initialDelayMs, win,
+        [win, outPath, waitRender, expectIncremental, playDuration] {
             if (waitRender) {
                 // 波形/增量验收：等 ChartSession 渲染完成（renderFinished → QML 置
                 // debugRenderDone）+ 增量也完成（--click-after-render 场景等 count ≥ 2）。
@@ -269,15 +280,20 @@ int main(int argc, char** argv) {
     beatbench::app::UiActionRegistry uiActions;
     beatbench::app::SampleListModel sampleModel;
     beatbench::app::LintListModel lintModel;
-    // 谱面文档会话（时间轴视图数据源，M2 第 5 步）：只读持有 Chart + TimingEngine，
-    // 与 info/check 命令共用同一 core 解析入口（doc/command-protocol.md 三、6.）
-    beatbench::app::ChartSession chartSession;
+    // 单开/多开共用同一文档集合，每个文档 ID 对应一个稳定的视图桥。
+    beatbench::app::DocumentService documentService;
+    beatbench::app::PaneEditContext primaryPaneContext(&documentService);
+    beatbench::app::PaneEditContext referencePaneContext(&documentService);
+    beatbench::app::PaneEditOperations primaryPaneOperations(&primaryPaneContext);
+    beatbench::app::PaneEditOperations referencePaneOperations(&referencePaneContext);
+    beatbench::app::PaneDragController paneDragController;
+    auto* initialSession = documentService.currentSession();
     // 音频引擎（M4.1 试听最小闭环）：采样面板单击播放；QML 经 `audioEngine` 访问
     beatbench::app::AudioEngine audioEngine;
     // 切音工作台数据桥（M6.1）：参考音频 + MIDI 导入/持有；QML 经 `sliceWorkspace` 访问
     beatbench::app::SliceWorkspace sliceWorkspace;
     sliceWorkspace.setAudioEngine(&audioEngine);
-    sliceWorkspace.setChartSession(&chartSession);  // M6.3：#WAV 占用检测 + 输出目录
+    sliceWorkspace.setChartSession(initialSession);  // M6.3：#WAV 占用检测 + 输出目录
     // 全局修饰键监控（Ctrl 按住态；QML Keys 收不到独立修饰键，Alt 又被菜单栏拦截）
     beatbench::app::KeyMonitor keyMonitor;
     app.installEventFilter(&keyMonitor);
@@ -286,22 +302,74 @@ int main(int argc, char** argv) {
     // 纯函数回抽（2026-09；SessionController.qml 减肥第一刀）：gcd/refEquals/addPosDelta +
     // 剪贴板文本判定（Base62 粘贴警告前置）。QML 经 editUtils 访问。
     beatbench::app::EditUtils editUtils;
+    // 项目页（doc/project-workflow.md §9.1）：文件夹 → 谱面/资源索引（QThreadPool 后台扫描）。
+    // 只发 chartOpenRequested / sliceTargetRequested 信号，不拥有文档会话。
+    beatbench::app::ProjectController projectController;
+    beatbench::app::ResourceBindingController resourceBindingController(&documentService);
+    beatbench::app::ResourceRelocationController resourceRelocationController(&documentService,
+                                                                              &projectController);
+    QObject::connect(&resourceRelocationController,
+                     &beatbench::app::ResourceRelocationController::relocated, &documentService,
+                     [&] {
+                         documentService.refresh();
+                         projectController.refreshOpenStates();
+                     });
+    QObject::connect(&resourceBindingController,
+                     &beatbench::app::ResourceBindingController::bindingsApplied, &documentService,
+                     [&] {
+                         documentService.refresh();
+                         projectController.refreshOpenStates();
+                     });
+    beatbench::app::ChartHistoryController chartHistoryController(&documentService);
+    beatbench::app::ChartFileActions chartFileActions;
 
     QQmlApplicationEngine engine;
+    QObject::connect(&chartFileActions, &beatbench::app::ChartFileActions::statusMessage, &engine,
+                     [&engine](const QString& message) {
+                         if (auto* root = engine.rootObjects().value(0))
+                             QMetaObject::invokeMethod(root, "setStatus", Qt::DirectConnection,
+                                                       Q_ARG(QVariant, QVariant(message)));
+                     });
     QObject::connect(&engine, &QQmlEngine::warnings, &dumpQmlWarnings);
     engine.rootContext()->setContextProperty(QStringLiteral("beatbench"), &dispatcher);
     engine.rootContext()->setContextProperty(QStringLiteral("uiActions"), &uiActions);
     engine.rootContext()->setContextProperty(QStringLiteral("Theme"), &theme);
     engine.rootContext()->setContextProperty(QStringLiteral("sampleModel"), &sampleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("lintModel"), &lintModel);
-    engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), &chartSession);
+    engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), initialSession);
     engine.rootContext()->setContextProperty(QStringLiteral("audioEngine"), &audioEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("sliceWorkspace"), &sliceWorkspace);
     engine.rootContext()->setContextProperty(QStringLiteral("keyMonitor"), &keyMonitor);
     engine.rootContext()->setContextProperty(QStringLiteral("clipboard"), &clipboardBridge);
     engine.rootContext()->setContextProperty(QStringLiteral("editUtils"), &editUtils);
+    engine.rootContext()->setContextProperty(QStringLiteral("project"), &projectController);
+    engine.rootContext()->setContextProperty(QStringLiteral("resourceBindingController"),
+                                             &resourceBindingController);
+    engine.rootContext()->setContextProperty(QStringLiteral("resourceRelocationController"),
+                                             &resourceRelocationController);
+    engine.rootContext()->setContextProperty(QStringLiteral("documents"), &documentService);
+    engine.rootContext()->setContextProperty(QStringLiteral("paneDragController"),
+                                             &paneDragController);
+    engine.rootContext()->setContextProperty(QStringLiteral("primaryPaneContext"),
+                                             &primaryPaneContext);
+    engine.rootContext()->setContextProperty(QStringLiteral("referencePaneContext"),
+                                             &referencePaneContext);
+    engine.rootContext()->setContextProperty(QStringLiteral("primaryPaneOperations"),
+                                             &primaryPaneOperations);
+    engine.rootContext()->setContextProperty(QStringLiteral("referencePaneOperations"),
+                                             &referencePaneOperations);
+    engine.rootContext()->setContextProperty(QStringLiteral("chartHistoryController"),
+                                             &chartHistoryController);
     // M5 播放：AudioEngine 连 ChartSession（渲染完成装载 PCM；编辑即停；waitRender 续播）
-    audioEngine.setChartSession(&chartSession);
+    audioEngine.setChartSession(initialSession);
+    QObject::connect(
+        &documentService, &beatbench::app::DocumentService::currentSessionChanged, &engine, [&] {
+            auto* current = documentService.currentSession();
+            audioEngine.setChartSession(current);
+            sliceWorkspace.setChartSession(current);
+            // 兼容已有面板的 context 名称；它只是集合当前项的别名，不再是第二份文档桥。
+            engine.rootContext()->setContextProperty(QStringLiteral("chartSession"), current);
+        });
 
     // ---- 动作注册（doc/action-registry.md 五、/九、）：必须在 QML 根加载**前**完成——QML 的 `text:`/`sequence:`
     // 是函数式绑定，只在首帧求值一次（注册表为空则取到空串）。若在 loadFromModule 后注册，
@@ -342,11 +410,35 @@ int main(int argc, char** argv) {
                                   nullptr, qml("newChart")});
         uiActions.add(UiActionDef{"file.open", QCoreApplication::tr("打开谱面…"), "Ctrl+O", "file",
                                   nullptr, qml("uiActionOpen")});
+        // 打开歌曲文件夹（项目页索引，doc/project-workflow.md §9.1）
+        uiActions.add(UiActionDef{"file.openFolder", QCoreApplication::tr("打开歌曲文件夹…"),
+                                  "Ctrl+Shift+O", "file", nullptr, qml("uiActionOpenFolder")});
         uiActions.add(UiActionDef{"file.save", QCoreApplication::tr("保存"), "Ctrl+S", "file",
                                   nullptr, qml("saveChart")});
         uiActions.add(UiActionDef{"file.saveAs", QCoreApplication::tr("另存为…"), "Ctrl+Shift+S",
                                   "file", nullptr, qml("uiActionSaveAs")});
-        uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：打开/保存/另存 ↔ 退出
+        uiActions.add(UiActionDef{
+            .id = "file.history",
+            .label = QCoreApplication::tr("谱面历史…"),
+            .category = "file",
+            .handler =
+                ActionHandler([&chartHistoryController, &documentService](const QVariantMap&) {
+                    chartHistoryController.showHistory(documentService.activeId());
+                    return true;
+                })});
+        uiActions.add(UiActionDef{.id = "file.revealInFileManager",
+                                  .label = QCoreApplication::tr("在文件管理器中打开"),
+                                  .category = "file",
+                                  .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
+                                      return chartFileActions.revealActiveChart();
+                                  })});
+        uiActions.add(UiActionDef{.id = "file.openInTextEditor",
+                                  .label = QCoreApplication::tr("用文本编辑器打开"),
+                                  .category = "file",
+                                  .handler = ActionHandler([&chartFileActions](const QVariantMap&) {
+                                      return chartFileActions.openActiveChartInTextEditor();
+                                  })});
+        uiActions.addSeparator(QStringLiteral("file"));  // 分隔线：文件操作 ↔ 退出
         uiActions.add(UiActionDef{"file.exit", QCoreApplication::tr("退出"), "Ctrl+Q", "file",
                                   nullptr, qml("uiActionExit")});
         // 编辑动作
@@ -449,6 +541,8 @@ int main(int argc, char** argv) {
                                   nullptr, setProp("currentPage", 1), true});
         uiActions.add(UiActionDef{"view.page.test", QCoreApplication::tr("测试页"), "", "view",
                                   nullptr, setProp("currentPage", 2), true});
+        uiActions.add(UiActionDef{"view.page.project", QCoreApplication::tr("项目页"), "", "view",
+                                  nullptr, setProp("currentPage", 3), true});
         // 切音页动作（M6.4f 键盘 2026-09 用户 woslicer 系；category=slice 无菜单，仅快捷键）。
         // 生产 handler 直接调用 QML 的正式 dispatchSliceAction 方法；debugSliceAct 只保留给
         // --slice-act 的异步调试队列，避免生产动作借用 debug 属性和轮询管线。
@@ -571,18 +665,19 @@ int main(int argc, char** argv) {
 
     const QStringList args = app.arguments();
 
-    // --open <bms>：启动即打开谱面（QML openChart 同路径；配 --screenshot 做真数据验收）
-    const int openIdx = args.indexOf(QStringLiteral("--open"));
-    if (openIdx >= 0 && openIdx + 1 < args.size()) {
+    // --open 可重复：独立文档打开/按路径复用，与项目页共用 DocumentService。
+    for (int i = 1; i + 1 < args.size(); ++i) {
+        if (args.at(i) != QStringLiteral("--open")) continue;
         if (QObject* root = engine.rootObjects().value(0))
-            root->setProperty("debugOpenPath", args.at(openIdx + 1));
+            root->setProperty("debugOpenPath", args.at(++i));
     }
 
     // 双击文件关联 / 把文件拖到 exe 图标：Explorer 把文件路径作为 argv[1] 传入（无开关时）。
     // 交给 QML 的 handleExternalFile 按后缀分流（谱面 → 编辑页；音频/MIDI → 切音工作台），
     // 与「拖拽入窗口」同一路径，避免两处维护类型判定。argv[1] 以 '-' 开头则视为开关，跳过。
-    if (args.size() >= 2 && !args.at(1).startsWith(QLatin1Char('-'))) {
-        const QString external = args.at(1);
+    // desktop 的 %F / 拖多个文件到 exe 可以传多个路径，不能只消费第一个。
+    for (int i = 1; i < args.size() && !args.at(i).startsWith(QLatin1Char('-')); ++i) {
+        const QString external = args.at(i);
         if (QFileInfo::exists(external)) {
             if (QObject* root = engine.rootObjects().value(0))
                 root->setProperty("externalFilePath", external);
@@ -597,6 +692,14 @@ int main(int argc, char** argv) {
             root->setProperty("debugPasteText", args.at(pasteIdx + 1));
     }
 
+    // --project <文件夹>：启动即打开歌曲文件夹（项目页，异步扫描；配 --screenshot-delay
+    // 等后台解析完成后再截图）。走 QML doOpenFolder()，与「文件 → 打开歌曲文件夹」同路径。
+    const int projectIdx = args.indexOf(QStringLiteral("--project"));
+    if (projectIdx >= 0 && projectIdx + 1 < args.size()) {
+        if (QObject* root = engine.rootObjects().value(0))
+            root->setProperty("debugProjectPath", args.at(projectIdx + 1));
+    }
+
     // --screenshot <png>：截图后退出（见 scheduleScreenshot）
     const int shotIdx = args.indexOf(QStringLiteral("--screenshot"));
     const bool waitRender = args.contains(QStringLiteral("--wait-render"));
@@ -606,9 +709,13 @@ int main(int argc, char** argv) {
     const int playDurIdx = args.indexOf(QStringLiteral("--play-duration"));
     if (playDurIdx >= 0 && playDurIdx + 1 < args.size())
         playDuration = args.at(playDurIdx + 1).toDouble();
+    int shotDelayMs = 1500;
+    const int shotDelayIdx = args.indexOf(QStringLiteral("--screenshot-delay"));
+    if (shotDelayIdx >= 0 && shotDelayIdx + 1 < args.size())
+        shotDelayMs = args.at(shotDelayIdx + 1).toInt();
     if (shotIdx >= 0 && shotIdx + 1 < args.size())
         scheduleScreenshot(engine, args.at(shotIdx + 1), waitRender, expectIncremental,
-                           playDuration);
+                           playDuration, shotDelayMs);
 
     // --render <out.wav>：调试——启动后自动渲染谱面→WAV（复现 Space；M4.3b 崩溃定位）
     const int renderIdx = args.indexOf(QStringLiteral("--render"));
@@ -984,5 +1091,9 @@ int main(int argc, char** argv) {
     }
 
     if (engine.rootObjects().isEmpty()) return -1;
-    return app.exec();
+    const int exitCode = app.exec();
+    // 桥层后台任务投递回调时仍持有接收对象的裸地址；先等工作线程结束，再销毁桥层。
+    // 队列中的回调由 QObject 析构移除，不在退出后重新应用旧结果。
+    QThreadPool::globalInstance()->waitForDone();
+    return exitCode;
 }

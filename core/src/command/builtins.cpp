@@ -6,6 +6,7 @@
 #include "beatbench/core/command/Builtins.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -27,6 +28,7 @@
 #include "beatbench/core/codec/Codec.hpp"
 #include "beatbench/core/codec/CodecRegistry.hpp"
 #include "beatbench/core/command/Midi.hpp"
+#include "beatbench/core/command/Project.hpp"
 #include "beatbench/core/command/Slice.hpp"
 #include "beatbench/core/edit/EditorSession.hpp"
 #include "beatbench/core/edit/Selection.hpp"
@@ -65,6 +67,15 @@ bool arg_bool(const Json& args, const char* key, bool fallback) {
 void write_chart_or_throw(const std::string& out_path, const std::string& text) {
     const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(out_path), text);
     if (!wr.ok) throw CommandError("write_failed", wr.error);
+}
+
+std::string serialize_or_throw(const Codec& codec, const Chart& chart,
+                               const beatbench::codec::WriteOptions& options) {
+    try {
+        return codec.write(chart, options);
+    } catch (const std::exception& e) {
+        throw CommandError("write_failed", e.what());
+    }
 }
 
 // 格式参数（M3：走 CodecRegistry 动态解析；未知格式 → unsupported_format）。
@@ -441,6 +452,7 @@ class ConvertCommand : public Command {
                 const std::string& e = v->as_str();
                 if (e == "sjis" || e == "shift_jis" || e == "shift-jis") {
                     wopts.encoding = "sjis";
+                    wopts.strict_encoding = true;
                     enc_name = "sjis";
                 } else if (e == "utf8" || e == "utf-8") {
                     wopts.encoding = "utf8";
@@ -450,7 +462,8 @@ class ConvertCommand : public Command {
             }
         }
 
-        if (!overwrite && std::filesystem::exists(out_path)) {
+        const bool output_exists = std::filesystem::exists(std::filesystem::u8path(out_path));
+        if (!overwrite && output_exists) {
             throw CommandError("output_exists",
                                "输出文件已存在: " + out_path + "（传 overwrite:true 覆盖）");
         }
@@ -463,7 +476,11 @@ class ConvertCommand : public Command {
             throw CommandError("read_failed", "读取失败（存在错误级诊断），未写出: " + in_path);
         }
 
-        const std::string text = codec->write(result.chart, wopts);
+        if (result.encoding_ambiguous && output_exists) {
+            throw CommandError("encoding_ambiguous",
+                               "输入编码有歧义，无法覆盖现有输出；请明确指定编码或改用新路径");
+        }
+        const std::string text = serialize_or_throw(*codec, result.chart, wopts);
         write_chart_or_throw(out_path, text);
 
         Json res = Json::object();
@@ -475,6 +492,7 @@ class ConvertCommand : public Command {
         res.set("from_encoding",
                 result.detected_encoding.empty() ? enc_name : result.detected_encoding);
         res.set("to_encoding", enc_name);
+        res.set("encoding_ambiguous", result.encoding_ambiguous);
         res.set("diagnostics", diags_json(result.diagnostics));
         return res;
     }
@@ -585,6 +603,58 @@ std::uint32_t u32_arg(const Json& args, const char* key) {
     return static_cast<std::uint32_t>(v->as_i64());
 }
 
+std::optional<bool> source_ln_channel(const Json& item) {
+    const Json* v = item.find("ln_channel");
+    if (!v) return std::nullopt;
+    if (!v->is_bool()) bad_args("ln_channel 应为布尔值");
+    return v->as_bool();
+}
+
+std::optional<NoteKind> source_note_kind(const Json& item) {
+    const Json* v = item.find("note_kind");
+    if (!v) return std::nullopt;
+    if (!v->is_string()) bad_args("note_kind 应为字符串 normal/mine");
+    if (v->as_str() == "normal") return NoteKind::Normal;
+    if (v->as_str() == "mine") return NoteKind::Landmine;
+    bad_args("note_kind 应为 normal/mine");
+}
+
+template <class T>
+std::unique_ptr<T> with_source_identity(std::unique_ptr<T> command, const Json& item) {
+    command->set_source_identity(source_ln_channel(item), source_note_kind(item));
+    return command;
+}
+
+template <class T>
+std::unique_ptr<T> with_source_identity(std::unique_ptr<T> command, const edit::NoteRef& ref) {
+    command->set_source_identity(ref.ln_channel, ref.note_kind);
+    return command;
+}
+
+void write_source_identity(Json& item, const edit::NoteRef& ref) {
+    if (ref.ln_channel) item.set("ln_channel", *ref.ln_channel);
+    if (ref.note_kind)
+        item.set("note_kind", *ref.note_kind == NoteKind::Landmine ? "mine" : "normal");
+}
+
+Json note_ref_json(const edit::NoteRef& ref) {
+    Json item = Json::object();
+    item.set("measure", static_cast<std::int64_t>(ref.measure));
+    Json pos = Json::object();
+    pos.set("num", ref.pos.num);
+    pos.set("den", ref.pos.den);
+    item.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", static_cast<std::int64_t>(ref.lane.player));
+    lane.set("kind", lane_kind_str(ref.lane.kind));
+    lane.set("index", static_cast<std::int64_t>(ref.lane.index));
+    item.set("lane", std::move(lane));
+    item.set("sample", static_cast<std::int64_t>(ref.sample));
+    item.set("sub_line", static_cast<std::int64_t>(ref.sub_line));
+    write_source_identity(item, ref);
+    return item;
+}
+
 // 解析 selection 数组（NoteRef 列表：{measure, pos, lane:{player,kind,index}, sample}）→
 // NoteRef 向量。空数组 / 非数组 → bad_args。lane 支持子对象优先 + 顶层平铺兼容。
 // bonus：可选 sub_line（BGM 行序号，Bgm note 同值消歧；缺省 0）。
@@ -608,6 +678,8 @@ std::vector<edit::NoteRef> selection_from_json(const Json& args) {
             if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
             ref.sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
+        ref.ln_channel = source_ln_channel(item);
+        ref.note_kind = source_note_kind(item);
         refs.push_back(ref);
     }
     return refs;
@@ -657,7 +729,7 @@ SampleKind sample_kind_arg(const Json& args) {
     return SampleKind::Wav;
 }
 
-// 数值参数（timing.put 的 value：BPM 值 / STOP 微秒 / 每小节拍数；允许小数）
+// 数值参数（timing.put 的 value：BPM 值 / STOP 原始计数 / 每小节拍数；允许小数）
 double number_arg(const Json& args, const char* key) {
     const Json* v = args.find(key);
     if (!v) throw CommandError("bad_args", std::string("缺少参数: ") + key);
@@ -723,17 +795,73 @@ Json timing_events_json(const Chart& chart, std::string_view kind) {
     return arr;
 }
 
-// 持久化钩子工厂：用 codec 把 chart 写到 path（崩溃备份/自动保存用）。
-// core/edit 不依赖 codec，由协议层注入——session.load 成功时绑定。
-edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
-    return [codec](const Chart& chart, const std::string& path, std::string* error) -> bool {
+Json text_format_json(const edit::DocumentTextFormat& format) {
+    Json out = Json::object();
+    out.set("encoding", format.encoding);
+    out.set("line_ending", format.line_ending);
+    out.set("preferred_line_ending", format.preferred_line_ending);
+    out.set("utf8_bom", format.utf8_bom);
+    out.set("encoding_ambiguous", format.encoding_ambiguous);
+    out.set("normalized_mixed_line_endings", format.normalized_mixed_line_endings);
+    return out;
+}
+
+bool preserve_text_format_arg(const Json& args) {
+    if (!args.is_object()) return false;
+    if (const auto* v = args.find("preserve_text_format")) {
+        if (!v->is_bool()) bad_args("preserve_text_format 应为布尔值");
+        return v->as_bool();
+    }
+    return false;
+}
+
+struct SerializedDocument {
+    std::string bytes;
+    edit::DocumentTextFormat format;
+};
+
+// 手动保存、另存、备份和自动保存使用同一策略。先在内存完成编码转换，再打开目标。
+SerializedDocument serialize_document(const Codec& codec, const edit::EditorSession& session,
+                                      std::string encoding = {}) {
+    beatbench::codec::WriteOptions options;
+    const auto& source = session.text_format();
+    const bool preserve = session.preserve_text_format() && codec.id() == "bms";
+    const bool explicit_encoding = !encoding.empty();
+    if (preserve) {
+        if (!explicit_encoding) encoding = source.encoding == "utf8" ? "utf8" : "sjis";
+        options.line_ending =
+            source.preferred_line_ending.empty() ? "crlf" : source.preferred_line_ending;
+        options.utf8_bom = encoding == "utf8" && source.utf8_bom;
+    }
+    options.encoding = std::move(encoding);
+    options.strict_encoding = preserve || options.encoding == "sjis";
+    bool ascii_only = false;
+    bool encoding_ambiguous = false;
+    options.ascii_only = &ascii_only;
+    options.encoding_ambiguous = &encoding_ambiguous;
+    auto bytes = serialize_or_throw(codec, session.chart(), options);
+    edit::DocumentTextFormat format;
+    if (codec.id() == "bms") {
+        format.encoding = options.encoding.empty() ? "utf8" : options.encoding;
+        // CP932 输出全为 ASCII 时保留中性标签；明确的 UTF-8 写回策略不变。
+        if (ascii_only && options.encoding == "sjis") format.encoding = "ascii";
+        format.line_ending = options.line_ending.empty() ? "lf" : options.line_ending;
+        format.preferred_line_ending = format.line_ending;
+        format.utf8_bom = options.utf8_bom;
+        format.encoding_ambiguous = encoding_ambiguous;
+        format.normalized_mixed_line_endings = source.line_ending == "mixed";
+    }
+    return {std::move(bytes), std::move(format)};
+}
+
+// core/edit 不依赖 codec，由协议层在装载/新建成功后注入。
+edit::EditorSession::TextPersistHook make_persist_hook(const Codec* codec) {
+    return [codec](const edit::EditorSession& session, const std::string& path,
+                   edit::DocumentTextFormat* written, std::string* error) -> bool {
         try {
-            const std::string text = codec->write(chart, beatbench::codec::WriteOptions{});
-            const auto wr = beatbench::io::atomic_write_file(std::filesystem::u8path(path), text);
-            if (!wr.ok) {
-                if (error) *error = wr.error;
-                return false;
-            }
+            auto document = serialize_document(*codec, session);
+            write_chart_or_throw(path, document.bytes);
+            if (written) *written = std::move(document.format);
             return true;
         } catch (const std::exception& e) {
             if (error) *error = e.what();
@@ -748,9 +876,8 @@ edit::EditorSession::PersistHook make_persist_hook(const Codec* codec) {
 }  // namespace
 
 // —— 时间轴事件命令（M3：BPM / STOP / 节拍；doc/ui-design.md 九、 工具栏值放置 + 右 dock 列表） ——
-// kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 微秒 /
-// 每小节拍数）。写回时 codec 自动派生 #BPMxx/#STOPxx 定义，
-// 因此「值」是唯一编辑维度——ch03 内联/引用的文本差异对编辑透明。
+// kind = bpm / stop / measure；定位 = (measure, pos)；值 = 事件值（BPM 数值 / STOP 原始计数 /
+// 每小节拍数）。BPM/STOP 可手动绑定；未绑定的事件写回时由 codec 复用或派生定义。
 // 两种 GUI 形态共用同一套接口：
 //   - 工具栏值放置（思路1）：timing.put（同位替换）+ timing.delete；
 //   - 右 dock 管理列表（思路2）：timing.list 数据源 + put/delete 增删改。
@@ -771,6 +898,28 @@ class TimingListCommand : public Command {
     }
 };
 
+// 定义是原始 BPM 数值或 STOP 计数，与客户端的显示单位无关。
+static double timing_definition_value(const Chart& chart, edit::TimingKind kind, std::uint32_t id) {
+    const bool stop = kind == edit::TimingKind::Stop;
+    const auto it = chart.samples.find({stop ? SampleKind::Stop : SampleKind::Bpm, id});
+    if (it == chart.samples.end()) bad_args("ref 没有现有定义，请指定 value");
+    const auto& text = it->second.value;
+    char* end = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || end != text.c_str() + text.size() || !std::isfinite(value) ||
+        (stop && (value < -0x1p63 || value >= 0x1p63)))
+        bad_args("ref 的现有定义不是有效数值，请指定 value");
+    return value;
+}
+
+std::uint32_t timing_ref_id(std::string_view text, IdBase base) {
+    if (text.size() > 2 || !std::all_of(text.begin(), text.end(), bms::is_c36_digit))
+        bad_args("ref 应为一至两位字母或数字");
+    const auto id = base == IdBase::Base62 ? bms::c62_to_u32(text) : bms::c36_to_u32(text);
+    if (id == 0) bad_args("ref 不能绑定到 00");
+    return id;
+}
+
 class TimingPutCommand : public Command {
    public:
     std::string_view name() const override { return "timing.put"; }
@@ -780,17 +929,29 @@ class TimingPutCommand : public Command {
         const auto kind = timing_kind_arg(args);
         const std::uint32_t measure = u32_arg(args, "measure");
         const Rational pos = pos_from_json(args);
-        const double value = number_arg(args, "value");
-        // 手动绑定 id（可选）：ref:"1A" → #BPMxx/#STOPxx 引用 id（缺省 = 由 codec 自动派生）。
+        const auto& chart = session.chart();
         std::optional<std::uint32_t> ref;
+        auto mode = edit::TimingPutMode::SetValue;
         if (const Json* r = args.find("ref")) {
-            if (!r->is_string()) throw CommandError("bad_args", "ref 应为字符串 id");
-            const auto& chart = session.chart();
-            const std::string s = r->as_str();
-            ref = chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
+            if (!r->is_string()) bad_args("ref 应为字符串 id，空串表示解除绑定");
+            if (kind != edit::TimingKind::Measure) {
+                const auto& s = r->as_str();
+                if (s.empty()) {
+                    mode = edit::TimingPutMode::ClearRef;
+                } else {
+                    ref = timing_ref_id(s, chart.id_base);
+                }
+            }
         }
-        const bool ok =
-            session.exec(std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref));
+        double value = 0;
+        if (ref && !args.find("value")) {
+            value = timing_definition_value(chart, kind, *ref);
+            mode = edit::TimingPutMode::UseDefinition;
+        } else {
+            value = number_arg(args, "value");
+        }
+        const bool ok = session.exec(
+            std::make_unique<edit::PutTimingCommand>(kind, measure, pos, value, ref, mode));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", std::string(edit::timing_kind_name(kind)));
@@ -996,7 +1157,7 @@ class TimingMoveCommandCmd : public Command {
 class ClipboardCopyCommand : public Command {
    public:
     std::string_view name() const override { return "clipboard.copy"; }
-    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——命令协议参数解析分支表（协议即分支）
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——复制协议需逐项消歧并校验 LN 两端完整性
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1022,17 +1183,28 @@ class ClipboardCopyCommand : public Command {
                 const auto& ev = chart.notes[i];
                 if (ev.measure == ref.measure && ev.pos == ref.pos && ev.value.lane == ref.lane &&
                     ev.value.sample.id == ref.sample && ev.value.sub_line == ref.sub_line &&
+                    ev.value.ln_channel == ref.ln_channel.value_or(ev.value.ln_channel) &&
+                    ev.value.kind == ref.note_kind.value_or(ev.value.kind) &&
                     !claimed.contains(i)) {
                     // 别名收敛后两个合法物件可能拥有完全相同的引用值；逐一认领，
                     // 否则完整LN选择也会反复命中第一端、被误判为半选。
+                    if (found) {
+                        if (found->value.ln_channel != ev.value.ln_channel ||
+                            found->value.kind != ev.value.kind)
+                            throw CommandError("bad_args",
+                                               "选择引用不明确；请提供 ln_channel/note_kind");
+                        continue;  // Identical aliases are still claimed FIFO.
+                    }
                     found = &ev;
                     found_i = i;
-                    claimed.insert(i);
-                    break;
+                    // Legacy references are accepted only when unambiguous.
+                    // Do not silently copy an ordinary note instead of an LN/mine.
+                    continue;
                 }
             }
             if (!found)
                 throw CommandError("not_found", "选择集中的 note 在谱面中不存在（可能已被删除）");
+            claimed.insert(found_i);
             const bool want_ln = found->value.ln_channel && found->value.lane.kind != LaneKind::Bgm;
             const auto ch =
                 bms::bms_channel_for_mode(mode, found->value.lane, want_ln, found->value.kind);
@@ -1238,6 +1410,8 @@ class ClipboardPasteCommand : public Command {
                 ref.lane = rule->lane;
                 ref.sample = decode_id_text(chart, slot);
                 ref.sub_line = sub_line;
+                ref.ln_channel = rule->ln_channel && rule->lane.kind != LaneKind::Bgm;
+                ref.note_kind = rule->note_kind;
                 parsed.push_back(ref);
                 parsed_ln.push_back(rule->ln_channel && rule->lane.kind != LaneKind::Bgm);
                 parsed_kind.push_back(rule->note_kind);
@@ -1334,6 +1508,7 @@ class ClipboardPasteCommand : public Command {
             item.set("lane", std::move(lane));
             item.set("sample", static_cast<std::int64_t>(r.sample));
             item.set("sub_line", static_cast<std::int64_t>(r.sub_line));
+            write_source_identity(item, r);
             placed.push_back(std::move(item));
         }
         Json out = Json::object();
@@ -1363,20 +1538,26 @@ class SessionLoadCommand : public Command {
         const Codec* codec = resolve_codec(args, path);
         beatbench::codec::ReadOptions opts;
         opts.encoding = read_encoding_arg(args);
-        const auto result = codec->read(path, opts);
+        const bool preserve = preserve_text_format_arg(args);
+        auto result = codec->read(path, opts);
         for (const auto& d : result.diagnostics) {
             if (d.severity == beatbench::codec::Severity::Error) {
                 throw CommandError("read_failed", "读取失败: " + d.message);
             }
         }
         auto& session = session_from_args(args);
-        session.load(result.chart, path);
+        session.load(std::move(result.chart), path);
+        session.set_preserve_text_format(preserve);
+        session.set_text_format({std::move(result.detected_encoding), std::move(result.line_ending),
+                                 std::move(result.preferred_line_ending), result.utf8_bom,
+                                 result.encoding_ambiguous});
         // 注入持久化钩子（崩溃备份/自动保存用；按本文件 codec 写出）
-        session.set_persist_hook(make_persist_hook(codec));
+        session.set_text_persist_hook(make_persist_hook(codec));
         Json out = Json::object();
         out.set("loaded", true);
         out.set("path", path);
         out.set("format", std::string(codec->id()));
+        out.set("text_format", text_format_json(session.text_format()));
         return out;
     }
 };
@@ -1387,6 +1568,7 @@ class SessionNewCommand : public Command {
    public:
     std::string_view name() const override { return "session.new"; }
     Json run(const Json& args) const override {
+        const bool preserve = preserve_text_format_arg(args);
         auto& session = session_from_args(args);
         beatbench::Chart chart;  // 空谱面（0 小节）
         // 可选 mode（2026-10 模式系统阶段一，issue #26）：显式指定新建谱面的游玩模式，
@@ -1405,13 +1587,17 @@ class SessionNewCommand : public Command {
             chart.mode_id = m->as_str();
         }
         session.load(std::move(chart), "");
+        session.set_preserve_text_format(preserve);
+        session.set_text_format(preserve ? edit::DocumentTextFormat{"sjis", "crlf", "crlf"}
+                                         : edit::DocumentTextFormat{"utf8", "lf", "lf"});
         // 注入 BMS 持久化钩子（另存为/自动保存用）
         if (const Codec* bms = global_codec_registry().by_id("bms"))
-            session.set_persist_hook(make_persist_hook(bms));
+            session.set_text_persist_hook(make_persist_hook(bms));
         Json out = Json::object();
         out.set("loaded", true);
         out.set("path", "");
         out.set("format", "bms");
+        out.set("text_format", text_format_json(session.text_format()));
         return out;
     }
 };
@@ -1448,32 +1634,32 @@ class SessionSaveCommand : public Command {
         }
         // 用 codec 写出（format 推断：显式 format 或按扩展名）
         const Codec* codec = resolve_codec(args, out_path);
-        beatbench::codec::WriteOptions wopts;
-        if (args.is_object()) {
-            if (const Json* v = args.find("encoding")) {
-                if (!v->is_string()) bad_args("参数类型错误: encoding 应为字符串");
-                const std::string& e = v->as_str();
-                if (e == "sjis" || e == "shift_jis" || e == "shift-jis") {
-                    wopts.encoding = "sjis";
-                } else if (e == "utf8" || e == "utf-8") {
-                    wopts.encoding = "utf8";
-                } else if (e != "auto") {
-                    bad_args("未知编码 '" + e + "'（支持 utf8 / sjis）");
-                }
+        std::string encoding;
+        if (const Json* v = args.find("encoding")) {
+            if (!v->is_string()) bad_args("参数类型错误: encoding 应为字符串");
+            const std::string& e = v->as_str();
+            if (e == "sjis" || e == "shift_jis" || e == "shift-jis") {
+                encoding = "sjis";
+            } else if (e == "utf8" || e == "utf-8") {
+                encoding = "utf8";
+            } else if (e != "auto") {
+                bad_args("未知编码 '" + e + "'（支持 utf8 / sjis）");
             }
         }
-        const std::string text = codec->write(session.chart(), wopts);
-        write_chart_or_throw(out_path, text);
+        auto document = serialize_document(*codec, session, std::move(encoding));
+        write_chart_or_throw(out_path, document.bytes);
 
-        // 另存为后更新会话路径（后续「保存」写新路径）
+        // 写成功后才更新路径和磁盘格式（另存为后沿用新路径）。
         if (session.path() != out_path) session.set_path(out_path);
+        session.set_text_format(std::move(document.format));
         session.mark_clean();
 
         Json res = Json::object();
         res.set("saved", true);
         res.set("output", out_path);
-        res.set("bytes", static_cast<std::int64_t>(text.size()));
+        res.set("bytes", static_cast<std::int64_t>(document.bytes.size()));
         res.set("format", std::string(codec->id()));
+        res.set("text_format", text_format_json(session.text_format()));
         res.set("dirty", false);
         if (!session.last_backup_error().empty())
             res.set("backup_error", session.last_backup_error());
@@ -1516,6 +1702,7 @@ class SessionAutosaveCommand : public Command {
 class SessionLintCommand : public Command {
    public:
     std::string_view name() const override { return "session.lint"; }
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)——会话 lint 聚合与定位字段序列化分支
     Json run(const Json& args) const override {
         auto& session = session_from_args(args);
         if (!session.has_chart()) throw CommandError("no_chart", "未加载谱面（先 session.load）");
@@ -1577,6 +1764,20 @@ class SessionLintCommand : public Command {
         }
         Json out = Json::object();
         out.set("issues", std::move(arr));
+        // 同一份内存 lint 也供采样面板刷新可用性，不能重新 check 磁盘旧谱面。
+        Json availability = Json::object();
+        Json missing = Json::array(), mismatch = Json::array();
+        for (const auto& issue : lint) {
+            if (issue.code != "missing_wav" && issue.code != "wav_ext_mismatch") continue;
+            Json entry = Json::object();
+            entry.set("id", issue.id);
+            entry.set("file", issue.file);
+            entry.set("resolved", issue.resolved);
+            (issue.code == "missing_wav" ? missing : mismatch).push_back(std::move(entry));
+        }
+        availability.set("missing_wav", std::move(missing));
+        availability.set("wav_ext_mismatch", std::move(mismatch));
+        out.set("lint", std::move(availability));
         return out;
     }
 };
@@ -1700,8 +1901,10 @@ class NoteMoveCommand : public Command {
             if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
             to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
-        return std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m, to_pos,
-                                                       false, to_lane, from_sub_line, to_sub_line);
+        return with_source_identity(
+            std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m, to_pos,
+                                                    false, to_lane, from_sub_line, to_sub_line),
+            *from);
     }
 
     Json run(const Json& args) const override {
@@ -1727,7 +1930,15 @@ class NoteMoveCommand : public Command {
             cmds.push_back(make_command(args));
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
-        for (auto& c : cmds) comp->add(std::move(c));
+        std::unordered_set<std::size_t> claimed;
+        for (auto& c : cmds) {
+            try {
+                c->preflight(session.chart(), claimed);
+            } catch (const std::invalid_argument& e) {
+                throw CommandError("bad_args", e.what());
+            }
+            comp->add(std::move(c));
+        }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
@@ -1765,7 +1976,9 @@ class NoteDeleteCommand : public Command {
                 if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
                 sub_line = static_cast<std::uint32_t>(bl->as_i64());
             }
-            return std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line);
+            return with_source_identity(
+                std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line),
+                item);
         };
         // selection 数组 = 批量删除（一个 CompositeCommand / 一次备份）；单对象路径保持兼容。
         if (args.find("selection")) {
@@ -1822,14 +2035,20 @@ class NoteQuantizeCommand : public Command {
             throw CommandError("bad_args", "snap 数值应 > 0");
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
-        for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::QuantizeNoteCommand>(r.measure, r.pos, r.lane,
-                                                                  r.sample, snap_num, snap_den));
+        Json selection = Json::array();
+        for (auto ref : refs) {
+            auto command = std::make_unique<edit::QuantizeNoteCommand>(
+                ref.measure, ref.pos, ref.lane, ref.sample, snap_num, snap_den, ref.sub_line);
+            command->set_source_identity(ref.ln_channel, ref.note_kind);
+            ref.pos = command->target_pos();
+            selection.push_back(note_ref_json(ref));
+            comp->add(std::move(command));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("notes", static_cast<std::int64_t>(refs.size()));
+        if (ok) out.set("selection", std::move(selection));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }
@@ -1859,6 +2078,7 @@ class NoteTransformCommand : public Command {
         for (const auto& r : refs) {
             auto command = std::make_unique<edit::TransformNoteCommand>(
                 r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line);
+            command->set_source_identity(r.ln_channel, r.note_kind);
             // Preflight against the unchanged chart. Invalid targets must return
             // a protocol error, not success with a replacement selection.
             try {
@@ -1890,6 +2110,7 @@ class NoteTransformCommand : public Command {
             o.set("lane", std::move(l));
             o.set("sample", static_cast<std::int64_t>(r.sample));
             o.set("sub_line", static_cast<std::int64_t>(r.sub_line));
+            write_source_identity(o, r);
             sel.push_back(std::move(o));
         }
         Json out = Json::object();
@@ -1925,8 +2146,9 @@ class NoteToggleLnCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(std::make_unique<edit::ToggleLnCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                              r.sub_line));
+            comp->add(with_source_identity(std::make_unique<edit::ToggleLnCommand>(
+                                               r.measure, r.pos, r.lane, r.sample, r.sub_line),
+                                           r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -2013,8 +2235,10 @@ class NoteConvertCommand : public Command {
                 tm = r.measure;
                 tp = r.pos;
             }
-            comp->add(std::make_unique<edit::ConvertNoteCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                                 r.sub_line, target, tm, tp));
+            comp->add(with_source_identity(
+                std::make_unique<edit::ConvertNoteCommand>(r.measure, r.pos, r.lane, r.sample,
+                                                           r.sub_line, target, tm, tp),
+                r));
         }
         if (comp->size() == 0)
             throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
@@ -2133,13 +2357,17 @@ class NoteMoveRegionCommand : public Command {
             }
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
-                comp->add(std::make_unique<edit::ConvertNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
-                    static_cast<std::uint32_t>(to_m), to_pos));
+                comp->add(with_source_identity(
+                    std::make_unique<edit::ConvertNoteCommand>(
+                        r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
+                        static_cast<std::uint32_t>(to_m), to_pos),
+                    r));
             } else {
-                comp->add(std::make_unique<edit::MoveNoteCommand>(
-                    r.measure, r.pos, r.lane, r.sample, static_cast<std::uint32_t>(to_m), to_pos,
-                    false, to_lane, r.sub_line, to_sub_line));
+                comp->add(with_source_identity(
+                    std::make_unique<edit::MoveNoteCommand>(
+                        r.measure, r.pos, r.lane, r.sample, static_cast<std::uint32_t>(to_m),
+                        to_pos, false, to_lane, r.sub_line, to_sub_line),
+                    r));
             }
         }
         if (comp->size() == 0) {
@@ -2182,6 +2410,20 @@ class MetaListCommand : public Command {
     }
 };
 
+bool contains_line_break(std::string_view text) {
+    return text.find_first_of("\r\n") != std::string_view::npos;
+}
+
+void validate_single_line_meta(std::string_view key, std::string_view value) {
+    if (contains_line_break(key) || contains_line_break(value))
+        bad_args("元信息字段名和值不能含换行");
+    const auto token = key.substr(0, key.find_first_of(" \t\f\v:"));
+    constexpr std::string_view kEncoding = "ENCODING";
+    if (std::equal(token.begin(), token.end(), kEncoding.begin(), kEncoding.end(),
+                   [](unsigned char a, char b) { return std::toupper(a) == b; }))
+        bad_args("ENCODING 由写出编码决定，不是可编辑的元信息字段");
+}
+
 class MetaEditCommand : public Command {
    public:
     std::string_view name() const override { return "meta.edit"; }
@@ -2197,18 +2439,30 @@ class MetaEditCommand : public Command {
             throw CommandError("bad_args", "edits 不能为空");
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
+        std::size_t applied = 0;
         for (const auto& item : edits->as_array()) {
             if (!item.is_object()) throw CommandError("bad_args", "edits 元素应为对象");
             const Json* key = item.find("key");
             if (!key || !key->is_string()) throw CommandError("bad_args", "edits 元素缺 key");
             const Json* val = item.find("value");
             if (!val || !val->is_string()) throw CommandError("bad_args", "edits 元素缺 value");
+            if (session.preserve_text_format())
+                validate_single_line_meta(key->as_str(), val->as_str());
+            // 无变化 = 不执行（2026-10-14）：值与原值相同（含"删一个不存在的字段"）时
+            // 不产生 undo 步、**不把文档标脏**。防御性守卫——UI 侧绑定求值误报一次
+            // meta.edit 就会让"打开谱面"即变未保存（见 MetaPanel onTextEdited 注释）。
+            const auto cur = session.chart().meta.find(key->as_str());
+            const bool exists = (cur != session.chart().meta.end());
+            if (exists && cur->second == val->as_str()) continue;
+            if (!exists && val->as_str().empty()) continue;
             comp->add(std::make_unique<edit::MetaEditCommand>(key->as_str(), val->as_str()));
+            ++applied;
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = applied == 0 ? true : session.exec(std::move(comp));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("edits", static_cast<std::int64_t>(edits->as_array().size()));
+        out.set("applied", static_cast<std::int64_t>(applied));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         return out;
     }
@@ -2243,6 +2497,7 @@ class MetaRawEditCommand : public Command {
         std::vector<std::string> lv;
         for (const auto& e : lines->as_array()) {
             if (!e.is_string()) throw CommandError("bad_args", "lines 元素应为字符串");
+            if (contains_line_break(e.as_str())) bad_args("lines 每个元素只能包含一行");
             lv.push_back(e.as_str());
         }
         session.exec(std::make_unique<edit::RawLinesEditCommand>(std::move(lv)));
@@ -2262,6 +2517,7 @@ class SessionDirtyCommand : public Command {
         out.set("dirty", session.is_dirty());
         out.set("has_chart", session.has_chart());
         out.set("path", session.path());
+        out.set("text_format", text_format_json(session.text_format()));
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
         out.set("redo_depth", static_cast<std::int64_t>(session.redo_depth()));
         return out;
@@ -2502,8 +2758,10 @@ class NoteSetSampleCommand : public Command {
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t to_id = decode(to);
-        const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(
-            measure, pos, lane, sample, sub_line, to_id));
+        const bool ok =
+            session.exec(with_source_identity(std::make_unique<edit::SetNoteSampleCommand>(
+                                                  measure, pos, lane, sample, sub_line, to_id),
+                                              args));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));
@@ -2522,6 +2780,8 @@ void register_builtin_commands(Registry& registry) {
     register_midi_commands(registry);
     // M6.2 切片（位置源 → 切片表；core 纯计算 + 命令对象）
     register_slice_commands(registry);
+    // M7 项目索引（文件夹 → 谱面/资源表；只读文本、不加载音频）
+    register_project_commands(registry);
     // M3 编辑命令（追加；会话命令，作用在 args.session_id 或活动会话）
     registry.add(std::make_unique<SessionLoadCommand>());
     registry.add(std::make_unique<SessionNewCommand>());  // 新建空谱面（2026-09 编辑态小节数）

@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shebang 固定 /bin/bash，勿改回 /usr/bin/env bash：winuxcmd（niugit）自带的 git
+# 无法执行 env shebang 的 hook，会以 exit 126 拒绝；官方 Git for Windows 与 Linux/macOS 正常。
 # pre-commit 门禁（安装：git config core.hooksPath .githooks）
 #
 #   - 文档护栏：挂账生命周期 / 指针有效性 / 弯引号（scripts/check-docs.sh）

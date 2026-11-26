@@ -47,10 +47,9 @@ ccache --set-config compiler_check=content
 ccache --zero-stats
 "$HOME/.local/bin/ccache" --version
 
-# 构建并行度：有界自动。cmake --build --parallel 不带值时读 CMAKE_BUILD_PARALLEL_LEVEL，
-# 未设则向 make 传裸 -j（无上限）——147 个编译单元同起跑曾把 3 vCPU/7GB 的 macos 压到
-# 27–35 分钟（run 37964482001）。按平台规格取 min(CPU数, 上限)：macos 3（GitHub 规格），
-# 其余 4（runner 规格）
+# 构建并行度：按平台取 min(CPU 数, 上限)，macOS 3，其余 4。
+# Linux/macOS 完整构建显式传入此值。CMake 仅在命令行未指定 --parallel 时才用此环境变量
+# 作为默认值；裸 --parallel 对 Unix Makefiles 会传无上限的 -j（见 #14）。
 case "$RUNNER_OS" in
   macOS) cap=3 ;;
   *)     cap=4 ;;

@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,17 +98,43 @@ struct RowCell {
     std::uint32_t sub_line = 0;  // BGM 行序号（仅 ch01 有意义；非 BGM = 0）
 };
 
-// 事件 i 与 j 是否互为 LN 配对（互指下标）
-inline bool ln_paired(const Chart& chart, std::size_t i, std::size_t j) {
-    if (i >= chart.notes.size() || j >= chart.notes.size()) return false;
-    const auto& a = chart.notes[i].value;
-    const auto& b = chart.notes[j].value;
-    return a.ln_pair && *a.ln_pair == j && b.ln_pair && *b.ln_pair == i;
-}
-
 // id 文本：按 chart.id_base 输出（36 = 大写；62 = 大小写敏感 base62）
 inline std::string fmt_id(const Chart& chart, std::uint32_t id) {
     return chart.id_base == IdBase::Base62 ? u32_to_c62(id, 2) : u32_to_c36(id, 2);
+}
+
+std::string apply_line_ending(std::string text, std::string_view kind) {
+    if (kind.empty() || kind == "lf") return text;
+    if (kind == "cr") {
+        std::ranges::replace(text, '\n', '\r');
+        return text;
+    }
+    if (kind != "crlf") throw std::invalid_argument("BMS 写出行尾必须为 lf、crlf 或 cr");
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        if (c == '\n') out.push_back('\r');
+        out.push_back(c);
+    }
+    return out;
+}
+
+std::string apply_byte_format(std::string text, const BmsWriteOptions& opts) {
+    if (opts.encoding == BmsEncoding::ShiftJis) {
+        if (opts.utf8_bom) throw std::invalid_argument("CP932 BMS 不能带 UTF-8 BOM");
+        text = utf8_to_shiftjis(text, opts.strict_encoding);
+    } else {
+        if (opts.strict_encoding && !is_valid_utf8(text))
+            throw std::invalid_argument("BMS 写出文本不是合法的 UTF-8");
+        if (opts.utf8_bom) text.insert(0, kUtf8Bom);
+    }
+    auto bytes = apply_line_ending(std::move(text), opts.line_ending);
+    if (opts.ascii_only) *opts.ascii_only = is_ascii(bytes);
+    if (opts.encoding_ambiguous) {
+        *opts.encoding_ambiguous = opts.encoding == BmsEncoding::ShiftJis &&
+                                   inspect_encoding(bytes, BmsEncoding::Auto).ambiguous;
+    }
+    return bytes;
 }
 
 }  // namespace
@@ -129,7 +156,8 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         for (const auto& [key, value] : chart.meta) {
             (void)value;
             const auto up = upper_ascii(key);
-            if (up == "BASE") continue;  // id 进制已由 id_base 结构化输出，meta 不重复
+            // 进制与编码声明都由专用逻辑生成，不能从通用 meta 伪造。
+            if (up == "BASE" || up == "ENCODING") continue;
             const bool is_known =
                 std::find(std::begin(kMetaOrder), std::end(kMetaOrder), up) != std::end(kMetaOrder);
             (is_known ? known : unknown).push_back(up);
@@ -353,55 +381,14 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         cells.push_back({pos, std::move(text), sub_line});
     };
 
-    // 3a. 头部元信息：LNTYPE 2 尾槽值需要 LNOBJ 文本
-    const auto lntype2 = [&] {
-        if (const auto it = chart.meta.find("LNTYPE"); it != chart.meta.end()) {
-            return it->second == "2";
-        }
-        return false;
-    }();
-    std::string lnobj_text;
-    if (const auto it = chart.meta.find("LNOBJ"); it != chart.meta.end()) {
-        lnobj_text = it->second;
-    }
-    if (lntype2 && lnobj_text.empty()) {
-        lnobj_text = "ZZ";  // 默认；若头部无 #LNOBJ 行则需补（见下方头部输出修正）
-    }
-
-    // 3b. note：LN 通道由配对关系决定（互为配对时按时间序分头尾）
-    //   LNTYPE 1（默认）：头尾同在 RDM LN 通道（1P→5x / 2P→6x，槽位文本 = WAV id）；
-    //   LNTYPE 2（#LNOBJ）：头尾同在普通通道（1x/2x），尾槽位文本 = #LNOBJ id。
-    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
-        const auto& ev = chart.notes[i];
+    // Note channel and sample are stored identity, never inferred from derived links.
+    for (const auto& ev : chart.notes) {
         const auto& n = ev.value;
-        bool is_head = false;
-        bool is_tail = false;
-        if (n.ln_pair && *n.ln_pair < chart.notes.size() && ln_paired(chart, i, *n.ln_pair)) {
-            if (ev < chart.notes[*n.ln_pair]) {
-                is_head = true;
-            } else {
-                is_tail = true;
-            }
-        }
         const auto mode = chart.mode_id.value_or("sp7k");
-        // BGM（ch01）：无 LN 表示（通道映射 ln_channel=false 且 bms_channel_for(Bgm,ln)==""）。
-        // 即使模型异常残留 ln_channel/配对，也按普通背景 note 写回（绝不丢数据）。
-        const bool want_ln = !lntype2 && (is_head || is_tail) && n.lane.kind != LaneKind::Bgm;
-        auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
-        // 部分遗留 PMS 2P 仅有 LN 通道而无普通通道。孤儿也保留源 LN 标记，
-        // 不能降级成会读成1P的普通通道，更不能因缺少配对而静默丢弃。
-        if (channel.empty() && n.ln_channel)
-            channel = bms_channel_for_mode(mode, n.lane, true, n.kind);
-        if (channel.empty()) continue;  // 无法表示的 Lane（罕见）→ 丢弃并依赖诊断
-        std::string slot_text;
-        const auto output_rule = bms_channel_rule_for(mode, channel);
-        const bool rdm_channel = output_rule && output_rule->ln_channel;
-        if (is_tail && lntype2 && !rdm_channel && n.lane.kind != LaneKind::Bgm) {
-            slot_text = lnobj_text;
-        } else {
-            slot_text = fmt_id(chart, n.sample.id);
-        }
-        add_cell(ev.measure, channel, ev.pos, std::move(slot_text), n.sub_line);
+        const bool want_ln = n.ln_channel && n.lane.kind != LaneKind::Bgm;
+        const auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
+        if (channel.empty()) continue;  // Unrepresentable lane; diagnostics report it.
+        add_cell(ev.measure, channel, ev.pos, fmt_id(chart, n.sample.id), n.sub_line);
     }
 
     // 3c. BPM：按源通道语义输出（2026-09 用户修复：ch08 不得改写成 ch03）——
@@ -589,21 +576,12 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
 
     // ---- 4. raw_lines 原样（#ENCODING 行按写出编码规范化） ----
     bool raw_started = false;
+    bool raw_block_comment = false;
+    bool has_encoding_declaration = false;
     for (const auto& line : chart.raw_lines) {
-        std::string_view lv(line);
-        std::size_t p = 0;
-        while (p < lv.size() && std::isspace(static_cast<unsigned char>(lv[p]))) ++p;
-        const bool is_encoding_decl =
-            lv.substr(p).starts_with('#') && upper_ascii(lv.substr(p + 1, 8)) == "ENCODING";
-        if (is_encoding_decl) {
-            if (opts.encoding == BmsEncoding::Utf8) {
-                if (!raw_started) {
-                    emit_section_comment(out, detail::kSectionRawLine);
-                    raw_started = true;
-                }
-                out += "#ENCODING UTF-8\n";
-            }
-            continue;  // SJIS 写回不输出编码声明（传统无声明）
+        if (encoding_declaration(line, raw_block_comment)) {
+            has_encoding_declaration = true;
+            continue;  // 真正的声明集中到文件头；CP932 写出省略声明。
         }
         if (!raw_started) {
             emit_section_comment(out, detail::kSectionRawLine);
@@ -612,11 +590,14 @@ std::string write_bms(const Chart& chart, const BmsWriteOptions& opts) {
         out += line;
         out.push_back('\n');
     }
-
-    if (opts.encoding == BmsEncoding::ShiftJis) {
-        return utf8_to_shiftjis(out);
+    if (opts.encoding != BmsEncoding::ShiftJis &&
+        (has_encoding_declaration ||
+         (!opts.utf8_bom && !is_ascii(out) && is_valid_utf8(out) && is_valid_cp932(out)))) {
+        // 已有声明规范化；无 BOM 的双可解 UTF-8 必须自描述，让默认重开不失真。
+        out.insert(0, "#ENCODING UTF-8\n");
     }
-    return out;
+
+    return apply_byte_format(std::move(out), opts);
 }
 
 }  // namespace beatbench::bms

@@ -21,6 +21,28 @@ add_executable(beatbench
     bridge/PlayheadOverlayItem.cpp
     bridge/SliceWorkspace.cpp
     bridge/SliceWaveformItem.cpp
+    bridge/ChartSnapshotStore.cpp
+    bridge/ChartSnapshotStore.hpp
+    bridge/ChartHistoryController.cpp
+    bridge/ChartHistoryController.hpp
+    bridge/ChartFileActions.cpp
+    bridge/ChartFileActions.hpp
+    bridge/DocumentService.cpp
+    bridge/DocumentService.hpp   # Q_OBJECT：显式列入
+    bridge/ResourceBindingController.cpp
+    bridge/ResourceBindingController.hpp
+    bridge/ResourceRelocationController.cpp
+    bridge/ResourceRelocationController.hpp
+    bridge/PaneEditContext.cpp
+    bridge/PaneEditContext.hpp
+    bridge/PaneEditOperations.cpp
+    bridge/PaneEditOperations.hpp
+    bridge/NoteMovePlan.cpp
+    bridge/NoteMovePlan.hpp
+    bridge/PaneDragController.cpp
+    bridge/PaneDragController.hpp
+    bridge/ProjectController.cpp
+    bridge/ProjectController.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/ThemeManager.hpp   # 显式列入：AUTOMOC 扫描 target sources 生成 moc（自动包含扫描不可靠）
     bridge/SampleListModel.hpp
     bridge/LintListModel.hpp
@@ -34,6 +56,9 @@ add_executable(beatbench
     bridge/SliceWaveformItem.hpp
 )
 target_link_libraries(beatbench PRIVATE beatbench_core beatbench_audio Qt6::Quick Qt6::QuickControls2)
+if(WIN32)
+    target_link_libraries(beatbench PRIVATE shell32 ole32)
+endif()
 beatbench_set_warnings(beatbench)
 
 # ⚠️ Qt 6.12.0 的 qmlcachegen 在本模块上**确定性 SIGSEGV**（已知上游问题，2026-10 实测）：
@@ -61,6 +86,7 @@ qt_add_qml_module(beatbench
         qml/pages/EditPage.qml
         qml/pages/SlicePage.qml
         qml/pages/TestPage.qml
+        qml/pages/ProjectPage.qml
         qml/components/PageSwitcher.qml
         qml/components/MetaPanel.qml
         qml/components/BbToolButton.qml
@@ -70,11 +96,20 @@ qt_add_qml_module(beatbench
         qml/components/BbSpinBox.qml
         qml/components/BbTextField.qml
         qml/components/BbDialog.qml
+        qml/components/BbDialogHeader.qml
+        qml/components/BbDialogPositioner.qml
         qml/components/BbComboBox.qml
         qml/components/SamplePanel.qml
         qml/components/SettingsDialog.qml
+        qml/components/ChartHistoryDialog.qml
+        qml/components/ChartHistoryPanel.qml
+        qml/components/ResourceBindingDialog.qml
+        qml/components/ResourceRelocationDialog.qml
+        qml/components/InlineWavBinding.qml
         qml/components/LintPanel.qml
         qml/components/ChartView.qml
+        qml/components/ChartCompareSplit.qml
+        qml/components/ChartPaneTitle.qml
         qml/components/PropertiesPanel.qml
         qml/components/TimelinePanel.qml
         qml/components/BgaPanel.qml

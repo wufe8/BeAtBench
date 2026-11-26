@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 中央视口：竖向时间轴（M2 第 5 步，doc/project-workflow.md 三、 步 5）。
-// ChartViewItem 自绘（QPainter，真数据 = chartSession 上下文属性）；滚动/缩放/水平滚动
+// ChartViewItem 自绘（QPainter，真数据 = root.documentSession）；滚动/缩放/水平滚动
 // 由本组件驱动（⚠️ Flickable 无 onWheel → WheelHandler，doc/development.md 五、）。秒标尺/波形铺底后置 Phase B。
 // 编辑接线（M3 命令，handoff-m2-m3）：
 // - 工具分发：select 普通拖 = 滚动（保持原交互）、Shift+拖 = 框选（selectionFinished）；
 //   pan 拖 = 滚动；note 点击 = hitTest → hitPlaceRequested（Main 走 note.put）；
 //   地雷/LN 工具暂提示（M3 命令无 kind 语义）。
 // - 选中高亮：Main 把 selection 回填 → view.selection（ChartViewItem 绘制）。
-// BGM 列头点击 → 展开为按 #WAV id 分列（iBMSC 式后台轨分开显示，BMS 笔记 ch01 注）；
+// BGM 默认按源子通道分列（不是按 #WAV id）；列头点击可收起/重新展开。
 // 列头显示实际 BMS 通道 id = 工具条勾选 / Ctrl 临时（Main.qml 经 checkbox.toggle() 同路径
 // 翻转 + 松开还原（C++ KeyMonitor 事件过滤器，Adobe 式）；此处只透传状态）。
 // 皮肤边界（doc/skin-system.md 三、6. / doc/ui-design.md 八、）：本组件 = 默认皮肤 surface「viewport」的组件库成员，
@@ -18,16 +18,60 @@ import BeatBench
 Item {
     id: root
 
+    // Explicit document bridge; existing single-document callers retain the context fallback.
+    property var documentSession: typeof chartSession !== "undefined" ? chartSession : null
+    // Read-only keeps selection/navigation/audition, but emits no document edits.
+    property bool editable: true
+    // 默认关闭的 note 拖动 seam：控制器负责所有文档/落点/命令语义，surface 只持有鼠标 grab。
+    // begin(sourceView, pressPoint, currentPoint, pressedRef, selectionSnapshot) -> bool
+    // update/finish(sourceView, viewportPoint), cancel(sourceView, reason)。所有点都在 viewportItem 本地。
+    // begin 拒绝也消费整次 gesture；只有 null 控制器才走 legacy 移动。
+    property var managedDragController: null
+    readonly property bool managedDragConsumed: _managedDragConsumed
+    property bool _managedDragConsumed: false
+    property bool _managedDragActive: false
+    property var _managedDragOwner: null
+    onManagedDragControllerChanged: if (_managedDragConsumed) cancelManagedDrag("controller-changed")
+    onVisibleChanged: if (!visible) invalidatePointerGesture("hidden")
+    onEnabledChanged: if (!enabled) invalidatePointerGesture("disabled")
+    onEditorToolChanged: if (_managedDragConsumed) cancelManagedDrag("tool-changed")
+    onReferenceOverlayEnabledChanged: if (_managedDragConsumed) cancelManagedDrag("overlay-changed")
+    // B is painted inside this viewport, never a second input surface.
+    property var referenceSession: null
+    property bool referenceOverlayEnabled: false
+    property color referenceOverlayColor: Theme.accent2
+    property real referenceOverlayOpacity: 0.45
+    property bool referenceOverlayHideSecondaryChannels: true
+    readonly property var referenceOverlayInfo: view.referenceOverlayInfo
+    // 播放角色独立于编辑权限：A 默认保留单视图兼容，B 必须显式关闭；
+    // 即使 A/B 显示同一文档，B 也不能接全局时钟或 seek。文档身份再防旧 A 接错 PCM。
+    property bool primaryPlaybackRole: true
+    readonly property bool ownsPlayback: root.primaryPlaybackRole && root.documentSession !== null
+                                        && typeof chartSession !== "undefined"
+                                        && root.documentSession === chartSession
+    function restoreDocumentVisuals() {
+        const info = root.documentSession ? root.documentSession.waveformInfo() : ({})
+        waveformShown = info.valid === true
+        waveformReady = waveformShown
+        view.playheadSec = -1
+    }
+    onDocumentSessionChanged: {
+        root.invalidatePointerGesture("document-changed")
+        Qt.callLater(root.restoreDocumentVisuals)
+    }
+    Component.onCompleted: restoreDocumentVisuals()
+
     property real measureHeight: 96      // 小节高度（缩放 = 改此值；Ctrl+滚轮快速缩放）
-    property bool topHigh: true          // 默认「顶部=高小节」（preview.html，note 自上而下落）
+    property bool topHigh: true          // 默认「顶部=高小节」（音符自上而下）
     property bool zoomToCursor: true     // 缩放锚点：true = 鼠标位置放大（推荐，默认开）；false = 视口中心
     property int snapNum: 1              // 吸附粒度分子（放置吸附 + 槽位弱线）
     property int snapDen: 16             // 吸附粒度分母
     property bool showChannelIds: false  // 列头显示实际 BMS 通道 id（工具条勾选）
-    property bool bgmExpanded: false     // BGM 轨展开（列头点击切换；--bgm-expand 调试）
+    property bool bgmExpanded: true      // BGM 默认展开，列头点击切换收起/展开
     property int noteSampleMode: 0       // note 采样标签：0 隐藏 / 1 id / 2 文件名
     property bool lnSelectMode: false    // LN 选取模式（默认关）：点 LN 任一段自动选配对两端
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
+    property bool hideSecondaryChannels: false
     property bool showGrid: true         // 槽位弱线显示开关（「网格」按钮；吸附不依赖此开关）
     /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
@@ -36,7 +80,7 @@ Item {
     property bool moveMode: false          // 平移开关（默认关，2026-09 用户确认：
                                            // 「默认关闭 note 平移限制」→ 自由 2D 拖动，
                                            // 时间+通道可同时动；勾选后按轴锁定）
-    property int sampleId: -1            // 放置用采样数值 id（chartSession.sampleValueOf）
+    property int sampleId: -1            // 放置用采样数值 id（root.documentSession.sampleValueOf）
     property string sampleText: ""       // 当前采样展示（无放置采样时提示）
     property var selection: []           // 选中 note 集合（NoteRef；回填 view.selection 高亮）
     property var metaSelection: []       // 选中 BGA/BPM/STOP 对象集合（回填 view.metaSelection 高亮）
@@ -58,10 +102,17 @@ Item {
     /// M4.3c：波形条首次渲染后置 true（此后恒真）——内容变化隐藏波形条（stale）时
     /// **保留**右侧预留宽度，视口宽度不变 → 列不重排（用户 2026-09 移动 note 会跳位）。
     property bool waveformShown: false
+    property bool waveformReady: false
+    readonly property real waveformReservedWidth: waveformShown && !hideSecondaryChannels ? waveform.width : 0
+
+    signal viewportChanged()
+    signal navigationCompleted()
+    readonly property var viewportItem: view
 
     signal hitPlaceRequested(var hit)       // note 工具点击 → Main 走 note.put
     signal selectionFinished(var refs)      // 框选完成 → Main 存 selection + 复制
     signal noteClicked(var ref, bool ctrl)  // select 点击命中 note（选中；ctrl = 多选切换）
+    signal samplePreviewStopRequested()       // blank press cancels audition before a drag/release
     signal playNoteSample(var ref)          // 点击 note（按下→释放无拖动）→ 播放该采样（M4.3 前端）
     signal canvasClicked()                  // select 点击空白（清空选中）
     signal noteRightDeleted(var ref)        // 右键命中 note（删除）
@@ -82,16 +133,19 @@ Item {
     // BGA/BPM/STOP 双击编辑
     signal metaEditRequested(var obj)
 
-    onBgmExpandedChanged: view.bgmExpanded = bgmExpanded
-
     ChartViewItem {
         id: view
         anchors.fill: parent
         anchors.bottomMargin: 12   // 底部水平滚动条区域
-        anchors.rightMargin: (waveformShown ? (waveform.width + 12) : 12)  // 右侧波形条 + 垂直滚动条区域
+        anchors.rightMargin: root.waveformReservedWidth + 12  // 右侧波形条 + 垂直滚动条区域
         // ⚠️ 用 waveformShown（首次渲染后恒真）而非 waveform.visible：内容变化隐藏波形条
         // （stale）时保持视口宽度不变 → 列不再重排（用户 2026-09：移动 note 后所有 note 跳位）。
-        session: typeof chartSession !== "undefined" ? chartSession : null
+        session: root.documentSession
+        referenceSession: root.referenceSession
+        referenceOverlayEnabled: root.referenceOverlayEnabled
+        referenceOverlayColor: root.referenceOverlayColor
+        referenceOverlayOpacity: root.referenceOverlayOpacity
+        referenceOverlayHideSecondaryChannels: root.referenceOverlayHideSecondaryChannels
         theme: Theme
         measureHeight: root.measureHeight
         topHigh: root.topHigh
@@ -100,6 +154,7 @@ Item {
         noteSampleMode: root.noteSampleMode
         lnSelectMode: root.lnSelectMode
         showExtras: root.showExtras
+        hideSecondaryChannels: root.hideSecondaryChannels
         showGrid: root.showGrid
         selection: root.selection
         metaSelection: root.metaSelection
@@ -111,10 +166,13 @@ Item {
         // Ctrl 临时切换已在状态层完成（Main.qml Connections → checkbox.toggle()），
         // 此处纯透传（不 XOR）——checkbox 视觉/视图状态始终一致（2026-09 用户）
         showChannelIds: root.showChannelIds
+        bgmExpanded: root.bgmExpanded
         // M6 编辑预览：放置工具 → ghost note 类型（note/ln/mine）；其它工具 = 关
-        previewNoteKind: root.editorTool === "note" ? "normal"
+        previewNoteKind: !root.editable ? ""
+                       : root.editorTool === "note" ? "normal"
                        : root.editorTool === "ln" ? "ln"
                        : root.editorTool === "mine" ? "mine" : ""
+        onViewportAnchorChanged: root.viewportChanged()
         onChartChanged: {
             // 谱面切换 → 定位到起点（小节 0 落在播放线/视口 90%——开头留白兜底，
             // 避免「0-1 小节播放头锁不住 90% → 开始播放跳变」；2026-09 用户）
@@ -127,7 +185,7 @@ Item {
     PlayheadOverlayItem {
         id: playheadOverlay
         anchors.fill: view
-        session: typeof chartSession !== "undefined" ? chartSession : null
+        session: root.documentSession
         chartView: view  // 2026-09 变拍高修复：y 换算委托 ChartViewItem（按小节高度累计）
         measureHeight: view.measureHeight
         scrollY: view.scrollY
@@ -150,14 +208,16 @@ Item {
         anchors.topMargin: 0
         anchors.bottomMargin: 12   // 底部水平滚动条区域留白
         orientation: 1             // 垂直（右侧条；时间轴方向与视口一致 topHigh 感知）
-        visible: false              // 有波形时显示（renderFinished 后置 true）
+        visible: root.waveformReady && !root.hideSecondaryChannels
         width: 60
         // ⚠️ z 必须高于编辑区 MouseArea（后者默认 z:0 且声明在后 → 叠上层抢走点击，
         //   波形条点不动/拖动变成框选；2026-09 用户）。提 z 让波形条自收鼠标（点击/拖动 seek）。
         z: 5
-        session: typeof chartSession !== "undefined" ? chartSession : null
+        session: root.documentSession
         theme: Theme
-        // 视口状态绑定（换算可见窗口指示）
+        // Delegate variable-measure viewport geometry and own-timing clamping to A.
+        chartView: view
+        // 视口状态绑定（方向/重绘兼容绑定）
         measureHeight: root.measureHeight
         scrollY: view.scrollY
         contentHeight: view.contentHeight
@@ -171,16 +231,16 @@ Item {
     // ⚠️ onRenderFinished 置 waveformShown=true（此后恒真）：内容变化隐藏波形条时视口宽度
     // 不变（仅波形内容变 blank）→ 列不重排。onDocumentChanged 重置 false（新谱面未渲染）。
     Connections {
-        target: typeof chartSession !== "undefined" ? chartSession : null
+        target: root.documentSession
         function onRenderFinished(ok, outPath, durationSec) {
             waveformShown = true
-            waveform.visible = ok
+            waveformReady = ok
         }
     }
     Connections {
-        target: typeof chartSession !== "undefined" ? chartSession : null
+        target: root.documentSession
         function onDocumentChanged() {
-            waveform.visible = false
+            waveformReady = false
             waveformShown = false
             view.playheadSec = -1  // 谱面切换：隐藏播放头（等新渲染/播放）
         }
@@ -195,7 +255,7 @@ Item {
     // 时间源 = AudioEngine 播放时钟（20Hz 刷新；暂停/停止也显示当前位置）。
     // 跟随：播放头出安全区 → 视口滚动（自动）；用户滚动 → 关闭（见 wheel/滚动条）。
     Connections {
-        target: typeof audioEngine !== "undefined" ? audioEngine : null
+        target: root.ownsPlayback && typeof audioEngine !== "undefined" ? audioEngine : null
         function onPlaybackChanged() {
             // 红线 = 视口光标（固定，见 PlayheadOverlayItem）；这里只：
             // ① view.playheadSec = 播放时钟（follow tick 让红线下方 = 时钟）
@@ -240,8 +300,10 @@ Item {
     /// ⚠️ zoomAt 直接改 C++ measureHeight（锚点滚动计算），完成后回写 root.measureHeight
     /// 保持工具条「缩放 %」显示同步（root→view 单向绑定，回写同值不会二次缩放）。
     function zoomAt(y, factor) {
+        const previousHeight = view.measureHeight
         view.zoomAt(y, factor)
         root.measureHeight = view.measureHeight
+        if (view.measureHeight !== previousHeight) root.navigationCompleted()
     }
 
     // ---- 缩放级别（等比，无漂移）----
@@ -280,7 +342,7 @@ Item {
         const nIdx = up ? Math.min(lv.length - 1, idx + 1) : Math.max(0, idx - 1)
         if (nIdx === idx) return
         if (root.zoomToCursor) root.zoomAt(y, lv[nIdx] / lv[idx])
-        else root.measureHeight = lv[nIdx]
+        else { root.measureHeight = lv[nIdx]; root.navigationCompleted() }
     }
 
     WheelHandler {
@@ -307,20 +369,22 @@ Item {
             // 垂直滚动（pixelDelta 触控板优先；angleDelta 为滚轮档位）
             const dy = event.pixelDelta.y !== 0 ? event.pixelDelta.y
                                                 : event.angleDelta.y / 120 * 48
+            const previousY = view.scrollY
             view.scrollY -= dy
-            root.userScroll()  // 用户滚动 → 关跟随
+            root.userScroll(previousY)
             event.accepted = true
         }
     }
 
     /// 用户主动滚动：**不阻断**（跟随只在播放中锁定——用户 2026-09「只要在播放期间锁定即可」；
-    /// 暂停/停止可自由滚动浏览）。此函数保留为空壳（原自动关跟随逻辑废弃——硬锁定优先）。
-    function userScroll() {
-        // no-op：跟随开启时仅播放中锁定（见 onPlaybackChanged 的 playing 判定）
+    /// 暂停/停止可自由滚动浏览）。只报告导航，不自动关闭播放跟随（硬锁定优先）。
+    function userScroll(previousY) {
+        // Pure horizontal pans and clamped no-ops must not drive A from a short B.
+        if (Math.abs(view.scrollY - previousY) > 0.00000001) root.navigationCompleted()
     }
 
     // 手势（M3 接线）：列头命中 → 展开；否则按工具分发：
-    //   拖动（select/pan/note 均可）滚动；select + Shift 拖动 = 框选；note 点击 = 放置。
+    //   select 从空白拖动框选；pan 拖动滚动；note 点击空白放置。
     // ⚠️ press 抓取保证 release 仍回到本 Area（落在滚动条上也不丢）。
     // 状态抽为 root 级（handlePress/Release），MouseArea 与调试入口（--click）共用同一路径。
     property real _lastY: -1
@@ -328,6 +392,11 @@ Item {
     property int _pressX: 0
     property int _pressY: 0
     property bool _boxSelect: false
+    // 框选起点属于谱面内容，另一端始终跟随视口内的指针。
+    property point _boxAnchor: Qt.point(0, 0)
+    property point _boxPointer: Qt.point(0, 0)
+    readonly property point _boxProjectedAnchor: Qt.point(_boxAnchor.x - view.scrollX,
+                                                           _boxAnchor.y - view.scrollY)
     property bool _dragged: false
     property bool _panning: false   // 中键拖动 = 滚动（任何工具下）
     property bool _moving: false    // 拖拽选中 note = 移动（选中 note 上按下即进入，无门控）
@@ -338,7 +407,71 @@ Item {
     property var _moveTargetLane: null  // 横向目标列（laneAtX 结果；null = 时间只动）
     property var _moveSourceLane: null  // 拖起的 note 所在轨（{player,kind,index}；跨通道多换轨判定用）
     property int _moveSourceSubLine: -1 // 拖起 note 的 BGM 子通道行号（相对平移对齐基准；非 BGM=-1）
+    property bool _collapseSelectionOnClick: false // managed 组选中仅在无拖动 release 时折叠
     property var _pressedNoteRef: null  // press 命中的 note（有值 = 点击待确认；release 无拖译才播放）
+
+    function clearPointerMoveState() {
+        _moving = false
+        _moveKind = ""
+        _moveObj = null
+        _pressedNoteRef = null
+        _collapseSelectionOnClick = false
+        _moveSourceLane = null
+        _moveSourceSubLine = -1
+        _moveTargetLane = null
+        _moveDeltaF = 0
+        _dragged = true
+        _boxSelect = false
+        _panning = false
+        _lastY = -1
+        if (view) {
+            view.movePreview = false
+            view.moveTargetLane = ({})
+            view.moveSourceLane = ({})
+            view.moveSourceSubLine = -1
+        }
+    }
+    function cancelManagedDrag(reason) {
+        if (!_managedDragConsumed) return false
+        const owner = _managedDragOwner
+        const active = _managedDragActive
+        _managedDragActive = false
+        _managedDragOwner = null
+        clearPointerMoveState()
+        // 保留 consumed，直到 release 或下一次 press；取消/拒绝绝不回退放置、试听或 legacy move。
+        if (active && owner) {
+            try { owner.cancel(root, reason || "cancelled") }
+            catch (error) { console.warn("Managed drag cancel failed: " + error) }
+        }
+        return true
+    }
+    function invalidatePointerGesture(reason) {
+        if (_managedDragConsumed) cancelManagedDrag(reason)
+        clearPointerMoveState()
+    }
+    function managedViewportPoint(x, y) {
+        const point = view.mapFromItem(root, x, y)
+        return Qt.point(point.x, point.y)
+    }
+    function beginManagedDrag(x, y) {
+        const owner = managedDragController
+        const pressed = _pressedNoteRef
+        const selected = selection.slice()
+        const pressPoint = managedViewportPoint(_pressX, _pressY)
+        const currentPoint = managedViewportPoint(x, y)
+        _managedDragConsumed = true // latch 必须先于任何外部调用，包括 begin 的拒绝/同步取消。
+        _managedDragActive = true
+        _managedDragOwner = owner
+        clearPointerMoveState()
+        interactionArea.forceActiveFocus()
+        try {
+            const accepted = owner.begin(root, pressPoint, currentPoint, pressed, selected)
+            if (accepted !== true && _managedDragActive) cancelManagedDrag("begin-rejected")
+        } catch (error) {
+            cancelManagedDrag("controller-error")
+        }
+    }
+    onEditableChanged: if (!editable) invalidatePointerGesture("read-only")
 
     /// 平移判定：按下点在选中集内的某个 note 上？
     function isSelectedNote(hit) {
@@ -350,13 +483,19 @@ Item {
                     s.lane.index === hit.lane.index &&
                     s.lane.player === hit.lane.player &&
                     s.pos.num === hit.pos.num && s.pos.den === hit.pos.den &&
-                    (s.sub_line === undefined || s.sub_line === hit.sub_line))
+                    (s.sub_line === undefined || s.sub_line === hit.sub_line) &&
+                    (s.ln_channel === undefined || s.ln_channel === hit.ln_channel) &&
+                    (s.note_kind === undefined || s.note_kind === hit.note_kind))
                 return true
         }
         return false
     }
 
     function handlePress(x, y, shift, ctrl) {
+        if (_managedDragConsumed) {
+            cancelManagedDrag("new-press")
+            _managedDragConsumed = false
+        }
         if (y <= 18 && view.bgmHeaderIndexAt(x) >= 0) {
             root.bgmExpanded = !root.bgmExpanded
             return
@@ -367,6 +506,7 @@ Item {
         _pressY = y
         _dragged = false
         _ctrlHeld = ctrl
+        _collapseSelectionOnClick = false
         // M5 seek 交互：点秒标尺列（x<rulerWidth、y>头部）→ 设播放位置（seek + 滚到红线）。
         // 与 note/框选/放置解耦；只响应单点（拖动不触发，保持标尺纯跳转语义）。
         if (x < view.rulerWidth && y > 18) {
@@ -389,7 +529,7 @@ Item {
                     root.metaObjectClicked(obj, ctrl)
                     // 2026-09 修复：pan（拖拽）工具下 meta 对象同样**只点选、不移动**——
                     // 与 note 的 pan 语义一致（点选/试听可用，拖动保持平移视口语义）。
-                    if (root.editorTool === "pan") return
+                    if (!root.editable || root.editorTool === "pan") return
                     _moving = true
                     _moveKind = obj.kind
                     _moveObj = obj
@@ -409,9 +549,13 @@ Item {
                 // 点击（无论是否已选中）→ noteClicked（选中；播放延后到 release 无拖动
                 // 时——拖动 = 移动操作不播，2026-09 用户「点击播放/移动不播」语义。
                 // 重复点击（已选中）也播放（用户「重复点击播放」确认）。
-                root.noteClicked(obj, false)
+                // Managed 拖动已选 note 必须把完整组选中交给控制器，不能在 press 先折叠。
+                // 仍是普通点击时延后到 release，保持原有单击选择/试听语义。
+                _collapseSelectionOnClick = managedDragController !== null && root.editable &&
+                                            root.editorTool !== "pan" && isSelectedNote(obj)
+                if (!_collapseSelectionOnClick) root.noteClicked(obj, false)
                 _pressedNoteRef = obj
-                if (root.editorTool === "pan") {
+                if (!root.editable || root.editorTool === "pan") {
                     // 拖拽工具（2026-09 用户默认「1 拖拽」）：点 note 只选中 +（release 无位移）试听，
                     // **不进入移动**——拖动保持「平移视口」语义（note 不移动）。
                     return
@@ -434,21 +578,31 @@ Item {
                 return
             }
         }
+        // 空白按下立即取消此窗格的单音试听，不停止整曲播放。
+        if (y > 18 && x >= view.rulerWidth) root.samplePreviewStopRequested()
         // select 工具空白 = 框选（拖动）；pan 工具 = 滚动（拖动）；note/ln/mine 空白 = 点击放置
         _boxSelect = root.editorTool === "select"
         if (_boxSelect) {
-            selRect.x = x
-            selRect.y = y
-            selRect.width = 0
-            selRect.height = 0
-            selRect.visible = true
+            _boxAnchor = Qt.point(x + view.scrollX, y + view.scrollY)
+            _boxPointer = Qt.point(x, y)
         }
     }
     function handleMove(x, y) {
+        if (_managedDragConsumed) {
+            if (_managedDragActive && _managedDragOwner) {
+                try { _managedDragOwner.update(root, managedViewportPoint(x, y)) }
+                catch (error) { cancelManagedDrag("controller-error") }
+            }
+            return
+        }
         if (_lastY < 0 && !_moving) return
         if (_moving) {
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             if (moved > 4) _dragged = true
+            if (_dragged && _moveKind === "" && managedDragController) {
+                beginManagedDrag(x, y)
+                return
+            }
             // 实时 delta 拍位（供状态栏/预览；release 一次性应用）
             if (_dragged) {
                 _moveDeltaF = view.measureAtY(y) - _moveStartF
@@ -488,24 +642,40 @@ Item {
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (moved > 4) _dragged = true
         if (_boxSelect) {
-            selRect.x = Math.min(_pressX, x)
-            selRect.y = Math.min(_pressY, y)
-            selRect.width = Math.abs(x - _pressX)
-            selRect.height = Math.abs(y - _pressY)
+            _boxPointer = Qt.point(x, y)
             return
         }
         if (_dragged) {
+            const previousY = view.scrollY
             view.scrollY -= (y - _lastY)
             view.scrollX -= (x - _lastX)
-            root.userScroll()  // 拖动滚动 → 关跟随
+            root.userScroll(previousY)
         }
         _lastY = y
         _lastX = x
     }
     function handleRelease(x, y) {
+        if (_managedDragConsumed) {
+            const owner = _managedDragOwner
+            const active = _managedDragActive
+            _managedDragActive = false
+            _managedDragOwner = null
+            clearPointerMoveState()
+            try {
+                if (active && owner) owner.finish(root, managedViewportPoint(x, y))
+            } catch (error) {
+                if (owner) {
+                    try { owner.cancel(root, "controller-error") }
+                    catch (cancelError) { console.warn("Managed drag cancel failed: " + cancelError) }
+                }
+            } finally {
+                _managedDragConsumed = false
+            }
+            return
+        }
         _lastY = -1
         // 拖拽工具（pan）：点 note 选中后，release 无位移 → 试听该采样；有位移 → 平移视口（不移动 note）。
-        if (_pressedNoteRef && root.editorTool === "pan") {
+        if (_pressedNoteRef && (!root.editable || root.editorTool === "pan")) {
             const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
             if (!_dragged && moved <= 4) root.playNoteSample(_pressedNoteRef)
             _pressedNoteRef = null
@@ -544,7 +714,7 @@ Item {
                     targetLane = laneHit && laneHit.valid ? laneHit : null
                 }
             }
-            if (Math.abs(deltaF) > 0.001 || targetLane) {
+            if (root.editable && (Math.abs(deltaF) > 0.001 || targetLane)) {
                 // 应用前 snap 时间（拍位吸附到 snapNum/snapDen；在 Main 侧再做）
                 if (root._moveKind !== "") {
                     root.metaMoveRequested(root._moveKind, root._moveObj, deltaF, targetLane)
@@ -555,8 +725,10 @@ Item {
             }
             // 点击（按下→释放，无拖动）= 播放一次；拖动（移动 note）= 不播。
             if (!_dragged && _pressedNoteRef) {
+                if (_collapseSelectionOnClick) root.noteClicked(_pressedNoteRef, false)
                 root.playNoteSample(_pressedNoteRef)
             }
+            _collapseSelectionOnClick = false
             _pressedNoteRef = null
             root._moveKind = ""
             root._moveObj = null
@@ -564,13 +736,11 @@ Item {
             return
         }
         if (_boxSelect) {
-            selRect.visible = false
-            const draggedSel = _dragged && selRect.width > 3 && selRect.height > 3
+            const anchor = _boxProjectedAnchor
             _boxSelect = false
-            if (draggedSel) {
-                root.selectionFinished(view.notesInRect(selRect.x, selRect.y,
-                                                        selRect.x + selRect.width,
-                                                        selRect.y + selRect.height))
+            // 查询用完整范围，不能用裁到当前视口的预览矩形。
+            if (Math.abs(x - anchor.x) > 3 && Math.abs(y - anchor.y) > 3) {
+                root.selectionFinished(view.notesInRect(anchor.x, anchor.y, x, y))
                 return
             }
             // 点击（未拖动）：点选 note / BGA/BPM/STOP 对象（Ctrl = 多选切换）/ 空白清空
@@ -586,9 +756,11 @@ Item {
         }
         const moved = Math.abs(y - _pressY) + Math.abs(x - _pressX)
         if (_dragged || moved > 4) return
+        if (root.editorTool === "pan" && y > 18 && x >= view.rulerWidth &&
+                !view.objectAt(x, y).valid) root.canvasClicked()
         // 点击：放置工具（note / ln / mine）→ hitTest → hitPlaceRequested（Main 按工具定 kind）。
         // M3 note.put 已接 kind（normal/ln/mine）→ 三种工具都真实放置。
-        if ((root.editorTool === "note" || root.editorTool === "ln" ||
+        if (root.editable && (root.editorTool === "note" || root.editorTool === "ln" ||
                 root.editorTool === "mine") && y > 18) {
             const hit = view.hitTest(x, y)
             if (hit.valid) root.hitPlaceRequested(hit)
@@ -614,20 +786,36 @@ Item {
     }
 
     MouseArea {
+        id: interactionArea
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        preventStealing: root._managedDragConsumed
         // select = 箭头（框选/点选）；pan = 手（拖动滚动）；note = 十字（点击放置）
-        cursorShape: root.editorTool === "note" ? Qt.CrossCursor
+        objectName: "chartInteractionArea"
+        cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor
+                     : root._panning || ((pressedButtons & Qt.LeftButton) !== 0 && root.editorTool === "pan")
+                       ? Qt.ClosedHandCursor
+                     : root._managedDragActive || (pressed && root._moving && root._dragged) ? Qt.SizeAllCursor
+                     : root.editable && root.editorTool === "note" ? Qt.CrossCursor
                      : root.editorTool === "pan" ? Qt.OpenHandCursor
                      : Qt.ArrowCursor
 
+        Keys.onEscapePressed: (event) => {
+            if (root._managedDragConsumed) {
+                root.cancelManagedDrag("escape")
+                event.accepted = true
+            } else event.accepted = false
+        }
         onPressed: (mouse) => {
+            // 附加按钮不能重置已消费的左键手势；buttons 是当前 mask，button 才是本次变化。
+            // 只有对应左键 release / 下一次左键 press 能结束或重启 managed 手势。
+            if (root._managedDragConsumed && mouse.button !== Qt.LeftButton) return
             // 2026-09：编辑区任意按下 → Main 释放文本框焦点（否则快捷键被文本框吞掉）
             root.editAreaPressed()
             if (mouse.button === Qt.RightButton) {
                 // 右键命中 note / BGA / BPM / STOP → 直接删除（BMS 编辑器惯例；select/pan/note 工具下可用）
-                if (root.editorTool === "select" || root.editorTool === "pan" ||
-                        root.editorTool === "note") {
+                if (root.editable && (root.editorTool === "select" || root.editorTool === "pan" ||
+                        root.editorTool === "note")) {
                     const obj = view.objectAt(mouse.x, mouse.y)
                     if (obj.valid) {
                         if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
@@ -650,12 +838,18 @@ Item {
                              (mouse.modifiers & Qt.ControlModifier) !== 0)
         }
         onPositionChanged: (mouse) => {
+            if (root._managedDragConsumed) {
+                root.handleMove(mouse.x, mouse.y)
+                return
+            }
             if (root._panning) {
                 const moved = Math.abs(mouse.y - root._pressY) + Math.abs(mouse.x - root._pressX)
                 if (moved > 4) root._dragged = true
                 if (root._dragged) {
+                    const previousY = view.scrollY
                     view.scrollY -= (mouse.y - root._lastY)
                     view.scrollX -= (mouse.x - root._lastX)
+                    root.userScroll(previousY)
                 }
                 root._lastY = mouse.y
                 root._lastX = mouse.x
@@ -664,18 +858,27 @@ Item {
             root.handleMove(mouse.x, mouse.y)
         }
         onReleased: (mouse) => {
-            if (root._panning) {
-                root._panning = false
-                root._lastY = -1
+            if (root._managedDragConsumed) {
+                if (mouse.button === Qt.LeftButton) root.handleRelease(mouse.x, mouse.y)
                 return
             }
-            if (mouse.button === Qt.RightButton) return
+            if (mouse.button === Qt.MiddleButton) {
+                // 左键 managed finish 后仍可能收到中键 release；没有 pan 就只消费，不能回退编辑。
+                if (root._panning) {
+                    root._panning = false
+                    root._lastY = -1
+                }
+                return
+            }
+            if (mouse.button === Qt.RightButton || root._panning) return
             root.handleRelease(mouse.x, mouse.y)
         }
+        onCanceled: root.invalidatePointerGesture("pointer-cancelled")
         onDoubleClicked: (mouse) => {
             // 双击命中 note / BGA / BPM / STOP（select 工具）→ 编辑（note 改采样；bga 改 BMP/图层；
             // bpm/stop 改值；Main 弹对话框）
-            if (mouse.button === Qt.LeftButton && root.editorTool === "select" && mouse.y > 18) {
+            if (root.editable && mouse.button === Qt.LeftButton &&
+                    root.editorTool === "select" && mouse.y > 18) {
                 const obj = view.objectAt(mouse.x, mouse.y)
                 if (obj.valid) {
                     if (obj.kind === "bga" || obj.kind === "bpm" || obj.kind === "stop")
@@ -686,14 +889,23 @@ Item {
         }
     }
 
-    // 框选矩形（select + Shift+拖；半透明主色 + 边框）
-    Rectangle {
-        id: selRect
-        visible: false
+    // 只裁剪预览；起点滚出屏幕时，选区仍延伸到谱面中的原始起点。
+    Item {
+        anchors.fill: view
+        anchors.topMargin: 18
+        visible: root._boxSelect
+        clip: true
         z: 3
-        color: Theme.primarySoft
-        border.color: Theme.accent
-        border.width: 1
+        Rectangle {
+            objectName: "chartSelectionPreview"
+            x: Math.min(root._boxProjectedAnchor.x, root._boxPointer.x)
+            y: Math.min(root._boxProjectedAnchor.y, root._boxPointer.y) - parent.y
+            width: Math.abs(root._boxProjectedAnchor.x - root._boxPointer.x)
+            height: Math.abs(root._boxProjectedAnchor.y - root._boxPointer.y)
+            color: Theme.primarySoft
+            border.color: Theme.accent
+            border.width: 1
+        }
     }
 
     // 右侧垂直滚动条（内容高于视口时出现；点击/拖拽滑块滑动）。
@@ -702,7 +914,8 @@ Item {
         id: vbar
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: waveformShown ? waveform.left : parent.right
+        anchors.right: parent.right
+        anchors.rightMargin: root.waveformReservedWidth
         width: 12
         z: 2
         color: Theme.surface2
@@ -719,18 +932,21 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
+            cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor : pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             property real grabOffset: 0
             onPressed: (mouse) => {
                 grabOffset = mouse.y - vthumb.y
+                const previousY = view.scrollY
                 view.scrollY = (mouse.y - vthumb.height / 2) /
                                Math.max(1, vbar.height - vthumb.height) * vbar.maxY
-                root.userScroll()
+                root.userScroll(previousY)
             }
             onPositionChanged: (mouse) => {
                 if (pressed) {
+                    const previousY = view.scrollY
                     view.scrollY = (mouse.y - grabOffset) /
                                    Math.max(1, vbar.height - vthumb.height) * vbar.maxY
-                    root.userScroll()
+                    root.userScroll(previousY)
                 }
             }
         }
@@ -759,6 +975,7 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
+            cursorShape: !root.enabled || !enabled ? Qt.ArrowCursor : pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             property real grabOffset: 0
             onPressed: (mouse) => {
                 grabOffset = mouse.x - thumb.x
@@ -792,7 +1009,9 @@ Item {
 
     /// 秒 → 视口滚动（波形总览 seekRequested / --seek 调试走同一路径）。
     function seekToSeconds(sec) {
+        if (!isFinite(sec) || sec < 0) return
         view.scrollToTime(sec)
+        root.navigationCompleted()
     }
 
     /// M5 seek 交互：设播放位置 + 滚到红线（视口光标）。
@@ -800,12 +1019,14 @@ Item {
     /// ② 视口滚到「该时间落红线(90%)」→ 红线读数 = 目标时间（非播放时红线显示就位）。
     /// 点秒标尺 / 波形条点击 / 波形条拖动（DAW 式 scrub）共用此路径。
     function seekTo(sec) {
+        if (!isFinite(sec) || sec < 0) return
         // 拖动静音定位（M5 收尾 2026-09）：scrub 拖动中只滚红线、**不触碰音频**（静音）；
         // 单点/标尺点击 = 正常 seek（音频跳转）。音频落到 release（WaveformOverviewItem）。
         const scrubbing = typeof waveform !== "undefined" && waveform && waveform.scrubbing
-        if (!scrubbing && typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
+        if (root.ownsPlayback && !scrubbing && typeof audioEngine !== "undefined" && audioEngine && audioEngine.hasPcm)
             audioEngine.seekSeconds(sec)
         if (view) view.scrollCursorToSec(sec)
+        root.navigationCompleted()
     }
 
     /// note 引用 → 显示列下标（转发 ChartViewItem.columnIndexForRef；会话层拿连续列秩，
