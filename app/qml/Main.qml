@@ -8,6 +8,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQuick.Shapes
 import "components"
 import "pages"
 
@@ -30,8 +31,30 @@ ApplicationWindow {
     font.family: Theme.fontSans
     font.pixelSize: Theme.fsBase
 
+    ChartHistoryDialog {
+        id: chartHistoryDialog
+        controller: chartHistoryController
+        onClosed: projectPage.refreshHistoryTarget()
+    }
+    Connections {
+        target: chartHistoryController
+        function onStatusMessage(message) { window.setStatus(message) }
+        function onSaveRequested(id) {
+            // 复用已有保存/草稿提交/PMS确认，不引入另一套写盘路径。
+            chartHistoryDialog.close()
+            if (id !== documents.activeId() || window.pmsSaveConfirmationPending ||
+                    window.saveAsDocumentId !== "" || window.pendingDocAction !== "" ||
+                    unsavedConfirmDialog.visible) {
+                chartHistoryController.finishSave(id, false)
+                return
+            }
+            const result = window.saveChart()
+            if (result !== undefined) chartHistoryController.finishSave(id, result)
+        }
+    }
+
     // ---------- 会话状态（不入 undo，doc/ui-design.md 一、.2） ----------
-    property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试
+    property int currentPage: 0          // 0 编辑 / 1 切音 / 2 测试 / 3 项目
     property var chartMeta: null         // dispatch(info) 的 result.meta
     property string chartPath: ""        // 当前谱面路径（info 返回的规范化路径）
     /// 元信息面板草稿（未点面板「保存」、也未 Ctrl+S）也算未保存。
@@ -68,9 +91,23 @@ ApplicationWindow {
     function stopUnitLabel() {
         return window.stopUnit === 0 ? qsTr("unit") : qsTr("ms")
     }
-    // 文件格式/编码（底部状态栏右下角显示；info/check 返回）
-    property string chartFormat: ""
-    property string chartEncoding: ""
+    // 只读显示当前文档的字节格式；切换和保存后由会话刷新，无需重读磁盘。
+    readonly property var chartTextFormat: typeof chartSession !== "undefined" && chartSession
+                                           ? chartSession.textFormat : null
+    readonly property string chartEncoding: {
+        if (!chartTextFormat) return ""
+        switch (chartTextFormat.encoding) {
+        case "ascii": return "ASCII"
+        case "utf8": return chartTextFormat.utf8Bom ? "UTF-8 BOM" : "UTF-8"
+        case "sjis": return chartTextFormat.encodingAmbiguous ? qsTr("CP932（推断）") : "CP932"
+        default: return ""
+        }
+    }
+    readonly property string chartLineEnding: {
+        const ending = chartTextFormat && chartTextFormat.lineEnding
+        if (ending === "mixed") return qsTr("混合换行")
+        return ending ? ending.toUpperCase() : ""
+    }
     /// 游玩模式（info 的 mode；"" = 未打开/未知，显示 SP 7K 缺省）。
     property string chartMode: ""
     readonly property bool isPmsChart: chartMode === "pms9k" || chartMode === "pms9k-bmesp"
@@ -86,6 +123,7 @@ ApplicationWindow {
     }
     // 轨道列头显示实际 BMS 通道 id（debug 用；Ctrl 临时切换经下方 Connections 同路径翻转）
     property bool showChannelIds: false
+    property bool hideReferenceSecondaryChannels: true
     /// Ctrl 临时勾选状态机（同 SlicePage MIDI 线）：按下 → 直接翻转 window.showChannelIds
     /// （与点击同一条状态链路：checkbox 经 uiActions 注册表跟随显示——⚠️ 不要用
     /// checkbox.toggle()：实测 Qt 6.11 只改内部 checked 不发 toggled，外部状态不更新）；
@@ -169,10 +207,20 @@ ApplicationWindow {
     property string editorTool: "pan"
     // 工具切换：进入 LN 放置 → 显示状态栏说明（持久）；离开 → 取消未完成 LN 头 + 恢复就绪
     onEditorToolChanged: {
+        updateActionStates()
         if (window.editorTool === "ln") {
             activateLnHint()
         } else {
-            if (window.pendingLnHead) cancelPendingLn()
+            // 工具动作只取消来源窗格的头；另一窗格仅失效状态，不删除其真实 note。
+            if (window.referenceActionTarget) {
+                if (window.referenceEditOperations && editPage.referenceEditingAvailable
+                        && window.referenceEditContext.pendingLnHead.measure !== undefined)
+                    window.referenceEditOperations.cancelPendingLn()
+                window.pendingLnHead = null
+            } else {
+                if (window.pendingLnHead) session.cancelPendingLn()
+                if (window.referenceEditContext) window.referenceEditContext.pendingLnHead = ({})
+            }
             statusClearTimer.stop()
             window.statusText = qsTr("就绪")
         }
@@ -205,7 +253,7 @@ ApplicationWindow {
     property bool lnSelectMode: false
     // 槽位弱线显示开关（「网格」按钮；默认开）。吸附计算不依赖此开关，仅控制画不画槽位线。
     property bool showGrid: true
-    /// LNTYPE 2（#LNOBJ）LN 放置的「待定头」（NoteRef 形状：measure/pos/lane/sample）。
+    /// LNOBJ 放置的待定头（仅 LNOBJ 有效且未声明 LNTYPE 时使用）。
     /// 会话状态不入 undo；同轨点尾 / 异轨重放头 / Esc 取消（2026-09 用户）。
     property var pendingLnHead: null
     /// 文本输入焦点（工具快捷键让行，避免输入时误触）。
@@ -239,26 +287,107 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("file.exit") : ""
                onActivated: uiActions.invoke("file.exit") }
 
+    Connections {
+        target: window.managedDragController
+        function onMessage(text) { window.setStatus(text) }
+        function onActiveChanged() { window.updateActionStates() }
+        function onSelectionCommitted(source, target, refs) {
+            // A selection is window-owned; context is its one-way mirror.
+            if (target === window.primaryEditContext) window.selectionRefs = refs
+            else if (source === window.primaryEditContext) window.selectionRefs = []
+            if (source === window.primaryEditContext || target === window.primaryEditContext) {
+                window.pendingLnHead = null
+                window.metaSelection = []
+            }
+        }
+    }
+    // A 的编辑仍走既有 SessionController；context 仅同步其窗格状态。
+    readonly property var managedDragController: typeof paneDragController !== "undefined" ? paneDragController : null
+    onActiveChanged: if (!active && managedDragController) managedDragController.cancelActive("window_inactive")
+    readonly property var primaryEditContext: typeof primaryPaneContext !== "undefined" ? primaryPaneContext : null
+    readonly property var primaryEditOperations: typeof primaryPaneOperations !== "undefined" ? primaryPaneOperations : null
+    readonly property var referenceEditContext: typeof referencePaneContext !== "undefined" ? referencePaneContext : null
+    readonly property var referenceEditOperations: typeof referencePaneOperations !== "undefined" ? referencePaneOperations : null
+    Binding { target: window.primaryEditContext; property: "sessionId"; value: chartSession ? chartSession.sessionId : ""; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "editable"; value: chartSession !== null && chartSession.hasChart; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "selection"; value: window.selectionRefs; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "metaSelection"; value: window.metaSelection; when: window.primaryEditContext !== null }
+    Binding { target: window.primaryEditContext; property: "pendingLnHead"; value: window.pendingLnHead || ({}); when: window.primaryEditContext !== null }
+
+    // 焦点只选择编辑上下文，不改变 active 文档、保存、播放或 Dock 所有权。
+    readonly property bool referenceActionTarget: editPage.referenceFocused
+    readonly property bool chartEditingAllowed: currentPage === 0 &&
+        (!referenceActionTarget || editPage.referenceEditingAvailable)
+    readonly property var actionSelection: referenceActionTarget
+        ? (referenceEditContext ? referenceEditContext.selection : []) : selectionRefs
+    readonly property var actionMetaSelection: referenceActionTarget
+        ? (referenceEditContext ? referenceEditContext.metaSelection : []) : metaSelection
+    readonly property var referenceEditSettings: ({tool: editorTool, sampleText: currentSampleId,
+        bmpText: currentBmpId, bpmValue: currentBpmValue, stopValue: currentStopValue,
+        snapNum: snapNum, snapDen: snapDen})
+    onActionSelectionChanged: updateActionStates()
+    onActionMetaSelectionChanged: updateActionStates()
+    Connections {
+        target: window.primaryEditOperations
+        function onMessage(text) { window.setStatus(text) }
+    }
+    Connections {
+        target: window.referenceEditOperations
+        function onMessage(text) { window.setStatus(text) }
+    }
+    // 仅实际改到 A 文档时刷新 A 的资源/事件查询；不重载元信息草稿。
+    function refreshPaneEditOwner(id) {
+        if (chartSession && id === chartSession.sessionId) {
+            window.refreshLint(); window.refreshSamples(); window.refreshTiming()
+            editPage.reloadBga()
+        }
+    }
+    function invalidatePrimaryPaneRefs() {
+        // B 已改同一文档：旧 A 引用/待定头不再可信；只丢弃 UI 状态，不发删除命令。
+        window.pendingLnHead = null
+        window.selectionRefs = []
+        window.metaSelection = []
+    }
+    function clearSampleEditRefs(id) {
+        // note/meta 弹窗改值后，丢弃源窗格及同文档另窗格的旧引用；不删除任何实际对象。
+        if (chartSession && id === chartSession.sessionId) window.invalidatePrimaryPaneRefs()
+        if (window.referenceEditContext && window.referenceEditContext.sessionId === id)
+            window.referenceEditContext.clearState()
+    }
+    Connections {
+        target: window.referenceEditContext
+        function onEdited(id) {
+            if (chartSession && id === chartSession.sessionId) window.invalidatePrimaryPaneRefs()
+            window.refreshPaneEditOwner(id)
+        }
+    }
+    Connections {
+        target: window.primaryEditContext
+        function onEdited(id) { window.refreshPaneEditOwner(id) }
+    }
+    onChartEditingAllowedChanged: updateActionStates()
+    onReferenceActionTargetChanged: updateActionStates()
+
     // 编辑动作
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.undo") : ""
                enabled: !window.textInputFocused &&
-                        ((currentPage === 0 && chartMeta !== null) ||
+                        ((chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canUndoSlice))
                onActivated: uiActions.invoke("edit.undo") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.redo") : ""
                enabled: !window.textInputFocused &&
-                        ((currentPage === 0 && chartMeta !== null) ||
+                        ((chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
                onActivated: uiActions.invoke("edit.redo") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.copy") : ""
-               enabled: chartMeta !== null && currentPage === 0 &&
-                        !window.textInputFocused && window.selectionRefs.length > 0
+               enabled: chartMeta !== null && chartEditingAllowed &&
+                        !window.textInputFocused && actionSelection.length > 0
                onActivated: uiActions.invoke("edit.copy") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.paste") : ""
-               enabled: chartMeta !== null && currentPage === 0 && !window.textInputFocused
+               enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.paste") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
-               enabled: chartMeta !== null && currentPage === 0
+               enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.delete") }
 
     // 工具动作（数字 1-5：文本输入焦点时让行）
@@ -286,12 +415,12 @@ ApplicationWindow {
                enabled: !window.textInputFocused && (currentPage === 0 || currentPage === 1)
                onActivated: uiActions.invoke("view.zoomOut") }
 
-    // Esc：取消未完成的 LN 头（LNTYPE 2 放置；文本输入焦点时让行）
+    // Esc：取消未完成的 LNOBJ 头（文本输入焦点时让行）
     // 2026-09 快捷键收尾：进注册表（edit.cancel，scope=edit）→ 设置页可改绑。
     Shortcut {
         sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.cancel") : ""
-        enabled: currentPage === 0 && editorTool === "ln" && !window.textInputFocused
-                 && chartMeta !== null
+        enabled: currentPage === 0 && (editorTool === "ln" || (managedDragController && managedDragController.active)) && !window.textInputFocused
+                 && chartEditingAllowed
         onActivated: uiActions.invoke("edit.cancel")
     }
 
@@ -319,6 +448,13 @@ ApplicationWindow {
 
     // ---------- 菜单栏（固定全局；doc/action-registry.md：从 uiActions 注册表查表） ----------
     menuBar: MenuBar {
+        objectName: "mainMenuBar"
+        delegate: MenuBarItem {
+            HoverHandler {
+                objectName: "semanticCursor"
+                cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
+        }
         // 菜单栏底 = 主题 token（启动即深色；Fusion 默认/平台 palette 兜底不可靠）。
         // ⚠️ 字体色：Fusion MenuBarItem 标题取 **palette.text**（非 windowText——上轮设错角色
         // 导致深灰字体）；palette.text 同步作用于弹出的菜单项文字。
@@ -327,6 +463,12 @@ ApplicationWindow {
         palette.windowText: Theme.text
         palette.buttonText: Theme.text
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("文件")
             // 枚举渲染（doc/action-registry.md 九、验收 2）：文件菜单动作按注册表 idsByCategory("file") 生成，
             // 分隔线由注册表 isSeparator(id) 判定（addSeparator 建模）。
@@ -337,6 +479,10 @@ ApplicationWindow {
             Repeater {
                 model: uiActions.idsByCategory("file")
                 delegate: MenuItem {
+                    HoverHandler {
+                        objectName: "semanticCursor"
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
                     id: fileItem
                     required property string modelData
                     readonly property bool isSep: uiActions.isSeparator(modelData)
@@ -381,11 +527,21 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("编辑")
             enabled: chartMeta !== null
             Repeater {
                 model: uiActions.idsByCategory("edit")
                 delegate: MenuItem {
+                    HoverHandler {
+                        objectName: "semanticCursor"
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
                     id: editItem
                     required property string modelData
                     readonly property bool isSep: uiActions.isSeparator(modelData)
@@ -409,13 +565,40 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("视图")
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                objectName: "hideReferenceSecondaryChannelsMenuItem"
+                text: qsTr("隐藏 B 侧次要通道与波形")
+                checkable: true
+                checked: window.hideReferenceSecondaryChannels
+                onTriggered: window.hideReferenceSecondaryChannels = checked
+            }
             // 皮肤（doc/skin-system.md 三、3. 运行时换肤）：L1 token 覆写 + 运行时切换。
             // 列出「默认」+ 内置皮肤，当前生效项打勾；点击即运行时切换（Theme.applySkinByName）。
             // ⚠️ 运行时切肤同时应用该皮肤目录的 keymap.json（doc/dev-workflow.md 四、 待改进）——默认皮肤清除覆写。
             Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
                 title: qsTr("皮肤")
                 MenuItem {
+                    HoverHandler {
+                        objectName: "semanticCursor"
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
                     text: qsTr("默认")
                     checkable: true
                     checked: Theme.activeSkin === ""
@@ -424,6 +607,10 @@ ApplicationWindow {
                 Repeater {
                     model: Theme.skinNames()
                     delegate: MenuItem {
+                        HoverHandler {
+                            objectName: "semanticCursor"
+                            cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
                         required property string modelData
                         text: modelData
                         checkable: true
@@ -434,20 +621,59 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("工作区")
-            MenuItem { text: uiActions.label("view.page.edit"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.edit"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.edit")
                        onTriggered: uiActions.invoke("view.page.edit") }
-            MenuItem { text: uiActions.label("view.page.slice"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.slice"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.slice")
                        onTriggered: uiActions.invoke("view.page.slice") }
-            MenuItem { text: uiActions.label("view.page.test"); checkable: true
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.test"); checkable: true
                        checked: window.uiStateTick >= 0 && uiActions.checked("view.page.test")
                        onTriggered: uiActions.invoke("view.page.test") }
+            MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                text: uiActions.label("view.page.project"); checkable: true
+                       checked: window.uiStateTick >= 0 && uiActions.checked("view.page.project")
+                       onTriggered: uiActions.invoke("view.page.project") }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("设置")
             MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 // 2026-09：走注册表（app.settings）——改绑后菜单提示同步（与 Ctrl+, 同源）。
                 text: qsTr("首选项…") + (uiActions.shortcutRevision >= 0 && uiActions.shortcut("app.settings")
                                          ? "    " + uiActions.shortcut("app.settings") : "")
@@ -455,8 +681,18 @@ ApplicationWindow {
             }
         }
         Menu {
+            delegate: MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+            }
             title: qsTr("帮助")
             MenuItem {
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 text: qsTr("关于")
                 onTriggered: aboutDialog.open()
             }
@@ -584,12 +820,53 @@ ApplicationWindow {
                                }
                                ToolTip.visible: hovered
                                ToolTip.text: qsTr("设循环终点 B（红线/播放头位置；再点解除）") }
-                BbToolButton { text: audioEngine && audioEngine.playing ? qsTr("⏸") : qsTr("▶")
-                               enabled: chartMeta !== null
-                               onClicked: togglePlayback()
-                               highlighted: audioEngine && audioEngine.playing
-                               ToolTip.visible: hovered
-                               ToolTip.text: qsTr("播放/暂停（Space）") }
+                BbToolButton {
+                    id: editPlaybackButton
+                    objectName: "editPlaybackButton"
+                    // Draw monochrome geometry instead of font-dependent emoji glyphs.
+                    readonly property bool playing: audioEngine && audioEngine.playing
+                    implicitWidth: 36
+                    implicitHeight: 28
+                    Layout.minimumWidth: 36
+                    Layout.maximumWidth: 36
+                    Layout.minimumHeight: 28
+                    Layout.maximumHeight: 28
+                    enabled: chartMeta !== null
+                    active: playing
+                    Accessible.name: playing ? qsTr("暂停") : qsTr("播放")
+                    onClicked: togglePlayback()
+                    contentItem: Item {
+                        implicitWidth: 16
+                        implicitHeight: 16
+                        Item {
+                            width: 16; height: 16
+                            anchors.centerIn: parent
+                            Shape {
+                                anchors.fill: parent
+                                visible: !editPlaybackButton.playing
+                                ShapePath {
+                                    strokeWidth: 0
+                                    fillColor: editPlaybackButton.lit ? Theme.primary : Theme.textMuted
+                                    startX: 3; startY: 1
+                                    PathLine { x: 14; y: 8 }
+                                    PathLine { x: 3; y: 15 }
+                                    PathLine { x: 3; y: 1 }
+                                }
+                            }
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 4
+                                visible: editPlaybackButton.playing
+                                Repeater {
+                                    model: 2
+                                    Rectangle { width: 4; height: 14; color: Theme.primary }
+                                }
+                            }
+                        }
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("播放/暂停（Space）")
+                }
                 Label { text: window.modeLabel(); color: Theme.accent; font.family: Theme.fontMono
                         font.pixelSize: Theme.fsSmall; padding: 4 }
             }
@@ -726,11 +1003,24 @@ ApplicationWindow {
 
         // 页面内容区（切页 = 切视图，doc/ui-design.md 二、）
         StackLayout {
+            objectName: "mainPageStack"
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: window.currentPage
             EditPage {
                 id: editPage
+                documentService: documents
+                managedDragController: window.managedDragController
+                primaryEditOperations: window.primaryEditOperations
+                primaryEditContext: window.primaryEditContext
+                referenceEditContext: window.referenceEditContext
+                referenceEditOperations: window.referenceEditOperations
+                sampleLiteral: window.currentSampleId
+                referenceEditSettings: window.referenceEditSettings
+                onReferenceNoteEditRequested: (ref) => window.editReferenceNoteSample(ref)
+                onReferenceMetaEditRequested: (obj) => window.editReferenceMetaObject(obj)
+                hideSecondaryChannels: window.hideReferenceSecondaryChannels
+                onReferenceSwapRequested: (id) => window.requestDocumentAction("swap", id)
                 chartMeta: window.chartMeta
                 chartPath: window.chartPath
                 modeLabel: window.modeLabel()
@@ -774,6 +1064,7 @@ ApplicationWindow {
                 onNoteClicked: (ref, ctrl) => window.onNoteClicked(ref, ctrl)
                 onPlayNoteSample: (ref) => session.playNoteSample(ref)
                 onCanvasClicked: () => window.onCanvasClicked()
+                onSamplePreviewStopRequested: session.stopNoteSample()
                 onNoteRightDeleted: (ref) => deleteNoteAt(ref)
                 onNoteEditRequested: (ref) => editNoteSample(ref)
                 onMoveSelectionRequested: (deltaF, targetLane, sourceLane, sourceBgmLine) => moveSelection(deltaF, targetLane, sourceLane, sourceBgmLine)
@@ -799,18 +1090,23 @@ ApplicationWindow {
                     deleteBga(layer, measure, num, den)
                 onBmpAddRequested: (id, file) => bmpAdd(id, file)
                 onBmpSetFileRequested: (id, file) => bmpSetFile(id, file)
-                onBmpRenameRequested: (fromId, toId) => bmpRename(fromId, toId)
                 onBmpDeleteRequested: (id) => bmpDelete(id)
                 onBmpSelected: (id) => setCurrentBmp(id)
             }
             SlicePage {
                 id: slicePage
+                editorChartPath: window.chartPath
                 // M6.4f 快捷键门控（父注入：跨文档绑定里无法引用 window 的 id）：
                 // 页面激活（currentPage）&& 无文本输入焦点（SpinBox 聚焦时 activeFocusItem
                 // 是其 TextInput → textInputFocused=true → ↑↓ 调值不被快捷键抢）
                 kbdPageActive: window.currentPage === 1 && !window.textInputFocused
             }
             TestPage {}
+            ProjectPage {
+                id: projectPage
+                onPrimaryAssignRequested: (path) => window.requestDocumentAction("assign", path)
+                onReferenceOpenRequested: (path) => window.doOpenReferenceChart(path)
+            }
         }
 
         // 底部页面条（固定，Resolve 式页面切换）
@@ -835,7 +1131,7 @@ ApplicationWindow {
                 visible: window.currentPage !== 1
                 // 主消息（可变长，占满剩余空间，右截断）：悬停信息 > 状态消息。
                 Label {
-                    text: editPage.hoverText !== "" ? editPage.hoverText : window.statusText
+                    text: window.currentPage === 0 && editPage.hoverText !== "" ? editPage.hoverText : window.statusText
                     color: editPage.hoverText !== "" ? Theme.accent : Theme.textMuted
                     elide: Text.ElideRight
                     Layout.fillWidth: true
@@ -887,14 +1183,15 @@ ApplicationWindow {
                     Layout.rightMargin: 2
                 }
                 Label {
-                    text: window.chartFormat !== "" ? window.chartFormat.toUpperCase() : ""
+                    text: "BMS"
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
-                    visible: window.chartFormat !== ""
+                    visible: typeof chartSession !== "undefined" && chartSession && chartSession.hasChart
                 }
                 Label {
-                    text: window.chartEncoding !== "" ? window.chartEncoding : ""
+                    objectName: "chartTextFormatLabel"
+                    text: [window.chartEncoding, window.chartLineEnding].filter(part => part !== "").join("  ")
                     color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsSmall
-                    visible: window.chartEncoding !== ""
+                    visible: text !== ""
                 }
             }
             // 切音页专用摘要（视口/光标/参考音频/播放/切片/MIDI；与上方编辑页状态互斥）
@@ -920,17 +1217,13 @@ ApplicationWindow {
     }
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
-    /// LN 放置提示文本（LNTYPE 2 = 头尾状态机；其余 = 连点两次自动配对）。
-    /// 附当前 LNTYPE/LNOBJ 解析值——用户可据此确认会话里 #LNTYPE 是否真的为 2
-    ///（元信息改了须点「保存」才写入会话；否则仍走 LNTYPE 1）。
+    /// Placement format is separate from derived LN connections.
     function lnHint() {
-        const t = (typeof chartSession !== "undefined" && chartSession) ? chartSession.lnType() : 1
+        const useObj = (typeof chartSession !== "undefined" && chartSession) && chartSession.useLnObjPlacement()
         const lj = (typeof chartSession !== "undefined" && chartSession) ? chartSession.lnobjSample() : -1
-        const mode = t === 2 ? "LNTYPE2" : (t === 0 ? "LNTYPE0" : "LNTYPE1")
-        const ljText = t === 2 ? (lj >= 0 ? " · LNOBJ #WAV" + chartSession.idTextOf(lj) : " · LNOBJ 未定义") : ""
-        return (t === 2 ? qsTr("同轨道左键放置Ln尾，不同轨道左键重新放置Ln头，按esc键取消")
-                        : qsTr("同一轨道连点两次：先头后尾（自动配对）"))
-               + qsTr("〔%1%2〕").arg(mode).arg(ljText)
+        return useObj
+            ? qsTr("先放普通头，再在同轨放 LNOBJ 尾；异轨重放头，Esc 取消〔LNOBJ #%1〕").arg(chartSession.idTextOf(lj))
+            : qsTr("LN 通道：同轨按时间先后连接头尾（不限制采样 ID）")
     }
     /// 进入 LN 工具：停掉自动清空，直接显示放置说明（持久直到切工具）。
     function activateLnHint() {
@@ -947,9 +1240,32 @@ ApplicationWindow {
         onRejected: { /* 用户取消 */ }
     }
 
+    // ---------- 项目页：打开歌曲文件夹 + 选中动作接线（doc/project-workflow.md §9.1） ----------
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("打开歌曲文件夹（一首歌的项目）")
+        onAccepted: doOpenFolder(urlToPath(selectedFolder))
+        onRejected: { /* 用户取消 */ }
+    }
+    // 桥层只发信号、不拥有文档：打开走既有 doOpenChart 链路
+    Connections {
+        target: project
+        function onChartOpenRequested(path) { window.requestDocumentAction("switch", path) }
+        function onSliceTargetsChanged() { window.syncSliceExportTargets() }
+    }
+
+    Connections {
+        target: chartSession
+        function onDirtyChanged() { project.refreshOpenStates() }
+        function onDocumentChanged() { project.refreshOpenStates() }
+    }
+
     // --open 调试参数（main.cpp 注入）：走与 Ctrl+O 相同的调用路径
     property string debugOpenPath: ""
     onDebugOpenPathChanged: if (debugOpenPath !== "") doOpenChart(debugOpenPath)
+    // --project 调试参数：启动即打开歌曲文件夹（项目页；--screenshot-delay 等后台解析）
+    property string debugProjectPath: ""
+    onDebugProjectPathChanged: if (debugProjectPath !== "") doOpenFolder(debugProjectPath)
     // 外部文件（双击文件关联 / 把文件拖到 exe 图标：Explorer 把路径作为 argv[1] 传入）：
     // 与「拖拽入窗口」共用同一路由函数，按后缀分流（谱面 → 编辑页；音频/MIDI → 切音工作台）。
     property string externalFilePath: ""
@@ -1023,10 +1339,48 @@ ApplicationWindow {
     // contentChanged 只刷新时间轴/波形，定义表须显式重取 session.samples）。
     Connections {
         target: sliceWorkspace
-        function onSamplesPlaced() { session.refreshSamples() }
+        function onSamplesPlaced() {
+            // Multi-target placement edits core sessions directly, including an already
+            // open inactive reference. Publish every bridge revision before consumers
+            // read chart/timing again; refreshing only the active sample list is not enough.
+            documents.refresh()
+            session.refreshSamples()
+            project.refreshOpenStates()
+        }
         function onSliceHistoryChanged() { updateActionStates() }
         function onSlicesChanged() { updateActionStates() }
         function onAudioChanged() { updateActionStates() }
+    }
+    // Both operations change explicit in-memory documents, never the disk index.
+    function refreshResourceEdits(changedTargets) {
+        if (changedTargets.indexOf(window.chartPath) >= 0) {
+            window.selectionRefs = []
+            window.metaSelection = []
+            window.pendingLnHead = null
+        }
+        documents.refresh()
+        session.refreshSamples()
+        session.refreshTiming()
+        session.refreshLint()
+        if (!window.metaDraftDirty) {
+            const metadata = JSON.parse(beatbench.dispatch(JSON.stringify({command: "meta.list", args: {}})))
+            if (metadata.ok) {
+                window.chartMeta = metadata.result.meta
+                const bpm = parseFloat(window.chartMeta.BPM)
+                if (isFinite(bpm) && bpm > 0) window.currentBpmValue = bpm
+            }
+            editPage.reloadMeta()
+        }
+        editPage.reloadBga()
+        project.refreshOpenStates()
+    }
+    Connections {
+        target: typeof resourceBindingController !== "undefined" ? resourceBindingController : null
+        function onBindingsApplied(changedTargets) { window.refreshResourceEdits(changedTargets) }
+    }
+    Connections {
+        target: typeof resourceRelocationController !== "undefined" ? resourceRelocationController : null
+        function onRelocated(changedTargets) { window.refreshResourceEdits(changedTargets) }
     }
     Timer { id: sliceExportRetry; interval: 300; repeat: true; onTriggered: doDebugSliceExport() }
     function doDebugSliceExport() {
@@ -1192,6 +1546,7 @@ ApplicationWindow {
     // 另存为（文件 → 另存为… / Ctrl+Shift+S）
     FileDialog {
         id: saveAsDialog
+        objectName: "saveAsDialog"
         title: qsTr("另存为 BMS 谱面")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("BMS 谱面 (*.bms *.bml *.bme *.pms)"), qsTr("所有文件 (*)")]
@@ -1199,6 +1554,7 @@ ApplicationWindow {
         defaultSuffix: window.isPmsChart ? "pms" : "bms"
         onAccepted: window.handleSaveAsAccepted(urlToPath(selectedFile))
         onRejected: {
+            chartHistoryController.finishSave(window.saveAsDocumentId, false)
             window.saveAsDocumentId = ""
             if (window.pendingDocAction !== "") cancelPendingDocumentAction()
         }
@@ -1212,14 +1568,15 @@ ApplicationWindow {
     property int pmsSaveRequestToken: 0
     readonly property bool pmsSaveConfirmationPending: pendingPmsSaveDocumentId !== ""
     function openSaveAsDialog() {
-        if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "" || !chartSession.hasChart) return
-        window.saveAsDocumentId = chartSession.activeSessionId()
+        if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "") return
+        window.saveAsDocumentId = documents.activeId()
         saveAsDialog.open()
     }
     function handleSaveAsAccepted(path) {
         const id = window.saveAsDocumentId
         window.saveAsDocumentId = "" // 一次性消费，重复/过期 accepted 不会写入另一文档。
-        if (id === "" || id !== chartSession.activeSessionId()) {
+        if (id === "" || id !== documents.activeId() || id !== chartSession.sessionId) {
+            chartHistoryController.finishSave(id, false)
             setStatus(qsTr("文档已切换，另存为已取消；请重新选择保存目标"))
             if (id !== "") cancelPendingDocumentAction()
             return false
@@ -1231,7 +1588,11 @@ ApplicationWindow {
     function completeSaveAttempt(result) {
         if (result === undefined || window.pendingDocAction === "") return
         if (result) {
-            finishPendingDocumentAction()
+            if (window.pendingDocAction === "saveSelected") {
+                ++window.pendingSelectedSaveIndex
+                saveThenContinue()
+            } else if (window.pendingDocAction === "close" || window.pendingDocAction === "saveAll") saveThenContinue()
+            else finishPendingDocumentAction()
         } else {
             setStatus(qsTr("保存失败，未关闭/替换当前谱面"))
             cancelPendingDocumentAction()
@@ -1239,7 +1600,7 @@ ApplicationWindow {
     }
     function requestPmsSuffixConfirmation(path, saveAs) {
         if (window.pmsSaveConfirmationPending) return
-        window.pendingPmsSaveDocumentId = chartSession.activeSessionId()
+        window.pendingPmsSaveDocumentId = chartSession.sessionId
         window.pendingPmsSavePath = path
         window.pendingPmsSaveAs = saveAs
         const token = ++window.pmsSaveRequestToken
@@ -1256,7 +1617,9 @@ ApplicationWindow {
         window.pendingPmsSaveAs = false
     }
     function cancelPmsSuffixSave() {
+        const historyDocumentId = window.pendingPmsSaveDocumentId
         clearPmsSuffixConfirmation()
+        chartHistoryController.finishSave(historyDocumentId, false)
         if (window.pendingDocAction !== "") cancelPendingDocumentAction()
         setStatus(qsTr("已取消保存；请使用 .pms 后缀，当前更改和面板草稿仍保留"))
     }
@@ -1265,13 +1628,16 @@ ApplicationWindow {
         const path = window.pendingPmsSavePath
         const saveAs = window.pendingPmsSaveAs
         clearPmsSuffixConfirmation() // 本次授权仅消费一次，不能留下全局“已允许”状态。
-        if (id === "" || id !== chartSession.activeSessionId() ||
-                !chartSession.hasChart || (!saveAs && path !== window.chartPath)) {
+        if (id === "" || id !== documents.activeId() || id !== chartSession.sessionId ||
+                !chartSession.hasChart || (!saveAs && path !== window.chartPath) ||
+                (window.pendingDocAction === "saveSelected" && !selectedSaveTargetUnchanged())) {
+            chartHistoryController.finishSave(id, false)
             setStatus(qsTr("文档或目标已变化，保存已取消；请重新确认"))
             if (window.pendingDocAction !== "") cancelPendingDocumentAction()
             return false
         }
         const result = saveAs ? session.saveChartAs(path) : session.saveChart()
+        chartHistoryController.finishSave(id, result)
         completeSaveAttempt(result)
         return result
     }
@@ -1323,10 +1689,12 @@ ApplicationWindow {
     }
 
     /// 关闭/新建/打开前的未保存确认。切音工作区是独立会话，不并入谱面脏。
-    property string pendingDocAction: ""   // "" | "close" | "new" | "open"
+    property string pendingDocAction: ""   // "" | "close" | "new" | "open" | "switch" | "assign" | "swap" (target ID in pendingOpenPath)
     property string pendingOpenPath: ""
-    /// 待建谱面的模式（2026-10 阶段一 issue #26）："" = 未定（确认未保存后弹新建对话框）；
-    /// 非空 = 子菜单「新建为模式」直建该模式（跳过对话框）。
+    property string pendingOriginalDocument: ""
+    property var pendingSelectedSaves: []
+    property int pendingSelectedSaveIndex: 0
+    /// 空模式走选择对话框；「新建为模式」直建指定模式。
     property string pendingNewMode: ""
     property bool allowClose: false
 
@@ -1334,6 +1702,18 @@ ApplicationWindow {
         if (chartSession && chartSession.dirty) return true
         if (window.metaDraftDirty) return true
         return false
+    }
+    function anyDocumentIsDirty() {
+        return documentIsDirty() || documents.dirtyDocuments().length > 0
+    }
+    function pendingDirtyLabel() {
+        if (window.pendingDocAction !== "close") return window.documentDirtyLabel()
+        var docs = documents.dirtyDocuments()
+        var labels = []
+        for (var i = 0; i < docs.length; ++i) labels.push(docs[i].label)
+        if (window.metaDraftDirty && !(chartSession && chartSession.dirty))
+            labels.push(window.documentDirtyLabel() + qsTr("（面板草稿）"))
+        return labels.join("、")
     }
     function documentDirtyLabel() {
         if (window.chartPath && window.chartPath.length > 0) {
@@ -1346,7 +1726,10 @@ ApplicationWindow {
         if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "" || unsavedConfirmDialog.visible) return
         window.pendingDocAction = action
         window.pendingOpenPath = path || ""
-        if (!documentIsDirty()) {
+        window.pendingOriginalDocument = action === "close" ? documents.activeId() : ""
+        // 新建/切换/打开都只改变集合当前项，不丢已有文档；面板草稿仍须先确认。
+        const needsConfirm = action === "close" ? anyDocumentIsDirty() : window.metaDraftDirty
+        if (!needsConfirm) {
             finishPendingDocumentAction()
             return
         }
@@ -1355,35 +1738,163 @@ ApplicationWindow {
     function finishPendingDocumentAction() {
         const action = window.pendingDocAction
         const path = window.pendingOpenPath
+        const original = window.pendingOriginalDocument
         window.pendingDocAction = ""
         window.pendingOpenPath = ""
+        window.pendingOriginalDocument = ""
         if (action === "close") {
             window.allowClose = true
             window.close()
         } else if (action === "new") {
-            // 模式已定（子菜单「新建为模式」直建）；未定（Ctrl+N）先弹新建对话框选模式
-            if (window.pendingNewMode !== "") {
-                const m = window.pendingNewMode
-                window.pendingNewMode = ""
-                performNewChart(m)
-            } else {
-                newChartDialog.open()
-            }
-        } else if (action === "open") {
+            // M7 新建独立文档，不替换/丢弃旧文档；草稿确认后再选模式。
+            const mode = window.pendingNewMode
+            window.pendingNewMode = ""
+            if (mode !== "") performNewChart(mode)
+            else newChartDialog.open()
+        } else if (action === "saveAll" || action === "saveSelected") {
+            window.pendingSelectedSaves = []
+            window.pendingSelectedSaveIndex = 0
+            restoreDocument(original)
+            project.refreshOpenStates()
+            documents.refresh()
+            setStatus(action === "saveSelected" ? qsTr("勾选范围内的已打开文档已保存") : qsTr("全部已打开文档已保存"))
+        } else if (action === "swap") {
+            const previousId = documents.activeId()
+            editPage.prepareReferenceSwap()
+            const activated = documents.activate(path)
+            if (!activated.ok) { editPage.abortReferenceSwap(); setStatus(activated.error); return }
+            adoptChart(activated.path)
+            editPage.finishReferenceSwap(previousId)
+        } else if (action === "assign") {
+            if (path) doOpenChart(path, false)
+        } else if (action === "open" || action === "switch") {
             if (path && path.length > 0) doOpenChart(path)
             else fileDialog.open()
         }
     }
+    function restoreDocument(id) {
+        if (id === "" || id === documents.activeId()) return
+        const restored = documents.activate(id)
+        if (restored.ok) adoptChart(restored.path)
+    }
     function cancelPendingDocumentAction() {
+        const original = window.pendingOriginalDocument
         window.pendingDocAction = ""
         window.pendingOpenPath = ""
+        window.pendingOriginalDocument = ""
         window.pendingNewMode = ""
+        window.pendingSelectedSaves = []
+        window.pendingSelectedSaveIndex = 0
         window.allowClose = false
+        restoreDocument(original)
+    }
+    function selectedSaveTargetUnchanged() {
+        const target = window.pendingSelectedSaves[window.pendingSelectedSaveIndex]
+        if (!target || window.metaDraftDirty) return false
+        const current = project.saveSliceTargetSnapshot([target.path])
+        return current.length === 1 && current[0].id === target.id &&
+                current[0].path === target.path && current[0].revision === target.revision
+    }
+    function saveSelectedDocuments(paths) {
+        if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "" ||
+                window.pendingDocAction !== "" || unsavedConfirmDialog.visible) return
+        // Never silently commit the primary panel or save an unselected dirty primary.
+        if (window.metaDraftDirty) {
+            setStatus(qsTr("请先提交面板草稿，再保存勾选谱面"))
+            return
+        }
+        window.pendingSelectedSaves = project.saveSliceTargetSnapshot(paths)
+        window.pendingSelectedSaveIndex = 0
+        window.pendingOriginalDocument = documents.activeId()
+        window.pendingDocAction = "saveSelected"
+        saveThenContinue()
     }
     function saveThenContinue() {
-        const saved = saveChart()
-        if (saved === undefined) return // 等待文件选择/后缀确认，不失败、不放行后续操作。
-        completeSaveAttempt(saved)
+        if (window.pendingDocAction === "saveSelected") {
+            // Snapshot includes only explicitly requested loaded dirty IDs. Do not use
+            // saveDirtyNamed here: unrelated dirty documents must remain untouched.
+            while (window.pendingSelectedSaveIndex < window.pendingSelectedSaves.length) {
+                if (!selectedSaveTargetUnchanged()) {
+                    setStatus(qsTr("勾选保存目标已修改、重载或另存为，请重新保存"))
+                    cancelPendingDocumentAction()
+                    return
+                }
+                const target = window.pendingSelectedSaves[window.pendingSelectedSaveIndex]
+                const activated = documents.activate(target.id)
+                if (!activated.ok) {
+                    setStatus(activated.error)
+                    cancelPendingDocumentAction()
+                    return
+                }
+                adoptChart(activated.path)
+                const saved = saveChart()
+                if (saved === undefined) return // PMS confirmation resumes via completeSaveAttempt.
+                if (!saved) {
+                    setStatus(qsTr("保存勾选谱面失败，其余目标未保存"))
+                    cancelPendingDocumentAction()
+                    return
+                }
+                ++window.pendingSelectedSaveIndex
+            }
+            finishPendingDocumentAction()
+            return
+        }
+        // 先提交当前面板草稿；退出时还要保存所有非活动脏文档。
+        if (documentIsDirty()) {
+            if (window.chartPath === "") { openSaveAsDialog(); return }
+            const saved = saveChart()
+            if (saved === undefined) return // 等待后缀确认，不失败、不放行后续文档操作。
+            if (!saved) {
+                setStatus(qsTr("保存失败，未关闭/替换当前谱面"))
+                cancelPendingDocumentAction()
+                return
+            }
+        }
+        if (window.pendingDocAction === "close" || window.pendingDocAction === "saveAll") {
+            const result = documents.saveDirtyNamed(true)
+            documents.refresh()
+            project.refreshOpenStates()
+            if (result.errors && result.errors.length > 0) {
+                var problems = []
+                for (var i = 0; i < result.errors.length; ++i)
+                    problems.push(result.errors[i].path + ": " + result.errors[i].error)
+                setStatus(qsTr("退出已取消，保存失败：%1").arg(problems.join("; ")))
+                cancelPendingDocumentAction()
+                return
+            }
+            // 非活动PMS也必须按各自模式逐一确认，不能由批量保存绕过交互。
+            if (result.confirmation && result.confirmation.length > 0) {
+                const next = result.confirmation[0]
+                const activated = documents.activate(next.id)
+                if (!activated.ok) {
+                    setStatus(activated.error)
+                    cancelPendingDocumentAction()
+                    return
+                }
+                adoptChart(activated.path)
+                saveChart() // 暂停；确认成功后completeSaveAttempt会继续本批次。
+                return
+            }
+            // 未命名文档逐一走另存为；取消或失败都不能放行退出。
+            if (result.unnamed && result.unnamed.length > 0) {
+                const next = result.unnamed[0]
+                const activated = documents.activate(next.id)
+                if (!activated.ok) {
+                    setStatus(activated.error)
+                    cancelPendingDocumentAction()
+                    return
+                }
+                adoptChart("")
+                openSaveAsDialog()
+                return
+            }
+            if (!result.ok || documents.dirtyDocuments().length > 0) {
+                setStatus(qsTr("仍有未保存文档，退出已取消"))
+                cancelPendingDocumentAction()
+                return
+            }
+        }
+        finishPendingDocumentAction()
     }
 
     onClosing: function(close) {
@@ -1391,8 +1902,19 @@ ApplicationWindow {
             close.accepted = false
             return
         }
-        if (window.allowClose || !documentIsDirty()) {
+        if (chartHistoryController.busy) {
+            close.accepted = false
+            setStatus(qsTr("正在处理谱面历史，请完成后再退出"))
+            return
+        }
+        if (window.allowClose || !anyDocumentIsDirty()) {
             window.allowClose = false
+            if (chartHistoryController.enabled && chartHistoryController.createOnClose &&
+                    !chartHistoryController.snapshotAllSaved()) {
+                close.accepted = false
+                // 保存已完成，不回滚、不伪造脏状态；允许重试或关闭可选退出快照。
+                chartHistoryController.showHistory(documents.activeId())
+            }
             return
         }
         close.accepted = false
@@ -1403,14 +1925,24 @@ ApplicationWindow {
         id: unsavedConfirmDialog
         title: qsTr("未保存的更改")
         width: 420
-        height: 200
+        height: 280
         showCancel: false
-        Label {
+        ScrollView {
             Layout.fillWidth: true
-            text: qsTr("「%1」有未保存的更改。保存后继续，放弃更改，或取消。切音工作区不随谱面保存。").arg(window.documentDirtyLabel())
-            color: Theme.text
-            wrapMode: Text.WordWrap
-            font.pixelSize: Theme.fsSmall
+            Layout.fillHeight: true
+            clip: true
+            Label {
+                width: unsavedConfirmDialog.width - 40
+                text: (window.pendingDocAction === "close"
+                       ? qsTr("以下文档有未保存更改：%1\n\n保存全部后退出，全部不保存，或取消。")
+                       : (window.pendingDocAction === "new"
+                          ? qsTr("「%1」有未保存的面板草稿。保存后新建，放弃草稿，或取消。会话内修改仍保留。")
+                          : qsTr("「%1」有未保存的面板草稿。保存后继续，放弃草稿，或取消。会话内修改仍保留。")))
+                      .arg(window.pendingDirtyLabel()) + qsTr("\n切音工作区不随谱面保存。")
+                color: Theme.text
+                wrapMode: Text.WordWrap
+                font.pixelSize: Theme.fsSmall
+            }
         }
         footer: Rectangle {
             width: unsavedConfirmDialog.width
@@ -1452,12 +1984,21 @@ ApplicationWindow {
     // 可能按错误 id 覆盖 #WAV 定义。取消可先去元信息设置 #BASE 62 或重新导出。
     BbDialog {
         id: base62PasteDialog
+        objectName: "base62PasteDialog"
         title: qsTr("Base62 粘贴提醒")
         width: 470
         height: 224
         showCancel: false
         property string pendingText: ""
         property int pendingTarget: 0
+        property var editContext: null
+        property var editOperations: null
+        property var captureToken: ({})
+        property var pendingSettings: ({})
+        onRejected: {
+            editContext = null; editOperations = null; captureToken = ({})
+            pendingText = ""; pendingSettings = ({})
+        }
         Label {
             Layout.fillWidth: true
             text: qsTr("粘贴内容看起来是 Base62（含 #BASE 62 声明或小写 id），但当前谱面未声明 #BASE 62。\n\nBase36 会把两位 id 解释成不同数值（如 10：Base62=62，Base36=36），可能覆盖已有 #WAV 定义。\n\n建议取消，先在元信息里设置 #BASE 62，或用 Base36 重新导出。仍要继续吗？")
@@ -1483,7 +2024,11 @@ ApplicationWindow {
                         const t = base62PasteDialog.pendingText
                         const m = base62PasteDialog.pendingTarget
                         base62PasteDialog.close()
-                        session.pasteRawText(t, m)
+                        if (!base62PasteDialog.editContext || !base62PasteDialog.editOperations) return
+                        const response = base62PasteDialog.editOperations.pasteCaptured(
+                            base62PasteDialog.captureToken, t, m, base62PasteDialog.pendingSettings)
+                        window.finishPanePaste(base62PasteDialog.editContext, response,
+                                               base62PasteDialog.captureToken.sessionId)
                     }
                 }
                 BbToolButton {
@@ -1494,6 +2039,27 @@ ApplicationWindow {
         }
     }
 
+    /// B 只选择统一集合中的实例；不采用 A 的面板/播放/草稿切换流程。
+    function doOpenReferenceChart(path) {
+        const result = documents.openReference(path)
+        if (!result.ok) { setStatus(qsTr("打开对照失败：%1").arg(result.error)); return false }
+        if (!editPage.openReference(result.id)) {
+            setStatus(qsTr("打开对照失败：文档不可用"))
+            return false
+        }
+        project.refreshOpenStates()
+        setStatus(qsTr("已设为 B 侧只读对照：%1").arg(result.path || path))
+        return true
+    }
+
+    function doOpenChart(path, navigateToEditor = true) {
+        const result = documents.open(path)
+        if (!result.ok) { setStatus(qsTr("打开失败：%1").arg(result.error)); return }
+        adoptChart(result.path)
+        if (navigateToEditor) window.currentPage = 0
+        setStatus(qsTr("已在 A 侧打开：%1").arg(result.path || path))
+    }
+
     // 新建谱面对话框（2026-10 阶段一 issue #26）：Ctrl+N 未保存确认后弹出，选游玩模式再建。
     // 模式列表同源 chartSession.codecModes()（Codec::modes / capabilities）；默认第一项 sp7k。
     BbDialog {
@@ -1502,8 +2068,8 @@ ApplicationWindow {
         width: 400
         height: 200
         ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 12
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             spacing: 8
             Label {
                 text: qsTr("选择游玩模式（决定轨道布局与保存通道表）：")
@@ -1512,6 +2078,7 @@ ApplicationWindow {
             }
             BbComboBox {
                 id: newModeCombo
+                objectName: "newModeCombo"
                 Layout.preferredWidth: 240
                 Layout.fillWidth: true
                 textRole: "label"
@@ -1554,7 +2121,6 @@ ApplicationWindow {
         }
     }
 
-    function doOpenChart(path) { openChart(path) }
 
     /// 外部文件路由（拖拽入窗口 / 拖到 exe 图标 / 双击关联）：分类 → 打开并切到对应页。
     /// 后缀分类在 EditUtils（C++ 纯函数，单测覆盖），QML 只做分流，避免后缀表两处维护。
@@ -1564,7 +2130,7 @@ ApplicationWindow {
         const kind = editUtils.classifyExternalFile(path)
         if (kind === "chart") {
             window.currentPage = 0
-            doOpenChart(path)
+            requestDocumentAction("switch", path)
             return true
         }
         if (kind === "audio") {
@@ -1581,74 +2147,53 @@ ApplicationWindow {
         return false
     }
 
-    function openChart(path) {
-        var req = JSON.stringify({ command: "info", args: { path: path } })
-        var resp = beatbench.dispatch(req)
-        var r = JSON.parse(resp)
-        if (r.ok) {
-            window.chartMeta = r.result.meta
-            // 当前 BPM 值兜底 = 元信息 BPM（路线 A 值放置默认）
+    /// M7：切到**已在会话中打开**的谱面——不重新读盘（保护未保存修改；审查稿 P0）。
+    /// 与 openChart 的区别：只换活动会话 + 用内存态刷新各面板。
+    function adoptChart(path) {
+        var d = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.dirty", args: {} })))
+        if (!d.ok || !d.result.has_chart) {
+            window.statusText = qsTr("切换失败：未加载谱面")
+            statusClearTimer.restart()
+            return
+        }
+        documents.refresh()      // 视图跟随新活动会话（不读盘）
+        chartSession.renderAsync()  // 该会话若未渲染过 → 后台补渲染（内存态）
+        window.chartPath = d.result.path
+        // 元信息：**内存态**（meta.list 读活动会话 chart），不用 info 的磁盘态
+        var m = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "meta.list", args: {} })))
+        if (m.ok) {
+            window.chartMeta = m.result.meta
             if (window.chartMeta && window.chartMeta.BPM !== undefined) {
                 const b = parseFloat(window.chartMeta.BPM)
                 if (isFinite(b) && b > 0) window.currentBpmValue = b
             }
-            window.chartPath = r.result.path
-            window.chartFormat = r.result.format !== undefined ? r.result.format : ""
-            window.chartMode = r.result.mode !== undefined ? r.result.mode : ""
-            // 编码：从 info/check 的 diagnostics（"encoding: UTF-8 (path)"）干净提取令牌
-            var enc = ""
-            if (r.result.diagnostics) {
-                for (var di = 0; di < r.result.diagnostics.length; di++) {
-                    var dm = r.result.diagnostics[di].message
-                    if (dm && dm.indexOf("encoding:") === 0) {
-                        var m = dm.match(/^encoding:\s*(\S+)/)
-                        if (m) enc = m[1]
-                        break
-                    }
-                }
-            }
-            window.chartEncoding = enc
-            // M2 第 5 步：时间轴真数据（ChartSession + TimingEngine，与 info 同源解析）
-            chartSession.openChart(path)
-            window.pendingLnHead = null  // 换谱面：清除可能的未完成 LN 头
-            window.selectionRefs = []
-            window.metaSelection = []
-            refreshTiming()  // 时间轴面板（BPM/STOP）数据源
-            // 元信息可编辑表单载入（meta.list；session 已 load，此后编辑保存走 meta.edit）
-            if (typeof editPage !== "undefined" && editPage) editPage.reloadMeta()
-            // BGA 面板载入（#BMP 定义 + 当前层事件；bga.list/session.samples）
-            if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()
-            // 当前 #BMP 默认 = 首个定义（视口 BGA 列放置用）；若无 #BMP 保持空（放置时提示）
-            const sb = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} })))
-            if (sb.ok && sb.result.samples && sb.result.samples.bmp && sb.result.samples.bmp.length > 0
-                    && (window.currentBmpId === "" ||
-                        !sb.result.samples.bmp.some(function (d) { return d.id === window.currentBmpId }))) {
-                window.currentBmpId = sb.result.samples.bmp[0].id
-                if (typeof editPage !== "undefined" && editPage) editPage.currentBmpId = window.currentBmpId
-            }
-            // ⚠️ 避免 multi-arg String.arg（QML 引擎会抛 Invalid arguments）：
-            // 预计算 + 链式单参 .arg（经典稳妥形式）
-            var wavCount = r.result.samples && r.result.samples.wav
-                           ? r.result.samples.wav.length : 0
-            window.statusText = qsTr("已打开：%1（%2 个采样）").arg(r.result.path).arg(wavCount)
-            statusClearTimer.restart()
-            // 采样面板 + lint 面板：info 的 wav 定义表 + check 的缺失/诊断（M2 第 4 步）
-            sampleModel.loadFromInfo(resp)
-            var checkResp = beatbench.dispatch(JSON.stringify({ command: "check", args: { path: path } }))
-            sampleModel.loadFromCheck(checkResp)
-            lintModel.loadFromCheck(checkResp)
-            // M4.1 音频：设置采样相对路径解析基准（谱面目录）。setChartPath 内部
-            // 用 QFileInfo 解析（兼容 / 与 \）——试听点击在 onSamplePicked 触发时
-            // 经 audioEngine.playPreview(file) 解析。
-            if (typeof audioEngine !== "undefined" && audioEngine) {
-                audioEngine.setChartPath(r.result.path)
-            }
-            window.metaDraftDirty = false
-        } else {
-            window.chartMeta = null
-            window.statusText = qsTr("打开失败：%1 %2").arg(r.error.code).arg(r.error.message)
-            statusClearTimer.restart()
         }
+        // 采样面板：session.samples（内存态）→ 合成 info 形状喂给 loadFromInfo
+        var ss = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.samples", args: {} })))
+        if (ss.ok) {
+            sampleModel.clear()  // 文档切换不继承上一谱面同 ID 的缺失灯
+            sampleModel.loadFromInfo(JSON.stringify(
+                { result: { samples: ss.result.samples, id_base: chartSession.idBase() } }))
+        }
+        // 模式取固定文档桥的内存态；未命名文档/未落盘模式不能被旧磁盘 info 覆盖。
+        window.chartMode = chartSession.chartMode()
+        window.pendingLnHead = null
+        window.currentSampleId = ""
+        window.currentBmpId = ""
+        window.selectionRefs = []
+        window.metaSelection = []
+        refreshTiming()
+        if (typeof editPage !== "undefined" && editPage) {
+            editPage.activatePrimary()
+            editPage.reloadMeta()
+            editPage.reloadBga()
+        }
+        refreshLint()
+        if (typeof audioEngine !== "undefined" && audioEngine)
+            audioEngine.setChartPath(d.result.path)
+        project.refreshOpenStates()
+        window.statusText = qsTr("已切换 A 侧谱面：%1").arg(d.result.path)
+        statusClearTimer.restart()
     }
 
     // file:///C:/x → C:/x（Windows 本地路径）
@@ -1756,11 +2301,27 @@ ApplicationWindow {
     function bgaLayerName(l) { return session.bgaLayerName(l) }
     function bmpAdd(id, file) { return session.bmpAdd(id, file) }
     function bmpDelete(id) { return session.bmpDelete(id) }
-    function bmpRename(fromId, toId) { return session.bmpRename(fromId, toId) }
     function bmpSetFile(id, file) { return session.bmpSetFile(id, file) }
     function addWavSample(id, file) { return session.addWavSample(id, file) }
-    function cancelPendingLn() { return session.cancelPendingLn() }
-    function copySelection() { return session.copySelection() }
+    function cancelPendingLn() {
+        if (managedDragController && managedDragController.active) {
+            managedDragController.cancelActive("escape")
+            return true
+        }
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.cancelPendingLn() : false
+        return session.cancelPendingLn()
+    }
+    function copySelection() {
+        const ops = referenceActionTarget ? referenceEditOperations : primaryEditOperations
+        if (!ops) return referenceActionTarget ? false : session.copySelection()
+        const response = ops.copySelection()
+        if (response.ok) {
+            window.clipboardLines = response.result.lines || []
+            if (typeof clipboard !== "undefined" && clipboard)
+                clipboard.setText(response.result.text)
+        }
+        return response
+    }
     function deleteBga(layer, measure, num, den) { return session.deleteBga(layer, measure, num, den) }
     function deleteMetaObject(obj) { return session.deleteMetaObject(obj) }
     function deleteMetaSelection() { return session.deleteMetaSelection() }
@@ -1771,8 +2332,11 @@ ApplicationWindow {
     function editBga(layer, measure, num, den, bmpId) { return session.editBga(layer, measure, num, den, bmpId) }
     function editTiming(kind, measure, num, den, value, ref) { return session.editTiming(kind, measure, num, den, value, ref) }
     /// 2026-09「加一小节」：编辑态有效小节数下限 +1（可放内容的新小节；用不到的保存时被 BMS 丢弃）。
-    function addMeasure() { editPage.extendMeasures(); setStatus(qsTr("已加一小节（保存时未用到的空小节会被舍弃）")) }
-    /// 2026-09 新建空谱面：未保存确认 → 选模式（对话框）→ chartSession.newChart(mode)。
+    function addMeasure() {
+        if (referenceActionTarget) return false
+        editPage.extendMeasures(); setStatus(qsTr("已加一小节（保存时未用到的空小节会被舍弃）"))
+    }
+    /// 新建空谱面：草稿确认 → 选模式（对话框）→ DocumentService.create(mode) 独立文档。
     /// 2026-10 阶段一（issue #26）：Ctrl+N 不再直建 sp7k，先选模式（新谳 PMS/DP 不再受阻）。
     function newChart() {
         if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "") return
@@ -1794,15 +2358,14 @@ ApplicationWindow {
         return mode
     }
     function performNewChart(mode) {
-        if (!chartSession.newChart(mode)) {
-            setStatus(qsTr("新建空谱面失败：%1").arg(chartSession.errorMessage()))
+        const created = documents.create(mode || "sp7k")
+        if (!created.ok) {
+            setStatus(qsTr("新建空谱面失败：%1").arg(created.error))
             statusClearTimer.restart()
             return
         }
         window.chartPath = ""
-        window.chartFormat = "bms"
-        window.chartMode = mode
-        window.chartEncoding = "utf8"
+        window.chartMode = mode || "sp7k"
         // 默认元信息（空谱面面板可编辑；TITLE 等留空让用户填）。
         // ⚠️ 不预设 PLAYER（2026-10 复核）：草稿回填 "1" 会覆盖模式推导——DP/Battle 新建
         // 保存后 PLAYER 由 writer 按 mode_id 推导（dp=3/battle=4），重开不再退回 SP。
@@ -1811,12 +2374,15 @@ ApplicationWindow {
                              "TOTAL": "", "DIFFICULTY": "" }
         window.currentBpmValue = 130
         window.pendingLnHead = null
+        window.currentSampleId = ""
+        window.currentBmpId = ""
         window.selectionRefs = []
         window.metaSelection = []
         refreshTiming()
         // 清空上一谱面的采样（新建空谱面无采样；lint 面板对空谱面显空/占位，暂不额外清）
         sampleModel.clear()
         if (typeof editPage !== "undefined" && editPage) {
+            editPage.activatePrimary()
             editPage.reloadMeta()
             editPage.reloadBga()
         }
@@ -1838,10 +2404,51 @@ ApplicationWindow {
     function onMetaClicked(obj, ctrl) { return session.onMetaClicked(obj, ctrl) }
     function onNoteClicked(ref, ctrl) { return session.onNoteClicked(ref, ctrl) }
     function onSelectionMade(refs) { return session.onSelectionMade(refs) }
-    function pasteClipboard() { return session.pasteClipboard() }
-    /// Base62 粘贴确认（2026-09 数据安全）：SessionController.pasteClipboard 判定「目标谱面
-    /// Base36 + 文本含 Base62 id」时调用；确认后走同一 pasteRawText 落点（一个 undo 步）。
+    function finishPanePaste(ctx, response, targetId) {
+        if (!response.ok) return response
+        if (ctx === primaryEditContext) {
+            window.pendingLnHead = null
+            window.metaSelection = []
+            window.selectionRefs = response.result.selection || []
+            if (referenceEditContext && referenceEditContext.sessionId === targetId)
+                referenceEditContext.clearState()
+        }
+        return response
+    }
+    function pasteClipboard() {
+        const ctx = referenceActionTarget ? referenceEditContext : primaryEditContext
+        const ops = referenceActionTarget ? referenceEditOperations : primaryEditOperations
+        if (!ops || !ctx) return referenceActionTarget ? false : session.pasteClipboard()
+        if (!ctx.available || !ctx.editable) return false
+        const view = referenceActionTarget ? editPage.referenceChartView : editPage.locateChartView()
+        if (!view) return false
+        const target = Math.max(0, Math.floor(view.centerMeasure() || 0))
+        const systemText = typeof clipboard !== "undefined" && clipboard ? clipboard.text() : ""
+        const text = systemText && editUtils.looksLikeBmsText(systemText)
+            ? systemText : window.clipboardLines.join("\n")
+        const settings = {allowDefinitions: !referenceActionTarget, legacyBase36CaseFold: !referenceActionTarget}
+        const token = ctx.capture()
+        const targetId = ctx.sessionId
+        const response = ops.paste(text, target, settings)
+        if (!response.ok && response.error.code === "base62_confirmation_required") {
+            base62PasteDialog.editContext = ctx
+            base62PasteDialog.editOperations = ops
+            base62PasteDialog.captureToken = token
+            base62PasteDialog.pendingSettings = settings
+            base62PasteDialog.pendingText = text
+            base62PasteDialog.pendingTarget = target
+            base62PasteDialog.open()
+            return response
+        }
+        return finishPanePaste(ctx, response, targetId)
+    }
+    /// legacy A 宿主兼容入口：确认始终保存原 owner/revision，不再调用可跟随 active 的 pasteRawText。
     function requestBase62PasteConfirm(text, targetMeasure) {
+        if (!primaryEditContext || !primaryEditOperations) return false
+        base62PasteDialog.editContext = primaryEditContext
+        base62PasteDialog.editOperations = primaryEditOperations
+        base62PasteDialog.captureToken = primaryEditContext.capture()
+        base62PasteDialog.pendingSettings = {allowDefinitions: true, legacyBase36CaseFold: true}
         base62PasteDialog.pendingText = text
         base62PasteDialog.pendingTarget = targetMeasure
         base62PasteDialog.open()
@@ -1849,30 +2456,43 @@ ApplicationWindow {
     function placeBgaAt(hit) { return session.placeBgaAt(hit) }
     function placeLnType2(hit) { return session.placeLnType2(hit) }
     function placeNote(hit) { return session.placeNote(hit) }
-    function quantizeSelection() { return session.quantizeSelection() }
+    function quantizeSelection() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.quantize(referenceEditSettings) : false
+        return session.quantizeSelection()
+    }
     function refEquals(a, b) { return session.refEquals(a, b) }
     function refreshLint() { return session.refreshLint() }
     function refreshSamples() { return session.refreshSamples() }
     function refreshTiming() { return session.refreshTiming() }
     function saveChart() {
         if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "") return undefined
-        if (!chartSession.hasChart) return false
-        // 新建谱面（path 空）Ctrl+S → 另存为；undefined 表示等待，不是失败。
+        if (!chartSession.hasChart || chartSession.sessionId !== documents.activeId()) return false
         if (window.chartPath === "") { openSaveAsDialog(); return undefined }
-        if (editUtils.pmsSuffixNeedsConfirmation(window.chartMode, window.chartPath)) {
+        if (editUtils.pmsSuffixNeedsConfirmation(chartSession.chartMode(), window.chartPath)) {
             requestPmsSuffixConfirmation(window.chartPath, false)
             return undefined
         }
-        return session.saveChart()
+        const result = session.saveChart()
+        chartHistoryController.finishSave(chartSession.sessionId, result)
+        return result
+    }
+    function saveAllDocuments() {
+        if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "" ||
+                window.pendingDocAction !== "" || unsavedConfirmDialog.visible) return
+        window.pendingDocAction = "saveAll"
+        window.pendingOriginalDocument = documents.activeId()
+        saveThenContinue()
     }
     function saveChartAs(path) {
-        if (window.pmsSaveConfirmationPending || window.saveAsDocumentId !== "") return undefined
-        if (!chartSession.hasChart) return false
-        if (editUtils.pmsSuffixNeedsConfirmation(window.chartMode, path)) {
+        if (window.pmsSaveConfirmationPending) return undefined
+        if (!chartSession.hasChart || chartSession.sessionId !== documents.activeId()) return false
+        if (editUtils.pmsSuffixNeedsConfirmation(chartSession.chartMode(), path)) {
             requestPmsSuffixConfirmation(path, true)
             return undefined
         }
-        return session.saveChartAs(path)
+        const result = session.saveChartAs(path)
+        chartHistoryController.finishSave(chartSession.sessionId, result)
+        return result
     }
     function saveMetaEdits() { return session.saveMetaEdits() }
     function setModeMeta(key, value) { return session.setModeMeta(key, value) }
@@ -1880,13 +2500,20 @@ ApplicationWindow {
     function setCurrentBmp(id) { return session.setCurrentBmp(id) }
     function setSampleFile(id, file) { return session.setSampleFile(id, file) }
     function toggleGrid() { return session.toggleGrid() }
-    function toggleLnSelection() { return session.toggleLnSelection() }
-    function transformSelection(mirror, rotate) { return session.transformSelection(mirror, rotate) }
+    function toggleLnSelection() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.toggleLn() : false
+        return session.toggleLnSelection()
+    }
+    function transformSelection(mirror, rotate) {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.transform(mirror, rotate) : false
+        return session.transformSelection(mirror, rotate)
+    }
     function undoEdit() {
         if (currentPage === 1) {
             sliceWorkspace.undoSliceEdit()
             return
         }
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.undo() : false
         return session.undoEdit()
     }
     function redoEdit() {
@@ -1894,6 +2521,7 @@ ApplicationWindow {
             sliceWorkspace.redoSliceEdit()
             return
         }
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.redo() : false
         return session.redoEdit()
     }
 
@@ -1901,6 +2529,26 @@ ApplicationWindow {
     // 迁移期机制：行为原点不变（原 chrome 的第 2 遍调用并入 handler）；invoke 失败 =
     // 方法不存在（C++ qWarning）或动作禁用（静默）。
     function uiActionOpen() { requestDocumentAction("open") }
+    /// M7：打开歌曲文件夹 → 项目页（只读索引版）。不替换当前文档，故无需未保存确认。
+    function uiActionOpenFolder() {
+        // Windows 会在重开原生弹窗时重用 initialDirectory；不能依赖其浏览历史。
+        folderDialog.currentFolder = project.folderPickerInitialFolder()
+        folderDialog.open()
+    }
+    function doOpenFolder(path) {
+        project.scan(path)
+        window.currentPage = 3
+    }
+    /// M7：把"生效切音目标"（勾选非空 → 勾选集合；否则当前编辑谱）注入切音工作区。
+    /// 铺放（同时铺入编辑区）按该集合对每个谱面各写一个撤销步。
+    function syncSliceExportTargets() {
+        sliceWorkspace.exportTargets = project.effectiveSliceTargets(window.chartPath)
+    }
+    onChartPathChanged: {
+        updateActionStates()
+        syncSliceExportTargets()
+        audioEngine.setChartPath(window.chartPath)
+    }
     function uiActionSaveAs() { openSaveAsDialog() }
     function uiActionExit() { window.close() }
     /// 运行时换肤（doc/skin-system.md 三、3.）：应用皮肤 token（applySkinByName）+ 该皮肤目录 keymap.json。
@@ -1915,6 +2563,7 @@ ApplicationWindow {
         }
     }
     function uiActionDelete() {
+        if (referenceActionTarget) return referenceEditOperations && editPage.referenceEditingAvailable ? referenceEditOperations.deleteSelection() : false
         if (window.metaSelection.length > 0) deleteMetaSelection()
         else deleteSelection()
     }
@@ -1940,20 +2589,24 @@ ApplicationWindow {
     function updateActionStates() {
         setActionEnabled("file.save", chartMeta !== null)
         setActionEnabled("file.saveAs", chartMeta !== null)
+        setActionEnabled("file.revealInFileManager", chartMeta !== null && chartPath !== "")
+        setActionEnabled("file.openInTextEditor", chartMeta !== null && chartPath !== "")
         setActionEnabled("edit.undo",
-                         (currentPage === 0 && chartMeta !== null) ||
+                         (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canUndoSlice))
         setActionEnabled("edit.redo",
-                         (currentPage === 0 && chartMeta !== null) ||
+                         (chartEditingAllowed && chartMeta !== null) ||
                          (currentPage === 1 && sliceWorkspace.canRedoSlice))
-        setActionEnabled("edit.copy", chartMeta !== null && selectionRefs.length > 0)
-        setActionEnabled("edit.paste", chartMeta !== null && currentPage === 0)
-        setActionEnabled("edit.delete", chartMeta !== null && currentPage === 0 &&
-                                           (selectionRefs.length > 0 || metaSelection.length > 0))
-        setActionEnabled("tool.quantize", selectionRefs.length > 0)
-        setActionEnabled("tool.mirror", selectionRefs.length > 0)
-        setActionEnabled("tool.rotate", selectionRefs.length > 0)
-        setActionEnabled("tool.toggleLn", selectionRefs.length > 0)
+        setActionEnabled("edit.copy", chartEditingAllowed && chartMeta !== null && actionSelection.length > 0)
+        setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed)
+        setActionEnabled("edit.delete", chartMeta !== null && chartEditingAllowed &&
+                                           (actionSelection.length > 0 || actionMetaSelection.length > 0))
+        setActionEnabled("tool.quantize", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.mirror", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.rotate", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.toggleLn", chartEditingAllowed && actionSelection.length > 0)
+        setActionEnabled("tool.addMeasure", currentPage === 0 && !referenceActionTarget)
+        setActionEnabled("edit.cancel", chartEditingAllowed && (editorTool === "ln" || (managedDragController && managedDragController.active)))
         setActionEnabled("tool.pan", currentPage === 0)
         setActionEnabled("tool.select", currentPage === 0)
         setActionEnabled("tool.note", currentPage === 0)
@@ -1981,13 +2634,22 @@ ApplicationWindow {
         uiActions.setChecked("view.page.edit", currentPage === 0)
         uiActions.setChecked("view.page.slice", currentPage === 1)
         uiActions.setChecked("view.page.test", currentPage === 2)
+        uiActions.setChecked("view.page.project", currentPage === 3)
     }
     onChartMetaChanged: { updateActionStates(); updateCheckedStates() }
-    onSelectionRefsChanged: { updateActionStates(); updateCheckedStates() }
-    onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
-    onCurrentPageChanged: {
+    onSelectionRefsChanged: {
+        // Selection replacement/removal invalidates the previous note audition only.
+        if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.stopPreview()
         updateActionStates()
         updateCheckedStates()
+    }
+    onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
+    onCurrentPageChanged: {
+        if (managedDragController) managedDragController.cancelActive("page_changed")
+        updateActionStates()
+        updateCheckedStates()
+        // M7：进项目页 → 重新采集「已打开 / 未保存」状态（§9.2）
+        if (currentPage === 3) project.refreshOpenStates()
         // M6.1 页切换音频协调：进切音页 → 谱面播放暂停（共用内核 kPcmSlot，互斥）；
         // 离开切音页 → 参考播放停止（退出切音页即静音）
         if (typeof audioEngine === "undefined" || !audioEngine) return
@@ -2023,14 +2685,33 @@ ApplicationWindow {
 
     // ---------- 对话框耦合函数（委托需 window 作用域的对话框，故保留在 Main） ----------
     function editMetaObject(obj) {
-        if (obj.kind === "bga") metaEditDialog.openBga(obj)
-        else metaEditDialog.openTiming(obj.kind, obj)
+        return metaEditDialog.openPane(primaryEditContext, primaryEditOperations, obj)
+    }
+    function editReferenceMetaObject(obj) {
+        if (!editPage.referenceEditingAvailable) return false
+        return metaEditDialog.openPane(referenceEditContext, referenceEditOperations, obj)
     }
 
     function editNoteSample(ref) {
         if (!ref) return
+        noteSampleDialog.editContext = primaryEditContext
+        noteSampleDialog.capturedPane = primaryEditContext !== null
+        noteSampleDialog.captureToken = primaryEditContext ? primaryEditContext.capture() : ({})
+        noteSampleDialog.displaySession = chartSession
         noteSampleDialog.ref = ref
-        noteIdInput.text = chartSession.idTextOf(ref.sample)
+        noteSampleDialog.displayId = chartSession.idTextOf(ref.sample)
+        noteIdInput.text = noteSampleDialog.displayId
+        noteSampleDialog.open()
+    }
+    function editReferenceNoteSample(ref) {
+        if (!ref || !editPage.referenceEditingAvailable) return
+        noteSampleDialog.editContext = referenceEditContext
+        noteSampleDialog.capturedPane = true
+        noteSampleDialog.captureToken = referenceEditContext.capture()
+        noteSampleDialog.displaySession = referenceEditContext.session
+        noteSampleDialog.ref = ref
+        noteSampleDialog.displayId = referenceEditContext.session.idTextOf(ref.sample)
+        noteIdInput.text = noteSampleDialog.displayId
         noteSampleDialog.open()
     }
 
@@ -2045,36 +2726,44 @@ ApplicationWindow {
 
     BbDialog {
         id: aboutDialog
+        objectName: "aboutDialog"
         title: qsTr("关于 BeAtBench")
         width: 360
-        height: 148
+        height: naturalHeight
         showCancel: false
         Label { text: "BeAtBench " + beatbench.versionString(); font.bold: true; color: Theme.text }
         Label { text: qsTr("BMS 谱面编辑器 · GPL-3.0"); font.pixelSize: Theme.fsSmall; color: Theme.text }
-        Label { text: qsTr("© 2026 wufe8"); font.pixelSize: Theme.fsSmall; color: Theme.textMuted }
     }
 
     // 编辑区双击 note → 改引用采样 id（切音手工版；note.setSample）
     BbDialog {
         id: noteSampleDialog
+        objectName: "noteSampleDialog"
         title: qsTr("编辑对象")
         width: 320
-        height: 176
+        // Four rows plus spacing exceeded the old 176px box after header/footer.
+        height: naturalHeight
         property var ref: null
+        property var editContext: null
+        property bool capturedPane: false
+        property var captureToken: ({})
+        property var displaySession: null
+        property string displayId: ""
         readonly property string posText: ref ? qsTr("小节 %1 · %2/%3")
                                                  .arg(ref.measure).arg(ref.pos.num).arg(ref.pos.den) : ""
-        readonly property string curText: ref ? qsTr("#WAV%1").arg(chartSession.idTextOf(ref.sample)) : ""
+        readonly property string curText: ref ? qsTr("#WAV%1").arg(displayId) : ""
         onOpened: noteIdInput.forceActiveFocus()
         Label { text: qsTr("note 引用采样"); color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
-        Label { text: noteSampleDialog.posText + qsTr("　当前 %1").arg(noteSampleDialog.curText);
+        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
+                text: noteSampleDialog.posText + qsTr("　当前 %1").arg(noteSampleDialog.curText);
                 color: Theme.textFaint; font.family: Theme.fontMono; font.pixelSize: Theme.fsTiny }
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
-            Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny;
-                    Layout.preferredWidth: 56 }
+            Label { text: qsTr("#WAV id"); color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
             BbTextField {
                 id: noteIdInput
+                objectName: "noteSampleIdInput"
                 Layout.fillWidth: true
                 font.family: Theme.fontMono
                 placeholderText: qsTr("如 1A")
@@ -2083,12 +2772,19 @@ ApplicationWindow {
                 escapeHandler: function() { noteSampleDialog.reject() }
             }
         }
-        Label { text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件"); color: Theme.textFaint;
-                font.pixelSize: Theme.fsTiny }
+        Label {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.minimumHeight: Math.ceil(contentHeight)
+            wrapMode: Text.Wrap
+            text: qsTr("双击左 Dock 采样行可给该槽位绑定/改文件")
+            color: Theme.textFaint
+            font.pixelSize: Theme.fsTiny
+        }
         onAccepted: {
             const r = noteSampleDialog.ref
             if (!r) return
-            const to = noteIdInput.text.trim()
+            const to = noteSampleDialog.capturedPane ? noteIdInput.text : noteIdInput.text.trim()
             if (to === "") { setStatus(qsTr("未填 #WAV id")); return }
             const args = {
                 measure: r.measure,
@@ -2098,23 +2794,66 @@ ApplicationWindow {
                 to: to
             }
             if (r.sub_line !== undefined) args.sub_line = r.sub_line
-            const res = sessionCmd("note.setSample", args)
-            if (res) setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
+            if (r.ln_channel !== undefined) args.ln_channel = r.ln_channel
+            if (r.note_kind !== undefined) args.note_kind = r.note_kind
+            if (noteSampleDialog.capturedPane) {
+                if (!noteSampleDialog.editContext) return
+                const res = noteSampleDialog.editContext.dispatchCaptured(noteSampleDialog.captureToken, "note.setSample", args)
+                if (res.ok) window.clearSampleEditRefs(noteSampleDialog.captureToken.sessionId)
+                setStatus(res.ok ? qsTr("note → #WAV%1（Undo 可恢复）").arg(to) : res.error.message)
+            } else {
+                const res = sessionCmd("note.setSample", args)
+                if (res) {
+                    window.clearSampleEditRefs(chartSession.sessionId)
+                    setStatus(qsTr("note → #WAV%1（Undo 可恢复）").arg(to))
+                }
+            }
         }
     }
 
     // ---- 视口双击编辑 BGA/BPM/STOP 对象（2026-09）：编辑内容（BMP id / 值）；位置用拖拽移动） ----
     BbDialog {
         id: metaEditDialog
+        objectName: "metaEditDialog"
         title: qsTr("编辑对象")
         width: 300
-        height: 190
+        height: naturalHeight
         property string kind: ""   // bga / bpm / stop
         property var base: null    // 原对象（measure/pos/layer/sample/value）
         readonly property string layerText: base ? ["base","poor","layer","layer2"][base.layer] : ""
 
-        function openBga(obj) { kind = "bga"; base = obj; applyFields(); open() }
-        function openTiming(k, obj) { kind = k; base = obj; applyFields(); open() }
+        property var editContext: null
+        property var editOperations: null
+        property var captureToken: ({})
+        property var displaySession: null
+        property var frozenSettings: ({})
+        property string displayText: ""
+        onRejected: { editContext = null; editOperations = null; captureToken = ({}) }
+        function openPane(ctx, ops, obj) {
+            if (!ctx || !ops || !ctx.available || !ctx.editable || !obj) return false
+            const settings = {stopUnit: window.stopUnit}
+            const info = ops.metaEditInfo(obj, settings)
+            if (!info.ok) { window.setStatus(info.error.message); return false }
+            editContext = ctx
+            editOperations = ops
+            captureToken = ctx.capture()
+            displaySession = ctx.session
+            base = JSON.parse(JSON.stringify(obj))
+            kind = base.kind
+            frozenSettings = {stopUnit: info.result.stopUnit, stopBpm: info.result.stopBpm}
+            displayText = info.result.text
+            applyFields()
+            open()
+            return true
+        }
+        function openBga(obj) {
+            const value = JSON.parse(JSON.stringify(obj)); value.kind = "bga"
+            return openPane(window.primaryEditContext, window.primaryEditOperations, value)
+        }
+        function openTiming(k, obj) {
+            const value = JSON.parse(JSON.stringify(obj)); value.kind = k
+            return openPane(window.primaryEditContext, window.primaryEditOperations, value)
+        }
         function applyFields() {
             meLabel.text = kind === "bga" ? qsTr("BGA 对象")
                           : kind === "bpm" ? qsTr("BPM 对象") : qsTr("STOP 对象")
@@ -2123,18 +2862,19 @@ ApplicationWindow {
             if (kind === "bga") {
                 meLayerLabel.text = qsTr("图层：%1").arg(metaEditDialog.layerText)
                 meContentLabel.text = qsTr("#BMP id")
-                meContentField.text = "#BMP" + chartSession.idTextOf(base.sample)
+                meContentField.text = displayText
                 meContentField.placeholderText = qsTr("01/ZZ")
             } else {
-                meContentLabel.text = kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(stopUnitLabel())
-                meContentField.text = kind === "bpm" ? String(base.value) : window.stopToDisplay(base.value)
-                meContentField.placeholderText = kind === "bpm" ? qsTr("如 180") : (window.stopUnit === 0 ? qsTr("如 96") : qsTr("如 800"))
+                meContentLabel.text = kind === "bpm" ? qsTr("值(BPM)") : qsTr("值(%1)").arg(frozenSettings.stopUnit === 0 ? qsTr("unit") : qsTr("ms"))
+                meContentField.text = displayText
+                meContentField.placeholderText = kind === "bpm" ? qsTr("如 180") : (frozenSettings.stopUnit === 0 ? qsTr("如 96") : qsTr("如 800"))
             }
         }
         onOpened: meContentField.forceActiveFocus()
 
         Label { id: meLabel; color: Theme.primary; font.pixelSize: Theme.fsSmall; font.bold: true }
-        Label { id: mePosLabel; color: Theme.textFaint; font.family: Theme.fontMono;
+        Label { id: mePosLabel; Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
+                color: Theme.textFaint; font.family: Theme.fontMono;
                 font.pixelSize: Theme.fsTiny }
         RowLayout { id: meLayerRow; spacing: 6; Layout.fillWidth: true
             Label { id: meLayerLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
@@ -2142,9 +2882,10 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
-            Label { id: meContentLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny; Layout.preferredWidth: 56 }
+            Label { id: meContentLabel; color: Theme.textMuted; font.pixelSize: Theme.fsTiny }
             BbTextField {
                 id: meContentField
+                objectName: "metaEditValueInput"
                 Layout.fillWidth: true
                 font.family: Theme.fontMono
                 onAccepted: metaEditDialog.accept()
@@ -2152,26 +2893,12 @@ ApplicationWindow {
             }
         }
         onAccepted: {
-            const s = metaEditDialog.base
-            if (!s) return
-            if (metaEditDialog.kind === "bga") {
-                const id = meContentField.text.trim().indexOf("#BMP") === 0
-                           ? meContentField.text.trim().substring(4) : meContentField.text.trim()
-                const sample = chartSession.decodeId(id)
-                if (sample < 0) { setStatus(qsTr("#BMP id 非法：%1").arg(id)); return }
-                const r = sessionCmd("bga.put", { layer: s.layer, measure: s.measure, pos: s.pos, sample: sample })
-                if (r) {
-                    if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()
-                    setStatus(qsTr("BGA → #BMP%1").arg(id))
-                }
-            } else {
-                const raw = parseFloat(meContentField.text)
-                const value = metaEditDialog.kind === "bpm" ? raw : window.stopFromDisplay(meContentField.text)
-                if (!isFinite(value)) { setStatus(qsTr("值非法")); return }
-                const r = sessionCmd("timing.put", { kind: metaEditDialog.kind,
-                                                     measure: s.measure, pos: s.pos, value: value })
-                if (r) { refreshTiming(); setStatus(qsTr("已改 %1 值").arg(metaEditDialog.kind.toUpperCase())) }
-            }
+            if (!metaEditDialog.editContext || !metaEditDialog.editOperations || !metaEditDialog.base) return
+            const response = metaEditDialog.editOperations.editMetaCaptured(
+                metaEditDialog.captureToken, metaEditDialog.base, meContentField.text,
+                metaEditDialog.frozenSettings)
+            if (response.ok) window.clearSampleEditRefs(metaEditDialog.captureToken.sessionId)
+            else window.setStatus(response.error.message)
         }
     }
 

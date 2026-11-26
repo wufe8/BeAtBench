@@ -53,6 +53,20 @@ TEST(SessionRegistry, DefaultSessionExists) {
     EXPECT_EQ(&global_editor_session(), reg.by_id("default"));
 }
 
+TEST(SessionRegistry, BackgroundCreateRetainsActive) {
+    SessionRegistry reg;
+    auto* primary = &reg.active();
+    ASSERT_TRUE(reg.create("reference", false));
+    EXPECT_EQ(reg.active_id(), "default");
+    EXPECT_EQ(&reg.active(), primary);
+    EXPECT_NE(reg.by_id("reference"), nullptr);
+    EXPECT_FALSE(reg.create("reference", false));
+    EXPECT_FALSE(reg.create("", false));
+    EXPECT_EQ(&reg.active(), primary);
+    EXPECT_TRUE(reg.close("reference"));
+    EXPECT_EQ(&reg.active(), primary);
+}
+
 TEST(SessionRegistry, CreateActivateClose) {
     auto& reg = session_registry();
     // 清理可能的残留（测试独立运行时 default 存在）
@@ -310,4 +324,23 @@ TEST(SessionRegistry, SaveNoPathFails) {
     const Json sresp = dispatch("session.save", std::move(sargs));
     EXPECT_FALSE(sresp.at("ok").as_bool());
     EXPECT_EQ(sresp.at("error").at("code").as_str(), "no_path");
+}
+
+TEST(SessionRegistry, FindByPathAddressesDocumentNotActiveSession) {
+    // doc/project-workflow.md §9.3：项目页/切音目标要"按文件寻址"，不能靠活动会话。
+    auto& reg = session_registry();
+    reg.activate("default");
+    const std::string a = "H:/tmp/bb_find_by_path/A.bms";
+    const std::string b = "H:/tmp/bb_find_by_path/B.bms";
+    reg.active().load(make_chart(1), a);
+    ASSERT_TRUE(reg.create("find-t2"));
+    reg.by_id("find-t2")->load(make_chart(1), b);
+    reg.activate("default");
+
+    EXPECT_EQ(reg.find_by_path(a), "default");
+    EXPECT_EQ(reg.find_by_path(b), "find-t2");
+    EXPECT_EQ(reg.active_id(), "default");  // 查找不改变活动会话
+    EXPECT_TRUE(reg.find_by_path("H:/tmp/bb_find_by_path/none.bms").empty());
+    EXPECT_TRUE(reg.find_by_path("").empty());
+    EXPECT_TRUE(reg.close("find-t2"));
 }

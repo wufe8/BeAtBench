@@ -15,6 +15,7 @@
 
 #include <QtQml/qqmlregistration.h>
 
+#include <QPointer>
 #include <QQuickPaintedItem>
 
 namespace beatbench::app {
@@ -54,9 +55,9 @@ class PlayheadOverlayItem : public QQuickPaintedItem {
 
     void paint(QPainter* painter) override;
 
-    QObject* session() const { return m_session; }
+    QObject* session() const { return m_session.data(); }
     void setSession(QObject* session);
-    QObject* chartView() const { return m_chartView; }
+    QObject* chartView() const { return m_chartView.data(); }
     void setChartView(QObject* v);
     qreal measureHeight() const { return m_measureHeight; }
     void setMeasureHeight(qreal v);
@@ -95,8 +96,10 @@ class PlayheadOverlayItem : public QQuickPaintedItem {
     /// 秒 → 屏幕 y（timing position_at + yOf 语义；A/B 标记用；无 timing/无效 → -1e9）。
     qreal yForSec(double sec) const;
 
-    QObject* m_session = nullptr;
-    QObject* m_chartView = nullptr;  ///< ChartViewItem（yForSec 委托；不拥有）
+    QPointer<QObject> m_session;
+    QPointer<QObject> m_chartView;  ///< ChartViewItem（yForSec 委托；不拥有）
+    QMetaObject::Connection m_sessionDestroyed;
+    QMetaObject::Connection m_chartViewDestroyed;
     qreal m_measureHeight = 96.0;
     qreal m_scrollY = 0.0;
     qreal m_contentHeight = 0.0;

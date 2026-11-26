@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # 版本发布自动化：依据 Conventional Commits 维护 release PR（chore: release vX.Y.Z）。
 # PR 内自动联动四处版本号（CMakeLists project VERSION / Version.hpp kVersion /
-# README 下载安装名 / CHANGELOG 版本小节，靠文件内 x-release-please 标记定位），
+# README 发布版本标记 / CHANGELOG 版本小节，额外文件的更新位置由 x-release-please 标记指定），
 # 合并后自动打 tag vX.Y.Z 并建 GitHub Release。
 #
 # ⚠️ 下游衔接：合并 release PR 后的 tag 必须能触发 release.yml / package.yml，而

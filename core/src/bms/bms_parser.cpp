@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include "beatbench/core/LnPairing.hpp"
 #include "beatbench/core/bms/BmsCodec.hpp"
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
@@ -155,15 +156,6 @@ std::int64_t resolve_stop_count(const Chart& chart, std::string_view slot, int n
     return 0;
 }
 
-// LN 配对辅助记录（解析时收集，行循环后统一配对）
-struct NoteInfo {
-    std::uint32_t idx = 0;
-    Lane lane;
-    bool ln_channel = false;  // 51-69 RDM LN 通道（LNTYPE 1：同通道内按时间序交替头尾）
-    bool lnobj_tail = false;  // LNTYPE 2：普通通道内值 == #LNOBJ 的对象 = LN 尾
-    int number = 0;
-};
-
 }  // namespace
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,readability-function-size)——BMS 逐行解析状态机（格式核心，勿轻拆）
@@ -172,11 +164,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     Chart& chart = result.chart;
 
     // 剥 UTF-8 BOM（read_bms_file 已剥，这里防御）
-    if (text.size() >= 3 && static_cast<unsigned char>(text[0]) == 0xEF &&
-        static_cast<unsigned char>(text[1]) == 0xBB &&
-        static_cast<unsigned char>(text[2]) == 0xBF) {
-        text.remove_prefix(3);
-    }
+    if (text.starts_with(kUtf8Bom)) text.remove_prefix(kUtf8Bom.size());
 
     // ---- 拆行（保留行号，1-based） ----
     struct Line {
@@ -185,18 +173,8 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     };
     std::vector<Line> lines;
     {
-        std::size_t start = 0;
         int number = 1;
-        while (start <= text.size()) {
-            const auto end = text.find('\n', start);
-            auto line = (end == std::string_view::npos) ? text.substr(start)
-                                                        : text.substr(start, end - start);
-            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-            lines.push_back({line, number});
-            if (end == std::string_view::npos) break;
-            start = end + 1;
-            ++number;
-        }
+        while (!text.empty()) lines.push_back({take_text_line(text).text, number++});
     }
 
     // ---- 预扫描 0：#BASE（id 进制扩展）。#BASE 62 → 大小写敏感 base62（62×62=3844，
@@ -214,25 +192,6 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             result.diagnostics.push_back({Severity::Warning,
                                           "不支持的 #BASE 值（按 36 进制处理）: " + std::string(v),
                                           number});
-        }
-    }
-
-    // ---- 预扫描 #LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
-    bool lntype2 = false;
-    std::uint32_t lnobj_id = 1295;  // 默认 ZZ
-    for (const auto& [line, number] : lines) {
-        (void)number;
-        if (line.empty() || line[0] != '#') continue;
-        const auto token = field_token(line);
-        const std::size_t token_end =
-            static_cast<std::size_t>(token.data() - line.data()) + token.size();
-        const auto up = upper_ascii(token);
-        if (up == "LNTYPE") {
-            const auto v = field_value(line, token_end);
-            lntype2 = v == "2";
-        } else if (up == "LNOBJ") {
-            const auto v = field_value(line, token_end);
-            if (!v.empty()) lnobj_id = decode_id(chart, v);
         }
     }
 
@@ -350,17 +309,12 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
     }
 
     auto& raw = chart.raw_lines;
-    std::vector<NoteInfo> note_infos;
+    std::vector<int> note_lines;  // Diagnostics only; pairing derives from Chart.
     // 子行序号（2026-09 泛化：任意 Note 通道同小节多行 = 子行，按 (measure,channel) 记录「第几条
     // 行」赋 sub_line（空行也占位，字数递增）。磁盘无"子通道"——子行就是同一通道的重复行，sub_line
     // 是读侧行序。allow_sub_lines=false 的通道出现多行由 lint 软警告（chart_check）。
     std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> sub_line_counts;
     bool in_block_comment = false;
-
-    // ---- 预扫描 1：#LNTYPE / #LNOBJ（LN 配对需要；BMS 惯例位于头部，此处容忍任意位置） ----
-    {
-        // （已在上方完成，此处占位保持结构清晰）
-    }
 
     // ---- 预扫描 2：定义行（#WAVxx/#BMPxx/#BPMxx/#STOPxx）。
     // 先于数据行解析，保证数据行内的 #BPMxx/#STOPxx 引用与定义顺序无关
@@ -579,10 +533,7 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
                                 note.sub_line = sub_line;
                                 note.ln_channel = rule->ln_channel;  // 51-69（LNTYPE 1 通道）
                                 chart.notes.push_back({measure, pos, note});
-                                note_infos.push_back(
-                                    {static_cast<std::uint32_t>(chart.notes.size() - 1), rule->lane,
-                                     rule->ln_channel,
-                                     lntype2 && !rule->ln_channel && id == lnobj_id, number});
+                                note_lines.push_back(number);
                                 break;
                             }
                             case ChannelSemantics::BpmInline:
@@ -673,61 +624,20 @@ BmsReadResult read_bms(std::string_view text, const BmsReadOptions& opts) {
             {Severity::Warning, std::string("无法识别的行：") + std::string(line), number});
     }
 
-    // ---- LN 配对 ----
-    // 定义（hitkey「#xxx51-69」「#LNTYPE 1 :: RDM-notation」+ BMS 笔记「长音」）：
-    //   LNTYPE 1（RDM 记法，BMS 惯例默认）：51-59 = 1P LN 通道、61-69 = 2P LN 通道；
-    //     通道内物件按出现次序严格交替 = 头、尾、头、尾…（同 lane 配对）。
-    //   LNTYPE 2（#LNOBJ）：不用 51-69；头尾同在普通通道（11-29），
-    //     值 == #LNOBJ 的物件为尾，头 = 同 lane 最近未配对的先前物件。
-    //     （BMS 笔记例 2：#02412:3C0000000000ZZ → channel 12 内 3C 头 + ZZ 尾。）
-    {
-        std::map<Lane, std::optional<std::uint32_t>> pending_head;  // LNTYPE 1：交替状态
-        std::map<Lane, std::vector<std::uint32_t>> head_stack;      // LNTYPE 2：候选头栈
-        for (const auto& info : note_infos) {
-            // 51-69 LN 通道件：**无论 LNTYPE 1/2 都按 LNTYPE 1 交替头尾**（用户确认两机制
-            // 不冲突可同时运行——谱面可同时含 51-69 LN 件与普通通道 #LNOBJ 件）。
-            if (info.ln_channel) {
-                auto& pending = pending_head[info.lane];
-                if (pending) {
-                    const auto h = *pending;
-                    pending.reset();
-                    chart.notes[h].value.ln_pair = info.idx;
-                    chart.notes[info.idx].value.ln_pair = h;
-                } else {
-                    pending = info.idx;
-                }
-                continue;
-            }
-            // LNTYPE 2（#LNOBJ）：普通通道（11-29）内值 == #LNOBJ 的物件 = 尾，
-            // 头 = 同 lane 最近未配对的先前物件。
-            if (lntype2) {
-                if (info.lnobj_tail) {
-                    auto& stk = head_stack[info.lane];
-                    if (stk.empty()) {
-                        result.diagnostics.push_back(
-                            {Severity::Warning,
-                             "未配对 LN 尾（缺少头）: 行 " + std::to_string(info.number), 0});
-                        continue;
-                    }
-                    const auto h = stk.back();
-                    stk.pop_back();
-                    chart.notes[h].value.ln_pair = info.idx;
-                    chart.notes[info.idx].value.ln_pair = h;
-                } else {
-                    head_stack[info.lane].push_back(info.idx);
-                }
-                continue;
-            }
-            // LNTYPE 1：普通通道件不做 LN 配对（只有 51-69 参与，已在上方处理）
-        }
-        // 未闭合 LN 头（LNTYPE 1 残留 / LNTYPE 2 无关；仅 LNTYPE 1 路径有 pending）
-        for (const auto& [lane, pending] : pending_head) {
-            (void)lane;
-            if (!pending) continue;
-            result.diagnostics.push_back(
-                {Severity::Warning,
-                 "未闭合 LN 头（缺少尾）: 行 " + std::to_string(note_infos[*pending].number), 0});
-        }
+    // Rebuild from stored note identity, not source-line encounter order.
+    rebuild_note_ln_pairs(chart);
+    const auto lnobj = lnobj_sample_id(chart);
+    for (std::size_t i = 0; i < chart.notes.size(); ++i) {
+        const auto& n = chart.notes[i].value;
+        if (n.ln_pair) continue;
+        const bool orphan_tail = lnobj && !n.ln_channel && n.kind == NoteKind::Normal &&
+                                 n.lane.kind != LaneKind::Bgm && n.sample.id == *lnobj;
+        if (!n.ln_channel && !orphan_tail) continue;
+        result.diagnostics.push_back(
+            {Severity::Warning,
+             (orphan_tail ? "未配对 LN 尾（缺少头）: 行 " : "未闭合 LN 头（缺少尾）: 行 ") +
+                 std::to_string(note_lines[i]),
+             note_lines[i]});
     }
 
     return result;
@@ -747,7 +657,23 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         result.diagnostics.push_back({Severity::Error, "无法打开文件: " + path, 0});
         return result;
     }
-    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const std::string bytes((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+    const auto detected = inspect_encoding(bytes, opts.encoding);
+    const auto endings = inspect_line_endings(bytes);
+    const auto set_byte_format = [&](BmsReadResult& out) {
+        out.detected = detected.encoding;
+        out.utf8_bom = detected.utf8_bom;
+        out.encoding_ambiguous = detected.ambiguous;
+        out.line_ending = endings.kind;
+        out.preferred_line_ending = endings.preferred;
+    };
+    if (!detected.error.empty()) {
+        set_byte_format(result);
+        result.diagnostics.push_back(
+            {Severity::Error, std::string(detected.error) + ": " + path, 0});
+        return result;
+    }
 
     // 模式推断优先级（2026-09 修正：.pms 后缀语义优先于 #PLAYER）：
     //   1. 显式 opts.mode（调用方指定，最高）；
@@ -763,12 +689,9 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
     if (effective.mode.empty() || effective.mode == "auto") {
         int player = 0;
         std::string_view bv(bytes);
-        std::size_t pos = 0;
-        while (pos <= bv.size()) {
-            const auto e = bv.find('\n', pos);
-            auto line = (e == std::string_view::npos) ? bv.substr(pos) : bv.substr(pos, e - pos);
-            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-            const auto line_view = line;  // 原始字节行（未解码）
+        if (detected.utf8_bom) bv.remove_prefix(kUtf8Bom.size());
+        while (!bv.empty()) {
+            const auto line_view = take_text_line(bv).text;
             // 找 #PLAYER（大小写不敏感；行首可有空白）
             std::size_t p = 0;
             while (p < line_view.size() && (line_view[p] == ' ' || line_view[p] == '\t')) ++p;
@@ -796,8 +719,6 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
                     break;
                 }
             }
-            if (e == std::string_view::npos) break;
-            pos = e + 1;
         }
         std::string ext = fs_path.extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(),
@@ -815,42 +736,21 @@ BmsReadResult read_bms_file(const std::string& path, const BmsReadOptions& opts)
         // 否则留空 → read_bms 内按 #PLAYER 推断 sp7k
     }
 
-    // UTF-16 BOM：本阶段不支持（后续按需）
-    if (bytes.size() >= 2 && ((static_cast<unsigned char>(bytes[0]) == 0xFF &&
-                               static_cast<unsigned char>(bytes[1]) == 0xFE) ||
-                              (static_cast<unsigned char>(bytes[0]) == 0xFE &&
-                               static_cast<unsigned char>(bytes[1]) == 0xFF))) {
-        result.diagnostics.push_back(
-            {Severity::Error, "暂不支持 UTF-16 编码的 BMS 文件: " + path, 0});
-        return result;
-    }
-
-    BmsEncoding enc = effective.encoding;
-    if (enc == BmsEncoding::Auto) {
-        enc = detect_encoding(bytes) == DetectedEncoding::Utf8 ? BmsEncoding::Utf8
-                                                               : BmsEncoding::ShiftJis;
-    }
-    result.detected =
-        enc == BmsEncoding::Utf8 ? DetectedEncoding::Utf8 : DetectedEncoding::ShiftJis;
-
-    std::string_view view(bytes);
-    if (enc == BmsEncoding::Utf8) {
-        // 剥 UTF-8 BOM（若有）
-        if (view.size() >= 3 && static_cast<unsigned char>(view[0]) == 0xEF &&
-            static_cast<unsigned char>(view[1]) == 0xBB &&
-            static_cast<unsigned char>(view[2]) == 0xBF) {
-            view.remove_prefix(3);
-        }
-        result = read_bms(view, effective);
+    if (detected.encoding == DetectedEncoding::ShiftJis) {
+        result = read_bms(shiftjis_to_utf8(bytes), effective);
     } else {
-        result = read_bms(shiftjis_to_utf8(view), effective);
+        result = read_bms(bytes, effective);
     }
-
+    set_byte_format(result);
+    if (detected.ambiguous) {
+        result.diagnostics.push_back(
+            {Severity::Warning, "BMS 文件同时可按 UTF-8 和 CP932 解码，按 CP932 读取: " + path, 0});
+    }
+    const auto* name = detected.encoding == DetectedEncoding::ShiftJis ? "Shift_JIS"
+                       : detected.encoding == DetectedEncoding::Ascii  ? "ASCII"
+                                                                       : "UTF-8";
     result.diagnostics.push_back(
-        {Severity::Info,
-         "encoding: " + std::string(enc == BmsEncoding::Utf8 ? "UTF-8" : "Shift_JIS") + " (" +
-             path + ")",
-         0});
+        {Severity::Info, std::string("encoding: ") + name + " (" + path + ")", 0});
     return result;
 }
 

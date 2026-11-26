@@ -13,7 +13,11 @@
 
 #include <QtQml/qqmlregistration.h>
 
+#include <QPointF>
+#include <QPointer>
 #include <QQuickPaintedItem>
+#include <QVariantMap>
+#include <vector>
 
 namespace beatbench::app {
 
@@ -25,6 +29,7 @@ class WaveformOverviewItem : public QQuickPaintedItem {
     QML_ELEMENT
 
     Q_PROPERTY(QObject* session READ session WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(QObject* chartView READ chartView WRITE setChartView NOTIFY chartViewChanged)
     Q_PROPERTY(QObject* theme READ theme WRITE setTheme NOTIFY themeChanged)
     /// 方向：0 = 水平（底部条）；1 = 垂直（右侧条，2026-09 用户布局）。
     Q_PROPERTY(int orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
@@ -50,8 +55,12 @@ class WaveformOverviewItem : public QQuickPaintedItem {
 
     void paint(QPainter* painter) override;
 
-    QObject* session() const { return m_session; }
+    QObject* session() const { return m_session.data(); }
     void setSession(QObject* session);
+    QObject* chartView() const { return m_chartView.data(); }
+    void setChartView(QObject* view);
+    /// Same interval the painter uses; no matching live chart view => hidden.
+    Q_INVOKABLE QVariantMap viewportTimeWindow() const;
     QObject* theme() const { return m_theme; }
     void setTheme(QObject* theme);
     int orientation() const { return m_orientation; }
@@ -71,13 +80,9 @@ class WaveformOverviewItem : public QQuickPaintedItem {
     bool scrubbing() const { return m_scrubbing; }
     void setScrubbing(bool v);
 
-    /// 视口窗（秒，可能 topHigh 逆序 → 归一 [t0, t1]）。
-    struct ViewWindow {
-        double t0 = 0.0, t1 = 0.0;
-    };
-
    signals:
     void sessionChanged();
+    void chartViewChanged();
     void themeChanged();
     void orientationChanged();
     void measureHeightChanged();
@@ -94,16 +99,18 @@ class WaveformOverviewItem : public QQuickPaintedItem {
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseUngrabEvent() override;
 
    private:
     ChartSession* sessionObj() const;
     ThemeManager* themeObj() const;
     void requestSeek(qreal pos);
-    /// 视口窗（秒；含小数小节 → timeAtMeasure 换算；无 timing → {0,0}）。
-    ViewWindow viewWindow() const;
     static QString formatTime(double sec);
 
-    QObject* m_session = nullptr;
+    QPointer<QObject> m_chartView;
+    std::vector<QMetaObject::Connection> m_chartViewConnections;
+    // Sessions may be destroyed before their QML overview; never retain a dangling wrapper.
+    QPointer<QObject> m_session;
     QObject* m_theme = nullptr;
     int m_orientation = 1;  // 默认垂直（当前布局=右侧条）
     qreal m_measureHeight = 96.0;
@@ -113,6 +120,8 @@ class WaveformOverviewItem : public QQuickPaintedItem {
     qreal m_viewportHeight = 0.0;
     qreal m_leadMeasures = 0.0;
     bool m_scrubbing = false;
+    bool m_pressed = false;
+    QPointF m_pressPosition;
 };
 
 }  // namespace beatbench::app

@@ -13,7 +13,14 @@ import QtQuick.Controls
 ComboBox {
     id: root
 
+    // Passive cursor feedback: leave clicks, grabs and keyboard focus to the control.
+    HoverHandler {
+        objectName: "semanticCursor"
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+
     property color textColor: Theme.text
+    property bool wrapPopupText: false
 
     font.pixelSize: Theme.fsSmall
     font.family: Theme.fontSans
@@ -72,7 +79,15 @@ ComboBox {
             model: root.model
             currentIndex: root.highlightedIndex
             delegate: ItemDelegate {
+                enabled: root.enabled
+                HoverHandler {
+                    objectName: "semanticCursor"
+                    cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 width: root.popup ? root.popup.width - 8 : root.width
+                height: root.wrapPopupText
+                        ? Math.max(implicitHeight, contentItem.contentHeight + topPadding + bottomPadding)
+                        : implicitHeight
                 required property int index
                 required property var modelData
                 contentItem: Label {
@@ -87,6 +102,8 @@ ComboBox {
                     font: root.font
                     verticalAlignment: Text.AlignVCenter
                     leftPadding: 8
+                    rightPadding: root.wrapPopupText ? 8 : 0
+                    wrapMode: root.wrapPopupText ? Text.Wrap : Text.NoWrap
                 }
                 background: Rectangle {
                     radius: Theme.boxRadius

@@ -21,7 +21,8 @@ class SessionRegistry {
     SessionRegistry();
 
     /// 创建新会话（空文档）。id 重复 → 返回 false（调用方换 id 或先 close）。
-    bool create(std::string id);
+    /// activateNew=false creates a background document without changing the editing target.
+    bool create(std::string id, bool activateNew = true);
 
     /// 关闭并销毁会话。禁止关闭最后一个活动会话（至少保留一个）。
     /// 返回是否成功。
@@ -33,6 +34,10 @@ class SessionRegistry {
     /// 按 id 取会话（不存在 → nullptr）。
     EditorSession* by_id(std::string_view id);
     const EditorSession* by_id(std::string_view id) const;
+
+    /// 按文档路径查找会话 id（未打开该文件 → 空串）。路径按 UTF-8 原样比较。
+    /// 用途：项目页/切音目标要"按文件寻址"而不是"按活动会话寻址"（doc/project-workflow.md §9.3）。
+    std::string find_by_path(std::string_view path) const;
 
     /// 当前活动会话（恒非空；首次访问惰性创建默认会话 "default"）。
     EditorSession& active();

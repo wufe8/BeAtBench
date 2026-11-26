@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // L1 主题 token 单点（doc/skin-system.md 三、5. / doc/ui-design.md 七、）。
-// 默认皮肤骨架（M2）：token 值 = doc/beatbench-ui-preview.html :root（唯一数据源，改动先改预览）；
+// 默认皮肤骨架：token 默认值以本类成员初始化为准。
 // theme.json 加载与 schema 校验后置皮肤系统（doc/skin-system.md 五、 待办）。
 // QML 经 context property `Theme` 只读访问；界面任何颜色/字体不得硬编码（doc/project-workflow.md 四、）。
 // 双语言纪律（doc/skin-system.md 二、）：本类只提供 token 数据，无界面逻辑。
@@ -23,7 +23,7 @@ class ThemeManager : public QObject {
    public:
     explicit ThemeManager(QObject* parent = nullptr) : QObject(parent) {}
 
-    // ---- 颜色 token（访问器；默认值见 doc/beatbench-ui-preview.html :root） ----
+    // ---- 颜色 token（访问器；默认值见下方成员初始化） ----
     // NOTIFY tokensChanged：运行时换肤（loadTheme 重载）→ QML 绑定重算（doc/skin-system.md 三、3. 运行时换肤）。
 #define BB_THEME_COLOR_PROP(name)                          \
     Q_PROPERTY(QColor name READ name NOTIFY tokensChanged) \
@@ -47,7 +47,7 @@ class ThemeManager : public QObject {
     BB_THEME_COLOR_PROP(danger)
     BB_THEME_COLOR_PROP(keyNote)  // 按键 note
     BB_THEME_COLOR_PROP(lnTail)   // LN 尾（rgba(139,156,248,.26)）
-    // 时间轴 note 着色（doc/ui-design.md 七、；= beatbench-ui-styles.html 默认主题，仅本地/视觉语义）
+    // 时间轴 note 着色（doc/ui-design.md 七、；默认值见成员初始化，styles.html 仅历史参考）
     BB_THEME_COLOR_PROP(n1)       // 键音 1（键 1/5/… → n1..n4 循环）
     BB_THEME_COLOR_PROP(n2)       // 键音 2
     BB_THEME_COLOR_PROP(n3)       // 键音 3
@@ -69,7 +69,7 @@ class ThemeManager : public QObject {
     BB_THEME_COLOR_PROP(bgaLayer2)  // ch0A layer2：中绿
 #undef BB_THEME_COLOR_PROP
 
-    // ---- 非颜色 token（L2 皮肤：密度/圆角/字体可覆写；默认值见 doc/beatbench-ui-preview.html） ----
+    // ---- 非颜色 token（L2 皮肤：密度/圆角/字体可覆写；默认值见成员初始化） ----
     Q_PROPERTY(qreal radiusSm READ radiusSm NOTIFY tokensChanged)  // 控件圆角（6）= button/box 默认
     Q_PROPERTY(qreal radius READ radius NOTIFY tokensChanged)      // 面板圆角（10）
     Q_PROPERTY(
@@ -79,9 +79,8 @@ class ThemeManager : public QObject {
     Q_PROPERTY(qreal boxRadius READ boxRadius NOTIFY
                    tokensChanged)  // 复选框/输入框/下拉圆角（= radiusSm）
     Q_PROPERTY(qreal keyLaneTintAlpha READ keyLaneTintAlpha NOTIFY
-                   tokensChanged)  // 键轨底色透明度（0=无，默认 20）
-    Q_PROPERTY(
-        qreal fsBase READ fsBase NOTIFY tokensChanged)  // 正文/按钮（13，= preview.html 基准）
+                   tokensChanged)                                // 键轨底色透明度（0=无，默认 20）
+    Q_PROPERTY(qreal fsBase READ fsBase NOTIFY tokensChanged)    // 正文/按钮
     Q_PROPERTY(qreal fsSmall READ fsSmall NOTIFY tokensChanged)  // 次级/标签（12）
     Q_PROPERTY(qreal fsTiny READ fsTiny NOTIFY tokensChanged)    // 提示/占位（11）
     Q_PROPERTY(QString fontSans READ fontSans NOTIFY tokensChanged)

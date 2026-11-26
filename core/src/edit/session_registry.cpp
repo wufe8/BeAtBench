@@ -12,11 +12,11 @@ SessionRegistry::SessionRegistry() {
     m_active = "default";
 }
 
-bool SessionRegistry::create(std::string id) {
+bool SessionRegistry::create(std::string id, bool activateNew) {
     if (id.empty()) return false;
     if (m_sessions.count(id)) return false;
     m_sessions.emplace(id, std::make_unique<EditorSession>());  // 拷贝 key（不移动，见下）
-    m_active = std::move(id);  // 创建后自动激活（GUI 新标签页即切到该会话）
+    if (activateNew) m_active = std::move(id);
     return true;
 }
 
@@ -66,6 +66,14 @@ const EditorSession& SessionRegistry::active() const {
         throw std::logic_error("SessionRegistry: 活动会话不存在");
     }
     return *it->second;
+}
+
+std::string SessionRegistry::find_by_path(std::string_view path) const {
+    if (path.empty()) return {};
+    for (const auto& [id, session] : m_sessions) {
+        if (session && session->path() == path) return id;
+    }
+    return {};
 }
 
 std::vector<std::string> SessionRegistry::ids() const {

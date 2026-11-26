@@ -21,7 +21,7 @@ class EditUtils : public QObject {
     Q_INVOKABLE int gcd(int a, int b) const;
 
     /// note 引用等价：measure / sample / lane(kind,index,player) / pos(num,den)；
-    /// sub_line 任一侧缺失（或 null）视为通配（与旧 JS 版 `undefined` 语义一致）。
+    /// sub_line / ln_channel / note_kind 两侧提供时必须匹配；缺失兼容旧引用。
     Q_INVOKABLE bool refEquals(const QVariantMap& a, const QVariantMap& b) const;
 
     /// 源位置 + 位移增量 → 绝对目标位置（带小节进位；分数约分；floor 语义同 JS Math.floor）。
@@ -42,7 +42,7 @@ class EditUtils : public QObject {
     Q_INVOKABLE QString classifyExternalFile(const QString& path) const;
 
     /// PMS 写入非 .pms 后缀前需确认（两种 PMS 模式均适用；后缀大小写不敏感）。
-    /// 空路径尚无保存目标，交给另存为流程；inline 保持纯策略无额外链接依赖。
+    /// 空路径尚无保存目标，交给另存为流程；inline 供文档服务共用，不增加链接依赖。
     Q_INVOKABLE static bool pmsSuffixNeedsConfirmation(const QString& mode, const QString& path) {
         return (mode == QStringLiteral("pms9k") || mode == QStringLiteral("pms9k-bmesp")) &&
                !path.isEmpty() &&

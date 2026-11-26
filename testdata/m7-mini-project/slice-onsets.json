@@ -1,0 +1,145 @@
+{
+  "description": "Original synthetic percussion; source onsets, not guaranteed detector output.",
+  "audio": "slice-onsets.wav",
+  "sample_rate": 44100,
+  "channels": 1,
+  "duration_seconds": 12.0,
+  "bpm": 120,
+  "event_count": 18,
+  "events": [
+    {
+      "time_seconds": 0.5,
+      "sample_frame": 22050,
+      "kind": "kick",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 1.0,
+      "sample_frame": 44100,
+      "kind": "snare",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 1.5,
+      "sample_frame": 66150,
+      "kind": "kick",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 2.0,
+      "sample_frame": 88200,
+      "kind": "snare",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 2.5,
+      "sample_frame": 110250,
+      "kind": "kick",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 3.0,
+      "sample_frame": 132300,
+      "kind": "snare",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 3.5,
+      "sample_frame": 154350,
+      "kind": "kick",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 4.0,
+      "sample_frame": 176400,
+      "kind": "snare",
+      "amplitude": 0.65
+    },
+    {
+      "time_seconds": 5.0,
+      "sample_frame": 220500,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 5.25,
+      "sample_frame": 231525,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 5.5,
+      "sample_frame": 242550,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 5.75,
+      "sample_frame": 253575,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 6.0,
+      "sample_frame": 264600,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 6.25,
+      "sample_frame": 275625,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 6.5,
+      "sample_frame": 286650,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 6.75,
+      "sample_frame": 297675,
+      "kind": "hat",
+      "amplitude": 0.45
+    },
+    {
+      "time_seconds": 8.0,
+      "sample_frame": 352800,
+      "kind": "kick",
+      "amplitude": 0.22
+    },
+    {
+      "time_seconds": 9.5,
+      "sample_frame": 418950,
+      "kind": "snare",
+      "amplitude": 0.22
+    }
+  ],
+  "sections": {
+    "regular_hits": [
+      0.5,
+      4.0
+    ],
+    "fast_hits": [
+      5.0,
+      6.75
+    ],
+    "soft_hits": [
+      8.0,
+      9.5
+    ]
+  },
+  "notes": [
+    "Leading silence and trailing silence are intentional.",
+    "Soft hits test sensitivity; hats test minimum-gap settings.",
+    "Slice boundaries include leading silence; slice count need not equal event count.",
+    "This fixture diagnoses behavior; it does not prove detection quality on music."
+  ],
+  "sha256": {
+    "m7-mini-tone-low.wav": "8eb8b59bce8d86b60132d459b131ba3795d796e46d6b45821db91cd259c6c2b6",
+    "m7-mini-tone-mid.wav": "684ecda9afb35f587662d934a1ffb5bdead6783df914621e7c33b6262f2d209a",
+    "m7-mini-tone-high.wav": "86d62e5a59fa99fc3126917c947a79f2b1b23f7ab68a336bf195b5dc0d0ef3f5",
+    "slice-onsets.wav": "790deb2b85bc490e78de850a9a11841cf25f38c8ea0b2a01796bb3e716ded07a"
+  }
+}

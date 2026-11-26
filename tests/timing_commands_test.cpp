@@ -256,6 +256,154 @@ TEST(TimingCommands, ProtocolPutWithRefBindsId) {
     EXPECT_EQ(session.chart().bpm_events.size(), 2u);
 }
 
+namespace {
+
+Json put_timing_args(const char* kind) {
+    Json args = Json::object();
+    args.set("kind", kind);
+    args.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    args.set("pos", std::move(pos));
+    return args;
+}
+
+Json timing_command(const char* command, Json args) {
+    Json req = Json::object();
+    req.set("command", command);
+    req.set("args", std::move(args));
+    return global_registry().dispatch(req);
+}
+
+}  // namespace
+
+TEST(TimingCommands, ProtocolRefOmittedOrExplicitlyCleared) {
+    auto& session = global_editor_session();
+    for (const bool stop : {false, true}) {
+        SCOPED_TRACE(stop ? "stop" : "bpm");
+        auto chart = make_chart();
+        chart.bpm_events = {{1, Rational(0, 1), Bpm{96.0, 1}}, {1, Rational(1, 2), Bpm{96.0, 1}}};
+        chart.stop_events = {{1, Rational(0, 1), Stop{96, 1}}, {1, Rational(1, 2), Stop{96, 1}}};
+        const auto key = std::make_pair(stop ? SampleKind::Stop : SampleKind::Bpm, 1u);
+        chart.samples[key].value = "96.0";
+        session.load(std::move(chart));
+
+        const char* kind = stop ? "stop" : "bpm";
+        const auto event_ref = [&](std::size_t index) {
+            return stop ? session.chart().stop_events[index].value.ref_id
+                        : session.chart().bpm_events[index].value.ref_id;
+        };
+        const auto event_value = [&](std::size_t index) {
+            return stop ? static_cast<double>(session.chart().stop_events[index].value.count)
+                        : session.chart().bpm_events[index].value.value;
+        };
+
+        auto args = put_timing_args(kind);
+        args.set("value", 120);
+        auto resp = timing_command("timing.put", args);
+        ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+        EXPECT_EQ(event_ref(0), 1u);
+        EXPECT_DOUBLE_EQ(event_value(0), 120);
+        EXPECT_DOUBLE_EQ(event_value(1), 120);
+        EXPECT_EQ(session.chart().samples.at(key).value, "120");
+
+        args.set("ref", "");
+        args.set("value", 180);
+        resp = timing_command("timing.put", args);
+        ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+        EXPECT_FALSE(event_ref(0));
+        EXPECT_EQ(event_ref(1), 1u);
+        EXPECT_DOUBLE_EQ(event_value(0), 180);
+        EXPECT_DOUBLE_EQ(event_value(1), 120);
+        EXPECT_EQ(session.chart().samples.at(key).value, "120");
+        resp = timing_command("timing.list", args);
+        ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+        EXPECT_EQ(resp.at("result").at("events").as_array().front().at("ref").as_str(), "");
+
+        ASSERT_TRUE(session.undo());
+        EXPECT_EQ(event_ref(0), 1u);
+        EXPECT_DOUBLE_EQ(event_value(0), 120);
+        EXPECT_DOUBLE_EQ(event_value(1), 120);
+        EXPECT_EQ(session.chart().samples.at(key).value, "120");
+        ASSERT_TRUE(session.redo());
+        EXPECT_FALSE(event_ref(0));
+        EXPECT_DOUBLE_EQ(event_value(0), 180);
+        EXPECT_DOUBLE_EQ(event_value(1), 120);
+        EXPECT_EQ(session.chart().samples.at(key).value, "120");
+    }
+}
+
+TEST(TimingCommands, ProtocolStopRebindUsesRawDefinitionWithoutWritingIt) {
+    auto& session = global_editor_session();
+    for (const auto base : {IdBase::Base36, IdBase::Base62}) {
+        auto chart = make_chart();
+        chart.id_base = base;
+        const auto target = base == IdBase::Base62 ? 36u : 10u;  // 输入 a → 0a / 0A
+        chart.stop_events = {{1, Rational(0, 1), Stop{48, 1}},
+                             {1, Rational(1, 2), Stop{96, target}}};
+        const auto old_key = std::make_pair(SampleKind::Stop, 1u);
+        const auto target_key = std::make_pair(SampleKind::Stop, target);
+        chart.samples[old_key].value = "48";
+        if (base == IdBase::Base62) chart.samples[{SampleKind::Stop, 10}].value = "7";
+        chart.samples[target_key].value = "96.0";
+        session.load(std::move(chart));
+
+        auto args = put_timing_args("stop");
+        args.set("ref", "a");
+        auto resp = timing_command("timing.put", args);
+        ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+        const auto& evs = session.chart().stop_events;
+        ASSERT_EQ(evs.size(), 2u);
+        EXPECT_EQ(evs[0].value.ref_id, target);
+        EXPECT_EQ(evs[0].value.count, 96);
+        EXPECT_EQ(evs[1].value.ref_id, target);
+        EXPECT_EQ(evs[1].value.count, 96);
+        EXPECT_EQ(session.chart().samples.at(old_key).value, "48");
+        EXPECT_EQ(session.chart().samples.at(target_key).value, "96.0");
+
+        ASSERT_TRUE(session.undo());
+        EXPECT_EQ(evs[0].value.ref_id, 1u);
+        EXPECT_EQ(evs[0].value.count, 48);
+        ASSERT_TRUE(session.redo());
+        EXPECT_EQ(evs[0].value.ref_id, target);
+        EXPECT_EQ(evs[0].value.count, 96);
+        EXPECT_EQ(evs[1].value.count, 96);
+        EXPECT_EQ(session.chart().samples.at(target_key).value, "96.0");
+
+        // 显式绑定并改值仍沿用共享同步，Undo 恢复原定义文本和两处事件值。
+        args.set("value", 192);
+        resp = timing_command("timing.put", args);
+        ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+        EXPECT_EQ(evs[0].value.count, 192);
+        EXPECT_EQ(evs[1].value.count, 192);
+        EXPECT_EQ(session.chart().samples.at(target_key).value, "192");
+        ASSERT_TRUE(session.undo());
+        EXPECT_EQ(evs[0].value.count, 96);
+        EXPECT_EQ(evs[1].value.count, 96);
+        EXPECT_EQ(session.chart().samples.at(target_key).value, "96.0");
+    }
+}
+
+TEST(TimingCommands, ProtocolRebindWithoutValueRejectsInvalidDefinitions) {
+    auto& session = global_editor_session();
+    auto chart = make_chart();
+    chart.samples[{SampleKind::Stop, 2}].value = "nan";
+    session.load(std::move(chart));
+    const auto before = norm_evs(session.chart().stop_events);
+    const auto undo_depth = session.undo_depth();
+    for (const char* ref : {"01", "02", "0!", "XYZ", "00", ""}) {
+        SCOPED_TRACE(ref);
+        auto args = put_timing_args("stop");
+        args.set("ref", ref);
+        const auto resp = timing_command("timing.put", args);
+        ASSERT_FALSE(resp.at("ok").as_bool()) << resp.dump();
+        EXPECT_EQ(resp.at("error").at("code").as_str(), "bad_args");
+        EXPECT_EQ(norm_evs(session.chart().stop_events), before);
+        EXPECT_EQ(session.undo_depth(), undo_depth);
+    }
+}
+
 // —— 排序保持：插入后容器仍按 (measure,pos) 升序 ——
 
 TEST(TimingCommands, InsertKeepsOrder) {
