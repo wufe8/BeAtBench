@@ -41,8 +41,9 @@ install_package() {
       # （partial upgrade）反模式，可能危害系统——实机验收请直接：
       #   sudo pacman -U --noconfirm <pkg>
       if [ -e /.dockerenv ] || [ -e /run/.containerenv ]; then
-        pacman -Sy --noconfirm >/dev/null
-        pacman -U --noconfirm "$PKG"
+        source "$(dirname "${BASH_SOURCE[0]}")/arch-pacman-retry.sh"
+        arch_pacman_retry -Sy --noconfirm >/dev/null
+        arch_pacman_retry -U --noconfirm "$PKG"
       else
         echo "⚠️ 非容器环境：跳过 pacman -Sy（避免部分升级），直接 pacman -U" >&2
         pacman -U --noconfirm "$PKG"

@@ -229,8 +229,13 @@ jobs:
           # 只读仓库 db（pacman -Si），不装包，几秒钟。
           ver="$(docker run --rm -e LC_ALL=C \
             -v "$RUNNER_TEMP/mirror/mirrorlist:/etc/pacman.d/mirrorlist:ro" \
+            -v "$PWD:/src:ro" \
             "$ARCH_ROOTFS" \
-            bash -c 'pacman -Sy --noconfirm >/dev/null && pacman -Si qt6-base | grep ^Version' \
+            bash -euo pipefail -c '
+              source /src/scripts/arch-pacman-retry.sh
+              arch_pacman_retry -Sy --noconfirm >/dev/null
+              pacman -Si qt6-base | grep "^Version"
+            ' \
             | awk '{print $3}')"
           [ -n "$ver" ] || { echo "::error::无法从钉定仓库读到 qt6-base 版本"; exit 1; }
           base="${ver%-*}"   # 去掉 pkgrel，只比 Qt 版本（6.11.2-3 → 6.11.2）

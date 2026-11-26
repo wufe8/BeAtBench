@@ -48,26 +48,6 @@ RPM_ARCH="$(uname -m)"
 
 echo "==> package-linux: 格式=$FORMAT 版本=$VER"
 
-install_arch_build_deps() {
-  local attempt status log
-  for attempt in 1 2; do
-    if log="$(LC_ALL=C pacman -Sy --noconfirm --needed base-devel cmake ninja git qt6-base qt6-declarative alsa-lib 2>&1)"; then
-      printf '%s\n' "$log"
-      return 0
-    else
-      status=$?
-    fi
-    printf '%s\n' "$log" >&2
-    # 仅在包（含 .sig 文件）下载失败、尚未安装包时重试，不重试签名校验或安装错误。
-    # 同一容器沿用 pacman 缓存、镜像和签名配置。
-    if [ "$attempt" = 2 ] || ! grep -Fxq 'error: failed to commit transaction (failed to retrieve some files)' <<< "$log"; then
-      return "$status"
-    fi
-    echo "==> Arch 构建依赖下载失败，3 秒后重试一次" >&2
-    sleep 3
-  done
-}
-
 install_build_deps() {
   if [ "$SKIP_DEPS" = 1 ]; then echo "==> 跳过构建依赖安装（--skip-deps）"; return; fi
   if [ -f /etc/debian_version ]; then
@@ -85,7 +65,8 @@ install_build_deps() {
     dnf install -y -q gcc-c++ cmake ninja-build git rpm-build \
       qt6-qtbase-devel qt6-qtdeclarative-devel alsa-lib-devel
   elif [ -f /etc/arch-release ]; then
-    install_arch_build_deps
+    source "$(dirname "${BASH_SOURCE[0]}")/arch-pacman-retry.sh"
+    arch_pacman_retry -Sy --noconfirm --needed base-devel cmake ninja git qt6-base qt6-declarative alsa-lib
   else
     echo "错误: 未知发行版（需 debian/fedora/arch 系），无法安装构建依赖" >&2
     exit 1
