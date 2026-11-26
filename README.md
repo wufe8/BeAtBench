@@ -8,7 +8,7 @@
 
 ## 下载与安装
 
-当前发布版本：v0.4.2<!-- x-release-please-version -->
+当前发布版本：v0.5.0<!-- x-release-please-version -->
 
 在 [GitHub Releases](https://github.com/wufe8/BeAtBench/releases) 为同一个版本下载适合平台的发行包及其 `.sha256` 校验文件。
 
