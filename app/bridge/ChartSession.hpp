@@ -109,7 +109,7 @@ class ChartSession : public QObject {
     Q_INVOKABLE bool renderToFile(const QString& outPath, qreal sampleRate = 44100.0);
 
     /// M4.3c+（多线程，用户 2026-09 拍板）：**后台异步渲染**——QThreadPool 跑
-    /// render_chart_w（快照 chart/timing，后台解码+混音），UI 不卡；完成时发
+    /// render_chart（快照 chart/timing，后台解码+混音），UI 不卡；完成时发
     /// renderFinishedSignal（成功 + 时长）并缓存结果（renderedAudio() 供波形/播放）。
     /// 渲染期间再次调用 → 忽略（in-flight 去重，版本号丢弃过期结果）。
     /// M5 saveWav：**全量渲染时是否写 .render.wav**——载入自动/增量 = false（只内存，
