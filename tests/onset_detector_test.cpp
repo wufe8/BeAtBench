@@ -142,6 +142,9 @@ TEST(OnsetDetectorTest, NonFiniteConfigAndSamplesDoNotEscape) {
     bad.minGapSec = std::numeric_limits<double>::infinity();
     EXPECT_TRUE(beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr, bad).empty());
     bad = beatbench::audio::OnsetConfig{};
+    bad.minGapSec = std::numeric_limits<double>::max();
+    EXPECT_TRUE(beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr, bad).empty());
+    bad = beatbench::audio::OnsetConfig{};
     bad.windowSize = 1;
     EXPECT_TRUE(beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2, kSr, bad).empty());
     EXPECT_TRUE(beatbench::audio::detect_onsets(st.data(), st.size() / 2, 2,

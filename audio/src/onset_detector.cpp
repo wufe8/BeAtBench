@@ -160,9 +160,14 @@ std::vector<double> detect_onsets(const float* interleaved, std::size_t frameCou
     }
     // ceil：用户语义「间隔 < minGapSec 的合并」——帧距 d·hop/sr < minGapSec 的都要拒，
     // 即保留 d ≥ ceil(minGapSec·sr/hop)（round 会在 X=5.17 时放行 5 帧差=58.3ms<60ms）。
-    const std::size_t minGapFrames = std::max<std::size_t>(
-        1, static_cast<std::size_t>(
-               std::ceil(cfg.minGapSec * sampleRate / static_cast<double>(hop) - 1e-9)));
+    const double minGapSamples = cfg.minGapSec * sampleRate;
+    if (!std::isfinite(minGapSamples)) return {};
+    const double minGapFramesExact = std::ceil(minGapSamples / static_cast<double>(hop) - 1e-9);
+    if (!std::isfinite(minGapFramesExact) ||
+        minGapFramesExact > static_cast<double>(std::numeric_limits<std::size_t>::max()))
+        return {};
+    const std::size_t minGapFrames =
+        std::max<std::size_t>(1, static_cast<std::size_t>(minGapFramesExact));
     std::vector<std::size_t> accepted;
     // flux 降序 + frame 升序平局打破：flux 位级相等（合成音/静音段常见）时
     // 不稳定排序的顺序随标准库实现漂移，破坏「同输入必同输出」的确定性承诺。
