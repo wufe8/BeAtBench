@@ -226,7 +226,7 @@ class MoveNoteCommand : public EditCommand {
 
 /// 整体移动 LN 头尾：两端同时改到目标轨道，时间/采样不变。
 /// 与 MoveNoteCommand（单端移动、配对互指保持）互补：本命令确实移动两端并保留配对。
-/// 前置条件：源 note 必须已有 ln_pair；否则 apply 无操作。
+/// 前置条件：源 note 必须已有 ln_pair；缺失时抛 invalid_argument，整条命令回滚。
 /// 单个 undo 步；目标只能是 lane（不提供时间位移）。
 class MoveLnPairCommand : public EditCommand {
    public:
@@ -237,11 +237,24 @@ class MoveLnPairCommand : public EditCommand {
     std::string describe() const override;
 
    private:
+    friend class CompositeCommand;
+    /// 批次先统一定位源/目标，再统一擦除和插入，避免前一条的落点被后一条误认。
+    void bind_source(const Chart& chart, std::unordered_set<std::size_t>& claimed);
+    void bind_target(const Chart& chart, std::unordered_set<std::size_t>& claimed);
+    void apply_bound(Chart& chart);
+    static void reposition(Chart& chart, const std::vector<MoveLnPairCommand*>& batch, bool undo);
+
     NoteRef m_from;
     Lane m_to_lane;
     bool m_applied = false;
     std::optional<Event<Note>> m_a;
     std::optional<Event<Note>> m_b;
+    std::optional<Event<Note>> m_target_a;
+    std::optional<Event<Note>> m_target_b;
+    std::optional<std::size_t> m_index_a;
+    std::optional<std::size_t> m_index_b;
+    std::optional<std::size_t> m_target_index_a;
+    std::optional<std::size_t> m_target_index_b;
 };
 
 /// 删除 note（doc/ui-design.md 九、「选择集删除」→ note.delete）。

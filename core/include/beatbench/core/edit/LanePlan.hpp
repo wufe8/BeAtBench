@@ -87,6 +87,7 @@ std::unique_ptr<EditCommand> make_lane_move_command(const LaneMove& move);
 
 /// 目标位置 key（BGM 带 sub_line；非 BGM 忽略 sub_line）。
 std::string lane_target_key(std::uint32_t measure, const Rational& pos, const Lane& lane,
-                            std::uint32_t sub_line);
+                            std::uint32_t sub_line, bool ln_channel = false,
+                            NoteKind kind = NoteKind::Normal);
 
 }  // namespace beatbench::edit

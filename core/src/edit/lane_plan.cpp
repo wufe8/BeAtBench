@@ -22,7 +22,9 @@ std::optional<std::size_t> find_note_index(const Chart& chart, const NoteRef& re
                          [](const Event<Note>& e, std::uint32_t m) { return e.measure < m; });
     for (auto it = begin; it != chart.notes.end() && it->measure == ref.measure; ++it) {
         if (it->pos != ref.pos || it->value.lane != ref.lane || it->value.sample.id != ref.sample ||
-            it->value.sub_line != ref.sub_line)
+            it->value.sub_line != ref.sub_line ||
+            (ref.ln_channel && it->value.ln_channel != *ref.ln_channel) ||
+            (ref.note_kind && it->value.kind != *ref.note_kind))
             continue;
         return static_cast<std::size_t>(it - chart.notes.begin());
     }
@@ -30,7 +32,10 @@ std::optional<std::size_t> find_note_index(const Chart& chart, const NoteRef& re
 }
 
 NoteRef ref_of(const Event<Note>& e) {
-    return NoteRef{e.measure, e.pos, e.value.lane, e.value.sample.id, e.value.sub_line};
+    NoteRef ref{e.measure, e.pos, e.value.lane, e.value.sample.id, e.value.sub_line};
+    ref.ln_channel = e.value.ln_channel;
+    ref.note_kind = e.value.kind;
+    return ref;
 }
 
 /// 同值 note 数量（别名/重复原始行会让一个 ref 匹配多条）。
@@ -41,7 +46,9 @@ std::size_t count_note_matches(const Chart& chart, const NoteRef& ref) {
     std::size_t count = 0;
     for (auto it = begin; it != chart.notes.end() && it->measure == ref.measure; ++it) {
         if (it->pos == ref.pos && it->value.lane == ref.lane && it->value.sample.id == ref.sample &&
-            it->value.sub_line == ref.sub_line)
+            it->value.sub_line == ref.sub_line &&
+            (!ref.ln_channel || it->value.ln_channel == *ref.ln_channel) &&
+            (!ref.note_kind || it->value.kind == *ref.note_kind))
             ++count;
     }
     return count;
@@ -79,12 +86,16 @@ std::uint32_t first_free_bgm_sub(const Chart& chart, std::uint32_t measure, cons
 }
 
 bool collides(const Chart& chart, const NoteRef& at, const Lane& lane, std::uint32_t sub_line,
-              const std::set<std::size_t>& moving) {
+              bool ln_channel, NoteKind kind, const std::set<std::size_t>& moving) {
     for (std::size_t i = 0; i < chart.notes.size(); ++i) {
         if (moving.count(i) != 0) continue;
         const auto& e = chart.notes[i];
         if (e.measure != at.measure || e.pos != at.pos || e.value.lane != lane) continue;
-        if (lane.kind == LaneKind::Bgm && e.value.sub_line != sub_line) continue;
+        if (lane.kind == LaneKind::Bgm) {
+            if (e.value.sub_line != sub_line) continue;
+        } else if (e.value.ln_channel != ln_channel || e.value.kind != kind) {
+            continue;
+        }
         return true;
     }
     return false;
@@ -93,9 +104,10 @@ bool collides(const Chart& chart, const NoteRef& at, const Lane& lane, std::uint
 }  // namespace
 
 std::string lane_target_key(std::uint32_t measure, const Rational& pos, const Lane& lane,
-                            std::uint32_t sub_line) {
+                            std::uint32_t sub_line, bool ln_channel, NoteKind kind) {
     return std::to_string(measure) + ":" + std::to_string(pos.num) + "/" + std::to_string(pos.den) +
-           ":" + lane_key_string(lane) + ":" + std::to_string(sub_line);
+           ":" + lane_key_string(lane) + ":" + std::to_string(sub_line) + ":" +
+           (ln_channel ? "ln" : "normal") + ":" + std::to_string(static_cast<int>(kind));
 }
 
 bool lane_target_allowed(std::string_view mode, const Lane& lane, const LanePlanOptions& options) {
@@ -109,7 +121,8 @@ std::vector<NoteGroup> group_selection(const Chart& chart, const std::vector<Not
     for (const auto& ref : refs) {
         const auto idx = find_note_index(chart, ref);
         if (!idx) continue;
-        normalized.insert(ref);
+        // 单一身份时把 ref 规范化为完整身份，避免同一 note 以 nullopt 和显式身份出现两次。
+        normalized.insert(count_note_matches(chart, ref) > 1 ? ref : ref_of(chart.notes[*idx]));
         const auto pair = chart.notes[*idx].value.ln_pair;
         if (pair && *pair < chart.notes.size() && *pair != *idx)
             normalized.insert(ref_of(chart.notes[*pair]));
@@ -208,13 +221,26 @@ LanePlan plan_lane_moves(const Chart& chart, const std::vector<NoteGroup>& group
             move.reason = LaneMoveReason::Hidden;
             continue;
         }
-        const std::string key =
-            lane_target_key(move.group.a.measure, move.group.a.pos, move.lane, move.sub_line);
-        if (claimed.count(key) != 0) {
+        // 占用键按输出通道身份区分：同位置普通 note、地雷、LN 通道可以共存。
+        const bool key_ln =
+            move.group.a.ln_channel.value_or(false) && move.lane.kind != LaneKind::Bgm;
+        const NoteKind key_kind = move.lane.kind == LaneKind::Bgm
+                                      ? NoteKind::Normal
+                                      : move.group.a.note_kind.value_or(NoteKind::Normal);
+        std::set<std::string> keys;
+        keys.insert(lane_target_key(move.group.a.measure, move.group.a.pos, move.lane,
+                                    move.sub_line, key_ln, key_kind));
+        if (move.group.b)
+            keys.insert(lane_target_key(move.group.b->measure, move.group.b->pos, move.lane,
+                                        move.sub_line, key_ln, key_kind));
+        bool conflict = false;
+        for (const auto& key : keys)
+            if (claimed.count(key) != 0) conflict = true;
+        if (conflict) {
             move.reason = LaneMoveReason::DuplicateTarget;
             continue;
         }
-        claimed.insert(key);
+        claimed.insert(keys.begin(), keys.end());
         move.move = true;
     }
 
@@ -229,9 +255,12 @@ LanePlan plan_lane_moves(const Chart& chart, const std::vector<NoteGroup>& group
         for (std::size_t i = 0; i < n; ++i) {
             auto& move = plan.moves[i];
             if (!move.move) continue;
-            if (collides(chart, move.group.a, move.lane, move.sub_line, active) ||
-                (move.group.b &&
-                 collides(chart, *move.group.b, move.lane, move.sub_line, active))) {
+            const bool target_ln = move.group.a.ln_channel.value_or(false);
+            const NoteKind target_kind = move.group.a.note_kind.value_or(NoteKind::Normal);
+            if (collides(chart, move.group.a, move.lane, move.sub_line, target_ln, target_kind,
+                         active) ||
+                (move.group.b && collides(chart, *move.group.b, move.lane, move.sub_line, target_ln,
+                                          target_kind, active))) {
                 move.move = false;
                 move.reason = LaneMoveReason::Occupied;
                 changed = true;
@@ -246,12 +275,17 @@ LanePlan plan_lane_moves(const Chart& chart, const std::vector<NoteGroup>& group
 
 std::unique_ptr<EditCommand> make_lane_move_command(const LaneMove& move) {
     if (!move.move) return nullptr;
-    if (move.group.ln) return std::make_unique<MoveLnPairCommand>(move.group.a, move.lane);
+    NoteRef from = move.group.a;
+    if (move.group.ln) {
+        if (!from.note_kind) from.note_kind = NoteKind::Normal;
+        return std::make_unique<MoveLnPairCommand>(from, move.lane);
+    }
+    if (!from.ln_channel) from.ln_channel = false;
+    if (!from.note_kind) from.note_kind = NoteKind::Normal;
     const std::optional<std::uint32_t> to_sub = move.lane.kind == LaneKind::Bgm
                                                     ? std::optional<std::uint32_t>(move.sub_line)
                                                     : std::nullopt;
-    return std::make_unique<MoveNoteCommand>(move.group.a, move.group.a.measure, move.group.a.pos,
-                                             move.lane, to_sub);
+    return std::make_unique<MoveNoteCommand>(from, from.measure, from.pos, move.lane, to_sub);
 }
 
 }  // namespace beatbench::edit

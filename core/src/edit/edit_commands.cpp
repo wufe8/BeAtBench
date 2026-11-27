@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -372,7 +373,7 @@ std::string PutNoteCommand::describe() const {
 MoveNoteCommand::MoveNoteCommand(NoteRef from, std::uint32_t to_measure, Rational to_pos,
                                  std::optional<Lane> to_lane,
                                  std::optional<std::uint32_t> to_sub_line)
-    : m_from(std::move(from)),
+    : m_from(from),
       m_to_measure(to_measure),
       m_to_pos(to_pos),
       m_to_lane(to_lane),
@@ -522,48 +523,132 @@ std::string MoveNoteCommand::describe() const {
 MoveLnPairCommand::MoveLnPairCommand(NoteRef from, Lane to_lane)
     : m_from(from), m_to_lane(to_lane) {}
 
-void MoveLnPairCommand::apply(Chart& chart) {
+void MoveLnPairCommand::bind_source(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+    m_index_a.reset();
+    m_index_b.reset();
+    m_target_a.reset();
+    m_target_b.reset();
+    m_target_index_a.reset();
+    m_target_index_b.reset();
     const auto idx = find_note(chart.notes, m_from.measure, m_from.pos, m_from.lane, m_from.sample,
-                               m_from.sub_line);
-    if (!idx) return;
+                               m_from.sub_line, m_from.ln_channel, m_from.note_kind);
+    if (!idx) throw std::invalid_argument("MoveLnPair source note missing");
     const auto pair = chart.notes[*idx].value.ln_pair;
-    if (!pair || *pair >= chart.notes.size()) return;  // 无配对：调用方应先拒绝
+    if (!pair || *pair >= chart.notes.size())
+        throw std::invalid_argument("MoveLnPair source note has no pair");
+    if (!claimed.insert(*idx).second || !claimed.insert(*pair).second)
+        throw std::invalid_argument("MoveLnPair source already claimed by another move");
+    m_index_a = idx;
+    m_index_b = pair;
     m_a = chart.notes[*idx];
     m_b = chart.notes[*pair];
-    const std::size_t lo = std::min(*idx, static_cast<std::size_t>(*pair));
-    const std::size_t hi = std::max(*idx, static_cast<std::size_t>(*pair));
-    chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(hi));
-    chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(lo));
 
-    auto move_event = [&](Event<Note> ev) {
-        ev.value.lane = m_to_lane;
-        ev.value.sub_line = 0;
-        const auto at = lower_bound_pos(chart.notes, ev.measure, ev.pos);
-        chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(at), ev);
+    const auto mode = chart.mode_id.value_or("sp7k");
+    const auto target_of = [&](const Event<Note>& source) {
+        Event<Note> target = source;
+        target.value.lane = m_to_lane;
+        target.value.sub_line = 0;
+        if (bms::bms_channel_for_mode(mode, target.value.lane, target.value.ln_channel,
+                                      target.value.kind)
+                .empty())
+            throw std::invalid_argument(
+                "MoveLnPair target cannot preserve this note's source channel");
+        return target;
     };
-    move_event(*m_a);
-    move_event(*m_b);
-    m_applied = true;
+    m_target_a = target_of(*m_a);
+    m_target_b = target_of(*m_b);
+}
+
+void MoveLnPairCommand::apply_bound(Chart& chart) {
+    (void)chart;
+    if (!m_index_a || !m_index_b || !m_target_a || !m_target_b || !m_a || !m_b)
+        throw std::logic_error("MoveLnPair apply_bound missing snapshot");
+}
+
+void MoveLnPairCommand::bind_target(const Chart& chart, std::unordered_set<std::size_t>& claimed) {
+    m_target_index_a.reset();
+    m_target_index_b.reset();
+    if (!m_applied || !m_a || !m_b) return;
+    const auto find_target = [&](const Event<Note>& source) {
+        return find_note(chart.notes, source.measure, source.pos, m_to_lane, source.value.sample.id,
+                         0, source.value.ln_channel, source.value.kind);
+    };
+    const auto idx_a = find_target(*m_a);
+    const auto idx_b = find_target(*m_b);
+    if (!idx_a || !idx_b) throw std::invalid_argument("MoveLnPair undo target missing");
+    if (!claimed.insert(*idx_a).second || !claimed.insert(*idx_b).second)
+        throw std::invalid_argument("MoveLnPair undo target already claimed by another move");
+    m_target_index_a = idx_a;
+    m_target_index_b = idx_b;
+}
+
+void MoveLnPairCommand::reposition(Chart& chart, const std::vector<MoveLnPairCommand*>& batch,
+                                   bool undo) {
+    struct Entry {
+        std::size_t lo = 0;
+        std::size_t hi = 0;
+        Event<Note> a;
+        Event<Note> b;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(batch.size());
+    for (auto* cmd : batch) {
+        if (!cmd || !cmd->m_a || !cmd->m_b)
+            throw std::logic_error("MoveLnPair batch missing snapshot");
+        if (undo) {
+            if (!cmd->m_target_index_a || !cmd->m_target_index_b)
+                throw std::logic_error("MoveLnPair undo batch missing indices");
+            const auto lo = std::min(*cmd->m_target_index_a, *cmd->m_target_index_b);
+            const auto hi = std::max(*cmd->m_target_index_a, *cmd->m_target_index_b);
+            entries.push_back({lo, hi, *cmd->m_a, *cmd->m_b});
+        } else {
+            if (!cmd->m_index_a || !cmd->m_index_b || !cmd->m_target_a || !cmd->m_target_b)
+                throw std::logic_error("MoveLnPair apply batch missing snapshot");
+            const auto lo = std::min(*cmd->m_index_a, *cmd->m_index_b);
+            const auto hi = std::max(*cmd->m_index_a, *cmd->m_index_b);
+            entries.push_back({lo, hi, *cmd->m_target_a, *cmd->m_target_b});
+        }
+    }
+
+    std::vector<std::size_t> erase;
+    erase.reserve(entries.size() * 2);
+    for (const auto& entry : entries) {
+        erase.push_back(entry.lo);
+        erase.push_back(entry.hi);
+    }
+    std::sort(erase.begin(), erase.end(), std::greater<>());
+    erase.erase(std::unique(erase.begin(), erase.end()), erase.end());
+    for (const auto idx : erase)
+        chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(idx));
+
+    for (const auto& entry : entries) {
+        for (const auto* ev : {&entry.a, &entry.b}) {
+            const auto at = lower_bound_pos(chart.notes, ev->measure, ev->pos);
+            chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(at), *ev);
+        }
+    }
+
+    for (auto* cmd : batch) {
+        cmd->m_applied = !undo;
+        cmd->m_index_a.reset();
+        cmd->m_index_b.reset();
+        cmd->m_target_index_a.reset();
+        cmd->m_target_index_b.reset();
+    }
+}
+
+void MoveLnPairCommand::apply(Chart& chart) {
+    std::unordered_set<std::size_t> claimed;
+    bind_source(chart, claimed);
+    apply_bound(chart);
+    reposition(chart, {this}, false);
 }
 
 void MoveLnPairCommand::invert(Chart& chart) {
-    if (!m_applied || !m_a || !m_b) return;
-    const auto idx_a =
-        find_note(chart.notes, m_a->measure, m_a->pos, m_to_lane, m_a->value.sample.id, 0);
-    const auto idx_b =
-        find_note(chart.notes, m_b->measure, m_b->pos, m_to_lane, m_b->value.sample.id, 0);
-    if (!idx_a || !idx_b) return;
-    const std::size_t lo = std::min(*idx_a, *idx_b);
-    const std::size_t hi = std::max(*idx_a, *idx_b);
-    chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(hi));
-    chart.notes.erase(chart.notes.begin() + static_cast<std::ptrdiff_t>(lo));
-    auto restore = [&](const Event<Note>& ev) {
-        const auto at = lower_bound_pos(chart.notes, ev.measure, ev.pos);
-        chart.notes.insert(chart.notes.begin() + static_cast<std::ptrdiff_t>(at), ev);
-    };
-    restore(*m_a);
-    restore(*m_b);
-    m_applied = false;
+    if (!m_applied) return;
+    std::unordered_set<std::size_t> claimed;
+    bind_target(chart, claimed);
+    reposition(chart, {this}, true);
 }
 
 std::string MoveLnPairCommand::describe() const {
@@ -815,6 +900,7 @@ bool CompositeCommand::changes_time() const {
     return false;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——批次分派：移动/变换按连续段归组，单命令回退
 void CompositeCommand::apply(Chart& chart) {
     for (std::size_t begin = 0; begin < m_commands.size();) {
         if (dynamic_cast<MoveNoteCommand*>(m_commands[begin].get())) {
@@ -832,6 +918,23 @@ void CompositeCommand::apply(Chart& chart) {
                 batch.push_back(c);
             }
             MoveNoteCommand::reposition(chart, batch, false);
+            continue;
+        }
+        if (dynamic_cast<MoveLnPairCommand*>(m_commands[begin].get())) {
+            std::unordered_set<std::size_t> claimed;
+            std::size_t end = begin;
+            for (; end < m_commands.size(); ++end) {
+                auto* c = dynamic_cast<MoveLnPairCommand*>(m_commands[end].get());
+                if (!c) break;
+                c->bind_source(chart, claimed);
+            }
+            std::vector<MoveLnPairCommand*> batch;
+            for (; begin < end; ++begin) {
+                auto* c = static_cast<MoveLnPairCommand*>(m_commands[begin].get());
+                c->apply_bound(chart);
+                batch.push_back(c);
+            }
+            MoveLnPairCommand::reposition(chart, batch, false);
             continue;
         }
         auto* transform = dynamic_cast<TransformNoteCommand*>(m_commands[begin].get());
@@ -854,6 +957,7 @@ void CompositeCommand::apply(Chart& chart) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)——逆操作分派：反向扫描移动/变换批次，单命令回退
 void CompositeCommand::invert(Chart& chart) {
     for (std::size_t end = m_commands.size(); end > 0;) {
         if (dynamic_cast<MoveNoteCommand*>(m_commands[end - 1].get())) {
@@ -872,6 +976,23 @@ void CompositeCommand::invert(Chart& chart) {
                 batch.push_back(c);
             }
             MoveNoteCommand::reposition(chart, batch, true);
+            continue;
+        }
+        if (dynamic_cast<MoveLnPairCommand*>(m_commands[end - 1].get())) {
+            std::unordered_set<std::size_t> claimed;
+            std::size_t begin = end;
+            while (begin > 0) {
+                auto* c = dynamic_cast<MoveLnPairCommand*>(m_commands[begin - 1].get());
+                if (!c) break;
+                c->bind_target(chart, claimed);
+                --begin;
+            }
+            std::vector<MoveLnPairCommand*> batch;
+            while (end > begin) {
+                auto* c = static_cast<MoveLnPairCommand*>(m_commands[--end].get());
+                batch.push_back(c);
+            }
+            MoveLnPairCommand::reposition(chart, batch, true);
             continue;
         }
         if (!dynamic_cast<TransformNoteCommand*>(m_commands[end - 1].get())) {
@@ -1396,7 +1517,7 @@ std::string ConvertMetaToNoteCommand::describe() const {
 // ---------- QuantizeNoteCommand ----------
 
 QuantizeNoteCommand::QuantizeNoteCommand(NoteRef ref, std::int64_t snap_num, std::int64_t snap_den)
-    : m_ref(std::move(ref)),
+    : m_ref(ref),
       m_snap_num(std::max<std::int64_t>(1, snap_num)),
       m_snap_den(std::max<std::int64_t>(1, snap_den)) {
     const auto last = (m_snap_den - 1) / m_snap_num;

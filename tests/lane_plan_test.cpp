@@ -245,6 +245,152 @@ TEST(LanePlan, AmbiguousSourceIsRejected) {
     EXPECT_EQ(plan.moves[0].reason, LaneMoveReason::AmbiguousSource);
 }
 
+TEST(LanePlan, DuplicateLnTargetEndpointsAreRejected) {
+    Chart c;
+    c.mode_id = "sp7k";
+    c.notes.push_back(note(1, Rational(0, 1), {0, LaneKind::Key, 1}, 7, true));
+    c.notes.push_back(note(1, Rational(0, 1), {0, LaneKind::Key, 3}, 8, true));
+    c.notes.push_back(note(2, Rational(0, 1), {0, LaneKind::Key, 1}, 7, true));
+    c.notes.push_back(note(2, Rational(0, 1), {0, LaneKind::Key, 3}, 8, true));
+    c.notes[0].value.ln_pair = 2;
+    c.notes[2].value.ln_pair = 0;
+    c.notes[1].value.ln_pair = 3;
+    c.notes[3].value.ln_pair = 1;
+
+    auto groups = beatbench::edit::group_selection(c, {ref(c.notes[0]), ref(c.notes[1])});
+    ASSERT_EQ(groups.size(), 2u);
+    auto plan = beatbench::edit::plan_lane_moves(
+        c, groups,
+        {LaneTarget{{0, LaneKind::Key, 2}, true}, LaneTarget{{0, LaneKind::Key, 2}, true}},
+        options());
+    ASSERT_EQ(plan.moves.size(), 2u);
+    EXPECT_TRUE(plan.moves[0].move) << reason_name(plan.moves[0].reason);
+    EXPECT_FALSE(plan.moves[1].move);
+    EXPECT_EQ(plan.moves[1].reason, LaneMoveReason::DuplicateTarget);
+}
+
+TEST(LanePlan, IdentitySeparatesNormalAndMineAtSamePosition) {
+    Chart c = make_chart();
+    Event<Note> mine{1, Rational(0, 1), {}};
+    mine.value.lane = {0, LaneKind::Key, 1};
+    mine.value.sample.id = 1;
+    mine.value.kind = NoteKind::Landmine;
+    c.notes.push_back(mine);
+
+    NoteRef normal{1, Rational(0, 1), {0, LaneKind::Key, 1}, 1, 0};
+    normal.ln_channel = false;
+    normal.note_kind = NoteKind::Normal;
+    NoteRef landmine = normal;
+    landmine.note_kind = NoteKind::Landmine;
+
+    auto groups = beatbench::edit::group_selection(c, {normal, landmine});
+    ASSERT_EQ(groups.size(), 2u);
+    EXPECT_FALSE(groups[0].ambiguous);
+    EXPECT_FALSE(groups[1].ambiguous);
+    auto plan = beatbench::edit::plan_lane_moves(
+        c, groups,
+        {LaneTarget{{0, LaneKind::Key, 2}, false}, LaneTarget{{0, LaneKind::Key, 3}, false}},
+        options());
+    ASSERT_EQ(plan.moves.size(), 2u);
+    EXPECT_TRUE(plan.moves[0].move) << reason_name(plan.moves[0].reason);
+    EXPECT_TRUE(plan.moves[1].move) << reason_name(plan.moves[1].reason);
+}
+
+TEST(LanePlan, IdentitySeparatesNormalAndLnChannelAtSamePosition) {
+    Chart c = make_chart();
+    c.notes.push_back(note(1, Rational(0, 1), {0, LaneKind::Key, 1}, 1, true));
+
+    NoteRef normal{1, Rational(0, 1), {0, LaneKind::Key, 1}, 1, 0};
+    normal.ln_channel = false;
+    normal.note_kind = NoteKind::Normal;
+    NoteRef ln = normal;
+    ln.ln_channel = true;
+
+    auto groups = beatbench::edit::group_selection(c, {normal, ln});
+    ASSERT_EQ(groups.size(), 2u);
+    EXPECT_FALSE(groups[0].ambiguous);
+    EXPECT_FALSE(groups[1].ambiguous);
+    auto plan = beatbench::edit::plan_lane_moves(
+        c, groups,
+        {LaneTarget{{0, LaneKind::Key, 2}, false}, LaneTarget{{0, LaneKind::Key, 3}, false}},
+        options());
+    ASSERT_EQ(plan.moves.size(), 2u);
+    EXPECT_TRUE(plan.moves[0].move) << reason_name(plan.moves[0].reason);
+    EXPECT_TRUE(plan.moves[1].move) << reason_name(plan.moves[1].reason);
+}
+
+TEST(LanePlan, LnObjPairMovesTogether) {
+    // LNOBJ 头尾在普通通道，ln_channel=false；命令仍按 ln_pair 成组移动。
+    Chart c;
+    c.mode_id = "sp7k";
+    c.meta["LNOBJ"] = "09";
+    c.notes.push_back(note(1, Rational(0, 1), {0, LaneKind::Key, 1}, 8));
+    c.notes.push_back(note(2, Rational(0, 1), {0, LaneKind::Key, 1}, 9));
+    c.notes[0].value.ln_pair = 1;
+    c.notes[1].value.ln_pair = 0;
+
+    auto groups = beatbench::edit::group_selection(c, {ref(c.notes[0])});
+    ASSERT_EQ(groups.size(), 1u);
+    ASSERT_TRUE(groups[0].ln);
+    auto plan = beatbench::edit::plan_lane_moves(
+        c, groups, {LaneTarget{{0, LaneKind::Key, 2}, true}}, options());
+    ASSERT_EQ(plan.moves.size(), 1u);
+    ASSERT_TRUE(plan.moves[0].move) << reason_name(plan.moves[0].reason);
+
+    EditorSession s;
+    s.load(c);
+    ASSERT_TRUE(s.exec(beatbench::edit::make_lane_move_command(plan.moves[0])));
+    ASSERT_EQ(s.chart().notes.size(), 2u);
+    EXPECT_EQ(s.chart().notes[0].value.lane.index, 2u);
+    EXPECT_EQ(s.chart().notes[1].value.lane.index, 2u);
+    EXPECT_FALSE(s.chart().notes[0].value.ln_channel);
+    EXPECT_TRUE(s.chart().notes[0].value.ln_pair.has_value());
+}
+
+TEST(LanePlan, PairBatchDoesNotCaptureAnotherPairsTail) {
+    // P1 头 m1:0 key1，尾 m2:0 key1；P2 头 m2:0 key2，尾 m3:0 key2。
+    // P1 移到 key2 后，尾会落在 P2 头的五元组上；逐条执行会把 P1 再移一次。
+    Chart c;
+    c.mode_id = "sp7k";
+    c.notes.push_back(note(1, Rational(0, 1), {0, LaneKind::Key, 1}, 7, true));
+    c.notes.push_back(note(2, Rational(0, 1), {0, LaneKind::Key, 1}, 7, true));
+    c.notes.push_back(note(2, Rational(0, 1), {0, LaneKind::Key, 2}, 7, true));
+    c.notes.push_back(note(3, Rational(0, 1), {0, LaneKind::Key, 2}, 7, true));
+    c.notes[0].value.ln_pair = 1;
+    c.notes[1].value.ln_pair = 0;
+    c.notes[2].value.ln_pair = 3;
+    c.notes[3].value.ln_pair = 2;
+
+    auto groups = beatbench::edit::group_selection(c, {ref(c.notes[0]), ref(c.notes[2])});
+    ASSERT_EQ(groups.size(), 2u);
+    auto plan = beatbench::edit::plan_lane_moves(
+        c, groups,
+        {LaneTarget{{0, LaneKind::Key, 2}, true}, LaneTarget{{0, LaneKind::Key, 3}, true}},
+        options());
+    ASSERT_EQ(plan.moves.size(), 2u);
+    ASSERT_TRUE(plan.moves[0].move) << reason_name(plan.moves[0].reason);
+    ASSERT_TRUE(plan.moves[1].move) << reason_name(plan.moves[1].reason);
+
+    EditorSession s;
+    s.load(c);
+    auto comp = std::make_unique<beatbench::edit::CompositeCommand>();
+    comp->add(beatbench::edit::make_lane_move_command(plan.moves[0]));
+    comp->add(beatbench::edit::make_lane_move_command(plan.moves[1]));
+    ASSERT_TRUE(s.exec(std::move(comp)));
+
+    const auto has = [&](std::uint32_t measure, const Lane& lane) {
+        return std::ranges::any_of(s.chart().notes, [&](const auto& e) {
+            return e.measure == measure && e.pos == Rational(0, 1) && e.value.lane == lane &&
+                   e.value.sample.id == 7;
+        });
+    };
+    EXPECT_TRUE(has(1, {0, LaneKind::Key, 2})) << "P1 头应到 key2";
+    EXPECT_TRUE(has(2, {0, LaneKind::Key, 3})) << "P2 头应到 key3";
+    EXPECT_FALSE(has(1, {0, LaneKind::Key, 3})) << "P1 被第二条命令误移";
+    EXPECT_EQ(s.chart().notes.size(), 4u);
+    for (const auto& e : s.chart().notes) EXPECT_TRUE(e.value.ln_pair.has_value());
+}
+
 TEST(LanePlan, MoveMergeRespectsBgmSubLine) {
     const Lane bgm{0, LaneKind::Bgm, 0};
     beatbench::edit::MoveNoteCommand first(NoteRef{1, Rational(0, 1), bgm, 7, 0}, 2, Rational(0, 1),
