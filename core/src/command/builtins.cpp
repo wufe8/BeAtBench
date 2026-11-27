@@ -129,7 +129,7 @@ std::string mode_arg(const Json& args) {
 /// mode 从会话 chart 取；非 BMS 格式各自映射（格式无关原则：值域检查在格式层）。
 bool lane_can_ln(const Chart& chart, const Lane& lane) {
     const auto mode = chart.mode_id.value_or("sp7k");
-    return !bms::bms_channel_for_mode(mode, lane, true, NoteKind::Normal).empty();
+    return bms::bms_can_represent(mode, lane, true, NoteKind::Normal);
 }
 
 std::string severity_str(beatbench::codec::Severity s) {
@@ -562,19 +562,8 @@ Lane lane_from_json(const Json& j) {
     return l;
 }
 
-// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）
-const char* lane_kind_str(LaneKind k) {
-    switch (k) {
-        case LaneKind::Scratch:
-            return "scratch";
-        case LaneKind::Pedal:
-            return "pedal";
-        case LaneKind::Bgm:
-            return "bgm";
-        default:
-            return "key";
-    }
-}
+// Lane → JSON kind 字符串（lane_from_json 的逆；note.transform 返回 selection 用）。
+// 单一实现见 core/include/beatbench/core/Lane.hpp。
 
 // 从 args 读 (measure, pos)（"measure": int, "pos": {"num":n,"den":d} 或 [n,d]）
 Rational pos_from_json(const Json& args) {
@@ -683,6 +672,26 @@ std::vector<edit::NoteRef> selection_from_json(const Json& args) {
         refs.push_back(ref);
     }
     return refs;
+}
+
+// 单个 note 引用（note.move/delete/setSample 的单对象路径）：与 selection 元素同构。
+edit::NoteRef note_ref_from_json(const Json& item) {
+    edit::NoteRef ref;
+    ref.measure = u32_arg(item, "measure");
+    ref.pos = pos_from_json(item);
+    if (const Json* lj = item.find("lane")) {
+        ref.lane = lane_from_json(*lj);
+    } else {
+        ref.lane = lane_from_json(item);
+    }
+    ref.sample = u32_arg(item, "sample");
+    if (const Json* bl = item.find("sub_line")) {
+        if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
+        ref.sub_line = static_cast<std::uint32_t>(bl->as_i64());
+    }
+    ref.ln_channel = source_ln_channel(item);
+    ref.note_kind = source_note_kind(item);
+    return ref;
 }
 
 // 时间轴事件种类参数（timing.* 的 kind：bpm / stop / measure）
@@ -1088,7 +1097,7 @@ class BgaMoveCommandCmd : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         comp->add(std::make_unique<edit::BgaDeleteCommand>(fm, fp, fl));
         comp->add(std::make_unique<edit::BgaPutCommand>(tm, tp, tl, sample));
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = session.exec(std::make_unique<edit::TimeShiftCommand>(std::move(comp)));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -1137,7 +1146,7 @@ class TimingMoveCommandCmd : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         comp->add(std::make_unique<edit::DeleteTimingCommand>(kind, fm, fp));
         comp->add(std::make_unique<edit::PutTimingCommand>(kind, tm, tp, value));
-        const bool ok = session.exec(std::move(comp));
+        const bool ok = session.exec(std::make_unique<edit::TimeShiftCommand>(std::move(comp)));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("undo_depth", static_cast<std::int64_t>(session.undo_depth()));
@@ -1481,10 +1490,15 @@ class ClipboardPasteCommand : public Command {
             const bool ln_kind = i < parsed_ln.size() && parsed_ln[i];
             const NoteKind kind = (i < parsed_kind.size()) ? parsed_kind[i] : NoteKind::Normal;
             comp->add(std::make_unique<edit::PutNoteCommand>(
-                static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset), r.pos,
-                r.lane, r.sample, ln_kind, kind, r.sub_line));
+                edit::NoteRef{
+                    static_cast<std::uint32_t>(static_cast<std::int64_t>(r.measure) + offset),
+                    r.pos, r.lane, r.sample, r.sub_line},
+                ln_kind, kind));
         }
-        const bool ok = session.exec(std::move(comp));
+        const bool has_changes = comp->size() > 0;
+        std::unique_ptr<edit::EditCommand> exec_cmd = std::move(comp);
+        if (has_changes) exec_cmd = std::make_unique<edit::TimeShiftCommand>(std::move(exec_cmd));
+        const bool ok = session.exec(std::move(exec_cmd));
         Json placed = Json::array();
         for (const auto& r : parsed) {
             Json item = Json::object();
@@ -1837,15 +1851,15 @@ class NotePutCommand : public Command {
         // 2026-09 用户：LN 只能放在「游玩轨/LN 轨」（具体通道由文件格式决定）；
         // BMS 中 BGM（ch01）无 LN 表示——映射层 bms_channel_for(..., ln) 为空。
         // 前端已阻止，此处协议层兜底（避免生成写出时被丢弃/降级的脏数据）。
-        if (bms::bms_channel_for_mode(session.chart().mode_id.value_or("sp7k"), lane, ln_kind, kind)
-                .empty()) {
+        if (!bms::bms_can_represent(session.chart().mode_id.value_or("sp7k"), lane, ln_kind,
+                                    kind)) {
             throw CommandError("bad_args", "该轨道/音符类型无法表示为当前模式的 BMS 通道");
         }
         if (ln_kind && !lane_can_ln(session.chart(), lane)) {
             throw CommandError("bad_args", "该轨道不能放置 LN（格式映射中无 LN 通道表示）");
         }
         const bool ok = session.exec(std::make_unique<edit::PutNoteCommand>(
-            measure, pos, lane, sample, ln_kind, kind, sub_line));
+            edit::NoteRef{measure, pos, lane, sample, sub_line}, ln_kind, kind));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("kind", ln_kind ? "ln" : (kind == NoteKind::Landmine ? "mine" : "normal"));
@@ -1901,10 +1915,10 @@ class NoteMoveCommand : public Command {
             if (!bl->is_int()) throw CommandError("bad_args", "to.sub_line 应为整数");
             to_sub_line = static_cast<std::uint32_t>(bl->as_i64());
         }
-        return with_source_identity(
-            std::make_unique<edit::MoveNoteCommand>(from_m, from_pos, lane, sample, to_m, to_pos,
-                                                    false, to_lane, from_sub_line, to_sub_line),
-            *from);
+        edit::NoteRef ref{from_m, from_pos, lane, sample, from_sub_line};
+        ref.ln_channel = source_ln_channel(*from);
+        ref.note_kind = source_note_kind(*from);
+        return std::make_unique<edit::MoveNoteCommand>(ref, to_m, to_pos, to_lane, to_sub_line);
     }
 
     Json run(const Json& args) const override {
@@ -1976,9 +1990,10 @@ class NoteDeleteCommand : public Command {
                 if (!bl->is_int()) throw CommandError("bad_args", "sub_line 应为整数");
                 sub_line = static_cast<std::uint32_t>(bl->as_i64());
             }
-            return with_source_identity(
-                std::make_unique<edit::DeleteNoteCommand>(measure, pos, lane, sample, sub_line),
-                item);
+            edit::NoteRef ref{measure, pos, lane, sample, sub_line};
+            ref.ln_channel = source_ln_channel(item);
+            ref.note_kind = source_note_kind(item);
+            return std::make_unique<edit::DeleteNoteCommand>(ref);
         };
         // selection 数组 = 批量删除（一个 CompositeCommand / 一次备份）；单对象路径保持兼容。
         if (args.find("selection")) {
@@ -2037,9 +2052,7 @@ class NoteQuantizeCommand : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         Json selection = Json::array();
         for (auto ref : refs) {
-            auto command = std::make_unique<edit::QuantizeNoteCommand>(
-                ref.measure, ref.pos, ref.lane, ref.sample, snap_num, snap_den, ref.sub_line);
-            command->set_source_identity(ref.ln_channel, ref.note_kind);
+            auto command = std::make_unique<edit::QuantizeNoteCommand>(ref, snap_num, snap_den);
             ref.pos = command->target_pos();
             selection.push_back(note_ref_json(ref));
             comp->add(std::move(command));
@@ -2076,9 +2089,7 @@ class NoteTransformCommand : public Command {
         auto comp = std::make_unique<edit::CompositeCommand>();
         std::unordered_set<std::size_t> claimed;
         for (const auto& r : refs) {
-            auto command = std::make_unique<edit::TransformNoteCommand>(
-                r.measure, r.pos, r.lane, r.sample, mirror, rotate, r.sub_line);
-            command->set_source_identity(r.ln_channel, r.note_kind);
+            auto command = std::make_unique<edit::TransformNoteCommand>(r, mirror, rotate);
             // Preflight against the unchanged chart. Invalid targets must return
             // a protocol error, not success with a replacement selection.
             try {
@@ -2093,7 +2104,8 @@ class NoteTransformCommand : public Command {
         // 键号上限按谱面模式，与命令 apply 同一 transform_lane）。
         const std::string mode =
             session.has_chart() ? session.chart().mode_id.value_or("sp7k") : "sp7k";
-        const int max_key = chart_mode_key_count(mode);
+        // exec 已通过 bind_source 校验模式已知；value_or 仅为回显防御。
+        const int max_key = chart_mode_key_count(mode).value_or(7);
         Json sel = Json::array();
         for (const auto& r : refs) {
             const Lane nl = edit::transform_lane(r.lane, mirror, rotate, max_key);
@@ -2146,9 +2158,7 @@ class NoteToggleLnCommand : public Command {
         }
         auto comp = std::make_unique<edit::CompositeCommand>();
         for (const auto& r : refs) {
-            comp->add(with_source_identity(std::make_unique<edit::ToggleLnCommand>(
-                                               r.measure, r.pos, r.lane, r.sample, r.sub_line),
-                                           r));
+            comp->add(std::make_unique<edit::ToggleLnCommand>(r));
         }
         const bool ok = session.exec(std::move(comp));
         Json out = Json::object();
@@ -2235,10 +2245,7 @@ class NoteConvertCommand : public Command {
                 tm = r.measure;
                 tp = r.pos;
             }
-            comp->add(with_source_identity(
-                std::make_unique<edit::ConvertNoteCommand>(r.measure, r.pos, r.lane, r.sample,
-                                                           r.sub_line, target, tm, tp),
-                r));
+            comp->add(std::make_unique<edit::ConvertNoteCommand>(r, target, tm, tp));
         }
         if (comp->size() == 0)
             throw CommandError("bad_args", "转换后无有效 note（全部移到负小节）");
@@ -2357,17 +2364,11 @@ class NoteMoveRegionCommand : public Command {
             }
             if (to_m < 0) continue;  // 移到负小节 → 跳过
             if (convert_target) {
-                comp->add(with_source_identity(
-                    std::make_unique<edit::ConvertNoteCommand>(
-                        r.measure, r.pos, r.lane, r.sample, r.sub_line, *convert_target,
-                        static_cast<std::uint32_t>(to_m), to_pos),
-                    r));
+                comp->add(std::make_unique<edit::ConvertNoteCommand>(
+                    r, *convert_target, static_cast<std::uint32_t>(to_m), to_pos));
             } else {
-                comp->add(with_source_identity(
-                    std::make_unique<edit::MoveNoteCommand>(
-                        r.measure, r.pos, r.lane, r.sample, static_cast<std::uint32_t>(to_m),
-                        to_pos, false, to_lane, r.sub_line, to_sub_line),
-                    r));
+                comp->add(std::make_unique<edit::MoveNoteCommand>(
+                    r, static_cast<std::uint32_t>(to_m), to_pos, to_lane, to_sub_line));
             }
         }
         if (comp->size() == 0) {
@@ -2758,10 +2759,10 @@ class NoteSetSampleCommand : public Command {
             return chart.id_base == IdBase::Base62 ? bms::c62_to_u32(s, 2) : bms::c36_to_u32(s, 2);
         };
         const std::uint32_t to_id = decode(to);
-        const bool ok =
-            session.exec(with_source_identity(std::make_unique<edit::SetNoteSampleCommand>(
-                                                  measure, pos, lane, sample, sub_line, to_id),
-                                              args));
+        edit::NoteRef ref{measure, pos, lane, sample, sub_line};
+        ref.ln_channel = source_ln_channel(args);
+        ref.note_kind = source_note_kind(args);
+        const bool ok = session.exec(std::make_unique<edit::SetNoteSampleCommand>(ref, to_id));
         Json out = Json::object();
         out.set("ok", ok);
         out.set("to", static_cast<std::int64_t>(to_id));

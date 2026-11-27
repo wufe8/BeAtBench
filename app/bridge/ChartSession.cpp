@@ -153,7 +153,8 @@ QString ChartSession::chartMode() const {
 int ChartSession::playKeyCount() const {
     const auto* currentChart = chart();
     if (!currentChart) return 7;
-    return beatbench::chart_mode_key_count(currentChart->mode_id.value_or("sp7k"));
+    // 未知模式显式降级 7 键；非法放置由 chart_mode_has_lane 白名单另行拦截。
+    return beatbench::chart_mode_key_count(currentChart->mode_id.value_or("sp7k")).value_or(7);
 }
 
 void ChartSession::refresh() {

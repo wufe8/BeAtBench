@@ -142,3 +142,41 @@ TEST(BmsModeInference, ReadBmsInfersFromPlayer) {
     opts.mode = "pms9k";
     EXPECT_EQ(read_bms("#PLAYER 1\n", opts).chart.mode_id.value_or(""), "pms9k");
 }
+
+// —— lane 合法性 / 摆音目标 / 可表示性谓词（编辑策略单一入口） ——
+
+TEST(ChartModePredicates, HasLaneFollowsModeTable) {
+    // sp7k：键1-7 + 皿 + 踏板；键8/9 不在表内
+    EXPECT_TRUE(chart_mode_has_lane("sp7k", {0, LaneKind::Key, 7}));
+    EXPECT_FALSE(chart_mode_has_lane("sp7k", {0, LaneKind::Key, 8}));
+    EXPECT_TRUE(chart_mode_has_lane("sp7k", {0, LaneKind::Scratch, 0}));
+    // dp：2P 键在表内；pms9k：无皿
+    EXPECT_TRUE(chart_mode_has_lane("dp", {1, LaneKind::Key, 7}));
+    EXPECT_FALSE(chart_mode_has_lane("pms9k", {0, LaneKind::Scratch, 0}));
+    EXPECT_TRUE(chart_mode_has_lane("pms9k", {0, LaneKind::Key, 9}));
+    // BME-SP 变体按家族归一；未知 id 无表可查
+    EXPECT_TRUE(chart_mode_has_lane("pms9k-bmesp", {0, LaneKind::Key, 9}));
+    EXPECT_FALSE(chart_mode_has_lane("nope", {0, LaneKind::Key, 1}));
+}
+
+TEST(ChartModePredicates, PlayableLaneExcludesPedalAndMeta) {
+    // 摆音目标 = Key/Scratch；踏板/元轨不算
+    EXPECT_TRUE(is_playable_lane("sp7k", {0, LaneKind::Key, 3}));
+    EXPECT_TRUE(is_playable_lane("dp", {1, LaneKind::Scratch, 0}));
+    EXPECT_FALSE(is_playable_lane("sp7k", {0, LaneKind::Pedal, 0}));
+    EXPECT_FALSE(is_playable_lane("sp7k", {0, LaneKind::Bgm, 0}));
+    // 表外的键号不算
+    EXPECT_FALSE(is_playable_lane("sp7k", {0, LaneKind::Key, 8}));
+    EXPECT_FALSE(is_playable_lane("pms9k", {1, LaneKind::Key, 1}));
+}
+
+TEST(ChartModePredicates, CanRepresentWrapsReverseMap) {
+    using namespace beatbench::bms;
+    // sp7k 键 9 键号不可表示；PMS 无皿
+    EXPECT_FALSE(bms_can_represent("sp7k", {0, LaneKind::Key, 9}, false, NoteKind::Normal));
+    EXPECT_FALSE(bms_can_represent("pms9k", {0, LaneKind::Scratch, 0}, false, NoteKind::Normal));
+    EXPECT_TRUE(bms_can_represent("sp7k", {0, LaneKind::Scratch, 0}, false, NoteKind::Normal));
+    EXPECT_TRUE(bms_can_represent("pms9k", {0, LaneKind::Key, 8}, false, NoteKind::Normal));
+    // 未知 mode 按 7key 兑底
+    EXPECT_TRUE(bms_can_represent("nope", {0, LaneKind::Key, 1}, false, NoteKind::Normal));
+}

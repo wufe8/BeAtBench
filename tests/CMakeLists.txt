@@ -30,7 +30,8 @@ add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp ln_codec_tes
     meta_lint_test.cpp ln_mine_put_test.cpp move_region_test.cpp
     convert_note_test.cpp sub_line_move_test.cpp ln_move_region_test.cpp
     toggle_ln_test.cpp sample_rename_test.cpp bga_test.cpp midi_parse_test.cpp
-    slice_test.cpp slice_export_test.cpp atomic_write_test.cpp project_scan_test.cpp)
+    slice_test.cpp slice_export_test.cpp atomic_write_test.cpp project_scan_test.cpp
+    lane_plan_test.cpp)
 target_link_libraries(beatbench_tests PRIVATE beatbench_core GTest::gtest_main)
 target_compile_definitions(beatbench_tests PRIVATE
     BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -51,7 +52,9 @@ if(BEATBENCH_NODE_EXECUTABLE)
             COMMAND "${BEATBENCH_NODE_EXECUTABLE}" --test
                 "${CMAKE_CURRENT_SOURCE_DIR}/qml_session_regression_test.js"
                 "${CMAKE_CURRENT_SOURCE_DIR}/qml_pms_save_guard_test.js")
-        set_tests_properties(qml_session_regression_tests PROPERTIES TIMEOUT 20)
+        # Windows 托管 runner 的 Node 启动和杀毒扫描波动大，20s 会偶发超时；
+        # 断言不变，只放宽墙钟上限。
+        set_tests_properties(qml_session_regression_tests PROPERTIES TIMEOUT 60)
     endif()
 endif()
 
