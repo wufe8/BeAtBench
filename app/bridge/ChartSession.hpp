@@ -17,9 +17,11 @@
 #include <mutex>
 #include <string>
 
+#include "beatbench/audio/SampleCache.hpp"
 #include "beatbench/audio/WaveformPyramid.hpp"
 #include "beatbench/core/Chart.hpp"
 #include "beatbench/core/timing/TimingEngine.hpp"
+#include "bridge/AudioTaskRunner.hpp"
 
 namespace beatbench::app {
 
@@ -109,7 +111,7 @@ class ChartSession : public QObject {
     Q_INVOKABLE bool renderToFile(const QString& outPath, qreal sampleRate = 44100.0);
 
     /// M4.3c+（多线程，用户 2026-09 拍板）：**后台异步渲染**——QThreadPool 跑
-    /// render_chart_w（快照 chart/timing，后台解码+混音），UI 不卡；完成时发
+    /// render_chart（快照 chart/timing，后台解码+混音），UI 不卡；完成时发
     /// renderFinishedSignal（成功 + 时长）并缓存结果（renderedAudio() 供波形/播放）。
     /// 渲染期间再次调用 → 忽略（in-flight 去重，版本号丢弃过期结果）。
     /// M5 saveWav：**全量渲染时是否写 .render.wav**——载入自动/增量 = false（只内存，
@@ -138,6 +140,18 @@ class ChartSession : public QObject {
         double sampleRate);  ///< 锁定 m_noteSnapMutex → 非 const（mutex 解 const）。
     /// 渲染完成后更新 note 快照（全量渲染后调用；供下次 diff）。
     void updateNoteSnapshot(const beatbench::Chart& chart, const beatbench::TimingEngine& timing);
+
+    /// #50 整轨试听：筛选选中 note 后，从 startSec 渲染到曲末（异步）。
+    /// 结果通过 auditionReady / auditionFinished 通知；不覆盖普通播放渲染。
+    Q_INVOKABLE bool renderAudition(const QVariantList& selection, double startSec,
+                                    qreal sampleRate = 44100.0);
+    /// 选择变化/取消：作废在途渲染与已装载的试听 PCM。
+    Q_INVOKABLE void cancelAudition();
+    /// 采样文件重绑/改名：清空试听解码缓存并作废在途结果。
+    Q_INVOKABLE void invalidateAuditionCache();
+    std::shared_ptr<const std::vector<float>> auditionPcm() const { return m_auditionPcm; }
+    double auditionSampleRate() const { return m_auditionRate; }
+    double auditionDurationSec() const { return m_auditionDuration; }
 
     /// M4.3c 波形显示：最近渲染的 min/max 金字塔查询。
     /// 帧区间 [frameLo, frameHi)（已夹逼）→ {min, max}（mono 混音）。
@@ -180,6 +194,9 @@ class ChartSession : public QObject {
     void textFormatChanged();
     /// M4.3c+ 后台渲染完成（ok + 输出路径 + 时长秒；任何状态栏/波形刷新响应这里）。
     void renderFinished(bool ok, const QString& outPath, double durationSec);
+    /// #50 整轨试听渲染完成（PCM 已可被 AudioEngine 装载）。
+    void auditionReady();
+    void auditionFinished(bool ok, const QString& error);
 
    private:
     void attachSession(bool rebuildTiming);
@@ -212,6 +229,13 @@ class ChartSession : public QObject {
 
     /// M4.3c 波形：最近渲染的 min/max 金字塔（渲染线程构建，UI 线程只读查询）。
     std::shared_ptr<const beatbench::audio::WaveformPyramid> m_waveform;
+    // —— #50 整轨试听 ——
+    beatbench::audio::SampleCache m_auditionCache;
+    // 单线程：试听取消靠渲染循环轮询代际；并发渲染只会白烧 CPU 与内存
+    AudioTaskRunner m_auditionTasks{nullptr, 1};
+    std::shared_ptr<const std::vector<float>> m_auditionPcm;
+    double m_auditionRate = 0.0;
+    double m_auditionDuration = 0.0;
 
     // —— M4.3c 增量重渲染 ——
     /// 渲染时 notes 快照（key → {sampleId, triggerUs}；diff 脏区间用）。

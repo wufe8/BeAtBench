@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "beatbench/audio/SampleCache.hpp"
@@ -38,43 +39,36 @@ struct RenderedAudio {
 /// 渲染结果（含错误信息；中文面向 UI/CLI）。
 struct RenderResult {
     bool ok = false;
-    RenderedAudio audio;  ///< ok 时有效
-    std::string message;  ///< 失败原因
+    bool cancelled = false;  ///< 协作式取消中止（非错误；调用方静默丢弃）
+    RenderedAudio audio;     ///< ok 时有效
+    std::string message;     ///< 失败原因
 };
 
 /// 16-bit PCM WAV 写出（渲染结果 → 文件；供 CLI save 与编辑器导出）。
+/// path 原生形态直用（Windows = UTF-16；窄 fopen 走 ACP 的旧坑随 _w 双轨一并退役）。
 /// 返回值：true = 成功；false = 打开/写失败（message 填充）。
-bool write_wav_file(const std::string& path, const RenderedAudio& audio,
+bool write_wav_file(const std::filesystem::path& path, const RenderedAudio& audio,
                     std::string* message = nullptr);
-/// 宽字符版（Windows 日文/非 ASCII 路径必须走它——窄 fopen 走 ACP 打不开，
-/// 与解码侧 decode_audio_file_w 同根因，2026-09 GUI「路径不可写」实测）。
-bool write_wav_file_w(const std::wstring& path, const RenderedAudio& audio,
-                      std::string* message = nullptr);
 
 /// 谱面 → 混音 PCM（全量）。chart 生命周期须覆盖本次调用（渲染器不复制）。
-/// sourceDir = 谱面目录（采样相对路径解析基准；空 = 缺省空串 → 视为绝对路径）。
-/// ⚠️ **非 ASCII 谱面目录**（日文等）必须用 **wstring 重载**（Windows 原生 UTF-16；
-/// 窄 string 走 ACP 导致 mojibake——2026-09 日文谱面渲染卡死/空音频根因）。
+/// sourceDir = 谱面目录（采样相对路径解析基准；空 = 缺省空 path → 视为绝对路径）。
+/// path 原生形态直用（Windows = UTF-16；窄 string 走 ACP 的 mojibake 坑随
+/// _w 双轨一并退役——2026-09 日文谱面渲染卡死/空音频根因）。
 /// timing 由调用方重建（或内部按 chart 重建——需要 timing 的 events 语义，
 /// 见 ChartSession.refresh 的指纹判定；此处简化为内部新建）。
 /// cache 为解码缓存（无 = 每次新解码；传暂存用）。返回全曲 [0, 结束)。
 RenderResult render_chart(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
                           SampleCache& cache, double sampleRate = 44100.0,
-                          const std::string& sourceDir = "");
-/// 宽字符版（Windows 日文路径用；非 Windows 传 UTF-8 宽字符）。
-RenderResult render_chart_w(const beatbench::Chart& chart, const beatbench::TimingEngine& timing,
-                            SampleCache& cache, double sampleRate, const std::wstring& sourceDir);
+                          const std::filesystem::path& sourceDir = {});
 
 /// 区间渲染（[t0, t1) 秒；t1 ≤ 0 = 到曲末）。render_chart 的底层实现，
 /// 也供 M5 任意起播/循环区间复用。t0/0 ≤ t1；越界自动夹逼。
+/// cancelled：协作式取消轮询（每个待混 note 检查一次；返回 true 则中止并返回
+/// ok=false 的部分结果；空 = 不取消）。后台线程长渲染的取消点。
 RenderResult render_chart_range(const beatbench::Chart& chart,
                                 const beatbench::TimingEngine& timing, SampleCache& cache,
                                 double sampleRate, double t0, double t1,
-                                const std::string& sourceDir = "");
-/// 宽字符版。
-RenderResult render_chart_range_w(const beatbench::Chart& chart,
-                                  const beatbench::TimingEngine& timing, SampleCache& cache,
-                                  double sampleRate, double t0, double t1,
-                                  const std::wstring& sourceDir);
+                                const std::filesystem::path& sourceDir = {},
+                                const std::function<bool()>& cancelled = {});
 
 }  // namespace beatbench::audio

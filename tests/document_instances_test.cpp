@@ -21,10 +21,12 @@
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/DocumentService.hpp"
+#include "bridge/PathUtils.hpp"
 
 namespace {
 using beatbench::app::ChartSession;
 using beatbench::app::DocumentService;
+using beatbench::app::path_from_qstring;
 using beatbench::edit::session_registry;
 
 class DocumentInstancesTest : public ::testing::Test {
@@ -72,7 +74,8 @@ class DocumentInstancesTest : public ::testing::Test {
         beatbench::audio::RenderedAudio audio;
         audio.sampleRate = 8000.0;
         audio.interleavedStereo.assign(320 * 2, amplitude);
-        return beatbench::audio::write_wav_file_w(temporary_->filePath(name).toStdWString(), audio);
+        return beatbench::audio::write_wav_file(path_from_qstring(temporary_->filePath(name)),
+                                                audio);
     }
 
     static QString idOf(const QVariantMap& result) { return result.value("id").toString(); }
@@ -123,7 +126,7 @@ class DocumentInstancesTest : public ::testing::Test {
     };
     using Decoded = std::unique_ptr<beatbench::audio::DecodedSample, ReleaseDecoded>;
     static Decoded decode(const QString& path) {
-        auto result = beatbench::audio::decode_audio_file_w(path.toStdWString());
+        auto result = beatbench::audio::decode_audio_file(path_from_qstring(path));
         EXPECT_TRUE(result.ok) << result.message;
         return Decoded(result.sample);
     }
