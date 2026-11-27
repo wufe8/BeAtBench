@@ -19,6 +19,7 @@
 #include "beatbench/core/bms/BmsUtil.hpp"
 #include "beatbench/core/bms/ChannelMap.hpp"
 #include "beatbench/core/bms/ChartCheck.hpp"
+#include "beatbench/core/codec/BmsChannelMaps.hpp"
 #include "beatbench/core/codec/CodecRegistry.hpp"
 
 using namespace beatbench;
@@ -319,10 +320,10 @@ TEST(BmsRoundTrip, Ch01SubLinesPreserved) {
 
 TEST(ChannelMap, AllowSubLinesFlag) {
     // ch01（BGM 背景音）显式声明允许子行；其余通道（如游玩键 11）默认不应有子行。
-    const auto bgm = bms_channel_rule("01");
+    const auto bgm = bms_channel_rule_for("sp7k", "01");
     ASSERT_TRUE(bgm.has_value());
     EXPECT_TRUE(bgm->allow_sub_lines);
-    const auto key = bms_channel_rule("11");
+    const auto key = bms_channel_rule_for("sp7k", "11");
     ASSERT_TRUE(key.has_value());
     EXPECT_FALSE(key->allow_sub_lines);
 }
@@ -554,6 +555,12 @@ class BmsByteFormat : public testing::Test {
         return bms.read(path, {.encoding = std::move(encoding), .mode = {}});
     }
 
+    std::string write(const Chart& chart, const codec::WriteOptions& opts) const {
+        auto result = bms.write(chart, opts);
+        EXPECT_TRUE(result.ok) << result.error;
+        return std::move(result.text);
+    }
+
     static bool rejected(const codec::ReadResult& result) {
         return std::ranges::any_of(result.diagnostics, [](const codec::Diagnostic& d) {
             return d.severity == codec::Severity::Error;
@@ -612,7 +619,7 @@ TEST_F(BmsByteFormat, CommentsAndOtherFieldsAreNotDeclarations) {
     EXPECT_EQ(result.chart.meta.at("TITLE"), "\xE3\x81\x92");
     codec::WriteOptions opts;
     opts.encoding = "sjis";
-    const std::string saved = bms.write(result.chart, opts);
+    const std::string saved = write(result.chart, opts);
     EXPECT_NE(saved.find("/* comment\n#ENCODING UTF-8\n*/"), std::string::npos);
     EXPECT_NE(saved.find("#ENCODING_OTHER UTF-8"), std::string::npos);
 }
@@ -631,7 +638,7 @@ TEST_F(BmsByteFormat, DualDecodableNonAsciiDefaultsToCp932UnlessEvidenceResolves
     opts.encoding = "sjis";
     bool ambiguous = false;
     opts.encoding_ambiguous = &ambiguous;
-    EXPECT_TRUE(read(bms.write(result.chart, opts)).encoding_ambiguous);
+    EXPECT_TRUE(read(write(result.chart, opts)).encoding_ambiguous);
     EXPECT_TRUE(ambiguous);
 
     result = read(std::string(5000, ' ') + "\n#eNcOdInG: UTF-8\n" + text);
@@ -691,13 +698,13 @@ TEST_F(BmsByteFormat, WritesChosenEolAndBomAndReportsAsciiBytes) {
     for (const auto* ending : {"crlf", "lf", "cr"}) {
         opts.line_ending = ending;
         opts.utf8_bom = false;
-        auto result = read(bms.write(c, opts));
+        auto result = read(write(c, opts));
         ASSERT_FALSE(rejected(result));
         EXPECT_EQ(result.line_ending, ending);
         EXPECT_EQ(result.detected_encoding, "ascii");
         EXPECT_TRUE(ascii);
         opts.utf8_bom = true;
-        result = read(bms.write(c, opts));
+        result = read(write(c, opts));
         EXPECT_EQ(result.line_ending, ending);
         EXPECT_EQ(result.detected_encoding, "utf8");
         EXPECT_TRUE(result.utf8_bom);
@@ -711,7 +718,7 @@ TEST_F(BmsByteFormat, OutputCannotInheritEncodingFromGenericMeta) {
     c.meta["ENCODING"] = "CP932";
     codec::WriteOptions opts;
     opts.utf8_bom = true;
-    const auto bytes = bms.write(c, opts);
+    const auto bytes = write(c, opts);
     EXPECT_EQ(bytes.find("#ENCODING"), std::string::npos);
     const auto result = read(bytes);
     EXPECT_FALSE(rejected(result));
@@ -721,13 +728,13 @@ TEST_F(BmsByteFormat, OutputCannotInheritEncodingFromGenericMeta) {
 TEST_F(BmsByteFormat, Utf8OutputDeclaresAmbiguousBytesWithoutChangingBomPolicy) {
     Chart c;
     c.meta["TITLE"] = "\xC2\xA9";
-    const auto bytes = bms.write(c, {});
+    const auto bytes = write(c, {});
     EXPECT_TRUE(bytes.starts_with("#ENCODING UTF-8\n"));
     const auto result = read(bytes);
     EXPECT_EQ(result.detected_encoding, "utf8");
     EXPECT_FALSE(result.utf8_bom);
     EXPECT_EQ(result.chart.meta.at("TITLE"), "\xC2\xA9");
-    EXPECT_EQ(bms.write(result.chart, {}), bytes);
+    EXPECT_EQ(write(result.chart, {}), bytes);
 }
 
 TEST_F(BmsByteFormat, StrictCp932RejectsCharacterLossAndSupportsExtensionBytes) {
@@ -735,11 +742,11 @@ TEST_F(BmsByteFormat, StrictCp932RejectsCharacterLossAndSupportsExtensionBytes) 
     c.meta["TITLE"] = "\xF0\x9F\x98\x80";  // 😀
     codec::WriteOptions opts;
     opts.encoding = "sjis";
-    EXPECT_NE(bms.write(c, opts).find("#TITLE ?"), std::string::npos);
+    EXPECT_NE(write(c, opts).find("#TITLE ?"), std::string::npos);
     opts.strict_encoding = true;
     EXPECT_THROW((void)bms.write(c, opts), std::invalid_argument);
     c.meta["TITLE"] = "\xEF\xA3\xB0";  // U+F8F0 ↔ CP932 A0
-    auto result = read(bms.write(c, opts));
+    auto result = read(write(c, opts));
     EXPECT_EQ(result.detected_encoding, "sjis");
     EXPECT_EQ(result.chart.meta.at("TITLE"), c.meta.at("TITLE"));
     opts.utf8_bom = true;
@@ -751,75 +758,81 @@ TEST_F(BmsByteFormat, StrictCp932RejectsCharacterLossAndSupportsExtensionBytes) 
 // ---------- 通道映射表（字符串 → 语义；换格式 = 换表） ----------
 
 TEST(BmsChannelMap, Semantics) {
-    EXPECT_EQ(bms_channel_rule("02")->semantics, ChannelSemantics::MeasureLen);
-    EXPECT_EQ(bms_channel_rule("03")->semantics, ChannelSemantics::BpmInline);
-    EXPECT_EQ(bms_channel_rule("04")->semantics, ChannelSemantics::Bga);
-    EXPECT_EQ(bms_channel_rule("04")->bga_layer, 0);  // base
-    EXPECT_EQ(bms_channel_rule("06")->semantics, ChannelSemantics::BgaPoor);
-    EXPECT_EQ(bms_channel_rule("06")->bga_layer, 1);                      // poor
-    EXPECT_EQ(bms_channel_rule("07")->semantics, ChannelSemantics::Bga);  // BGA Layer（BMS 笔记）
-    EXPECT_EQ(bms_channel_rule("07")->bga_layer, 2);
-    EXPECT_EQ(bms_channel_rule("0A")->semantics, ChannelSemantics::Bga);  // BGA Layer2
-    EXPECT_EQ(bms_channel_rule("0A")->bga_layer, 3);
-    EXPECT_EQ(bms_channel_rule("0B")->semantics, ChannelSemantics::KeepRaw);  // 不透明度控制通道
-    EXPECT_EQ(bms_channel_rule("08")->semantics, ChannelSemantics::BpmRef);
-    EXPECT_EQ(bms_channel_rule("09")->semantics, ChannelSemantics::StopRef);
-    EXPECT_EQ(bms_channel_rule("01")->semantics,
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "02")->semantics, ChannelSemantics::MeasureLen);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "03")->semantics, ChannelSemantics::BpmInline);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "04")->semantics, ChannelSemantics::Bga);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "04")->bga_layer, 0);  // base
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "06")->semantics, ChannelSemantics::BgaPoor);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "06")->bga_layer, 1);  // poor
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "07")->semantics,
+              ChannelSemantics::Bga);  // BGA Layer（BMS 笔记）
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "07")->bga_layer, 2);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "0A")->semantics, ChannelSemantics::Bga);  // BGA Layer2
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "0A")->bga_layer, 3);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "0B")->semantics,
+              ChannelSemantics::KeepRaw);  // 不透明度控制通道
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "08")->semantics, ChannelSemantics::BpmRef);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "09")->semantics, ChannelSemantics::StopRef);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "01")->semantics,
               ChannelSemantics::Note);  // BGM 背景轨（2026-08 结构化）
-    EXPECT_EQ(bms_channel_rule("01")->lane, (Lane{0, LaneKind::Bgm, 0}));
-    EXPECT_FALSE(bms_channel_rule("99").has_value());
-    EXPECT_FALSE(bms_channel_rule("").has_value());
-    EXPECT_FALSE(bms_channel_rule("0").has_value());
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "01")->lane, (Lane{0, LaneKind::Bgm, 0}));
+    EXPECT_FALSE(bms_channel_rule_for("sp7k", "99").has_value());
+    EXPECT_FALSE(bms_channel_rule_for("sp7k", "").has_value());
+    EXPECT_FALSE(bms_channel_rule_for("sp7k", "0").has_value());
 }
 
 TEST(BmsChannelMap, NoteLanes) {
     // BMS 笔记「5/7key SP/DP 模式游玩轨」：11-15=键1-5 16=皿 17=踏板/保留 18=键6 19=键7
-    const auto r11 = bms_channel_rule("11");
+    const auto r11 = bms_channel_rule_for("sp7k", "11");
     ASSERT_TRUE(r11.has_value());
     EXPECT_EQ(r11->semantics, ChannelSemantics::Note);
     EXPECT_EQ(r11->lane, (Lane{0, LaneKind::Key, 1}));
     EXPECT_EQ(r11->ln_channel, false);
-    EXPECT_EQ(bms_channel_rule("16")->lane, (Lane{0, LaneKind::Scratch, 0}));
-    EXPECT_EQ(bms_channel_rule("17")->lane, (Lane{0, LaneKind::Pedal, 0}));
-    EXPECT_EQ(bms_channel_rule("18")->lane, (Lane{0, LaneKind::Key, 6}));
-    EXPECT_EQ(bms_channel_rule("19")->lane, (Lane{0, LaneKind::Key, 7}));
-    EXPECT_EQ(bms_channel_rule("21")->lane, (Lane{1, LaneKind::Key, 1}));
-    EXPECT_EQ(bms_channel_rule("26")->lane, (Lane{1, LaneKind::Scratch, 0}));
-    EXPECT_EQ(bms_channel_rule("27")->lane, (Lane{1, LaneKind::Pedal, 0}));
-    EXPECT_EQ(bms_channel_rule("28")->lane, (Lane{1, LaneKind::Key, 6}));
-    EXPECT_EQ(bms_channel_rule("29")->lane, (Lane{1, LaneKind::Key, 7}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "16")->lane, (Lane{0, LaneKind::Scratch, 0}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "17")->lane, (Lane{0, LaneKind::Pedal, 0}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "18")->lane, (Lane{0, LaneKind::Key, 6}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "19")->lane, (Lane{0, LaneKind::Key, 7}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "21")->lane, (Lane{1, LaneKind::Key, 1}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "26")->lane, (Lane{1, LaneKind::Scratch, 0}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "27")->lane, (Lane{1, LaneKind::Pedal, 0}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "28")->lane, (Lane{1, LaneKind::Key, 6}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "29")->lane, (Lane{1, LaneKind::Key, 7}));
     // LN 通道：51-59=1P、61-69=2P（RDM 记法，LNTYPE 1 同通道交替头尾；大小写不敏感）
-    EXPECT_EQ(bms_channel_rule("51")->lane, (Lane{0, LaneKind::Key, 1}));
-    EXPECT_EQ(bms_channel_rule("51")->ln_channel, true);
-    EXPECT_EQ(bms_channel_rule("56")->lane, (Lane{0, LaneKind::Scratch, 0}));
-    EXPECT_EQ(bms_channel_rule("56")->ln_channel, true);
-    EXPECT_EQ(bms_channel_rule("59")->lane, (Lane{0, LaneKind::Key, 7}));
-    EXPECT_EQ(bms_channel_rule("61")->lane, (Lane{1, LaneKind::Key, 1}));
-    EXPECT_EQ(bms_channel_rule("61")->ln_channel, true);
-    EXPECT_EQ(bms_channel_rule("68")->lane, (Lane{1, LaneKind::Key, 6}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "51")->lane, (Lane{0, LaneKind::Key, 1}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "51")->ln_channel, true);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "56")->lane, (Lane{0, LaneKind::Scratch, 0}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "56")->ln_channel, true);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "59")->lane, (Lane{0, LaneKind::Key, 7}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "61")->lane, (Lane{1, LaneKind::Key, 1}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "61")->ln_channel, true);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "68")->lane, (Lane{1, LaneKind::Key, 6}));
     // 地雷（槽位与游玩轨同构）
-    EXPECT_EQ(bms_channel_rule("d3")->note_kind, NoteKind::Landmine);
-    EXPECT_EQ(bms_channel_rule("D3")->lane, (Lane{0, LaneKind::Key, 3}));
-    EXPECT_EQ(bms_channel_rule("D7")->lane, (Lane{0, LaneKind::Pedal, 0}));
-    EXPECT_EQ(bms_channel_rule("E3")->lane, (Lane{1, LaneKind::Key, 3}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "d3")->note_kind, NoteKind::Landmine);
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "D3")->lane, (Lane{0, LaneKind::Key, 3}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "D7")->lane, (Lane{0, LaneKind::Pedal, 0}));
+    EXPECT_EQ(bms_channel_rule_for("sp7k", "E3")->lane, (Lane{1, LaneKind::Key, 3}));
 }
 
 TEST(BmsChannelMap, Reverse) {
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 1}, false, NoteKind::Normal), "11");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Scratch, 0}, false, NoteKind::Normal), "16");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Pedal, 0}, false, NoteKind::Normal), "17");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 6}, false, NoteKind::Normal), "18");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 7}, false, NoteKind::Normal), "19");
-    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 5}, false, NoteKind::Normal), "25");
-    EXPECT_EQ(bms_channel_for({1, LaneKind::Pedal, 0}, false, NoteKind::Normal), "27");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Key, 1}, false, NoteKind::Normal), "11");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Scratch, 0}, false, NoteKind::Normal),
+              "16");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Pedal, 0}, false, NoteKind::Normal), "17");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Key, 6}, false, NoteKind::Normal), "18");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Key, 7}, false, NoteKind::Normal), "19");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {1, LaneKind::Key, 5}, false, NoteKind::Normal), "25");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {1, LaneKind::Pedal, 0}, false, NoteKind::Normal), "27");
     // LN（RDM 记法）：1P→5x / 2P→6x（头尾同通道，不再区分头尾通道）
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 2}, true, NoteKind::Normal), "52");
-    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 2}, true, NoteKind::Normal), "62");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Scratch, 0}, true, NoteKind::Normal), "56");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Key, 4}, false, NoteKind::Landmine), "D4");
-    EXPECT_EQ(bms_channel_for({1, LaneKind::Key, 4}, false, NoteKind::Landmine), "E4");
-    EXPECT_EQ(bms_channel_for({0, LaneKind::Pedal, 0}, false, NoteKind::Landmine), "D7");
-    EXPECT_TRUE(bms_channel_for({0, LaneKind::Key, 9}, false, NoteKind::Normal).empty());
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Key, 2}, true, NoteKind::Normal), "52");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {1, LaneKind::Key, 2}, true, NoteKind::Normal), "62");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Scratch, 0}, true, NoteKind::Normal),
+              "56");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Key, 4}, false, NoteKind::Landmine), "D4");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {1, LaneKind::Key, 4}, false, NoteKind::Landmine), "E4");
+    EXPECT_EQ(bms_channel_for_mode("sp7k", {0, LaneKind::Pedal, 0}, false, NoteKind::Landmine),
+              "D7");
+    EXPECT_TRUE(
+        bms_channel_for_mode("sp7k", {0, LaneKind::Key, 9}, false, NoteKind::Normal).empty());
 }
 
 // ---------- 数据行事件化 ----------
@@ -1410,4 +1423,40 @@ TEST(BmsRealCharts, RoundTripAllLocalCharts) {
     }
     ASSERT_GT(verified, 0u) << "local/chart 下未找到任何谱面样本";
     std::printf("验证谱面 %zu 个（跳过 %zu 个）\n", verified, skipped);
+}
+
+TEST(BmsWriter, UnrepresentableNoteFailsInsteadOfDropping) {
+    Chart c;
+    c.mode_id = "sp7k";
+    c.meta["BPM"] = "130";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Key, 9};  // sp7k 无键9
+    n.value.sample.id = 1;
+    c.notes.push_back(n);
+    const auto r = write_bms_checked(c);
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(r.text.empty());
+    ASSERT_FALSE(r.diagnostics.empty());
+    EXPECT_NE(r.diagnostics[0].message.find("lane key"), std::string::npos);
+    EXPECT_NE(r.diagnostics[0].message.find("player 0"), std::string::npos);
+    EXPECT_NE(r.diagnostics[0].message.find("index 9"), std::string::npos);
+    EXPECT_THROW(write_bms(c), std::runtime_error);
+}
+
+TEST(BmsCodecAdapter, WriteFailureCarriesDiagnostics) {
+    Chart c;
+    c.mode_id = "sp7k";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Key, 9};
+    n.value.sample.id = 1;
+    c.notes.push_back(n);
+
+    const auto* codec = codec::global_codec_registry().by_id("bms");
+    ASSERT_NE(codec, nullptr);
+    const auto r = codec->write(c, {});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(r.text.empty());
+    ASSERT_FALSE(r.diagnostics.empty());
+    EXPECT_EQ(r.diagnostics[0].severity, codec::Severity::Error);
+    EXPECT_NE(r.diagnostics[0].message.find("index 9"), std::string::npos);
 }
