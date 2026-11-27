@@ -9,4 +9,8 @@
 testdata/m7-mini-project/*       text eol=lf
 testdata/m7-mini-project/*.wav   binary
 
+# CP932 生成数据与源表使用 LF，保证 Windows 检出也可按字节校验。
+core/src/bms/sjis_table.hpp text eol=lf
+tools/cp932_map.tsv         text eol=lf
+
 # 其余源文件沿用仓库既有风格（不做全局 text=auto，避免一次巨大的重写 diff）。

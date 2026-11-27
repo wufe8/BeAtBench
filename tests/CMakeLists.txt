@@ -12,6 +12,15 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# Python 仅用于校验已提交的 CP932 表，不参与产品构建。
+find_package(Python3 3.9 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME sjis_table_parity
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/sjis_table_parity_test.py")
+    add_test(NAME sjis_table_regeneration
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/gen_sjis_table.py" --check)
+endif()
+
 add_executable(beatbench_tests rational_test.cpp bms_codec_test.cpp ln_codec_test.cpp timing_test.cpp
     ln_identity_test.cpp
     json_test.cpp command_test.cpp codec_registry_test.cpp chart_mode_test.cpp

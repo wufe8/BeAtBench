@@ -106,7 +106,9 @@ Windows 可选 ASIO 的构建/运行已接入，默认 OFF；ON 不等于硬件�
 
 - 格式规则以根目录 `.clang-format` 为准。
 - `third_party/` 与生成文件 `core/src/bms/sjis_table.hpp` 在 `.clang-format-ignore` 中排除，
-  生成表由 `tools/gen_sjis_table.ps1` 重新生成，不参与格式化。
+  生成表用 `python tools/gen_sjis_table.py` 重新生成（Python 3.9+），不参与格式化。
+  常规构建使用已提交的表，不依赖 Python；装有 Python 的测试构建可通过 `ctest -R sjis_table_`
+  校验与原表的映射一致性以及生成文件是否过期。
 - 检查入口 `scripts/check-format.sh`（check.sh 第 0 步与 CI format job 同一入口）；版本钉
   23.1.3（本机版本不符只警告不拦截，以 CI 为准）。修复命令：
   `git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format -i`。

@@ -42,6 +42,7 @@ bool is_valid_utf8(std::string_view in);
 bool is_valid_cp932(std::string_view in);
 
 /// SJIS(CP932) → UTF-8。通常先验证；无效序列降级为 U+FFFD。
+/// 映射表由 tools/gen_sjis_table.py 从固化的 CP932 数据生成。
 std::string shiftjis_to_utf8(std::string_view in);
 
 /// UTF-8 → SJIS(CP932)。strict 时拒绝无效 UTF-8 或不可映射字符；否则保留旧回退。

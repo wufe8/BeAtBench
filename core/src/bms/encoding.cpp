@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 
@@ -12,6 +13,9 @@
 
 namespace beatbench::bms {
 namespace {
+
+static_assert(std::size(kSjisToUcs) == kSjisLeadRows * kSjisTrailCols);
+static_assert(sizeof(SjisRev) == 4);
 
 // ---- UTF-8 码点工具（严格校验） ----
 
@@ -87,26 +91,23 @@ inline void append_utf8(std::string& out, std::uint32_t cp) {
     }
 }
 
-// 正表二分查找（kSjisToUcs 按 (lead, trail) 升序）
-inline const SjisPair* find_sjis_pair(std::uint8_t lead, std::uint8_t trail) {
-    const auto* begin = kSjisToUcs;
-    const auto* end = begin + kSjisToUcsCount;
-    while (begin < end) {
-        const auto* mid = begin + (end - begin) / 2;
-        if (mid->lead < lead || (mid->lead == lead && mid->trail < trail)) {
-            begin = mid + 1;
-        } else {
-            end = mid;
-        }
+// 正表直接索引：两段 lead 顺排为行，trail 跳过 0x7F 后为列；0 表示无映射。
+std::uint16_t lookup_sjis_to_ucs(std::uint8_t lead, std::uint8_t trail) {
+    if (trail < kSjisTrailBase || trail == 0x7F || trail > 0xFC) return 0;
+    std::size_t row;
+    if (lead >= 0x81 && lead <= 0x9F) {
+        row = static_cast<std::size_t>(lead - 0x81);
+    } else if (lead >= 0xE0 && lead <= 0xFC) {
+        row = static_cast<std::size_t>(lead - 0xE0) + 31;
+    } else {
+        return 0;
     }
-    if (begin != kSjisToUcs + kSjisToUcsCount && begin->lead == lead && begin->trail == trail) {
-        return begin;
-    }
-    return nullptr;
+    const auto col = static_cast<std::size_t>(trail - kSjisTrailBase) - (trail > 0x7F ? 1 : 0);
+    return kSjisToUcs[row * kSjisTrailCols + col];
 }
 
-// 反表二分查找（kUcsToSjis 按 ucs 升序；同 ucs 多映射取首个）
-inline const SjisPair* find_ucs_pair(std::uint32_t ucs) {
+// 反表按 ucs 升序；未收录的码点返回 0，不与合法双字节值冲突。
+std::uint16_t lookup_ucs_to_sjis(std::uint32_t ucs) {
     const auto* begin = kUcsToSjis;
     const auto* end = begin + kUcsToSjisCount;
     while (begin < end) {
@@ -118,9 +119,9 @@ inline const SjisPair* find_ucs_pair(std::uint32_t ucs) {
         }
     }
     if (begin != kUcsToSjis + kUcsToSjisCount && begin->ucs == ucs) {
-        return begin;
+        return begin->sjis;
     }
-    return nullptr;
+    return 0;
 }
 
 // ASCII 大小写不敏感前缀匹配（bytes 为原始字节流，可能含高位字节）
@@ -142,7 +143,7 @@ Utf8Cp decode_cp932(std::string_view in, std::size_t at) {
     if (const auto u = kSjisSingle[b - 0x80]; u != 0) return {u, 1};
     if (at + 1 < in.size()) {
         const auto t = static_cast<unsigned char>(in[at + 1]);
-        if (const SjisPair* p = find_sjis_pair(b, t)) return {p->ucs, 2};
+        if (const auto cp = lookup_sjis_to_ucs(b, t); cp != 0) return {cp, 2};
     }
     return {};
 }
@@ -263,9 +264,9 @@ std::string utf8_to_shiftjis(std::string_view in, bool strict) {
         i += static_cast<std::size_t>(d.len);
         if (const int single = cp932_single(d.cp); single >= 0) {
             out.push_back(static_cast<char>(single));
-        } else if (const SjisPair* p = find_ucs_pair(d.cp)) {
-            out.push_back(static_cast<char>(p->lead));
-            out.push_back(static_cast<char>(p->trail));
+        } else if (const auto sjis = lookup_ucs_to_sjis(d.cp); sjis != 0) {
+            out.push_back(static_cast<char>(sjis >> 8));
+            out.push_back(static_cast<char>(sjis & 0xFF));
         } else {
             if (strict) throw std::invalid_argument("BMS 含 CP932 无法表示的字符");
             out.push_back('?');  // 宽容模式保留旧 BMSE 行为
