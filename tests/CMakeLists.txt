@@ -52,7 +52,9 @@ if(BEATBENCH_NODE_EXECUTABLE)
             COMMAND "${BEATBENCH_NODE_EXECUTABLE}" --test
                 "${CMAKE_CURRENT_SOURCE_DIR}/qml_session_regression_test.js"
                 "${CMAKE_CURRENT_SOURCE_DIR}/qml_pms_save_guard_test.js")
-        set_tests_properties(qml_session_regression_tests PROPERTIES TIMEOUT 20)
+        # Windows 托管 runner 的 Node 启动和杀毒扫描波动大，20s 会偶发超时；
+        # 断言不变，只放宽墙钟上限。
+        set_tests_properties(qml_session_regression_tests PROPERTIES TIMEOUT 60)
     endif()
 endif()
 
