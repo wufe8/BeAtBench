@@ -31,6 +31,7 @@
 #include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
 #include "bridge/DocumentService.hpp"
+#include "bridge/PathUtils.hpp"
 
 namespace beatbench::app {
 
@@ -263,11 +264,7 @@ QVariantMap SliceWorkspace::previewExportFiles(const QString& outDir, const QStr
 
 bool SliceWorkspace::loadAudioFileSyncForTest(const QString& path) {
     if (path.isEmpty()) return false;
-#ifdef _WIN32
-    const bool ok = m_track.load_w(path.toStdWString());
-#else
-    const bool ok = m_track.load(path.toStdString());
-#endif
+    const bool ok = m_track.load(path_from_qstring(path));
     if (!ok) {
         setStatus(QStringLiteral("解码失败：%1").arg(QString::fromStdString(m_track.error())));
         return false;
@@ -590,11 +587,8 @@ QVariantMap SliceWorkspace::commitExport(const QString& planId, const QString& c
         ra.interleavedStereo = std::move(pcm);
         std::string msg;
         // 音频层已经经 core::io 原子写入，不再套一层持有打开句柄的临时文件。
-#ifdef _WIN32
-        const bool ok = audio::write_wav_file_w(outPath.toStdWString(), ra, &msg);
-#else
-        const bool ok = audio::write_wav_file(outPath.toUtf8().toStdString(), ra, &msg);
-#endif
+        // 音频层已经经 core::io 原子写入，不再套一层持有打开句柄的临时文件。
+        const bool ok = beatbench::audio::write_wav_file(path_from_qstring(outPath), ra, &msg);
         if (!ok) {
             errors << outPath + QStringLiteral(": ") + QString::fromStdString(msg);
             continue;
@@ -807,11 +801,7 @@ bool SliceWorkspace::loadAudioFile(const QString& path) {
         // 工作线程：局部 ReferenceTrack（解码 + 金字塔构建；不碰成员）。
         // ⚠️ Windows 含非 ASCII 路径必须走宽字符（ma_decoder_init_file_w）。
         auto* track = new beatbench::audio::ReferenceTrack();
-#ifdef _WIN32
-        const bool ok = track->load_w(root.toStdWString());
-#else
-        const bool ok = track->load(root.toStdString());
-#endif
+        const bool ok = track->load(path_from_qstring(root));
         QMetaObject::invokeMethod(
             this, [this, track, ok, root] { audioDecoded(ok, track, root); }, Qt::QueuedConnection);
     });

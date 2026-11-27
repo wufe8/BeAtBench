@@ -150,6 +150,32 @@ TEST_F(AudioLibTest, PlayPreviewSwitch) {
     player.drainReclaimed();
 }
 
+TEST_F(AudioLibTest, OrdinaryPlaySkipsReservedVoices) {
+    // 保留槽 6-9 全部占满后，普通 play 仍能用 0-5 六个槽；第七个普通 play
+    // 在回调侧被丢弃，不能挤占保留槽（#59 槽位收口的回归守卫）。
+    SamplePlayer player;
+    for (int slot = SamplePlayer::kFirstReservedVoice; slot < SamplePlayer::kMaxVoices; ++slot) {
+        ASSERT_TRUE(player.playAtSlot(makeTestSample(44100.0, 4410, 0.1f), 1.0f, 0.0, slot));
+    }
+    std::vector<float> out(2, 0.0f);
+    player.render(out.data(), 1, 44100.0);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kMaxVoices - SamplePlayer::kFirstReservedVoice);
+
+    for (int i = 0; i < SamplePlayer::kFirstReservedVoice; ++i) {
+        ASSERT_TRUE(player.play(makeTestSample(44100.0, 4410, 0.1f), 1.0f, 0.0));
+    }
+    player.render(out.data(), 1, 44100.0);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kMaxVoices);
+
+    ASSERT_TRUE(player.play(makeTestSample(44100.0, 4410, 0.1f), 1.0f, 0.0));
+    player.render(out.data(), 1, 44100.0);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kMaxVoices);
+
+    player.stopAll();
+    player.render(out.data(), 1, 44100.0);
+    player.drainReclaimed();
+}
+
 TEST_F(AudioLibTest, VorbisOggSupported) {
     // 仅验证扩展名判定（实际 OGG 解码依赖 miniaudio；合成 OGG 复杂，跳过）
     EXPECT_TRUE(beatbench::audio::audio_extension_supported("ogg"));
@@ -232,7 +258,7 @@ TEST_F(
     // 窄字符 fopen 走 ANSI 代码页打不开；ma_decoder_init_file_w（UTF-16）必须可用。
     const auto dir = m_tmp / L"彼岸帰航-idling mix-";
     std::filesystem::create_directories(dir);
-    const std::wstring wpath = dir / L"abass-01.wav";
+    const std::filesystem::path wpath = dir / L"abass-01.wav";
     // 直接写 wav（宽字符 _wfopen_s）：复用 writeTestWav 需窄路径，这里单独写
     FILE* f = nullptr;
     _wfopen_s(&f, wpath.c_str(), L"wb");
@@ -259,7 +285,7 @@ TEST_F(
     }
     std::fclose(f);
 
-    const auto r = beatbench::audio::decode_audio_file_w(wpath);
+    const auto r = beatbench::audio::decode_audio_file(wpath);
     EXPECT_TRUE(r.ok) << "宽字符解码失败: " << r.message;
     if (r.ok) {
         EXPECT_GT(r.sample->frameCount(), 1000u);
@@ -308,18 +334,23 @@ TEST_F(AudioLibTest, MasterVolumeClamps) {
     EXPECT_FLOAT_EQ(player.masterVolume(), 0.0f);
 }
 
-TEST_F(AudioLibTest, PreviewUsesSlotSevenAndOrdinaryVoicesCannotOccupyIt) {
+TEST_F(AudioLibTest, PreviewUsesReservedSlotAndOrdinaryVoicesCannotOccupyIt) {
     SamplePlayer player;
     std::vector<float> out(1024);
-    for (int i = 0; i < 6; ++i) ASSERT_TRUE(player.play(makeTestSample(48000, 48000), 0.1f, 0));
+    for (int i = 0; i < SamplePlayer::kFirstReservedVoice; ++i)
+        ASSERT_TRUE(player.play(makeTestSample(48000, 48000), 0.1f, 0));
     player.render(out.data(), 512, 48000);
-    EXPECT_EQ(player.activeCount(), 5);  // 0..4 only; PCM/ref/audition reserved.
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kFirstReservedVoice);
+    // 普通 play 无槽可用时不能挤占保留槽。
+    EXPECT_TRUE(player.play(makeTestSample(48000, 48000), 0.1f, 0));
+    player.render(out.data(), 512, 48000);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kFirstReservedVoice);
     ASSERT_TRUE(player.playPreview(makeTestSample(48000, 48000)));
     player.render(out.data(), 512, 48000);
-    EXPECT_EQ(player.activeCount(), 6);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kFirstReservedVoice + 1);
     ASSERT_TRUE(player.stopPreview());
     player.render(out.data(), 512, 48000);
-    EXPECT_EQ(player.activeCount(), 5);
+    EXPECT_EQ(player.activeCount(), SamplePlayer::kFirstReservedVoice);
     // Canceled generation events must not clear a newer audition busy state.
     EXPECT_EQ(player.drainEndedEvents(), -1);
     player.shutdown();

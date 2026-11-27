@@ -14,6 +14,7 @@
 #include <QThread>
 #include <algorithm>
 #include <deque>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
@@ -21,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "beatbench/audio/AudioPath.hpp"
 #include "beatbench/core/edit/SessionRegistry.hpp"
 #include "bridge/AudioEngine.hpp"
 #include "bridge/ChartSession.hpp"
@@ -30,9 +32,7 @@ namespace beatbench::app {
 struct AudioEngineTestAccess {
     using Results = decltype(AudioEngine::m_previewResults);
     static void decoder(AudioEngine& engine, beatbench::audio::SampleCache::DecodeFn fn) {
-        engine.m_cache.setDecoders(fn, [fn](const std::wstring& path) {
-            return fn(QString::fromStdWString(path).toStdString());
-        });
+        engine.m_cache.setDecoders(std::move(fn));
     }
     static bool wait(AudioEngine& engine) { return engine.m_previewPool.waitForDone(5000); }
     static void complete(AudioEngine& engine) { engine.completePreviewDecodes(); }
@@ -775,9 +775,10 @@ TEST_F(AudioEngineTest, DeferredOldDecodeCompletionCannotReplaceNewPreview) {
     const auto oldFile = previewFile(dir, "old.wav");
     const auto newFile = previewFile(dir, "new.wav");
     std::weak_ptr<const std::vector<float>> oldRef, newRef;
-    AudioEngineTestAccess::decoder(*engine, [&](const std::string& path) {
-        return path.find("old.wav") != std::string::npos ? decoded(0.8f, &oldRef)
-                                                         : decoded(0.2f, &newRef);
+    AudioEngineTestAccess::decoder(*engine, [&](const std::filesystem::path& path) {
+        return beatbench::audio::u8_string(path).find("old.wav") != std::string::npos
+                   ? decoded(0.8f, &oldRef)
+                   : decoded(0.2f, &newRef);
     });
     ASSERT_TRUE(engine->playPreview(oldFile));
     ASSERT_TRUE(AudioEngineTestAccess::wait(*engine));
