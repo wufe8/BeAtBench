@@ -79,7 +79,7 @@ std::string serialize_or_throw(const Codec& codec, const Chart& chart,
                 if (!message.empty()) message.push_back('\n');
                 message += d.message;
             }
-            throw CommandError("write_failed", std::move(message));
+            throw CommandError("write_failed", message);
         }
         return std::move(result.text);
     } catch (const CommandError&) {
