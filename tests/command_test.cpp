@@ -538,6 +538,25 @@ TEST_F(SessionTextFormatTest, UpdatesAsciiAfterSaveAndProtectsUnmappableOutput) 
     EXPECT_TRUE(call("session.dirty").at("result").at("dirty").as_bool());
 }
 
+TEST_F(SessionTextFormatTest, SaveRefusesUnrepresentableNoteWithoutTouchingFile) {
+    const auto output = write_temp("session_unrepresentable_saved.bms", "sentinel");
+    auto* session = beatbench::edit::session_registry().by_id("byte-format-test");
+    ASSERT_NE(session, nullptr);
+
+    beatbench::Chart chart;
+    chart.mode_id = "sp7k";
+    chart.meta["BPM"] = "130";
+    beatbench::Event<beatbench::Note> note{1, beatbench::Rational(0, 1), {}};
+    note.value.lane = {0, beatbench::LaneKind::Key, 9};
+    note.value.sample.id = 1;
+    chart.notes.push_back(note);
+    session->load(std::move(chart), output);
+
+    const auto saved = save(output);
+    EXPECT_EQ(saved.at("error").at("code").as_str(), "write_failed") << saved.dump();
+    EXPECT_EQ(read_temp(output), "sentinel");
+}
+
 TEST_F(SessionTextFormatTest, PreservesUtf8BomOnAutosaveAndChoosesNewDefaults) {
     const auto input = write_temp("session_utf8_bom.bms", "\xef\xbb\xbf#TITLE ASCII\r\n");
     const auto loaded = load(input);

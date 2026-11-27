@@ -1436,6 +1436,27 @@ TEST(BmsWriter, UnrepresentableNoteFailsInsteadOfDropping) {
     const auto r = write_bms_checked(c);
     EXPECT_FALSE(r.ok);
     EXPECT_TRUE(r.text.empty());
-    EXPECT_FALSE(r.diagnostics.empty());
+    ASSERT_FALSE(r.diagnostics.empty());
+    EXPECT_NE(r.diagnostics[0].message.find("lane key"), std::string::npos);
+    EXPECT_NE(r.diagnostics[0].message.find("player 0"), std::string::npos);
+    EXPECT_NE(r.diagnostics[0].message.find("index 9"), std::string::npos);
     EXPECT_THROW(write_bms(c), std::runtime_error);
+}
+
+TEST(BmsCodecAdapter, WriteFailureCarriesDiagnostics) {
+    Chart c;
+    c.mode_id = "sp7k";
+    Event<Note> n{1, Rational(0, 1), {}};
+    n.value.lane = {0, LaneKind::Key, 9};
+    n.value.sample.id = 1;
+    c.notes.push_back(n);
+
+    const auto* codec = codec::global_codec_registry().by_id("bms");
+    ASSERT_NE(codec, nullptr);
+    const auto r = codec->write(c, {});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(r.text.empty());
+    ASSERT_FALSE(r.diagnostics.empty());
+    EXPECT_EQ(r.diagnostics[0].severity, codec::Severity::Error);
+    EXPECT_NE(r.diagnostics[0].message.find("index 9"), std::string::npos);
 }

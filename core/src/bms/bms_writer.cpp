@@ -389,18 +389,30 @@ BmsWriteResult write_bms_checked(const Chart& chart, const BmsWriteOptions& opts
         const auto mode = chart.mode_id.value_or("sp7k");
         // BGM（ch01）：无 LN 表示。即使模型异常残留 ln_channel，也按普通背景 note 写回。
         const bool want_ln = n.ln_channel && n.lane.kind != LaneKind::Bgm;
-        auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
-        // 部分遗留 PMS 2P 仅有 LN 通道而无普通通道。孤儿也保留源 LN 标记，
-        // 不能降级成会读成1P的普通通道，更不能因缺少配对而静默丢弃。
-        if (channel.empty() && n.ln_channel)
-            channel = bms_channel_for_mode(mode, n.lane, true, n.kind);
+        const auto channel = bms_channel_for_mode(mode, n.lane, want_ln, n.kind);
         if (channel.empty()) {
             failed = true;
             Diagnostic d;
             d.severity = Severity::Error;
+            const auto kind = [](LaneKind k) {
+                switch (k) {
+                    case LaneKind::Key:
+                        return "key";
+                    case LaneKind::Scratch:
+                        return "scratch";
+                    case LaneKind::Pedal:
+                        return "pedal";
+                    case LaneKind::Bgm:
+                        return "bgm";
+                }
+                return "unknown";
+            };
             d.message = "无法在模式 " + mode + " 表示 note：measure " + std::to_string(ev.measure) +
                         " pos " + std::to_string(ev.pos.num) + "/" + std::to_string(ev.pos.den) +
-                        " lane index " + std::to_string(static_cast<int>(n.lane.index));
+                        " lane " + kind(n.lane.kind) + " player " +
+                        std::to_string(static_cast<int>(n.lane.player)) + " index " +
+                        std::to_string(static_cast<int>(n.lane.index)) + " sub_line " +
+                        std::to_string(n.sub_line);
             write_diagnostics.push_back(std::move(d));
             continue;  // 继续扫描，收集全部不可表示项
         }
