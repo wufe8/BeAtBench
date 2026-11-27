@@ -741,7 +741,7 @@ QtObject {
             if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()  // BGA/BMP 面板同刷新
             if (r.ok) {
                 if (typeof chartSession !== "undefined" && chartSession) {
-                    const m = chartSession.modeId()
+                    const m = chartSession.chartMode()
                     if (m) window.chartMode = m
                 }
                 setStatus(qsTr("已撤销（可重做 %1 步）").arg(r.redo_depth))
@@ -758,7 +758,7 @@ QtObject {
             if (typeof editPage !== "undefined" && editPage) editPage.reloadBga()  // BGA/BMP 面板同刷新
             if (r.ok) {
                 if (typeof chartSession !== "undefined" && chartSession) {
-                    const m = chartSession.modeId()
+                    const m = chartSession.chartMode()
                     if (m) window.chartMode = m
                 }
                 setStatus(qsTr("已重做（可撤销 %1 步）").arg(r.undo_depth))
