@@ -57,8 +57,10 @@ class EditCommand {
     /// 必须与 apply 精确互逆（可逆性测试守卫）。
     virtual void invert(Chart& chart) = 0;
 
-    /// 命令是否改变 note/事件的时间坐标（GUI 纵向锁用）。
-    /// 默认 false；移动/量化/转换等改时间的命令覆写。纯换轨/换图层/改值不算。
+    /// 命令是否可能改变 note/事件的时间坐标（GUI 纵向锁用；保守判定）。
+    /// 默认 false；移动/量化/转换等时间相关命令覆写。纯换轨/换图层/改值不算。
+    /// 调用方按“可能改变”处理：返回 true 不代表本次实例一定改了坐标，
+    /// 只代表不能把它当作纯横向操作放行。
     virtual bool changes_time() const { return false; }
 
     /// 尝试与下一个命令合并（连续拖动/滚轮微调 → 一个 undo 步）。
@@ -106,8 +108,9 @@ class CompositeCommand : public EditCommand {
 
 enum class TimingPutMode : std::uint8_t { SetValue, ClearRef, UseDefinition };
 
-/// 标记型包装：内部命令整体视为“改变时间”。
+/// 标记型包装：内部命令整体视为“时间相关操作”，保守返回 true。
 /// 协议层把多个 Put/Delete 组合成一次粘贴/移动时使用（单个 Put 本身只是放置，不是移动）。
+/// 即使落点与源相同，也保留时间相关标记；GUI 纵向锁按保守语义处理。
 class TimeShiftCommand : public EditCommand {
    public:
     explicit TimeShiftCommand(std::unique_ptr<EditCommand> inner);

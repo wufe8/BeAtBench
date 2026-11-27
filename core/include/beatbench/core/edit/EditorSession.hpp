@@ -290,6 +290,7 @@ class QuantizeNoteCommand : public EditCommand {
     Rational target_pos() const { return m_new_pos; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    /// 保守：即使目标位置已在网格上，也按时间相关操作处理。
     bool changes_time() const override { return true; }
     std::string describe() const override;
 
