@@ -238,6 +238,8 @@ ApplicationWindow {
     }
     // 剪贴板（BMS 原始行；clipboard.copy 输出 → paste 输入；会话状态）
     property var clipboardLines: []
+    /// 配置复制用的轨道序列（clipboard.copy pattern；与 BMS 原始行分开保存）
+    property var clipboardPattern: []
     // 选中 note 集合（NoteRef；框选后存 + 回填高亮；Ctrl+C 复制）
     property var selectionRefs: []
     // 选中 BGA/BPM/STOP 对象集合（{kind, measure, pos, ...}；视口点选/拖拽/删除/编辑用）
@@ -399,6 +401,10 @@ ApplicationWindow {
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.paste") : ""
                enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.paste") }
+    Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.pastePattern") : ""
+               enabled: chartMeta !== null && currentPage === 0 && !window.textInputFocused &&
+                        window.selectionRefs.length > 0
+               onActivated: uiActions.invoke("edit.pastePattern") }
     Shortcut { sequence: uiActions.shortcutRevision >= 0 ? uiActions.shortcut("edit.delete") : ""
                enabled: chartMeta !== null && chartEditingAllowed && !window.textInputFocused
                onActivated: uiActions.invoke("edit.delete") }
@@ -2541,6 +2547,7 @@ ApplicationWindow {
         return finishPanePaste(ctx, response, targetId)
     }
     /// legacy A 宿主兼容入口：确认始终保存原 owner/revision，不再调用可跟随 active 的 pasteRawText。
+    function pastePattern() { return session.pastePattern() }
     function requestBase62PasteConfirm(text, targetMeasure) {
         if (!primaryEditContext || !primaryEditOperations) return false
         base62PasteDialog.editContext = primaryEditContext
@@ -2698,6 +2705,8 @@ ApplicationWindow {
         setActionEnabled("edit.toggleVerticalMove", chartMeta !== null && currentPage === 0)
         setActionEnabled("edit.copy", chartEditingAllowed && chartMeta !== null && actionSelection.length > 0)
         setActionEnabled("edit.paste", chartMeta !== null && chartEditingAllowed)
+        setActionEnabled("edit.pastePattern",
+                         chartMeta !== null && chartEditingAllowed && actionSelection.length > 0)
         setActionEnabled("edit.delete", chartMeta !== null && chartEditingAllowed &&
                                            (actionSelection.length > 0 || actionMetaSelection.length > 0))
         setActionEnabled("tool.quantize", chartEditingAllowed && actionSelection.length > 0)

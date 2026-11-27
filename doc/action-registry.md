@@ -45,3 +45,4 @@ UI 动作注册在应用内，不是外部插件接口。外部命令分层见 [
 ## 九、实现落点
 
 动作注册见 [应用装配](../app/main.cpp)，快捷键作用域、冲突判定和工具条查询语义以 [注册表头文件](../app/bridge/UiActionRegistry.hpp) 及实现为准。
+配置复制默认 `Ctrl+Shift+V`（`edit.pastePattern`）；快速摆音见 `QuickPlaceController`。
