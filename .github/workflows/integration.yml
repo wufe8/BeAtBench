@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# 组合验证（手动触发）：把声明的分支按顺序合到 origin/master，构建、ctest、GUI 冒烟。
+# 组合验证（手动触发）：把声明的分支按顺序合到 <remote>/master，构建、ctest、GUI 冒烟。
 #
 # 定位：PR 仍以 master 为 base、彼此不是 GitHub 栈时的补偿控制；不替代单 PR 的 ci.yml。
 # 触发：Actions -> Integration -> Run workflow，branches 留空则只验证两个地基分支。
@@ -16,9 +16,13 @@ on:
   workflow_dispatch:
     inputs:
       branches:
-        description: '空格分隔的分支名（按合并顺序）；留空验证两个地基'
+        description: '空格分隔的分支名（按合并顺序）；留空验证当前两条链的顶端与独立件'
         required: false
         default: ''
+      remote:
+        description: '分支所在 remote（fork 用 brightmeows；留 origin 则用本仓库）'
+        required: false
+        default: 'origin'
 
 permissions:
   contents: read
@@ -51,9 +55,14 @@ jobs:
       - name: Run integration check
         env:
           INTEGRATION_BRANCHES: ${{ inputs.branches }}
+          INTEGRATION_REMOTE: ${{ inputs.remote }}
         run: |
           set -euo pipefail
           export QT_PREFIX="${QT_ROOT_DIR:-}"
           test -n "$QT_PREFIX" || { echo "QT_ROOT_DIR 未设置" >&2; exit 1; }
+          if [ "$INTEGRATION_REMOTE" != "origin" ]; then
+            git remote add "$INTEGRATION_REMOTE" "https://github.com/$INTEGRATION_REMOTE/BeAtBench.git" 2>/dev/null || true
+            git fetch "$INTEGRATION_REMOTE" --prune
+          fi
           chmod +x scripts/check-integration.sh
           scripts/check-integration.sh
