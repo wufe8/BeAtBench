@@ -94,9 +94,10 @@ class DocumentInstancesTest : public ::testing::Test {
     }
     static bool putNote(const QString& id, unsigned sample = 1) {
         auto* s = core(id);
-        return s && s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-                        2, beatbench::Rational(1, 4),
-                        beatbench::Lane{0, beatbench::LaneKind::Key, 7}, sample));
+        return s &&
+               s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(beatbench::edit::NoteRef{
+                   2, beatbench::Rational(1, 4), beatbench::Lane{0, beatbench::LaneKind::Key, 7},
+                   sample}));
     }
     QVariantMap entry(const QString& id) {
         for (const auto& value : service_->instances()) {
@@ -160,8 +161,9 @@ TEST_F(DocumentInstancesTest, RefreshRebuildsTimingWhenNoteOrBgaExtentChanges) {
     EXPECT_EQ(bridge.measureCount(), 2);
     EXPECT_DOUBLE_EQ(bridge.timing()->bpm_at(tail), 0.0);
     // Editing inside an existing extent must not invalidate the timing fingerprint.
-    ASSERT_TRUE(reference->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-        0, beatbench::Rational(1, 2), beatbench::Lane{0, beatbench::LaneKind::Key, 2}, 1)));
+    ASSERT_TRUE(
+        reference->exec(std::make_unique<beatbench::edit::PutNoteCommand>(beatbench::edit::NoteRef{
+            0, beatbench::Rational(1, 2), beatbench::Lane{0, beatbench::LaneKind::Key, 2}, 1})));
     EXPECT_EQ(bridge.chart(), nullptr);
     EXPECT_EQ(bridge.timing(), nullptr);
     bridge.refresh();
@@ -174,7 +176,8 @@ TEST_F(DocumentInstancesTest, RefreshRebuildsTimingWhenNoteOrBgaExtentChanges) {
                 6, beatbench::Rational(0, 1), 0, 1)));
         } else {
             ASSERT_TRUE(reference->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-                6, beatbench::Rational(0, 1), beatbench::Lane{0, beatbench::LaneKind::Bgm, 0}, 1)));
+                beatbench::edit::NoteRef{6, beatbench::Rational(0, 1),
+                                         beatbench::Lane{0, beatbench::LaneKind::Bgm, 0}, 1})));
         }
         EXPECT_EQ(bridge.chart(), nullptr);
         EXPECT_EQ(bridge.timing(), nullptr);

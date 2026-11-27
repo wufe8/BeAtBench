@@ -636,7 +636,7 @@ Item {
             const hit = pointFor(bv, bp, true)
             mouseClick(bv, hit.x, hit.y, Qt.RightButton)
             mouseDoubleClickSequence(bv, hit.x, hit.y, Qt.LeftButton)
-            bv.moveMode = true
+            bv.verticalMoveMode = 0
             mouseDrag(bv, hit.x, hit.y, 20, 48, Qt.LeftButton)
             compare(placeSpy.count, 0)
             compare(deleteSpy.count, 0)

@@ -10,6 +10,8 @@ add_executable(beatbench
     bridge/LintListModel.cpp
     bridge/ChartSession.cpp
     bridge/KeyMonitor.cpp
+    bridge/QuickPlaceController.cpp
+    bridge/QuickPlaceController.hpp   # Q_OBJECT：须显式列入（AUTOMOC 自动包含扫描不可靠）
     bridge/UiActionRegistry.cpp
     bridge/ThemeManager.cpp
     bridge/ClipboardBridge.cpp
