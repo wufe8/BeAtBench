@@ -53,7 +53,7 @@ TestCase {
         reference = split.referenceView
         verify(primary !== null && reference !== null)
         main.editorTool = "select"
-        main.moveMode = false
+        main.setVerticalMoveMode(2)
         main.lnSelectMode = false
         tryCompare(primary, "editable", true)
         tryCompare(reference, "editable", true)

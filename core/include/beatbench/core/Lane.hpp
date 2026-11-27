@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <cstdint>
+#include <string>
 
 namespace beatbench {
 
@@ -27,5 +28,29 @@ struct Lane {
         return a.index < b.index;
     }
 };
+
+/// LaneKind → 协议字符串（JSON 的 lane.kind / 列 key 格式）：key/scratch/pedal/bgm。
+constexpr const char* lane_kind_str(LaneKind k) {
+    switch (k) {
+        case LaneKind::Scratch:
+            return "scratch";
+        case LaneKind::Pedal:
+            return "pedal";
+        case LaneKind::Bgm:
+            return "bgm";
+        case LaneKind::Key:
+            break;
+    }
+    return "key";
+}
+
+/// lane → 稳定列 key："lane:<player>:<kind>:<index>"（如 lane:0:key:1、lane:1:scratch:0）。
+/// 协议 clipboard.applyPattern 的 hidden_lanes 元素、视图列头（ChartViewItem）、
+/// 快速摆音（QuickPlaceController）三处共用的单一格式源。
+inline std::string lane_key_string(const Lane& lane) {
+    const char* kind = lane_kind_str(lane.kind);
+    return "lane:" + std::to_string(static_cast<int>(lane.player)) + ":" + kind + ":" +
+           std::to_string(static_cast<int>(lane.index));
+}
 
 }  // namespace beatbench
