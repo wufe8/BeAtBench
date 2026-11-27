@@ -14,8 +14,11 @@
 |---|---|
 | deb | Debian 12 的系统 Qt 6.4.2；其它目标系统以工作流的安装冒烟矩阵为准。Qt 等依赖由打包脚本生成，支持 time_t 迁移的依赖备选项。 |
 | rpm | Fedora 43 的系统 Qt；使用该发行版构建环境的符号面，不以源码下限推断运行兼容性。 |
-| arch | 当前钉定快照的 Qt 6.11.2；镜像和 archive 同日，版本以 `ARCH_QT_FLOOR` 校验。定时任务测试固定基线，不代表追踪最新滚动版本。 |
+| arch | 当前钉定快照的 Qt 6.11.2；镜像和 archive 同日，版本以 `ARCH_QT_FLOOR` 校验。 |
 | Windows zip | 包内捆绑 Qt，不依赖系统 Qt；版本以发布工作流与 Release 的构建环境为准。 |
+
+定时与分支手动触发还会运行非阻塞 `arch-rolling`：用 `archlinux:base-devel` 构建和安装冒烟，
+失败在 Actions 运行摘要中预警；通过后上传独立的 `probe-arch-rolling` artifact，不用于发布。
 
 **已知差异**：当前 Arch 包元数据仍允许 `qt6-base>=6.4`（见 [Linux 打包脚本](../scripts/package-linux.sh)），低于发布包的 Qt 6.11.2 基线；pacman 接受安装不证明旧 Qt 能加载该包。
 
@@ -41,7 +44,7 @@ Windows zip 自带 Qt 运行时、`BeatBench/` QML 模块和 `skins/`；[打包�
 
 Linux 复用 [打包工作流](../.github/workflows/package.yml) 对应 job 的构建镜像、命令与目标系统，调用
 [Linux 打包脚本](../scripts/package-linux.sh) 和[安装冒烟脚本](../scripts/verify-linux-package.sh)。
-复现 Arch 必须配对 `ARCH_ROOTFS` 与同日 archive mirrorlist，不把滚动镜像当成同一个构建环境。
+复现 Arch 发布基线必须配对 `ARCH_ROOTFS` 与同日 archive mirrorlist，不把滚动镜像当成同一个构建环境。
 在 Arch 实机上直接用 `pacman -U` 安装下载的包，不单独跑 `pacman -Sy`。
 
 Windows 在 Git Bash 运行 [打包脚本](../scripts/package-release.sh)，用与发布工作流匹配的 Qt、MinGW 与 Ninja，并按脚本头部设置工具路径。
