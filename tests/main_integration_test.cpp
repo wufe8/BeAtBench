@@ -341,9 +341,11 @@ class MainIntegrationSetup : public QObject {
                              beatbench::NoteKind kind = beatbench::NoteKind::Normal) {
             auto* s = registry.by_id(id);
             if (!s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-                    measure, beatbench::Rational(num, den),
-                    beatbench::Lane{0, beatbench::LaneKind::Key, static_cast<std::uint8_t>(lane)},
-                    id == aId ? 1u : 2u, ln, kind, 0)))
+                    beatbench::edit::NoteRef{measure, beatbench::Rational(num, den),
+                                             beatbench::Lane{0, beatbench::LaneKind::Key,
+                                                             static_cast<std::uint8_t>(lane)},
+                                             id == aId ? 1u : 2u},
+                    ln, kind)))
                 qFatal("Cannot prepare overlay fixture");
         };
         put(aId, 0, 0, 1, 3);

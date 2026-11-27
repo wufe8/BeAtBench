@@ -41,6 +41,7 @@ TestCase {
         mainFixture.bind(main)
         main.requestActivate()
         main.adoptChart(mainFixture.snapshot(a).path)
+        main.setVerticalMoveMode(2)  // 集成用例按自由 2D 编辑语义运行；锁本身由 core 测试覆盖
         wait(0) // Flush obsolete Repeater delegates from initial component creation/reload.
         split = mainFixture.findProperty(main, "referenceDocumentId")
         verify(split !== null)

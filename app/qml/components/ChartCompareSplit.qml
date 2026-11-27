@@ -23,7 +23,8 @@ Item {
     }
     property int snapNum: 1
     property int snapDen: 16
-    property bool moveMode: false
+    property int verticalMoveMode: 0
+    readonly property bool verticalMoveLocked: verticalMoveMode === 0
     property bool lnSelectMode: false
     property bool showGrid: true
     property bool showChannelIds: false
@@ -453,7 +454,7 @@ Item {
                     editorTool: root.editorTool
                     snapNum: root.snapNum
                     snapDen: root.snapDen
-                    moveMode: root.moveMode
+                    verticalMoveMode: root.verticalMoveMode
                     lnSelectMode: root.lnSelectMode
                     showGrid: root.showGrid
                     showChannelIds: root.showChannelIds

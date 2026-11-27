@@ -153,7 +153,36 @@ QString ChartSession::chartMode() const {
 int ChartSession::playKeyCount() const {
     const auto* currentChart = chart();
     if (!currentChart) return 7;
-    return beatbench::chart_mode_key_count(currentChart->mode_id.value_or("sp7k"));
+    // 未知模式显式降级 7 键；非法放置由 chart_mode_has_lane 白名单另行拦截。
+    return beatbench::chart_mode_key_count(currentChart->mode_id.value_or("sp7k")).value_or(7);
+}
+
+void ChartSession::setVerticalMoveMode(int mode) {
+    auto& s = beatbench::edit::session_registry().active();
+    if (!s.has_chart()) return;
+    switch (mode) {
+        case 1:
+            s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+            break;
+        case 2:
+            s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::Free);
+            break;
+        default:
+            s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+            break;
+    }
+}
+
+int ChartSession::verticalMoveMode() const {
+    switch (beatbench::edit::session_registry().active().vertical_move_mode()) {
+        case beatbench::edit::VerticalMoveMode::TimeOnly:
+            return 1;
+        case beatbench::edit::VerticalMoveMode::Free:
+            return 2;
+        case beatbench::edit::VerticalMoveMode::LaneOnly:
+            break;
+    }
+    return 0;
 }
 
 void ChartSession::refresh() {
@@ -163,9 +192,11 @@ void ChartSession::refresh() {
     const auto* s = reg.by_id(sid);
     const beatbench::Chart* c = s && s->has_chart() ? &s->chart() : nullptr;
     const bool pathChanged = (s ? QString::fromStdString(s->path()) : QString()) != m_path;
-    const bool docChanged = (sid != m_sessionId) || (c != m_chart) || pathChanged;
+    const bool sessionChanged = (sid != m_sessionId);
+    const bool docChanged = sessionChanged || (c != m_chart) || pathChanged;
     if (docChanged) {
         attachSession(true);
+        if (sessionChanged) emit verticalMoveModeChanged();
         emit documentChanged();
         emit chartChanged();
         syncDirty();

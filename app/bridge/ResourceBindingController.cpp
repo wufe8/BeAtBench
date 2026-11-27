@@ -55,6 +55,7 @@ class CustomContentCommand final : public EditCommand {
         chart = m_after;
     }
     void invert(Chart& chart) override { chart = *m_before; }
+    ChangeSet changes() const override { return {false, false, true}; }
 };
 QString rawKey(const QString& source) {
     static const QRegularExpression tag(QStringLiteral("^#([^ \t:]+)"));

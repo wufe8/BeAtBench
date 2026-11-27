@@ -163,11 +163,12 @@ class ChartViewBindingSetup : public QObject {
         const int line = std::max(0, hit.value(QStringLiteral("sub_line")).toInt());
         auto* document = beatbench::edit::session_registry().by_id(sessionA);
         const bool ok = document->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-            hit.value(QStringLiteral("measure")).toUInt(),
-            beatbench::Rational(hit.value(QStringLiteral("num")).toInt(),
-                                hit.value(QStringLiteral("den")).toInt()),
-            beatbench::Lane{0, beatbench::LaneKind::Bgm, 0}, 1, false, beatbench::NoteKind::Normal,
-            static_cast<std::uint32_t>(line)));
+            beatbench::edit::NoteRef{hit.value(QStringLiteral("measure")).toUInt(),
+                                     beatbench::Rational(hit.value(QStringLiteral("num")).toInt(),
+                                                         hit.value(QStringLiteral("den")).toInt()),
+                                     beatbench::Lane{0, beatbench::LaneKind::Bgm, 0}, 1,
+                                     static_cast<std::uint32_t>(line)},
+            false, beatbench::NoteKind::Normal));
         bridgeA->refresh();
         return ok;
     }
@@ -347,8 +348,9 @@ class ChartViewBindingSetup : public QObject {
     Q_INVOKABLE bool addOverlayReferenceNote() {
         auto* document = beatbench::edit::session_registry().by_id(sessionB);
         const bool ok = document->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-            1u, beatbench::Rational(1, 2), beatbench::Lane{0, beatbench::LaneKind::Key, 2}, 110,
-            false, beatbench::NoteKind::Normal, 0));
+            beatbench::edit::NoteRef{1u, beatbench::Rational(1, 2),
+                                     beatbench::Lane{0, beatbench::LaneKind::Key, 2}, 110},
+            false, beatbench::NoteKind::Normal));
         bridgeB->refresh();  // must invalidate the underlay via contentChanged
         return ok;
     }
