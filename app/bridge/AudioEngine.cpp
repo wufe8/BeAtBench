@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <set>
 #include <utility>
@@ -580,11 +581,71 @@ void AudioEngine::setSourceDir(const QString& dir) {
 /// 设置谱面路径（AudioEngine 内部解析目录；QML 传 r.result.path）。
 void AudioEngine::setChartPath(const QString& path) {
     stopPreview();
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+    m_waveformRequested.clear();
     if (path.isEmpty()) {
         m_sourceDir.clear();
         return;
     }
     m_sourceDir = QFileInfo(path).absoluteDir().path();
+}
+
+void AudioEngine::requestSampleWaveform(const QString& file) {
+    if (file.isEmpty()) return;
+    if (m_waveforms.count(file)) return;
+    if (m_waveformRequested.contains(file)) return;
+    m_waveformRequested.insert(file);
+    const QString sourceDir = m_sourceDir;
+    // 线程模型：m_waveforms/m_waveformRequested 是 UI 线程容器；work 只解码，
+    // 路径解析也放在 work 内，paint 不再做 QFileInfo/exists。
+    auto slot = std::make_shared<std::shared_ptr<const beatbench::audio::WaveformPyramid>>();
+    m_waveformTasks.submit(
+        file,
+        [this, file, sourceDir, slot](AudioTaskRunner::Generation gen) {
+            if (m_waveformTasks.cancelled(gen)) return;
+            QString resolved = file;
+            if (QDir::isRelativePath(file) && !sourceDir.isEmpty())
+                resolved = QDir(sourceDir).filePath(file);
+            const QString path = AudioEngine::resolveAudioPath(resolved);
+            auto wf = std::make_shared<beatbench::audio::WaveformPyramid>();
+            if (!path.isEmpty()) {
+                const beatbench::audio::SampleCacheResult r = m_cache.get(path.toStdString());
+                if (r.ok && r.sample) {
+                    wf->build(r.sample->pcm().data(), r.sample->frameCount(), 2,
+                              r.sample->sampleRate);
+                    beatbench::audio::decoded_sample_release(r.sample);
+                }
+            }
+            *slot = std::move(wf);
+        },
+        [this, file, slot](AudioTaskRunner::Generation, std::exception_ptr error) {
+            m_waveformRequested.remove(file);
+            if (error || !slot || !*slot) {
+                // 解码/构建异常也缓存空金字塔：会话内不反复重试坏文件。
+                m_waveforms[file] = std::make_shared<beatbench::audio::WaveformPyramid>();
+            } else {
+                m_waveforms[file] = *slot;
+            }
+            emit sampleWaveformReady(file);
+        });
+}
+
+void AudioEngine::invalidateSampleWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveforms.clear();
+    m_waveformRequested.clear();
+}
+
+void AudioEngine::cancelPendingWaveforms() {
+    m_waveformTasks.cancelAll();
+    m_waveformRequested.clear();
+}
+
+std::shared_ptr<const beatbench::audio::WaveformPyramid> AudioEngine::sampleWaveform(
+    const QString& file) const {
+    const auto it = m_waveforms.find(file);
+    return it == m_waveforms.end() ? nullptr : it->second;
 }
 
 // —— M5 播放（PCM 渲染代理；零拷贝经 SamplePlayer 播出） ——
