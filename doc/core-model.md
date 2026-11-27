@@ -146,6 +146,9 @@ bgm `max(0, t0+gap)`。**“塞不下”即来自钳制**（保距刚性平移�
 
 ### 5. ghost 预览 / 后端命令
 
+- 整轨试听（#50）：选中后 `Space` 单选播单采样、多选按时间从红线到曲末试听
+  （筛选 chart 后离线渲染，独立 PCM 槽，不混 BGM；再按 Space 停）。无选中时
+  `Space` 仍是谱面播放/暂停。轨头全选见 #65。
 - 单 note 波形（#49）：`AudioEngine` 异步解码采样并构建 `WaveformPyramid`（按绝对路径缓存，
   `SampleCache` 复用）；`ChartViewItem` 只对“选中且当前视口可见”的 note 画，沿时间轴按采样
   时长展开、BGM 也画；工具条“波形”开关。无采样/解码失败不画。

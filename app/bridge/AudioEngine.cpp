@@ -72,7 +72,8 @@ AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend
     : QObject(parent),
       m_backend(std::move(backend)),
       m_playback(&m_player, 44100.0),
-      m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot) {
+      m_refPlayback(&m_player, 44100.0, beatbench::audio::kRefPcmSlot),
+      m_auditionPlayback(&m_player, 44100.0, beatbench::audio::kAuditionPcmSlot) {
     m_previewPool.setMaxThreadCount(2);
     loadSettings();
     m_renderCtx.player = &m_player;
@@ -108,6 +109,7 @@ AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend
                 emit playbackChanged();
                 emit playbackFinished();  // 完成信号（QML 状态栏/后续）
             }
+            if (slot == beatbench::audio::kAuditionPcmSlot) emit auditionChanged();
         }
         // M5 播放时钟：播放中 positionSec 持续变化 → playbackChanged（20Hz 状态栏刷新）。
         // 自然播完检测：reachedEnd → notifyEnded 复位状态机（否则状态卡 Playing →
@@ -128,6 +130,10 @@ AudioEngine::AudioEngine(std::unique_ptr<beatbench::audio::AudioBackend> backend
         if (m_refPlayback.playing()) {
             if (m_refPlayback.reachedEnd()) m_refPlayback.notifyEnded();
             emit refPlaybackChanged();
+        }
+        if (m_auditionPlayback.playing()) {
+            if (m_auditionPlayback.reachedEnd()) m_auditionPlayback.notifyEnded();
+            emit auditionChanged();
         }
     });
     poll->start();
@@ -267,6 +273,10 @@ void AudioEngine::stopAll() {
     if (m_refPlayback.playing()) {
         m_refPlayback.stop();
         emit refPlaybackChanged();
+    }
+    if (m_auditionPlayback.playing()) {
+        m_auditionPlayback.stop();
+        emit auditionChanged();
     }
     m_busy = false;
     emit busyChanged();
@@ -541,6 +551,7 @@ bool AudioEngine::startStream(const beatbench::audio::AudioSettings& settings, s
     m_renderCtx.deviceRate.store(rate);
     m_playback.setDeviceRate(rate);
     m_refPlayback.setDeviceRate(rate);
+    m_auditionPlayback.setDeviceRate(rate);
     m_renderCtx.ready.store(true, std::memory_order_release);
     m_initialized = true;
     return true;
@@ -584,6 +595,9 @@ void AudioEngine::setChartPath(const QString& path) {
     m_waveformTasks.cancelAll();
     m_waveforms.clear();
     m_waveformRequested.clear();
+    m_auditionPlayback.stop();
+    m_auditionPlayback.load(nullptr, 0.0);
+    emit auditionChanged();
     if (path.isEmpty()) {
         m_sourceDir.clear();
         return;
@@ -694,11 +708,20 @@ void AudioEngine::setChartSession(QObject* session) {
                     play();
                 }
             });
+    // 整轨试听：筛选渲染完成 → 装载独立 PCM 槽（#50）
+    connect(m_chartSession, &ChartSession::auditionReady, this, [this] {
+        if (m_chartSession)
+            setAuditionPcm(m_chartSession->auditionPcm(), m_chartSession->auditionSampleRate());
+    });
     // 编辑即停（M5 决策）：内容变化 → 停止播放（计划/渲染过期；下次起播用新版）
     connect(m_chartSession, &ChartSession::contentChanged, this, [this] {
         if (m_playback.playing()) {
             m_playback.stop();
             emit playbackChanged();
+        }
+        if (m_auditionPlayback.playing()) {
+            m_auditionPlayback.stop();
+            emit auditionChanged();
         }
         m_waitRender = false;
         emit waitRenderChanged();
@@ -867,6 +890,49 @@ void AudioEngine::rebuildDevices() {
         }
     }
     emit devicesChanged();
+}
+
+// —— 整轨试听（#50；独立 PCM 槽） ——
+
+void AudioEngine::setAuditionPcm(std::shared_ptr<const std::vector<float>> pcm, double sampleRate) {
+    m_auditionPlayback.load(std::move(pcm), sampleRate);
+    emit auditionChanged();
+}
+
+bool AudioEngine::auditionPlay() {
+    if (!m_initialized) {
+        m_statusText = QStringLiteral("音频不可用（后端初始化失败）");
+        emit statusTextChanged();
+        return false;
+    }
+    if (m_playback.playing()) {
+        m_playback.stop();
+        emit playbackChanged();
+    }
+    if (m_refPlayback.playing()) {
+        m_refPlayback.stop();
+        emit refPlaybackChanged();
+    }
+    if (!m_auditionPlayback.play(m_player.masterVolume())) {
+        m_statusText = QStringLiteral("试听尚无有效 PCM");
+        emit statusTextChanged();
+        return false;
+    }
+    emit auditionChanged();
+    return true;
+}
+
+void AudioEngine::auditionStop() {
+    m_auditionPlayback.stop();
+    emit auditionChanged();
+}
+
+bool AudioEngine::auditionToggle() {
+    if (m_auditionPlayback.playing()) {
+        auditionStop();
+        return false;
+    }
+    return auditionPlay();
 }
 
 // —— M6.1 参考音频（切音工作台预览；独立于谱面播放） ——

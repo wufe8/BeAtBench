@@ -179,6 +179,8 @@ if (Qt6Core_FOUND)
         ${CMAKE_SOURCE_DIR}/app/bridge/ResourceBindingController.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
     target_include_directories(resource_binding_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
@@ -195,6 +197,8 @@ if (Qt6Core_FOUND)
         ${CMAKE_SOURCE_DIR}/app/bridge/ProjectController.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
     target_include_directories(resource_relocation_controller_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
@@ -252,6 +256,8 @@ if (Qt6Core_FOUND)
         ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
     target_include_directories(pane_edit_context_test PRIVATE ${CMAKE_SOURCE_DIR}/app)
@@ -281,6 +287,8 @@ if (Qt6Core_FOUND)
         ${CMAKE_SOURCE_DIR}/app/bridge/PaneEditContext.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/EditUtils.cpp
@@ -296,6 +304,8 @@ if (Qt6Core_FOUND)
     add_executable(chart_history_controller_test chart_history_controller_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/DocumentService.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp
         ${CMAKE_SOURCE_DIR}/app/bridge/ChartHistoryController.cpp
@@ -312,6 +322,8 @@ if (Qt6Core_FOUND)
     target_compile_definitions(document_service_test PRIVATE BEATBENCH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     foreach(document_test project_controller_test document_service_test)
         target_sources(${document_test} PRIVATE
+            ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.cpp
+            ${CMAKE_SOURCE_DIR}/app/bridge/AudioTaskRunner.hpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
             ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
         target_link_libraries(${document_test} PRIVATE beatbench_audio)

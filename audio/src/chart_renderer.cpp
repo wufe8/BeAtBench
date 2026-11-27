@@ -161,7 +161,8 @@ void mix_sample(const DecodedSample& sample, double triggerSec, double rate, dou
 RenderResult render_chart_range(const beatbench::Chart& chart,
                                 const beatbench::TimingEngine& timing, SampleCache& cache,
                                 double sampleRate, double t0, double t1,
-                                const std::filesystem::path& sourceDir) {
+                                const std::filesystem::path& sourceDir,
+                                const std::function<bool()>& cancelled) {
     RenderResult res;
     res.audio.sampleRate = sampleRate;
     if (sampleRate <= 0.0) {
@@ -210,8 +211,13 @@ RenderResult render_chart_range(const beatbench::Chart& chart,
     std::sort(notes.begin(), notes.end(),
               [](const auto& a, const auto& b) { return a.triggerSec < b.triggerSec; });
 
-    // 渲染 [t0,t1)：单遍混入
+    // 渲染 [t0,t1)：单遍混入；协作式取消（后台长渲染的取消点，调用方轮询）
     for (const auto& ev : notes) {
+        if (cancelled && cancelled()) {
+            res.cancelled = true;
+            res.message = "已取消";
+            return res;  // ok=false：调用方丢弃部分结果
+        }
         // 覆盖判定：触发秒 + 采样长 必须 ≥ t0 且 触发秒 ≤ t1
         if (ev.file.empty()) continue;
         // 解码（cache 持有；宽字符路径——Windows 日文目录）

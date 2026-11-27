@@ -139,6 +139,22 @@ class AudioEngine : public QObject {
     Q_INVOKABLE void setWaitRenderSetting(bool v);
     bool waitRenderSetting() const { return m_waitRenderSetting; }
 
+    // ---- 整轨试听（#50：离线筛选渲染的 PCM，独立槽位） ----
+    Q_PROPERTY(bool auditionPlaying READ auditionPlaying NOTIFY auditionChanged)
+    Q_PROPERTY(qreal auditionPositionSec READ auditionPositionSec NOTIFY auditionChanged)
+    Q_PROPERTY(qreal auditionDurationSec READ auditionDurationSec NOTIFY auditionChanged)
+    Q_PROPERTY(bool auditionHasPcm READ auditionHasPcm NOTIFY auditionChanged)
+
+    /// 装载试听 PCM（ChartSession.renderAudition 完成后由 main/AudioEngine 连接调用）。
+    void setAuditionPcm(std::shared_ptr<const std::vector<float>> pcm, double sampleRate);
+    Q_INVOKABLE bool auditionPlay();
+    Q_INVOKABLE void auditionStop();
+    Q_INVOKABLE bool auditionToggle();
+    bool auditionPlaying() const { return m_auditionPlayback.playing(); }
+    qreal auditionPositionSec() const { return m_auditionPlayback.currentSec(); }
+    qreal auditionDurationSec() const { return m_auditionPlayback.durationSec(); }
+    bool auditionHasPcm() const { return m_auditionPlayback.hasLoaded(); }
+
     // ---- M6.1 参考音频（切音工作台：外部 stem.wav 预览播放/seek；与谱面播放独立） ----
     Q_PROPERTY(bool refPlaying READ refPlaying NOTIFY refPlaybackChanged)
     Q_PROPERTY(qreal refPositionSec READ refPositionSec NOTIFY refPlaybackChanged)
@@ -226,6 +242,7 @@ class AudioEngine : public QObject {
     void playbackFinished();
     /// M6.1 参考音频播放状态变化（refPlaying/refPositionSec/…）。
     void refPlaybackChanged();
+    void auditionChanged();
     /// M5 等待渲染状态变化。
     void waitRenderChanged();
     /// M5 waitRenderSetting 变化（设置面板）。
@@ -295,9 +312,10 @@ class AudioEngine : public QObject {
     beatbench::audio::PcmPlayback m_playback;  ///< PCM 播放状态机（UI 线程；设备率随流更新）
     // ---- M6.1 参考音频 ----
     beatbench::audio::PcmPlayback m_refPlayback;  ///< 参考音频（stem）预览状态机（独立于谱面播放）
-    ChartSession* m_chartSession = nullptr;       ///< 渲染 PCM 来源（ChartSession；不拥有）
-    bool m_waitRender = false;                    ///< 等待渲染中（renderFinished 后续播）
-    bool m_waitRenderSetting = false;             ///< 设置：Space 等待渲染完成（默认关）
+    beatbench::audio::PcmPlayback m_auditionPlayback;  ///< 整轨试听（#50，独立槽位）
+    ChartSession* m_chartSession = nullptr;            ///< 渲染 PCM 来源（ChartSession；不拥有）
+    bool m_waitRender = false;                         ///< 等待渲染中（renderFinished 后续播）
+    bool m_waitRenderSetting = false;                  ///< 设置：Space 等待渲染完成（默认关）
 };
 
 }  // namespace beatbench::app

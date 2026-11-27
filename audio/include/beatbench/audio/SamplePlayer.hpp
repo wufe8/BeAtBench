@@ -32,6 +32,8 @@ namespace beatbench::audio {
 inline constexpr int kPcmSlot = 8;
 /// kRefPcmSlot：参考音轨播放专用槽位（M6.1 切音工作台；与谱面 kPcmSlot 互不挤占）。
 inline constexpr int kRefPcmSlot = 7;
+/// kAuditionPcmSlot：整轨试听 PCM 专用槽位（#50；与谱面/参考音轨互不挤占）。
+inline constexpr int kAuditionPcmSlot = 6;
 
 class SamplePlayer {
    public:
