@@ -2,7 +2,7 @@
 # 组合验证（手动触发）：把声明的分支按顺序合到 <remote>/master，构建、ctest、GUI 冒烟。
 #
 # 定位：PR 仍以 master 为 base、彼此不是 GitHub 栈时的补偿控制；不替代单 PR 的 ci.yml。
-# 触发：Actions -> Integration -> Run workflow，branches 留空则只验证两个地基分支。
+# 触发：Actions -> Integration -> Run workflow，branches 必填。
 #
 # 用法示例（branches）：
 #   refactor/edit-foundation refactor/audio-foundation feat/vertical-lock
@@ -16,9 +16,8 @@ on:
   workflow_dispatch:
     inputs:
       branches:
-        description: '空格分隔的分支名（按合并顺序）；留空验证当前两条链的顶端与独立件'
-        required: false
-        default: ''
+        description: '空格分隔的分支名（按合并顺序）'
+        required: true
       remote:
         description: '分支所在 remote（fork 用 brightmeows；留 origin 则用本仓库）'
         required: false
@@ -37,12 +36,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06  # v4.5.0
         with:
           version: '6.11.2'
           arch: linux_gcc_64

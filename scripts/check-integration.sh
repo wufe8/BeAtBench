@@ -10,6 +10,7 @@
 #   BEATBENCH_INTEGRATION_APP=0 scripts/check-integration.sh   # 无 Qt，只构建 core/tests
 #
 # 说明:
+# - 分支列表必须显式传入；不维护默认列表，避免分支删除后静默跑错链。
 # - 合并顺序 = 参数顺序；冲突直接失败，不自动解决。
 # - 临时 worktree 在退出时删除；需要现场时用 --keep。
 # - GUI 冒烟需要 QT_PREFIX；无 Qt 时显式设 BEATBENCH_INTEGRATION_APP=0。
@@ -30,9 +31,8 @@ if [ "$#" -gt 0 ]; then
 elif [ -n "${INTEGRATION_BRANCHES:-}" ]; then
     read -r -a branches <<< "$INTEGRATION_BRANCHES"
 else
-    # 默认验证当前两条链的顶端 + 独立件；完整链用参数传入。
-    branches=("fix/onset-deterministic-tiebreak" "refactor/channel-map-dedup"
-              "feat/clipboard-pattern" "feat/audition-lanes")
+    echo "缺少分支列表：传分支参数或设置 INTEGRATION_BRANCHES" >&2
+    exit 2
 fi
 
 if [ "${#branches[@]}" -eq 0 ]; then
@@ -41,7 +41,8 @@ if [ "${#branches[@]}" -eq 0 ]; then
 fi
 
 if ! git fetch "$REMOTE" --prune; then
-    echo "⚠️  fetch 失败，使用现有 $REMOTE/* 引用继续（CI 应确保网络可用）" >&2
+    echo "fetch 失败: $REMOTE（拒绝用旧引用继续）" >&2
+    exit 1
 fi
 
 tmp_base="$(mktemp -d "${TMPDIR:-/tmp}/beatbench-integration.XXXXXX")"
@@ -67,7 +68,8 @@ for b in "${branches[@]}"; do
         exit 1
     fi
     echo "==> merge $b"
-    if ! git merge --no-ff --no-edit "$REMOTE/$b"; then
+    if ! git -c user.name="beatbench-integration" -c user.email="beatbench-integration@local" \
+        merge --no-ff --no-edit "$REMOTE/$b"; then
         echo "❌ 合并冲突: $b（用 --keep 保留现场）" >&2
         exit 1
     fi
