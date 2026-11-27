@@ -17,6 +17,14 @@
 
 namespace beatbench::edit {
 
+/// 编辑会话错误（协议层映射为稳定 error code）。
+enum class EditError : std::uint8_t { None, TimeLocked, LaneLocked };
+
+/// 纵向移动三态（GUI 编辑策略；会话状态不入 undo）。
+/// LaneOnly = 只换轨（拦 moves_time）；TimeOnly = 只改时间（拦 moves_lane）；
+/// Free = 自由。core 默认 Free 保证 CLI/脚本兼容；GUI 打开/新建后置 LaneOnly。
+enum class VerticalMoveMode : std::uint8_t { LaneOnly, TimeOnly, Free };
+
 /// 文档的磁盘文本格式（不属于 Chart、编辑事务或撤销栈）。空字段表示未识别或不适用。
 struct DocumentTextFormat {
     std::string encoding;     ///< ascii / sjis / utf8
@@ -93,6 +101,16 @@ class EditorSession {
     Selection& selection_mut() { return m_selection; }
     void set_selection(Selection sel) { m_selection = std::move(sel); }
 
+    /// 纵向移动三态（GUI 编辑策略；core 默认 Free 保证 CLI/脚本兼容，GUI 打开/新建后
+    /// 置 LaneOnly）。两把方向锁都由 exec 按 ChangeSet 的移动维度统一拦截；
+    /// 会话状态不入 undo 栈。
+    VerticalMoveMode vertical_move_mode() const { return m_vertical_move_mode; }
+    void set_vertical_move_mode(VerticalMoveMode mode) { m_vertical_move_mode = mode; }
+
+    /// 最近一次 exec 的错误（成功/普通失败 = None）。
+    EditError last_error() const { return m_last_error; }
+    const std::string& last_error_message() const { return m_last_error_message; }
+
     // —— 崩溃备份 / 自动保存（2026-09，用户决策：默认关自动保存，以手动保存 + 崩溃备份为主） ——
     // 机制：每次 exec/undo/redo 修改文档后调用 maybe_persist()：
     //   - backup（默认开）：把「修改后」chart 写到 path + ".bak"（崩溃时 .bak = 内存最新，
@@ -140,6 +158,10 @@ class EditorSession {
     DocumentTextFormat m_text_format;
     bool m_preserve_text_format = false;
     TextPersistHook m_persist_hook;
+    VerticalMoveMode m_vertical_move_mode =
+        VerticalMoveMode::Free;  ///< core 默认自由（CLI/脚本兼容）；GUI 打开/新建谱面时置 LaneOnly
+    EditError m_last_error = EditError::None;
+    std::string m_last_error_message;
     bool m_backup = true;
     bool m_autosave = false;
     std::string m_last_backup_error;
@@ -165,6 +187,7 @@ class PutNoteCommand : public EditCommand {
     std::string name() const override { return "note.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, true}; }
     std::string describe() const override;
 
    private:
@@ -198,8 +221,9 @@ class MoveNoteCommand : public EditCommand {
     std::string name() const override { return "note.move"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
-    bool changes_time() const override {
-        return m_from.measure != m_to_measure || m_from.pos != m_to_pos;
+    ChangeSet changes() const override {
+        return {m_from.measure != m_to_measure || m_from.pos != m_to_pos,
+                m_to_lane && *m_to_lane != m_from.lane, true};
     }
     bool merge_with(const EditCommand& next) override;
     std::string describe() const override;
@@ -234,6 +258,7 @@ class MoveLnPairCommand : public EditCommand {
     std::string name() const override { return "note.moveLnPair"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, true, true}; }
     std::string describe() const override;
 
    private:
@@ -253,6 +278,7 @@ class DeleteNoteCommand : public EditCommand {
     std::string name() const override { return "note.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, true}; }
     std::string describe() const override;
 
    private:
@@ -277,7 +303,7 @@ class QuantizeNoteCommand : public EditCommand {
     Rational target_pos() const { return m_new_pos; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
-    bool changes_time() const override { return true; }
+    ChangeSet changes() const override { return {true, false, true}; }
     std::string describe() const override;
 
    private:
@@ -305,6 +331,9 @@ class TransformNoteCommand : public EditCommand {
     std::string name() const override { return "note.transform"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override {
+        return {false, true, true};
+    }  ///< 镜像/旋转移键轨，锁「仅纵向」时拒绝
     std::string describe() const override;
 
    private:
@@ -339,6 +368,7 @@ class MetaEditCommand : public EditCommand {
     std::string name() const override { return "meta.edit"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -365,6 +395,7 @@ class RawLinesEditCommand : public EditCommand {
     std::string name() const override { return "meta.rawEdit"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {true, true, true}; }
     std::string describe() const override;
 
    private:
@@ -383,6 +414,7 @@ class BgaPutCommand : public EditCommand {
     std::string name() const override { return "bga.put"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -404,6 +436,7 @@ class BgaDeleteCommand : public EditCommand {
     std::string name() const override { return "bga.delete"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
+    ChangeSet changes() const override { return {false, false, false}; }
     std::string describe() const override;
 
    private:
@@ -425,7 +458,9 @@ class ConvertMetaToNoteCommand : public EditCommand {
     std::string name() const override { return "note.convertBack"; }
     void apply(Chart& chart) override;
     void invert(Chart& chart) override;
-    bool changes_time() const override { return m_measure != m_to_measure || m_pos != m_to_pos; }
+    ChangeSet changes() const override {
+        return {m_measure != m_to_measure || m_pos != m_to_pos, true, true};
+    }
     std::string describe() const override;
 
    private:

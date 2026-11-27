@@ -58,9 +58,7 @@ bool target_hidden(const Lane& lane, std::uint32_t sub_line, const std::set<std:
 std::uint32_t first_free_bgm_sub(const Chart& chart, std::uint32_t measure, const Rational& pos,
                                  const std::set<std::size_t>& moving,
                                  const std::set<std::string>& claimed) {
-    // 上界 = note 总数：每个 sub_line 至少要占一个 note，超过它必然无解。
-    const std::uint32_t max_sub = static_cast<std::uint32_t>(chart.notes.size());
-    for (std::uint32_t sub = 0; sub <= max_sub; ++sub) {
+    for (std::uint32_t sub = 0;; ++sub) {
         bool used = false;
         for (std::size_t i = 0; i < chart.notes.size(); ++i) {
             if (moving.count(i) != 0) continue;
@@ -75,7 +73,6 @@ std::uint32_t first_free_bgm_sub(const Chart& chart, std::uint32_t measure, cons
             claimed.count(lane_target_key(measure, pos, Lane{0, LaneKind::Bgm, 0}, sub)) == 0)
             return sub;
     }
-    return max_sub;
 }
 
 bool collides(const Chart& chart, const NoteRef& at, const Lane& lane, std::uint32_t sub_line,

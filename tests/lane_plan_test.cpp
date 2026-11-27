@@ -122,7 +122,7 @@ TEST(LanePlan, MovesLaneWithoutTimeChange) {
     s.load(c);
     auto cmd = beatbench::edit::make_lane_move_command(plan.moves[0]);
     ASSERT_TRUE(cmd);
-    EXPECT_FALSE(cmd->changes_time());
+    EXPECT_FALSE(cmd->changes().moves_time);
     ASSERT_TRUE(s.exec(std::move(cmd)));
     EXPECT_EQ(s.chart().notes[0].value.lane.index, 2u);
     EXPECT_EQ(s.chart().notes[0].measure, 1u);
@@ -263,24 +263,30 @@ TEST(LanePlan, ChangesTimeCapability) {
 
     beatbench::edit::MoveNoteCommand lane_only(NoteRef{1, Rational(0, 1), lane1, 1}, 1,
                                                Rational(0, 1), lane2);
-    EXPECT_FALSE(lane_only.changes_time());
+    EXPECT_FALSE(lane_only.changes().moves_time);
+    EXPECT_TRUE(lane_only.changes().moves_lane);
 
     beatbench::edit::MoveNoteCommand time_move(NoteRef{1, Rational(0, 1), lane1, 1}, 2,
                                                Rational(0, 1));
-    EXPECT_TRUE(time_move.changes_time());
+    EXPECT_TRUE(time_move.changes().moves_time);
+    EXPECT_FALSE(time_move.changes().moves_lane);
 
     beatbench::edit::QuantizeNoteCommand quantize(NoteRef{1, Rational(1, 8), lane1, 1}, 1, 4);
-    EXPECT_TRUE(quantize.changes_time());
+    EXPECT_TRUE(quantize.changes().moves_time);
+    EXPECT_TRUE(quantize.changes().changes_content);
 
     beatbench::edit::CompositeCommand composite;
     composite.add(
         std::make_unique<beatbench::edit::PutNoteCommand>(NoteRef{1, Rational(0, 1), lane1, 1}));
-    EXPECT_FALSE(composite.changes_time());
+    EXPECT_FALSE(composite.changes().moves_time);
+    EXPECT_TRUE(composite.changes().changes_content);
     composite.add(std::make_unique<beatbench::edit::MoveNoteCommand>(
         NoteRef{1, Rational(0, 1), lane1, 1}, 2, Rational(0, 1)));
-    EXPECT_TRUE(composite.changes_time());
+    EXPECT_TRUE(composite.changes().moves_time);
 
-    beatbench::edit::TimeShiftCommand shift(
-        std::make_unique<beatbench::edit::PutNoteCommand>(NoteRef{1, Rational(0, 1), lane1, 1}));
-    EXPECT_TRUE(shift.changes_time());
+    beatbench::edit::ShiftMarkerCommand shift(
+        std::make_unique<beatbench::edit::PutNoteCommand>(NoteRef{1, Rational(0, 1), lane1, 1}),
+        beatbench::edit::ChangeSet{true, false, false});
+    EXPECT_TRUE(shift.changes().moves_time);
+    EXPECT_TRUE(shift.changes().changes_content);
 }

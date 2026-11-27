@@ -209,6 +209,9 @@ void EditorSession::load(Chart chart) {
     m_text_format = {};
     m_preserve_text_format = false;
     m_last_backup_error.clear();
+    m_vertical_move_mode = VerticalMoveMode::Free;
+    m_last_error = EditError::None;
+    m_last_error_message.clear();
     m_generation = 0;
     m_next_generation = 1;
     m_clean_generation = 0;
@@ -224,7 +227,21 @@ void EditorSession::load(Chart chart, std::string path) {
 }
 
 bool EditorSession::exec(std::unique_ptr<EditCommand> cmd) {
+    m_last_error = EditError::None;
+    m_last_error_message.clear();
     if (!m_chart || !cmd) return false;
+    // 三态方向锁：仅横向拦改时间，仅纵向拦截换轨；自由不拦。
+    const ChangeSet changes = cmd->changes();
+    if (m_vertical_move_mode == VerticalMoveMode::LaneOnly && changes.moves_time) {
+        m_last_error = EditError::TimeLocked;
+        m_last_error_message = "仅横向：时间不可改（Ctrl+L 切换三态）";
+        return false;
+    }
+    if (m_vertical_move_mode == VerticalMoveMode::TimeOnly && changes.moves_lane) {
+        m_last_error = EditError::LaneLocked;
+        m_last_error_message = "仅纵向：轨道不可改（Ctrl+L 切换三态）";
+        return false;
+    }
     Chart before = *m_chart;  // 失败回滚快照（防御性；命令应极少失败）
     try {
         cmd->apply(*m_chart);
@@ -232,8 +249,9 @@ bool EditorSession::exec(std::unique_ptr<EditCommand> cmd) {
         *m_chart = std::move(before);
         return false;
     }
-    // LN 推导（自下而上）：文档变更后统一重建 ln_pair（编辑命令不再各自维护）。
-    rebuild_ln_pairs(*m_chart);
+    // LN 推导（自下而上）：只有 note 图/顺序/身份变化的命令才重建 ln_pair；
+    // meta/BGA/timing/采样定义变更不再触发全谱配对。
+    if (changes.changes_content) rebuild_ln_pairs(*m_chart);
     // 连续操作可并入栈顶，但：刚保存的状态、以及 undo/redo 之后的新编辑都不能合并，
     // 否则无法撤回到保存点，且代际号会与清洁点撞车（保存→撤销→再改被误判干净）。
     const bool can_merge = m_redo.empty() && !m_undo.empty() &&
@@ -255,13 +273,16 @@ bool EditorSession::exec(std::unique_ptr<EditCommand> cmd) {
 }
 
 bool EditorSession::undo() {
+    m_last_error = EditError::None;
+    m_last_error_message.clear();
     if (m_undo.empty() || !m_chart || m_undo.size() != m_undo_generation.size()) return false;
     auto cmd = std::move(m_undo.back());
     const std::uint64_t gen_after = m_undo_generation.back();
     m_undo.pop_back();
     m_undo_generation.pop_back();
+    const bool rebuild = cmd->changes().changes_content;
     cmd->invert(*m_chart);
-    rebuild_ln_pairs(*m_chart);
+    if (rebuild) rebuild_ln_pairs(*m_chart);
     m_redo.push_back(std::move(cmd));
     m_redo_generation.push_back(gen_after);
     m_generation = m_undo_generation.empty() ? 0 : m_undo_generation.back();
@@ -271,13 +292,16 @@ bool EditorSession::undo() {
 }
 
 bool EditorSession::redo() {
+    m_last_error = EditError::None;
+    m_last_error_message.clear();
     if (m_redo.empty() || !m_chart || m_redo.size() != m_redo_generation.size()) return false;
     auto cmd = std::move(m_redo.back());
     const std::uint64_t gen_after = m_redo_generation.back();
     m_redo.pop_back();
     m_redo_generation.pop_back();
+    const bool rebuild = cmd->changes().changes_content;
     cmd->apply(*m_chart);
-    rebuild_ln_pairs(*m_chart);
+    if (rebuild) rebuild_ln_pairs(*m_chart);
     m_undo.push_back(std::move(cmd));
     m_undo_generation.push_back(gen_after);
     m_generation = gen_after;
@@ -809,10 +833,10 @@ std::string CompositeCommand::name() const {
     return "composite." + m_commands.front()->name();
 }
 
-bool CompositeCommand::changes_time() const {
-    for (const auto& c : m_commands)
-        if (c->changes_time()) return true;
-    return false;
+ChangeSet CompositeCommand::changes() const {
+    ChangeSet out;
+    for (const auto& c : m_commands) out = out | c->changes();
+    return out;
 }
 
 void CompositeCommand::apply(Chart& chart) {
@@ -899,23 +923,27 @@ std::string CompositeCommand::describe() const {
     return "批量操作（" + std::to_string(m_commands.size()) + " 项）";
 }
 
-// ---------- TimeShiftCommand ----------
+// ---------- ShiftMarkerCommand ----------
 
-TimeShiftCommand::TimeShiftCommand(std::unique_ptr<EditCommand> inner)
-    : m_inner(std::move(inner)) {}
+ShiftMarkerCommand::ShiftMarkerCommand(std::unique_ptr<EditCommand> inner, ChangeSet changes)
+    : m_inner(std::move(inner)), m_changes(changes) {}
 
-std::string TimeShiftCommand::name() const { return m_inner ? m_inner->name() : "time.shift"; }
+std::string ShiftMarkerCommand::name() const { return m_inner ? m_inner->name() : "shift.marker"; }
 
-void TimeShiftCommand::apply(Chart& chart) {
+ChangeSet ShiftMarkerCommand::changes() const {
+    return m_inner ? (m_inner->changes() | m_changes) : m_changes;
+}
+
+void ShiftMarkerCommand::apply(Chart& chart) {
     if (m_inner) m_inner->apply(chart);
 }
 
-void TimeShiftCommand::invert(Chart& chart) {
+void ShiftMarkerCommand::invert(Chart& chart) {
     if (m_inner) m_inner->invert(chart);
 }
 
-std::string TimeShiftCommand::describe() const {
-    return m_inner ? m_inner->describe() : "时间变更";
+std::string ShiftMarkerCommand::describe() const {
+    return m_inner ? m_inner->describe() : "维度变更";
 }
 
 // ---------- Selection ----------

@@ -38,6 +38,7 @@ Item {
             verify(bindingFixture.activate(false))
             source = createTemporaryObject(surface, scene)
             verify(source !== null)
+            source.verticalMoveMode = 2  // 本组用例验证自由 2D 拖动语义
             verify(waitForRendering(scene))
             source.viewportItem.scrollToStart()
             scene.otherReleases = 0

@@ -157,6 +157,34 @@ int ChartSession::playKeyCount() const {
     return beatbench::chart_mode_key_count(currentChart->mode_id.value_or("sp7k")).value_or(7);
 }
 
+void ChartSession::setVerticalMoveMode(int mode) {
+    auto& s = beatbench::edit::session_registry().active();
+    if (!s.has_chart()) return;
+    switch (mode) {
+        case 1:
+            s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+            break;
+        case 2:
+            s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::Free);
+            break;
+        default:
+            s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+            break;
+    }
+}
+
+int ChartSession::verticalMoveMode() const {
+    switch (beatbench::edit::session_registry().active().vertical_move_mode()) {
+        case beatbench::edit::VerticalMoveMode::TimeOnly:
+            return 1;
+        case beatbench::edit::VerticalMoveMode::Free:
+            return 2;
+        case beatbench::edit::VerticalMoveMode::LaneOnly:
+            break;
+    }
+    return 0;
+}
+
 void ChartSession::refresh() {
     auto& reg = beatbench::edit::session_registry();
     const std::string sid =
@@ -164,9 +192,11 @@ void ChartSession::refresh() {
     const auto* s = reg.by_id(sid);
     const beatbench::Chart* c = s && s->has_chart() ? &s->chart() : nullptr;
     const bool pathChanged = (s ? QString::fromStdString(s->path()) : QString()) != m_path;
-    const bool docChanged = (sid != m_sessionId) || (c != m_chart) || pathChanged;
+    const bool sessionChanged = (sid != m_sessionId);
+    const bool docChanged = sessionChanged || (c != m_chart) || pathChanged;
     if (docChanged) {
         attachSession(true);
+        if (sessionChanged) emit verticalMoveModeChanged();
         emit documentChanged();
         emit chartChanged();
         syncDirty();

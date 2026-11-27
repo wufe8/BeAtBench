@@ -460,6 +460,7 @@ class FailingTransformBatchCommand : public EditCommand {
     std::string name() const override { return "test.fail"; }
     void apply(Chart&) override { throw std::runtime_error("batch rollback"); }
     void invert(Chart&) override {}
+    ChangeSet changes() const override { return {}; }
 };
 
 }  // namespace

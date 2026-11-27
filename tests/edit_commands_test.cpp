@@ -970,3 +970,288 @@ TEST(EditCommands, NoteDeleteSelectionIsSingleUndo) {
     ASSERT_TRUE(session.undo());
     EXPECT_EQ(session.chart().notes.size(), before);
 }
+
+// —— 纵向移动锁（GUI 策略；命令层只拦时间变化） ——
+
+TEST(EditCommands, VerticalMoveLockRejectsTimeChangesButAllowsLaneChange) {
+    auto& session = global_editor_session();
+    session.load(make_chart());
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+
+    // 纯换轨（时间不变）允许
+    Json lane_move = Json::object();
+    lane_move.set("from", note_sel_item(session.chart().notes[0]));
+    Json to_lane = Json::object();
+    to_lane.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    to_lane.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "key");
+    lane.set("index", 4);
+    to_lane.set("lane", std::move(lane));
+    lane_move.set("to", std::move(to_lane));
+    Json moves = Json::array();
+    moves.push_back(std::move(lane_move));
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+    Json resp = global_registry().dispatch(req);
+    ASSERT_TRUE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(session.chart().notes[0].value.lane.index, 4);
+
+    // 改时间（时间坐标变化）拒绝
+    Json time_move = Json::object();
+    time_move.set("from", note_sel_item(session.chart().notes[1]));
+    Json to_time = Json::object();
+    to_time.set("measure", 2);
+    Json pos2 = Json::object();
+    pos2.set("num", 0);
+    pos2.set("den", 1);
+    to_time.set("pos", std::move(pos2));
+    time_move.set("to", std::move(to_time));
+    Json moves2 = Json::array();
+    moves2.push_back(std::move(time_move));
+    Json req2 = Json::object();
+    req2.set("command", "note.move");
+    Json args2 = Json::object();
+    args2.set("moves", std::move(moves2));
+    req2.set("args", std::move(args2));
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_FALSE(resp2.at("ok").as_bool()) << resp2.dump();
+    EXPECT_EQ(resp2.at("error").at("code").as_str(), "time_locked");
+
+    // 解锁后同一移动允许
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::Free);
+    const Json resp3 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp3.at("ok").as_bool()) << resp3.dump();
+}
+
+TEST(EditCommands, VerticalMoveLockBlocksPasteAndQuantize) {
+    auto& session = global_editor_session();
+    session.load(make_chart());
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+    const std::size_t before = session.chart().notes.size();
+    const std::size_t undo_before = session.undo_depth();
+
+    Json paste_args = Json::object();
+    Json lines = Json::array();
+    lines.push_back("#00111:01000000");
+    paste_args.set("lines", std::move(lines));
+    paste_args.set("target_measure", 3);
+    Json paste_req = Json::object();
+    paste_req.set("command", "clipboard.paste");
+    paste_req.set("args", std::move(paste_args));
+    const Json paste_resp = global_registry().dispatch(paste_req);
+    ASSERT_FALSE(paste_resp.at("ok").as_bool()) << paste_resp.dump();
+    EXPECT_EQ(paste_resp.at("error").at("code").as_str(), "time_locked");
+    EXPECT_EQ(session.chart().notes.size(), before);
+    EXPECT_EQ(session.undo_depth(), undo_before);
+
+    Json quant_args = Json::object();
+    Json sel = Json::array();
+    sel.push_back(note_sel_item(session.chart().notes[0]));
+    quant_args.set("selection", std::move(sel));
+    Json snap = Json::object();
+    snap.set("num", 1);
+    snap.set("den", 4);
+    quant_args.set("snap", std::move(snap));
+    Json quant_req = Json::object();
+    quant_req.set("command", "note.quantize");
+    quant_req.set("args", std::move(quant_args));
+    const Json quant_resp = global_registry().dispatch(quant_req);
+    ASSERT_FALSE(quant_resp.at("ok").as_bool()) << quant_resp.dump();
+    EXPECT_EQ(quant_resp.at("error").at("code").as_str(), "time_locked");
+    EXPECT_EQ(session.undo_depth(), undo_before);
+}
+
+TEST(EditCommands, LoadResetsVerticalMoveMode) {
+    EditorSession s;
+    s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+    s.load(make_chart());
+    // core 默认自由（CLI/脚本兼容）；GUI 在 openChart/new 后自行置 LaneOnly
+    EXPECT_EQ(s.vertical_move_mode(), beatbench::edit::VerticalMoveMode::Free);
+    s.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+    s.load(make_chart());
+    EXPECT_EQ(s.vertical_move_mode(), beatbench::edit::VerticalMoveMode::Free);
+}
+
+TEST(EditCommands, VerticalMoveLockAllowsBgaLayerButBlocksTime) {
+    Chart c = make_chart();
+    Event<Bga> bga{1, Rational(0, 1), {}};
+    bga.value.layer = 0;
+    bga.value.image.id = 5;
+    c.bga_events.push_back(bga);
+    auto& session = global_editor_session();
+    session.load(std::move(c));
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+
+    auto move = [&](int from_layer, std::uint32_t to_measure, int to_layer) {
+        Json args = Json::object();
+        Json from = Json::object();
+        from.set("layer", static_cast<std::int64_t>(from_layer));
+        from.set("measure", static_cast<std::int64_t>(1));
+        Json pos = Json::object();
+        pos.set("num", static_cast<std::int64_t>(0));
+        pos.set("den", static_cast<std::int64_t>(1));
+        from.set("pos", std::move(pos));
+        args.set("from", std::move(from));
+        Json to = Json::object();
+        to.set("layer", static_cast<std::int64_t>(to_layer));
+        to.set("measure", static_cast<std::int64_t>(to_measure));
+        Json tpos = Json::object();
+        tpos.set("num", static_cast<std::int64_t>(0));
+        tpos.set("den", static_cast<std::int64_t>(1));
+        to.set("pos", std::move(tpos));
+        args.set("to", std::move(to));
+        Json req = Json::object();
+        req.set("command", "bga.move");
+        req.set("args", std::move(args));
+        return global_registry().dispatch(req);
+    };
+
+    // 同时间换图层：允许
+    const Json layer_resp = move(0, 1, 1);
+    ASSERT_TRUE(layer_resp.at("ok").as_bool()) << layer_resp.dump();
+    ASSERT_EQ(session.chart().bga_events.size(), 1u);
+    EXPECT_EQ(session.chart().bga_events[0].value.layer, 1);
+
+    // 改时间：拒绝
+    const auto undo_before = session.undo_depth();
+    const Json time_resp = move(1, 2, 2);
+    ASSERT_FALSE(time_resp.at("ok").as_bool()) << time_resp.dump();
+    EXPECT_EQ(time_resp.at("error").at("code").as_str(), "time_locked");
+    EXPECT_EQ(session.undo_depth(), undo_before);
+}
+
+TEST(EditCommands, TimeOnlyModeBlocksLaneChanges) {
+    auto& session = global_editor_session();
+    session.load(make_chart());
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+
+    // 纯换轨：拒绝（lane_locked）
+    Json lane_move = Json::object();
+    lane_move.set("from", note_sel_item(session.chart().notes[0]));
+    Json to = Json::object();
+    to.set("measure", 1);
+    Json pos = Json::object();
+    pos.set("num", 0);
+    pos.set("den", 1);
+    to.set("pos", std::move(pos));
+    Json lane = Json::object();
+    lane.set("player", 0);
+    lane.set("kind", "key");
+    lane.set("index", 4);
+    to.set("lane", std::move(lane));
+    lane_move.set("to", std::move(to));
+    Json moves = Json::array();
+    moves.push_back(std::move(lane_move));
+    Json req = Json::object();
+    req.set("command", "note.move");
+    Json args = Json::object();
+    args.set("moves", std::move(moves));
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_FALSE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("error").at("code").as_str(), "lane_locked");
+    EXPECT_EQ(session.chart().notes[0].value.lane.index, 1);
+
+    // 改时间：放行（TimeOnly 语义）——移 notes[0] 到 m2
+    Json time_move = Json::object();
+    time_move.set("from", note_sel_item(session.chart().notes[0]));
+    Json to_time = Json::object();
+    to_time.set("measure", 2);
+    Json pos2 = Json::object();
+    pos2.set("num", 0);
+    pos2.set("den", 1);
+    to_time.set("pos", std::move(pos2));
+    time_move.set("to", std::move(to_time));
+    Json moves2 = Json::array();
+    moves2.push_back(std::move(time_move));
+    Json req2 = Json::object();
+    req2.set("command", "note.move");
+    Json args2 = Json::object();
+    args2.set("moves", std::move(moves2));
+    req2.set("args", std::move(args2));
+    const Json resp2 = global_registry().dispatch(req2);
+    ASSERT_TRUE(resp2.at("ok").as_bool()) << resp2.dump();
+    // move 后容器按 (measure,pos) 重排：按集合性质断言（存在 m2 pos0 的 note）
+    bool moved_to_m2 = false;
+    for (const auto& e : session.chart().notes) {
+        if (e.measure == 2 && e.pos == Rational(0, 1)) moved_to_m2 = true;
+    }
+    EXPECT_TRUE(moved_to_m2);
+
+    // 切回仅横向：纯换轨放行（from 取当前容器首位；同位换轨 = 时间不变）
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::LaneOnly);
+    Json lane_move2 = Json::object();
+    lane_move2.set("from", note_sel_item(session.chart().notes[0]));
+    Json to2 = Json::object();
+    to2.set("measure", 1);
+    Json pos3 = Json::object();
+    pos3.set("num", 1);
+    pos3.set("den", 2);
+    to2.set("pos", std::move(pos3));
+    Json lane2 = Json::object();
+    lane2.set("player", 0);
+    lane2.set("kind", "key");
+    lane2.set("index", 4);
+    to2.set("lane", std::move(lane2));
+    lane_move2.set("to", std::move(to2));
+    Json moves3 = Json::array();
+    moves3.push_back(std::move(lane_move2));
+    Json req3 = Json::object();
+    req3.set("command", "note.move");
+    Json args3 = Json::object();
+    args3.set("moves", std::move(moves3));
+    req3.set("args", std::move(args3));
+    const Json resp3 = global_registry().dispatch(req3);
+    ASSERT_TRUE(resp3.at("ok").as_bool()) << resp3.dump();
+    // move 后容器重排：按集合性质断言（存在 lane key4 的 note）
+    bool lane4_present = false;
+    for (const auto& e : session.chart().notes) {
+        if (e.value.lane.kind == beatbench::LaneKind::Key && e.value.lane.index == 4)
+            lane4_present = true;
+    }
+    EXPECT_TRUE(lane4_present);
+}
+
+TEST(EditCommands, TimeOnlyModeBlocksBgaLayerMove) {
+    Chart c = make_chart();
+    Event<Bga> bga{1, Rational(0, 1), {}};
+    bga.value.layer = 0;
+    bga.value.image.id = 5;
+    c.bga_events.push_back(bga);
+    auto& session = global_editor_session();
+    session.load(std::move(c));
+    // 仅纵向（TimeOnly）：BGA 同时间换图层 = 横向变更，拒绝（lane_locked）
+    session.set_vertical_move_mode(beatbench::edit::VerticalMoveMode::TimeOnly);
+    Json args = Json::object();
+    Json from = Json::object();
+    from.set("layer", static_cast<std::int64_t>(0));
+    from.set("measure", static_cast<std::int64_t>(1));
+    Json fpos = Json::object();
+    fpos.set("num", 0);
+    fpos.set("den", 1);
+    from.set("pos", std::move(fpos));
+    args.set("from", std::move(from));
+    Json to = Json::object();
+    to.set("layer", static_cast<std::int64_t>(1));
+    to.set("measure", static_cast<std::int64_t>(1));
+    Json tpos = Json::object();
+    tpos.set("num", 0);
+    tpos.set("den", 1);
+    to.set("pos", std::move(tpos));
+    args.set("to", std::move(to));
+    Json req = Json::object();
+    req.set("command", "bga.move");
+    req.set("args", std::move(args));
+    const Json resp = global_registry().dispatch(req);
+    ASSERT_FALSE(resp.at("ok").as_bool()) << resp.dump();
+    EXPECT_EQ(resp.at("error").at("code").as_str(), "lane_locked");
+    EXPECT_EQ(session.chart().bga_events[0].value.layer, 0);
+}
