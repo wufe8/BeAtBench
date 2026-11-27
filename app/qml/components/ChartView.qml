@@ -73,6 +73,10 @@ Item {
     property bool showExtras: false      // 更多轨道（BGA 图层通道列，游玩轨与背景轨之间）
     property bool hideSecondaryChannels: false
     property bool showGrid: true         // 槽位弱线显示开关（「网格」按钮；吸附不依赖此开关）
+    /// 选中 note 的采样波形（#49；默认开）
+    property bool showNoteWaveforms: true
+    /// 避免 ChartViewItem.audioEngine 绑定自引用（QML 作用域：同名属性会解析到自己）
+    property var audioEngineRef: typeof audioEngine !== "undefined" ? audioEngine : null
     /// 当前缩放（相对默认 96px 小节高度；工具条显示用）
     readonly property int zoomPercent: Math.round(root.measureHeight / 96 * 100)
     // ---- 编辑接线（M3） ----
@@ -147,6 +151,8 @@ Item {
         referenceOverlayOpacity: root.referenceOverlayOpacity
         referenceOverlayHideSecondaryChannels: root.referenceOverlayHideSecondaryChannels
         theme: Theme
+        audioEngine: root.audioEngineRef
+        showNoteWaveforms: root.showNoteWaveforms
         measureHeight: root.measureHeight
         topHigh: root.topHigh
         snapNum: root.snapNum
