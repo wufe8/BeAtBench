@@ -2,6 +2,13 @@
 
 本文件记录 BeAtBench 对各发布版本的用户可见变更。版本号遵循语义化版本（major.minor.patch）；仓库规范见 `doc/04`。
 
+## [0.5.1](https://github.com/wufe8/BeAtBench/compare/v0.5.0...v0.5.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **bms:** adapt CP932 tables to current master ([765986c](https://github.com/wufe8/BeAtBench/commit/765986c141bf1d4d2b969fbfcc02dbac98845f03))
+
 ## [0.5.0](https://github.com/wufe8/BeAtBench/compare/v0.4.2...v0.5.0) (2026-11-26)
 
 
