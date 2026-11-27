@@ -335,6 +335,24 @@ if (Qt6Core_FOUND)
     add_test(NAME slice_workspace_tests COMMAND slice_workspace_test)
     set_tests_properties(slice_workspace_tests PROPERTIES TIMEOUT 20)
 
+    # 键盘快速摆音（issue #46）：控件桥 + 活动 EditorSession；不启 GUI/音频设备。
+    find_package(Qt6 COMPONENTS Gui QUIET)
+    if(Qt6Gui_FOUND)
+    add_executable(quick_place_controller_test quick_place_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/QuickPlaceController.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/QuickPlaceController.hpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.cpp
+        ${CMAKE_SOURCE_DIR}/app/bridge/ChartSession.hpp)
+    target_include_directories(quick_place_controller_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/app ${CMAKE_SOURCE_DIR}/core/include)
+    target_link_libraries(quick_place_controller_test PRIVATE
+        beatbench_core beatbench_audio Qt6::Core Qt6::Gui GTest::gtest_main)
+    set_target_properties(quick_place_controller_test PROPERTIES AUTOMOC ON)
+    beatbench_set_warnings(quick_place_controller_test)
+    add_test(NAME quick_place_controller_tests COMMAND quick_place_controller_test)
+    set_tests_properties(quick_place_controller_tests PROPERTIES TIMEOUT 20)
+    endif()
+
     add_executable(ui_action_registry_test ui_action_registry_test.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.cpp
         ${CMAKE_SOURCE_DIR}/app/bridge/UiActionRegistry.hpp)  # Q_OBJECT 头须显式列入（AUTOMOC 扫描不可靠）

@@ -61,6 +61,17 @@ ApplicationWindow {
     property bool metaDraftDirty: false
     /// 菜单/工具条 enabled 绑定重算（uiActions.stateChanged +1）。Shortcut.sequence 直接读 shortcut()。
     property int uiStateTick: 0
+    property int modalDepth: 0
+    readonly property bool modalOpen: modalDepth > 0
+    property int popupDepth: 0
+    readonly property bool popupOpen: popupDepth > 0
+    /// 输入门控单一条件源：文本焦点、模态框、弹层菜单任一存在即阻断轨键。
+    QtObject {
+        id: inputGate
+        readonly property bool blocked: window.textInputFocused || window.modalOpen ||
+                                         window.popupOpen
+        onBlockedChanged: window.syncQuickPlaceState()
+    }
     property string statusText: qsTr("就绪")
     property string currentSampleId: ""  // 当前采样（会话状态，M3 放置落点）
     property string currentBmpId: ""     // 当前 #BMP（视口 BGA 列放置用；BGA 面板行点击设置）
@@ -263,6 +274,7 @@ ApplicationWindow {
     /// 改用 TextInput/TextField 特有的 inputMethodHints 属性判断。
     readonly property bool textInputFocused:
         window.activeFocusItem && "inputMethodHints" in window.activeFocusItem
+    onTextInputFocusedChanged: syncQuickPlaceState()
 
     /// 释放文本框焦点（2026-09）：点击编辑区/空白时，把焦点从文本框移走，避免快捷键被文本框吞掉。
     function clearTextFocus() {
@@ -919,6 +931,16 @@ ApplicationWindow {
                     ToolTip.text: qsTr("仅横向=只换轨；仅纵向=只改时间；自由=2D。"
                                      + "Ctrl+L 在仅横向与自由之间切换；每个文档默认仅横向")
                 }
+                Label { text: qsTr("摆音"); color: Theme.textFaint
+                        font.pixelSize: Theme.fsTiny; padding: 4 }
+                BbComboBox {
+                    model: [qsTr("单手换边"), qsTr("双手固定")]
+                    currentIndex: typeof quickPlace !== "undefined" && quickPlace ? quickPlace.preset : 0
+                    onActivated: (idx) => { if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.setPreset(idx) }
+                    Layout.preferredWidth: 110
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("快速摆音键位：单手换边 = G 切换 1P/2P；双手固定 = 右手区直接对应 2P")
+                }
                 Item { Layout.fillWidth: true }
                 // LN 选取模式（默认关）：勾选后点选 LN 任一段，自动选中配对两端（可整体移动/删除）
                 BbCheckBox {
@@ -1173,6 +1195,17 @@ ApplicationWindow {
                     font.pixelSize: Theme.fsSmall
                     font.bold: !window.verticalMoveLocked
                 }
+                // 快速摆音目标侧（DP/Battle 单手预设）：状态栏常驻，避免按错边。
+                Label {
+                    visible: typeof quickPlace !== "undefined" && quickPlace && chartMeta !== null &&
+                             quickPlace.preset === 0 &&
+                             (window.chartMode === "dp" || window.chartMode === "battle")
+                    text: quickPlace.side === 0 ? "1P" : "2P"
+                    color: Theme.accent
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    font.bold: true
+                }
                 // —— 固定长度令牌（右区右段，right-aligned，自然宽度不截断）：SP7K/格式/编码 ——
                 // M5 收尾 2026-09：有播放头（已渲染/已播放，playheadSec>=0）→ 时间/小节 = **播放头**
                 // （随播放推进；暂停停在播放位置，无视"跟随"开关）；未渲染（playheadSec<0）→ 视口光标。
@@ -1245,6 +1278,23 @@ ApplicationWindow {
     }
     function toggleVerticalMove() {
         setVerticalMoveMode(window.verticalMoveMode === 0 ? 2 : 0)
+    }
+    /// 快速摆音门控：编辑页 + 有谱面；文本焦点让行。selection 变化由 onSelectionRefsChanged 同步。
+    function syncQuickPlaceState() {
+        if (typeof quickPlace === "undefined" || !quickPlace) return
+        quickPlace.setEnabled(currentPage === 0 && chartMeta !== null)
+        quickPlace.setInputBlocked(inputGate.blocked)
+        if (typeof editPage !== "undefined" && editPage && editPage.activeView &&
+                editPage.activeView.hiddenColumns)
+            quickPlace.setHiddenLanes(editPage.activeView.hiddenColumns)
+        else
+            quickPlace.setHiddenLanes([])
+    }
+    Connections {
+        target: typeof quickPlace !== "undefined" ? quickPlace : null
+        function onStatusMessage(msg) { window.setStatus(msg) }
+        function onSelectionUpdated(refs) { window.selectionRefs = refs }
+        function onEdited() { refreshLint() }
     }
     /// LN 放置提示是否该显示（当前为 LN 工具 + 已打开谱面）。
     function lnHintActive() { return window.editorTool === "ln" && window.chartMeta !== null }
@@ -2192,6 +2242,7 @@ ApplicationWindow {
     /// M7：切到**已在会话中打开**的谱面——不重新读盘（保护未保存修改；审查稿 P0）。
     /// 与 openChart 的区别：只换活动会话 + 用内存态刷新各面板。
     function adoptChart(path) {
+        if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.cancel()
         var d = JSON.parse(beatbench.dispatch(JSON.stringify({ command: "session.dirty", args: {} })))
         if (!d.ok || !d.result.has_chart) {
             window.statusText = qsTr("切换失败：未加载谱面")
@@ -2406,6 +2457,7 @@ ApplicationWindow {
             statusClearTimer.restart()
             return
         }
+        if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.cancel()
         window.chartPath = ""
         window.chartMode = mode || "sp7k"
         window.verticalMoveMode = 0
@@ -2418,6 +2470,7 @@ ApplicationWindow {
                              "BPM": "130", "PLAYLEVEL": "", "RANK": "",
                              "TOTAL": "", "DIFFICULTY": "" }
         window.currentBpmValue = 130
+        if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.cancel()
         window.pendingLnHead = null
         window.currentSampleId = ""
         window.currentBmpId = ""
@@ -2682,12 +2735,18 @@ ApplicationWindow {
         uiActions.setChecked("view.page.test", currentPage === 2)
         uiActions.setChecked("view.page.project", currentPage === 3)
     }
-    onChartMetaChanged: { updateActionStates(); updateCheckedStates() }
+    onChartMetaChanged: { updateActionStates(); updateCheckedStates(); syncQuickPlaceState() }
     onSelectionRefsChanged: {
         // Selection replacement/removal invalidates the previous note audition only.
         if (typeof audioEngine !== "undefined" && audioEngine) audioEngine.stopPreview()
         updateActionStates()
         updateCheckedStates()
+        if (typeof quickPlace !== "undefined" && quickPlace) quickPlace.setSelection(window.selectionRefs)
+        // 选择变化：作废旧整轨试听渲染/播放，避免旧选择结果回来播放。
+        if (typeof audioEngine !== "undefined" && audioEngine && audioEngine.auditionPlaying)
+            audioEngine.auditionStop()
+        if (typeof chartSession !== "undefined" && chartSession && chartSession.cancelAudition)
+            chartSession.cancelAudition()
     }
     onClipboardLinesChanged: { updateActionStates(); updateCheckedStates() }
     onCurrentPageChanged: {
@@ -2696,6 +2755,7 @@ ApplicationWindow {
         updateCheckedStates()
         // M7：进项目页 → 重新采集「已打开 / 未保存」状态（§9.2）
         if (currentPage === 3) project.refreshOpenStates()
+        syncQuickPlaceState()
         // M6.1 页切换音频协调：进切音页 → 谱面播放暂停（共用内核 kPcmSlot，互斥）；
         // 离开切音页 → 参考播放停止（退出切音页即静音）
         if (typeof audioEngine === "undefined" || !audioEngine) return
