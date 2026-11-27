@@ -20,4 +20,10 @@ std::optional<BmsChannelRule> bms_channel_rule_for(std::string_view mode, std::s
 /// 语义与 bms_channel_for 相同，mode 决定用哪张表（pms9k → 9key，其余 → 7key）。
 std::string bms_channel_for_mode(std::string_view mode, const Lane& lane, bool ln, NoteKind kind);
 
+/// 物件能否在指定模式写出（格式能力谓词；反向映射非空即真）。
+/// 模式预检（chart.set_mode）、变换校验、写回兜底的单一入口。
+inline bool bms_can_represent(std::string_view mode, const Lane& lane, bool ln, NoteKind kind) {
+    return !bms_channel_for_mode(mode, lane, ln, kind).empty();
+}
+
 }  // namespace beatbench::bms

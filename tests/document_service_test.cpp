@@ -74,8 +74,8 @@ class DocumentServiceTest : public ::testing::Test {
         auto* s = session(id);
         if (!s) return false;
         s->set_backup_enabled(false);  // 本用例无需崩溃备份，亦不修改原谱面文件
-        return s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(
-            1, beatbench::Rational(0, 1), beatbench::Lane{0, beatbench::LaneKind::Key, 1}, 1));
+        return s->exec(std::make_unique<beatbench::edit::PutNoteCommand>(beatbench::edit::NoteRef{
+            1, beatbench::Rational(0, 1), beatbench::Lane{0, beatbench::LaneKind::Key, 1}, 1}));
     }
 
     static bool containsId(const QVariantList& documents, const QString& id) {
