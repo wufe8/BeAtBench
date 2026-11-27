@@ -335,7 +335,7 @@ TEST(PlaybackPlanTest, Bpm9999xxxZeroDuration) {
 }
 
 TEST(PcmPlaybackTest, DualInstancesIndependentPlayAndSeek) {
-    // M6.1：谱面播放（kPcmSlot=6）与参考音轨（kRefPcmSlot=5）分槽共存——
+    // M6.1：谱面播放（kPcmSlot=8）与参考音轨（kRefPcmSlot=7）分槽共存——
     // play/seek（同槽 Stop+Start）互不影响；pause/stop 的 stopAll 全停语义不变
     // （GUI 以页面切换互斥兜底，见 Main.qml currentPage）。
     SamplePlayer player;
